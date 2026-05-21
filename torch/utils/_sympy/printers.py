@@ -1,4 +1,5 @@
 import sys
+from typing import Literal
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE, precedence
@@ -541,7 +542,7 @@ class CppPrinter(ExprPrinter):
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_min_max(self, expr: sympy.Expr, name: str) -> str:
+    def _print_min_max(self, expr: sympy.Expr, name: Literal["min", "max"]) -> str:
         # pyrefly: ignore [missing-attribute]
         args = [self._print(a) for a in expr.args]
         if not expr.is_integer:

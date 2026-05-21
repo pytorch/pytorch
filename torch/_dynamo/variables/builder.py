@@ -331,6 +331,7 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
+symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 from typing import TypeVar
 
 
@@ -2319,7 +2320,7 @@ class VariableBuilder:
         if type(value) is int:
             if not isinstance(value, int):
                 raise AssertionError(f"Expected int, got {type(value)}")
-            # The dynamic-sources list has higher precedence over specialization control.
+            # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug(
                     "%s marked dynamic via dynamic-sources list", self.source.name
@@ -2876,6 +2877,10 @@ class VariableBuilder:
                     0
                 ]
             ) or not config.assume_static_by_default:
+                symbolic_shape_log.info(
+                    "marking %s as dynamic (from assume_static_by_default = False)",
+                    name,
+                )
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -3880,10 +3885,16 @@ def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     for pattern, pat_dim in dynamic_sources:
         if pattern == source_name or re.match(pattern, source_name):
             if dim is None or pat_dim is None or pat_dim == dim:
+                pretty = pattern if pat_dim is None else f"{pattern}:{pat_dim}"
                 log.debug(
                     "%s was marked dynamic due to dynamic-sources entry: %s",
                     source_name,
-                    pattern if pat_dim is None else f"{pattern}:{pat_dim}",
+                    pretty,
+                )
+                symbolic_shape_log.info(
+                    "%s was marked dynamic due to dynamic-sources entry: %s",
+                    source_name,
+                    pretty,
                 )
                 return True
     return False
@@ -4118,6 +4129,8 @@ def _automatic_dynamic(
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", ())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", ())
+        if marked_dynamic:
+            symbolic_shape_log.info("marking %s as dynamic (from mark_dynamic)", name)
         marked_weak_dynamic = i in getattr(
             e, "_dynamo_weak_dynamic_indices", ()
         ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
@@ -4238,6 +4251,11 @@ def _automatic_dynamic(
             dynamic_size = DimDynamic.STATIC
         else:
             # TODO: When does this show up?
+            if not config.assume_static_by_default:
+                symbolic_shape_log.info(
+                    "marking %s as dynamic (from assume_static_by_default = False)",
+                    name,
+                )
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:

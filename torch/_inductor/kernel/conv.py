@@ -596,8 +596,9 @@ def convolution(
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
+        bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
+        assert bias is not None
         args = [x, weight, bias]
-        bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
@@ -985,6 +986,7 @@ def convolution_backward_lowering(
 
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
 
     input.realize()
     weight.realize()
