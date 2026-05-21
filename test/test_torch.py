@@ -7974,7 +7974,7 @@ class TestTorch(TestCase):
             with open(fname, "wb") as f:
                 f.write(b"\0" * 64)
             storage = torch.UntypedStorage.from_file(fname, shared=False, nbytes=64)
-            with self.assertRaisesRegex(RuntimeError, msg):
+            with self.assertRaisesRegex(ValueError, msg):
                 storage.new()
 
         tensor = torch.randn(2, 3)
@@ -7982,7 +7982,7 @@ class TestTorch(TestCase):
             torch.save(tensor, f)
             f.seek(0)
             loaded = torch.load(f, weights_only=True)
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(ValueError, msg):
             loaded.untyped_storage().new()
 
     def test_from_file(self):
