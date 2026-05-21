@@ -159,6 +159,8 @@ if(INSTALL_TEST)
   set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
   install(FILES ${JIT_TEST_ROOT}/test_interpreter_async.pt DESTINATION bin)
+  install(FILES ${JIT_TEST_ROOT}/script_module_v4.ptl DESTINATION bin)
+  install(DIRECTORY ${JIT_TEST_ROOT}/upgrader_models DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_jit> DESTINATION bin OPTIONAL)

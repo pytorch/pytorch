@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <limits>
 #include <ostream>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
@@ -294,8 +295,10 @@ C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
 
 // Returns a pair of strings representing the names for each dtype.
 // The returned pair is (name, legacy_name_if_applicable)
-C10_API std::pair<std::string, std::string> getDtypeNames(
+C10_API std::pair<std::string_view, std::string_view> getDtypeNames(
     c10::ScalarType scalarType);
+
+C10_API std::string_view getScalarTypeAbbr(ScalarType scalarType);
 
 // Returns a map of string name to dtype.
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();

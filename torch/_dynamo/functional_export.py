@@ -179,7 +179,10 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             new_target = clean_export_root_string(old_target)
             if new_target != old_target:
                 node.target = new_target
-                assert hasattr(graph_module, old_target)
+                if not hasattr(graph_module, old_target):
+                    raise AssertionError(
+                        f"graph_module missing attribute {old_target!r}"
+                    )
                 # Move the parameter to the new name
                 param = torch.fx.graph_module._get_attr(graph_module, old_target)
                 torch.fx.graph_module._assign_attr(param, graph_module, new_target)
@@ -187,9 +190,15 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
         # Dynamo will only have one nested level
         if node.op == "call_module":
             old_target = node.target
-            assert isinstance(old_target, str)
+            if not isinstance(old_target, str):
+                raise AssertionError(
+                    f"expected old_target to be str, got {type(old_target)}"
+                )
             new_target = clean_export_root_string(old_target)
-            assert isinstance(new_target, str)
+            if not isinstance(new_target, str):
+                raise AssertionError(
+                    f"expected new_target to be str, got {type(new_target)}"
+                )
             new_name = clean_export_root_string(node.name)
             if new_target == old_target:
                 continue
@@ -239,7 +248,11 @@ class DynamoGraphTransformer(torch.fx.Transformer):
     ) -> None:
         super().__init__(module)
 
-        assert len(flat_args_dynamic_dims) == len(flat_inputs)
+        if len(flat_args_dynamic_dims) != len(flat_inputs):
+            raise AssertionError(
+                f"flat_args_dynamic_dims length ({len(flat_args_dynamic_dims)}) "
+                f"must match flat_inputs length ({len(flat_inputs)})"
+            )
 
         self.flat_inputs = flat_inputs
         self.flat_args_dynamic_dims = flat_args_dynamic_dims
@@ -518,14 +531,23 @@ class InputProcessor:
             args = args[: self.num_args]
         if self.root is not None:
             if isinstance(self.root, torch.fx.GraphModule):
-                assert isinstance(self.root.graph._codegen, _DynamoBytecodeCodeGen)
-                assert hasattr(
+                if not isinstance(self.root.graph._codegen, _DynamoBytecodeCodeGen):
+                    raise AssertionError(
+                        f"expected _DynamoBytecodeCodeGen, got {type(self.root.graph._codegen)}"
+                    )
+                if not hasattr(
                     self.root.graph._codegen.dynamo_bytecode_flatten, "input_processor"
-                )
-                assert (
+                ):
+                    raise AssertionError(
+                        "dynamo_bytecode_flatten missing input_processor attribute"
+                    )
+                if (
                     self.root.graph._codegen.dynamo_bytecode_flatten.input_processor
-                    is self
-                )
+                    is not self
+                ):
+                    raise AssertionError(
+                        "dynamo_bytecode_flatten.input_processor is not self"
+                    )
             args = (self.root, *args)
         return args, kwargs
 
@@ -558,7 +580,8 @@ class DynamoBytecodeFlatten:
                 compiled_fn=backend_dummy, extra_globals=self.f_globals
             )(*args, **kwargs)
         except Yield:
-            assert self.gm_inputs is not None
+            if self.gm_inputs is None:
+                raise AssertionError("gm_inputs must not be None after Yield") from None
             return self.gm_inputs
         raise RuntimeError
 
@@ -592,7 +615,8 @@ class DynamoBytecodeUnflatten:
 def create_fx_graph_from_captured_output(
     out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> torch.fx.GraphModule:
-    assert out.backend_input is not None
+    if out.backend_input is None:
+        raise AssertionError("out.backend_input must not be None")
     backend_input = out.backend_input
 
     _, root = torch._dynamo.convert_frame.get_traced_fn(mod)
@@ -607,7 +631,10 @@ def create_fx_graph_from_captured_output(
     if isinstance(root, torch.nn.Module):
         graph_module._parameters = root._parameters
         graph_module._buffers = root._buffers
-        assert all(not hasattr(graph_module, m) for m in root._modules)
+        if not all(not hasattr(graph_module, m) for m in root._modules):
+            raise AssertionError(
+                "graph_module already has attributes conflicting with root._modules"
+            )
         graph_module._modules.update(root._modules)
         graph_module._non_persistent_buffers_set = root._non_persistent_buffers_set
         if sys.version_info >= (3, 14):
@@ -628,14 +655,20 @@ def create_fx_graph_from_captured_output(
             # of state through closure. We need to make sure these data are
             # accessible through the captured module (but the hooks should be
             # disabled).
-            assert getattr(graph_module, "_wrapped_call", None) is not None
-            assert isinstance(
+            if getattr(graph_module, "_wrapped_call", None) is None:
+                raise AssertionError("graph_module._wrapped_call must not be None")
+            if not isinstance(
                 graph_module._wrapped_call, torch.fx.graph_module._WrappedCall
-            )
-            assert graph_module._wrapped_call.cls_call is None
+            ):
+                raise AssertionError(
+                    f"expected _WrappedCall, got {type(graph_module._wrapped_call)}"
+                )
+            if graph_module._wrapped_call.cls_call is not None:
+                raise AssertionError("graph_module._wrapped_call.cls_call must be None")
 
             def dynamo_wrapped_call(self, *args: object, **kwargs: object) -> object:
-                assert "forward" not in self.__dict__
+                if "forward" in self.__dict__:
+                    raise AssertionError("'forward' should not be in self.__dict__")
 
                 fwd_hooks = self._forward_hooks
                 fwd_pre_hooks = self._forward_pre_hooks
@@ -673,8 +706,14 @@ def create_fx_graph_from_captured_output(
         dynamo_bytecode_unflatten,
     )  # type: ignore[attr-defined]
     normalize_graph_module(graph_module)
-    assert not hasattr(graph_module, "_dynamo_bytecode_flatten")
-    assert not hasattr(graph_module, "_dynamo_bytecode_unflatten")
+    if hasattr(graph_module, "_dynamo_bytecode_flatten"):
+        raise AssertionError(
+            "graph_module already has _dynamo_bytecode_flatten attribute"
+        )
+    if hasattr(graph_module, "_dynamo_bytecode_unflatten"):
+        raise AssertionError(
+            "graph_module already has _dynamo_bytecode_unflatten attribute"
+        )
     # pyrefly: ignore [bad-argument-type]
     graph_module._dynamo_bytecode_flatten = dynamo_bytecode_flatten
     # pyrefly: ignore [bad-argument-type]
@@ -684,7 +723,8 @@ def create_fx_graph_from_captured_output(
     graph_module.meta["module_call_specs"] = (
         out.graph_capture_output.output_graph.export_metadata.module_call_spec
     )
-    assert out.backend_input is not None
+    if out.backend_input is None:
+        raise AssertionError("out.backend_input must not be None for fake_mode")
     graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
     graph_module.meta["fake_mode"].allow_non_fake_inputs = True
     tracing_context = TracingContext(graph_module.meta["fake_mode"])
@@ -797,7 +837,8 @@ def op_overload_wrapper({", ".join(arg_list)}):
         fn = out["op_overload_wrapper"]  # type: ignore[assignment]
 
     def inner(*args: Any, **kwargs: Any) -> Any:
-        assert not torch._dynamo.config.install_free_tensors
+        if torch._dynamo.config.install_free_tensors:
+            raise AssertionError("install_free_tensors must be False")
         with (
             _compiling_state_context(),
             torch._dynamo.config.patch(
@@ -894,7 +935,10 @@ def _dynamo_graph_capture_for_export(
                     _is_export_deprecated_do_not_use=True,
                 )
 
-                assert out.graph_capture_output.output_graph is not None
+                if out.graph_capture_output.output_graph is None:
+                    raise AssertionError(
+                        "output_graph must not be None after fullgraph_capture"
+                    )
 
                 example_inputs: list[Any] = []
                 if out.backend_input is not None:
