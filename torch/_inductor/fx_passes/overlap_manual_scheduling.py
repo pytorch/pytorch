@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 def _collect_exclusive_users(start: fx.Node) -> list[fx.Node]:
     """BFS collecting nodes whose inputs are all within the chain."""
     chain: list[fx.Node] = [start]
-    chain_set: set[fx.Node] = {start}
+    chain_set: OrderedSet[fx.Node] = OrderedSet([start])
     i = 0
     while i < len(chain):
         for user in chain[i].users:
@@ -72,7 +72,7 @@ def _collect_chain_to_node(target: fx.Node) -> list[fx.Node]:
         root = parents[0]
 
     chain: list[fx.Node] = [root]
-    chain_set: set[fx.Node] = {root}
+    chain_set: OrderedSet[fx.Node] = OrderedSet([root])
     i = 0
     while i < len(chain):
         for user in chain[i].users:
@@ -95,7 +95,7 @@ def _move_overlap_nodes(
 ) -> None:
     """Directly move AG/RS chain nodes to satisfy overlap_deps.
 
-    Instead of re-sorting the graph, moves only the specific chains:
+    Instead of graph topological sort, moves only the specific chains:
     - AG start chains are moved earlier (before the anchor wait node)
     - RS wait chains are moved later (after the latest RS start)
     No-op when overlap_deps is empty.
@@ -128,7 +128,9 @@ def _move_overlap_nodes(
     # Recompute positions after RS moves
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
-    # AG prefetch: move each start chain before the anchor wait
+    # AG prefetch: move each start chain before the anchor wait.
+    # After moving, any exclusive users of the AG start (wait + unpack)
+    # that were already before the anchor must follow the moved chain.
     for anchor, ag_starts in ag_prefetch.items():
         anchor_pos = node_positions[anchor]
         sorted_starts = sorted(ag_starts, key=lambda n: node_positions[n])
@@ -138,6 +140,14 @@ def _move_overlap_nodes(
             chain = _collect_chain_to_node(ag_start)
             for node in chain:
                 anchor.prepend(node)
+            last = chain[-1]
+            users = _collect_exclusive_users(last)
+            if len(users) > 1:
+                cursor = last
+                for user in users[1:]:
+                    if node_positions.get(user, anchor_pos) < anchor_pos:
+                        cursor.append(user)
+                        cursor = user
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
@@ -162,29 +172,28 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
 
         waits = [self.collective_info[n].wait_node for n in coll_nodes]
+        # Use earliest wait insertion point
         first_wait = min(waits, key=lambda w: self.node_idx[w])
-        first = min(coll_nodes, key=lambda n: self.node_idx[n])
-        last = max(coll_nodes, key=lambda n: self.node_idx[n])
+        # Find insertion location
+        first = coll_nodes[0]
+        next_node = first
+        while next_node in coll_nodes:
+            next_node = next_node.next
 
         if is_all_gather(first):
-            # AG: insert early (right after first AG) to start prefetch ASAP.
-            # Move wait+consumers to the earliest original wait position.
             new_nodes, replacements = merge_all_gather_bucket(
                 self.graph,
                 coll_nodes,
                 wait_insertion_point=first_wait,
-                insert_before=first.next,
+                insert_before=next_node,
                 mode=self.bucket_mode,
             )
         elif is_reduce_scatter(first):
-            # RS: pre_bucket_reduce_scatter needs all individual RS inputs,
-            # which are only available after the last RS fires.  Insert
-            # after the last coll_node (by graph position) and leave the
-            # wait in place -- it naturally follows the bucketed RS.
             new_nodes, replacements = merge_reduce_scatter_bucket(
                 self.graph,
                 coll_nodes,
-                insert_before=last.next,
+                wait_insertion_point=first_wait,
+                insert_before=next_node,
                 mode=self.bucket_mode,
             )
         else:
@@ -411,11 +420,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             if is_compute_node(node):
                 last_compute = node
 
-        if last_compute is not None and not bool(
-            OrderedSet(picked_ag) & OrderedSet(self.node_ancestors[last_compute])
-        ):
-            for ag in picked_ag:
-                overlap_deps[last_compute].add(ag)
+        if last_compute is not None:
+            if not any(
+                self.node_ancestors.is_ancestor(ag, last_compute) for ag in picked_ag
+            ):
+                for ag in picked_ag:
+                    overlap_deps[last_compute].add(ag)
 
         _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
         self.graph.lint()
@@ -433,6 +443,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         for i, nodes in enumerate(self.nodes_in_subgraph):
             self.bucketer.manual_bucket_collectives(nodes=nodes)
 
+        _stable_topological_sort(self.graph, {})
         self.graph.lint()
         self.nodes = list(self.graph.nodes)
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
