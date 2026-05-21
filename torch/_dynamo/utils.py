@@ -1594,6 +1594,7 @@ class CompilationMetrics:
     inline_inbuilt_nn_modules_candidate: bool | None = False
     pytorch_version: str | None = None
     inductor_provenance: set[str] | None = None
+    functorch_config: str | None = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1845,6 +1846,31 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
     return inductor_conf_str
 
 
+def _functorch_config_for_logging() -> str | None:
+    """Serialize functorch config (AOT autograd settings) for Scuba logging."""
+    if not justknobs_check("pytorch/dynamo:log_functorch_config"):
+        return None
+
+    try:
+        functorch_config_copy = torch._functorch.config.get_config_copy()
+    except (TypeError, AttributeError, RuntimeError, AssertionError):
+        return None
+
+    try:
+        blocklist = {
+            "TYPE_CHECKING",
+            "_save_config_ignore",
+        }
+        clean = {
+            k: (list(v) if isinstance(v, set) else v)
+            for k, v in functorch_config_copy.items()
+            if k not in blocklist and isinstance(k, str)
+        }
+        return json.dumps(clean, sort_keys=True, default=str)
+    except Exception:
+        return "Functorch Config is not JSON serializable"
+
+
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
@@ -1891,6 +1917,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
         "pytorch_version": torch.__version__,
+        "functorch_config": _functorch_config_for_logging(),
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -5505,6 +5532,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
