@@ -5,6 +5,7 @@ import email
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from packaging.version import Version
@@ -92,6 +93,7 @@ def get_torch_version(sha: str | None = None) -> str:
                 sha = get_sha(pytorch_root)
             version += "+git" + sha[:7]
             origin += " and git commit"
+
     # Validate that the version is PEP 440 compliant
     parsed_version = Version(version)
     if sdist_version:
@@ -114,7 +116,16 @@ if __name__ == "__main__":
     # Imported here so library users that load this file outside the tools
     # package (e.g. via importlib.util.spec_from_file_location) do not need
     # the project root on sys.path just to call get_torch_version().
+    #
+    # Because this file is run as a script (e.g. by CMake), we need to add
+    # the repo root to sys.path to be able to import tools.strtobool.
+    # Python only adds the script's *directory* (i.e. tools/) to sys.path[0],
+    # but ``from tools.strtobool import strtobool`` requires the parent
+    # directory (the repo root) to be importable.
+    _repo_root = str(Path(__file__).resolve().parent.parent)
+    sys.path.insert(0, _repo_root)
     from tools.strtobool import strtobool
+    sys.path.pop(0)
 
     parser = argparse.ArgumentParser(
         description="Generate torch/version.py from build and environment metadata."
