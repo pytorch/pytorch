@@ -30,7 +30,7 @@ import sympy
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing, Where
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
@@ -172,12 +172,12 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(Min(x.expr, y.expr), result_type)
+        return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(Max(x.expr, y.expr), result_type)
+        return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
 
 @dataclass

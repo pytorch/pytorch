@@ -1377,6 +1377,7 @@ def apply_manual_reordering_and_get_graph(
     graph, module_bucket_plans, out_li, custom_module_stack_fn=None
 ) -> None:
     gm = graph.owning_module
+    from torch._inductor.config import aten_distributed_optimizations as dist_opts
     from torch._inductor.fx_passes.overlap_manual_scheduling import (
         ManualOverlapScheduler,
     )
@@ -1408,6 +1409,7 @@ def apply_manual_reordering_and_get_graph(
         module_bucket_plans,
         insert_overlap_deps=False,
         module_stack_fn=custom_module_stack_fn,
+        bucket_mode=dist_opts.bucket_mode,
     ).run()
     overlapped_gm.graph.lint()
     out_li.append(overlapped_gm.graph)
@@ -1857,6 +1859,113 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 "wait_tensor_3",
             ],
         )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "default"}
+    )
+    def test_manual_bucketing_ag_with_intermediate_deps(self):
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, c, *, ranks):
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            b_prepared = b[:4] + 1.0
+            c_prepared = c[:4] * 2.0
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                ag2 = _functional_collectives.all_gather_tensor(b_prepared, 0, ranks)
+                ag3 = _functional_collectives.all_gather_tensor(c_prepared, 0, ranks)
+            return ag1.sum() + ag2.sum() + ag3.sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                custom_module_stack_fn=module_stack_fn,
+            )
+
+            graph_str = str(aten_graph)
+            (
+                FileCheck()
+                .check("all_gather_into_tensor")
+                .check("wait_tensor")
+                .run(graph_str)
+            )
+
+            correct = func(a, b, c, ranks=ranks)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "default"}
+    )
+    def test_manual_bucketing_rs_with_intermediate_deps(self):
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, c):
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                rs1 = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+            c_grad = c * 2.0 + 1.0
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                rs2 = _functional_collectives.reduce_scatter_tensor(b, "sum", 0, "0")
+                rs3 = _functional_collectives.reduce_scatter_tensor(
+                    c_grad, "sum", 0, "0"
+                )
+            return rs1, rs2, rs3
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+
+            compiled = torch.compile(func)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                custom_module_stack_fn=module_stack_fn,
+            )
+
+            graph_str = str(aten_graph)
+            (
+                FileCheck()
+                .check("reduce_scatter_tensor")
+                .check("wait_tensor")
+                .run(graph_str)
+            )
+
+            correct = func(a, b, c)
+            self.assertTrue(same(out, correct))
 
 
 if __name__ == "__main__":

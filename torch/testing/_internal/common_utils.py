@@ -338,15 +338,6 @@ DEFAULT_SLOW_TESTS_FILE = 'slow_tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
-
-def resolve_sandcastle_slow_tests_file() -> str:
-    if not IS_SANDCASTLE:
-        return ""
-
-    filename = torch._utils_internal.get_file_path("test", DEFAULT_SLOW_TESTS_FILE)
-    return filename if os.path.isfile(filename) else ""
-
-
 def maybe_load_json(filename):
     if os.path.isfile(filename):
         with open(filename) as fp:
@@ -355,10 +346,8 @@ def maybe_load_json(filename):
     return {}
 
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
-slow_tests_file = os.getenv("SLOW_TESTS_FILE", "") or resolve_sandcastle_slow_tests_file()
-if slow_tests_file:
-    slow_tests_dict = maybe_load_json(slow_tests_file)
-    os.environ["SLOW_TESTS_FILE"] = slow_tests_file
+if os.getenv("SLOW_TESTS_FILE", ""):
+    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
