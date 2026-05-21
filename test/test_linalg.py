@@ -129,12 +129,21 @@ class TestLinalg(TestCase):
             torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
 
-    def _get_other_device(self):
+    def _get_other_device(self, dtype=None):
         """Return a device different from self.device_type for error-path testing."""
         if self.device_type != 'cpu':
             return 'cpu'
         if torch.accelerator.is_available():
-            return torch.accelerator.current_accelerator().type
+            other = torch.accelerator.current_accelerator().type
+            if dtype is not None:
+                try:
+                    caps = torch.accelerator.get_device_capability(other)
+                except Exception:
+                    pass
+                else:
+                    if dtype not in caps["supported_dtypes"]:
+                        return None
+            return other
         return None
 
     exact_dtype = True
@@ -506,7 +515,7 @@ class TestLinalg(TestCase):
             torch.linalg.lstsq(a, b)
 
         def complement_device(device):
-            other = self._get_other_device()
+            other = self._get_other_device(dtype=dtype)
             if device == 'cpu' and other is not None:
                 return other
             else:
@@ -652,7 +661,7 @@ class TestLinalg(TestCase):
             torch.linalg.cholesky(A, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, device=wrong_device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
@@ -1096,7 +1105,7 @@ class TestLinalg(TestCase):
             torch.linalg.eigh(a, out=(out_w, out_v))
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out_w = torch.empty(0, device=wrong_device, dtype=dtype)
             out_v = torch.empty(0, device=device, dtype=dtype)
@@ -1185,7 +1194,7 @@ class TestLinalg(TestCase):
             torch.linalg.eigvalsh(t, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, device=wrong_device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -1691,7 +1700,7 @@ class TestLinalg(TestCase):
                 torch.linalg.cond(a, p, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             for p in ['fro', 2]:
@@ -2578,7 +2587,7 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out_w = torch.empty(0, device=wrong_device, dtype=torch.complex128)
             out_v = torch.empty(0, device=device, dtype=torch.complex128)
@@ -2698,7 +2707,7 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out_w = torch.empty(0, device=wrong_device, dtype=torch.complex128)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -3230,7 +3239,7 @@ class TestLinalg(TestCase):
             torch.cholesky_solve(b, a, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -3508,7 +3517,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.pinv(a, out=out)
 
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             # device of out and input should match
             out = torch.empty_like(a).to(wrong_device)
@@ -3568,7 +3577,7 @@ class TestLinalg(TestCase):
             torch.linalg.inv(a, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, device=wrong_device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -3722,7 +3731,7 @@ class TestLinalg(TestCase):
             torch.linalg.tensorsolve(a, b, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -3815,7 +3824,7 @@ class TestLinalg(TestCase):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
 
             # device should match
-            wrong_device = self._get_other_device()
+            wrong_device = self._get_other_device(dtype=dtype)
             if wrong_device is not None:
                 out = torch.empty(0, dtype=dtype, device=wrong_device)
                 with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -4072,7 +4081,7 @@ class TestLinalg(TestCase):
             torch.linalg.matrix_rank(a, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
@@ -4968,7 +4977,7 @@ class TestLinalg(TestCase):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, dtype=dtype, device=wrong_device)
             clone_a = torch.empty_like(a)
@@ -7872,7 +7881,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             sign_out = torch.empty(0, device=wrong_device, dtype=dtype)
             logabsdet_out = torch.empty(0, device=wrong_device, dtype=real_dtype)
@@ -8183,7 +8192,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch.cholesky_inverse(a, out=out)
 
         # device should match
-        wrong_device = self._get_other_device()
+        wrong_device = self._get_other_device(dtype=dtype)
         if wrong_device is not None:
             out = torch.empty(0, device=wrong_device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
