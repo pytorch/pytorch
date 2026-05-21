@@ -1607,6 +1607,29 @@ class f(torch.nn.Module):
 
             _ = torch.baddbmm(bias3, A, Bmat)
 
+    def test_lu_unpack_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            LU = torch.empty((m, n), device="meta")
+            pivots = torch.empty((1,), device="meta", dtype=torch.int32)
+            P, L, U = torch.lu_unpack(LU, pivots)
+
+    def test_linalg_qr_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            A = torch.empty((m, n), device="meta")
+            Q, R = torch.linalg.qr(A)
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -3829,6 +3852,37 @@ class TestUnbacked(TestCase):
                 r"Runtime assertion failed for expression Ne\(u0, 1\)",
             ):
                 f(torch.ones(2) * 0.1)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._dynamo.config.patch("suppress_errors", True)
+    def test_sparse_csr_tensor_no_data_dependent_guard(self):
+        """
+        Test that sparse CSR tensor construction doesn't trigger
+        GuardOnDataDependentSymNode errors due to str() being called
+        on FakeTensors during graph break handling.
+        """
+
+        class MinimalSparseModel(torch.nn.Module):
+            def forward(self, values):
+                crow_indices = torch.tensor([0, 2, 4], dtype=torch.int64)
+                col_indices = torch.tensor([0, 1, 0, 1], dtype=torch.int64)
+                size = (2, 2)
+                sparse = torch.ops.aten.sparse_csr_tensor(
+                    crow_indices, col_indices, values, size
+                )
+                return sparse
+
+        values = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        model = MinimalSparseModel()
+        eager_out = model(values)
+
+        compiled_model = torch.compile(model, fullgraph=False)
+        compiled_out = compiled_model(values)
+
+        self.assertEqual(eager_out.layout, compiled_out.layout)
+        self.assertEqual(eager_out.shape, compiled_out.shape)
+        torch.testing.assert_close(eager_out.values(), compiled_out.values())
 
 
 class TestUbackedOps(TestCase):
