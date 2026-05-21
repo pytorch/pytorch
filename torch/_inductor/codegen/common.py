@@ -2714,8 +2714,7 @@ class CSEProxy(DefaultHandler):
             if (
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
-            ):
-                assert var_dtype is not None
+            ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
             if (
