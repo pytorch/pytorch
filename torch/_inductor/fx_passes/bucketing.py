@@ -14,6 +14,7 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -326,7 +327,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+    all_node_ancestors: BitsetAncestors | None = None,
 ) -> bool:
     """Check if an all_gather derives from exactly one placeholder (parameter).
 
@@ -336,7 +337,9 @@ def is_fsdp_all_gather(
     if not is_all_gather_into_tensor(node):
         return False
     if all_node_ancestors is not None:
-        phs = (a for a in all_node_ancestors[node] if a.op == "placeholder")
+        phs = (
+            a for a in all_node_ancestors.iter_ancestors(node) if a.op == "placeholder"
+        )
         return next(phs, None) is not None and next(phs, None) is None
     from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
