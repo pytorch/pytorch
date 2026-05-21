@@ -376,6 +376,55 @@ class CtxSubclassTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
 
+class TensorMetadataSubclass(torch.Tensor):
+    @staticmethod
+    def __new__(cls, data, weights):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data, weights):
+        self._data = data
+        self._weights = weights
+
+    def __tensor_flatten__(self):
+        return ["_data"], {"weights": self._weights}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, meta, outer_size, outer_stride):
+        return cls(inner_tensors["_data"], meta["weights"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(t):
+            return t._data if isinstance(t, TensorMetadataSubclass) else t
+
+        unwrapped_args = pytree.tree_map(unwrap, args)
+        unwrapped_kwargs = pytree.tree_map(unwrap, kwargs)
+        out = func(*unwrapped_args, **unwrapped_kwargs)
+
+        if not isinstance(out, torch.Tensor):
+            return out
+
+        first_subclass_arg = next(
+            t for t in pytree.tree_leaves(args) if isinstance(t, TensorMetadataSubclass)
+        )
+        return cls(out, first_subclass_arg._weights)
+
+
+class TensorMetadataSubclassWithCustomGuard(TensorMetadataSubclass):
+    @classmethod
+    def __metadata_guard__(cls, original_metadata, current_metadata):
+        return torch.equal(original_metadata["weights"], current_metadata["weights"])
+
+
 class DeferredInitSubclass(torch.Tensor):
     """
     A traceable wrapper subclass that calls super().__init__() BEFORE
@@ -2076,6 +2125,33 @@ s50 > 3""",
             "Tensor subclass method __metadata_guard__ must be a classmethod",
             lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
+
+    def test_tensor_subclass_tensor_metadata_requires_custom_guard(self):
+        import torch._dynamo.exc
+
+        x = TensorMetadataSubclass(torch.randn(4), torch.randn(5))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "returned Tensor metadata.*does not define __metadata_guard__",
+        ) as cm:
+            torch.compile(lambda x: x * 2, backend="eager")(x)
+
+        self.assertNotIn("Guard failed on the same frame", str(cm.exception))
+
+    def test_tensor_subclass_tensor_metadata_custom_guard(self):
+        x = TensorMetadataSubclassWithCustomGuard(torch.randn(4), torch.randn(5))
+        same_metadata = TensorMetadataSubclassWithCustomGuard(
+            torch.randn(4), x._weights.clone()
+        )
+        different_metadata = TensorMetadataSubclassWithCustomGuard(
+            torch.randn(4), torch.randn(5)
+        )
+
+        def fn(x):
+            return x * 2
+
+        _check_recompiles(self, fn, (x,), (same_metadata,), False)
+        _check_recompiles(self, fn, (x,), (different_metadata,), True)
 
     def test_tensor_subclass_metadata_with_symint(self):
         # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
