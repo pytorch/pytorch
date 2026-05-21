@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -42,6 +43,38 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   }
 
   // Destructively overwrite data_ptr
+  storage->set_data_ptr_noswap(std::move(data));
+  storage->set_nbytes(size_bytes);
+}
+
+void resize_bytes_cuda_with_addr(
+    StorageImpl* storage,
+    size_t size_bytes,
+    void* addr) {
+  if (size_bytes == 0) {
+    resize_bytes_cuda(storage, 0);
+    return;
+  }
+
+  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+  auto allocator = storage->allocator();
+  TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
+  TORCH_CHECK(
+      storage->nbytes() == 0,
+      "_resize_with_addr_ only supports resizing a zero-sized CUDA storage to a non-zero size, but got current size ",
+      storage->nbytes(),
+      " bytes");
+  TORCH_CHECK(
+      addr != nullptr,
+      "_resize_with_addr_ expects a non-null addr when size is non-zero");
+  TORCH_CHECK(
+      allocator == c10::cuda::CUDACachingAllocator::get(),
+      "_resize_with_addr_ only supports storages allocated by the current CUDA caching allocator");
+
+  c10::Device device = storage->device();
+  c10::cuda::CUDAGuard guard(device.index());
+  at::DataPtr data =
+      c10::cuda::CUDACachingAllocator::allocateWithAddress(size_bytes, addr);
   storage->set_data_ptr_noswap(std::move(data));
   storage->set_nbytes(size_bytes);
 }
