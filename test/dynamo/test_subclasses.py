@@ -1422,6 +1422,58 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
 
+    def test_tensor_subclass_from_module_attr_data_assignment(self):
+        class CustomTensor(torch.Tensor):
+            def __init__(self, data):
+                super().__init__()
+                self.custom_metadata = "custom_tensor_data"
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(4, 4)
+                self.custom_weights = None
+
+            def forward(self, x):
+                self.custom_weights = CustomTensor(self.layer.weight.data)
+                return self.layer(x)
+
+        mod = Mod().eval()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        inp = torch.randn(2, 4)
+        expected = mod.layer(inp)
+
+        with torch.no_grad():
+            result = opt_mod(inp)
+
+        self.assertEqual(result, expected)
+        self.assertIsInstance(mod.custom_weights, CustomTensor)
+        self.assertEqual(mod.custom_weights.custom_metadata, "custom_tensor_data")
+
+    def test_tensor_subclass_unpack_attr_mutation(self):
+        class MySubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def f(x):
+            a, b = x
+            a.foo = 3
+            return a + b, a.foo
+
+        opt_f = compile_full_eager(f)
+
+        x = torch.ones(2, 3).as_subclass(MySubclass)
+        res = f(x)
+        ref = opt_f(x)
+
+        self.assertEqual(res, ref)
+        self.assertIsInstance(ref[0], MySubclass)
+
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
         # object (from as_subclass call) is handled both during Dynamo tracing
