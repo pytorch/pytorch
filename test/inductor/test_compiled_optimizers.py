@@ -999,6 +999,25 @@ class CompiledOptimizerTests(TestCase):
         for param, param_ref in zip(params, params_ref):
             self.assertEqual(param, param_ref)
 
+    def test_capturable_does_not_leak_to_param_groups(self, device="cpu"):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+        m = torch.nn.Linear(2, 2, device=device)
+        opt = AdamW(m.parameters(), lr=0.01)
+        m(torch.randn(2, 2, device=device)).sum().backward()
+        opt.step()
+
+        original_capturable = opt.param_groups[0]["capturable"]
+
+        def fn():
+            opt.param_groups[0]["lr"] = 5.0
+            sd = deepcopy(opt.state_dict())
+            opt.param_groups[0]["lr"] = 0.01
+            return sd
+
+        torch._dynamo.optimize("eager_noexcept", nopython=False)(fn)()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton

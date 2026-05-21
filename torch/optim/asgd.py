@@ -258,9 +258,10 @@ def _single_tensor_asgd(
             param.add_(grad, alpha=-eta_value)  # update parameter
 
         # averaging
-        if capturable or mu.item() != 1:
+        if capturable or torch.compiler.is_compiling() or mu.item() != 1:
             ax.add_(param.sub(ax).mul_(mu))
         else:
+            # When mu == 1, copy_ is equivalent but cheaper in eager mode.
             ax.copy_(param)
 
         if capturable:

@@ -124,7 +124,17 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.graph_break_if_pending_mutation(tx)
                 self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-                ret_val = self.value._init_group(*py_args, **py_kwargs)
+                original_capturables: dict[int, bool] = {}
+                for i, group in enumerate(self.value.param_groups):
+                    if self._safe_to_set_capturable(group):
+                        original_capturables[i] = group["capturable"]
+                        group["capturable"] = True
+                try:
+                    ret_val = self.value._init_group(*py_args, **py_kwargs)
+                finally:
+                    for i, group in enumerate(self.value.param_groups):
+                        if i in original_capturables:
+                            group["capturable"] = original_capturables[i]
                 self.map_sources_and_install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 # stash a weak_ptr to optimizer to invalidate code
@@ -192,35 +202,25 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
+    def _safe_to_set_capturable(self, group: dict[str, Any]) -> bool:
+        all_uninitialized = True
+        all_gpu = True
+        for p in group.get("params", []):
+            all_gpu &= p.is_cuda or p.is_xpu
+            all_uninitialized &= p not in self.value.state
+        return "capturable" in group and all_uninitialized and all_gpu
+
     def _set_capturable(self, tx: "InstructionTranslatorBase") -> None:
         from . import LazyVariableTracker
-
-        # We only set capturable if params are on cuda
-        # and the state is not initialized
-        def safe_to_set_capturable(group: dict[str, Any]) -> bool:
-            all_uninitialized = True
-            all_gpu = True
-
-            for p in group.get("params", []):
-                all_gpu &= p.is_cuda or p.is_xpu
-                all_uninitialized &= p not in self.value.state
-
-            return "capturable" in group and all_uninitialized and all_gpu
-
-        # track indices to not set so we don't need to
-        # in the variable tracker realize the whole state
-        # we handle guarding the state specially
-        for group in self.value.param_groups:
-            if safe_to_set_capturable(group):
-                group["capturable"] = True
 
         source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
-        for param_group_vt in param_groups_vt.items:
-            key = HashableTracker(ConstantVariable.create("capturable"))
-            param_group_vt.items[key] = ConstantVariable.create(True)
+        for i, param_group_vt in enumerate(param_groups_vt.items):
+            if self._safe_to_set_capturable(self.value.param_groups[i]):
+                key = HashableTracker(ConstantVariable.create("capturable"))
+                param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(
         self, *args: Any, **kwargs: Any
