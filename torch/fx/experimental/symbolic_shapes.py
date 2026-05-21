@@ -7084,6 +7084,30 @@ class ShapeEnv:
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
 
+        if isinstance(expr, sympy.StrictLessThan):
+            lhs, rhs = expr.args
+            if isinstance(lhs, Mod):
+                base, modulus = lhs.args
+                if rhs == modulus and (
+                    self._maybe_evaluate_static(
+                        sympy.Ge(base, 0),
+                        unbacked_only=unbacked_only,
+                        size_oblivious=size_oblivious,
+                        axioms=axioms,
+                        var_to_range=var_to_range,
+                    )
+                    is sympy.true
+                    and self._maybe_evaluate_static(
+                        sympy.Gt(modulus, 0),
+                        unbacked_only=unbacked_only,
+                        size_oblivious=size_oblivious,
+                        axioms=axioms,
+                        var_to_range=var_to_range,
+                    )
+                    is sympy.true
+                ):
+                    return sympy.true
+
         fs = expr.free_symbols
 
         if not fs and (expr.is_number or expr.is_Boolean):
