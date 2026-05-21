@@ -1054,11 +1054,6 @@ combo_kernel_max_num_nodes = 8
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 # Implies enable_autotune=True (per-subkernel blocks without tuning is pointless).
 combo_kernel_per_subkernel_blocks = True
-# When True, pointwise and reduction sub-kernels can share a combo kernel.
-# Requires combo_kernel_per_subkernel_blocks=True so each sub-kernel keeps its
-# own block geometry; otherwise the shared XBLOCK/R0_BLOCK would force one
-# heuristic onto the other.
-combo_kernel_allow_mixed_pointwise_reduction = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
 # Memory-aware combo kernel gating.
