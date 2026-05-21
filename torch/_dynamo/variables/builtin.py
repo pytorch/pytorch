@@ -1675,6 +1675,56 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
+            descriptor = getattr(self.fn, name, None)
+            descriptor_owner = getattr(descriptor, "__objclass__", self.fn)
+            try:
+                receiver_type = args[0].python_type()
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
+            if not issubclass(receiver_type, descriptor_owner):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__hash__' requires a '{descriptor_owner.__name__}' "
+                    f"object but received a '{receiver_type.__name__}'",
+                )
+            if self.fn is object:
+                real_id = args[0].get_id(tx)
+                if real_id is not None:
+                    guard_type = args[0].get_id_guard_type()
+                    if args[0].source and guard_type is not None:
+                        install_guard(args[0].source.make_guard(guard_type))
+                    real_value = args[0].get_real_python_backed_value()
+                    if real_value is NO_SUCH_SUBOBJ and args[0].source:
+                        real_value = tx.output.resolve_source_value(args[0].source)
+                    if real_value is not NO_SUCH_SUBOBJ:
+                        return ConstantVariable.create(object.__hash__(real_value))
+                if args[0].source:
+                    guard_type = args[0].get_id_guard_type()
+                    if guard_type is not None:
+                        install_guard(args[0].source.make_guard(guard_type))
+                    return ConstantVariable.create(
+                        object.__hash__(tx.output.resolve_source_value(args[0].source))
+                    )
+                return FakeIdVariable(id(args[0]))
+            elif (
+                isinstance(args[0], UserDefinedObjectVariable)
+                and args[0]._base_vt is not None
+                and args[0]._base_methods is not None
+                and descriptor in args[0]._base_methods
+            ):
+                h, is_fake = args[0]._base_vt.hash_impl(tx)
+            else:
+                h, is_fake = args[0].hash_impl(tx)
+            if is_fake:
+                return FakeIdVariable(h)
+            return ConstantVariable.create(h)
+
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
@@ -2302,6 +2352,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         arg = args[0]
         if istype(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
+        elif isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                items = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                items = arg.view_items
+            return SetVariable(items, mutation_type=ValueMutationNew())
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
             return SetVariable(items, mutation_type=ValueMutationNew())
@@ -2344,6 +2402,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         if istype(arg, variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
             return arg
+        elif isinstance(arg, SetVariable):
+            return FrozensetVariable(arg.items.keys())
+        elif isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                items = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                items = arg.view_items
+            return FrozensetVariable(items)
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
             return FrozensetVariable(items)
@@ -3225,6 +3293,18 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 return ConstDictVariable(const_items, mutation_type=ValueMutationNew())
 
         items: dict[HashableTracker, VariableTracker] = {}
+        if isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                keys = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                keys = arg.view_items
+            items.update(dict.fromkeys(keys, value))
+            return _make_result(items)
+        if isinstance(arg, SetVariable):
+            items.update(dict.fromkeys(arg.items.keys(), value))
+            return _make_result(items)
         iterator = generic_getiter(tx, arg)
         while True:
             try:

@@ -195,7 +195,7 @@ class SetVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(set, name))
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
@@ -274,14 +274,14 @@ class SetVariable(VariableTracker):
                 "difference",
                 "symmetric_difference",
             )
-            and check_constant_args(args, kwargs)
             and self.python_type() is set
+            and check_constant_args(args, kwargs)
         ):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
 
         # Lazy imports to avoid circular dependencies
-        from .dicts import DictItemsVariable, DictKeysVariable
+        from .dicts import ConstDictVariable, DictItemsVariable, DictKeysVariable
 
         if name == "__init__":
             temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
@@ -360,6 +360,29 @@ class SetVariable(VariableTracker):
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
+            if all(
+                isinstance(x, (SetVariable, ConstDictVariable, DictKeysVariable))
+                for x in args
+            ):
+                result = self.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                )
+                for other in args:
+                    if isinstance(other, ConstDictVariable):
+                        other.install_dict_keys_match_guard()
+                        other_items = other.items.keys()
+                    elif isinstance(other, DictKeysVariable):
+                        other.dv_dict.install_dict_keys_match_guard()
+                        other_items = other.view_items
+                    elif isinstance(other, SetVariable):
+                        other_items = other.items.keys()
+                    else:
+                        raise AssertionError("unreachable")
+                    for item in other_items:
+                        result.items.pop(item, None)  # type: ignore[attr-defined]
+                return result
             return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
                 tx,
                 [self, *args],
