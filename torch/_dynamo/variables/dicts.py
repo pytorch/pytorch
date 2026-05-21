@@ -20,7 +20,7 @@ in sets.py.
 import collections
 import functools
 import types
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from typing import Any, TYPE_CHECKING, Union
 
 from torch.utils._pytree import MappingKey
@@ -196,7 +196,7 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         other_dicts: list[ConstDictVariable] = []
@@ -246,7 +246,7 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
