@@ -638,6 +638,27 @@ class SetVariable(VariableTracker):
         self.call_method(tx, "intersection_update", [other], {})
         return self
 
+    def nb_xor_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        return self_.call_method(tx, "symmetric_difference", [other_], {})
+
+    def nb_inplace_xor_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1992-L2004 (set_ixor)
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        self.call_method(tx, "symmetric_difference_update", [other], {})
+        return self
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
@@ -795,6 +816,13 @@ class OrderedSetVariable(SetVariable):
         # OrderedSet does not inherit from Python set, so SetVariable.nb_and_impl
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "intersection", [other], {})
+
+    def nb_xor_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # OrderedSet does not inherit from Python set, so SetVariable.nb_xor_impl
+        # won't work due to the PyAnySet_Check
+        return super().call_method(tx, "symmetric_difference", [other], {})
 
     def nb_subtract_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
