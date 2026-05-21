@@ -3038,6 +3038,13 @@ class FusedNestedReductions(FusedSchedulerNode):
 
 
 class UserTritonSchedulerNode(ExternKernelSchedulerNode):
+    """
+    A scheduler node for user-defined Triton kernels.
+    """
+
+    # pyrefly: ignore [bad-override]
+    node: ir.UserDefinedTritonKernel
+
     def __init__(self, scheduler: Scheduler, node: ir.UserDefinedTritonKernel) -> None:
         super().__init__(scheduler, node)
         assert isinstance(self.node, ir.UserDefinedTritonKernel)
@@ -3053,6 +3060,13 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         self.group = (device, (numel, rnumel))
 
     def can_fuse_with(self, node2: BaseSchedulerNode) -> bool:
+        """
+        Allow unary a unary pointwise epilogue pointwise to be fused into this kernel.
+
+        Fusion of user-defined kernels is initially gated on `config.epilogue_fusion_user_defined_triton_kernel`
+        (see `Scheduler.unfusable_nodes`).
+        """
+
         why = WhyNoFuse(self, node2)
         if not self.only_tt_stores:
             why("user Triton fusion only supports `tl.store`")
@@ -3062,8 +3076,9 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("user's Triton kernel has multiple stores")
             return False
 
-        formal_writes = list(self.formal_writes)
-        if formal_writes[0].access_count != 1:
+        formal_write = next(iter(self.formal_writes))
+        assert isinstance(formal_write, dependencies.UserTritonDep)
+        if formal_write.access_count != 1:
             why("user's Triton kernel writes to output more than once")
             return False
 
@@ -3089,7 +3104,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("user's Triton kernel output is not an empty tensor")
             return False
 
-        formal_arg_name = formal_writes[0].name
+        formal_arg_name = formal_write.name
         if any(dep.name == formal_arg_name for dep in self.formal_reads):
             why("user's Triton kernel reads from its output buffer")
             return False
@@ -3144,6 +3159,8 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
 
 class FusedUserTritonSchedulerNode(FusedSchedulerNode):
+    kernel_node: UserTritonSchedulerNode
+
     def __init__(
         self,
         scheduler: Scheduler,
