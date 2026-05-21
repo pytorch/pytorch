@@ -8784,6 +8784,29 @@ class TestMPS(TestCaseMPS):
         helper((5, 5), torch.tanh_, True)
         helper((5, 5), lambda x, **kwargs: torch.round(x, decimals=2, **kwargs), False)
 
+    def test_unary_op_out_cast_fallback(self):
+        # When the user passes out= with a dtype that has no direct
+        # `<op>_dense_<out>_<in>` kernel registered, exec_unary_kernel falls back
+        # to the `<op>_dense_castout_<in>` variant, which computes in the input
+        # dtype and casts to the user's out dtype on store -- matching CPU
+        # semantics. Cross-dtype pairs that DO have a direct kernel (e.g. int
+        # input naturally promotes to float) must keep using the direct path.
+        src_h = torch.rand(64, device='mps', dtype=torch.half)
+        out_f = torch.empty(64, device='mps', dtype=torch.float32)
+        torch.sin(src_h, out=out_f)
+        self.assertEqual(out_f, torch.sin(src_h.cpu(), out=torch.empty(64, dtype=torch.float32)))
+
+        # Strided output via the cast-fallback path.
+        dst_strided = torch.empty(4, 16, device='mps', dtype=torch.float32).t()
+        torch.sin(src_h.view(16, 4), out=dst_strided)
+        self.assertEqual(dst_strided, torch.sin(src_h.view(16, 4).cpu()).to(torch.float32))
+
+        # Integer input still hits the direct sin_dense_float_int kernel.
+        src_i = torch.randint(-10, 10, (64,), device='mps')
+        out_f = torch.empty(64, device='mps')
+        torch.sin(src_i, out=out_f)
+        self.assertEqual(out_f, torch.sin(src_i.cpu().float()))
+
     def test_atan2(self):
         def helper(shape):
             input_cpu = torch.randn(shape)
@@ -14670,6 +14693,40 @@ class TestErrorInputs(TestCase):
 
 
 class TestComplex(TestCase):
+    def test_conj_imag(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184379
+        # MPS copy ignored the neg bit, so `.imag` on a conjugate view returned
+        # the original imaginary values instead of their negation.
+        x = torch.tensor([1 + 2j, 3 - 4j], device="mps")
+        self.assertEqual(x.conj().imag.cpu(), x.cpu().conj().imag)
+
+    def test_neg_bit(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/184379
+        # MPS copy paths (the direct blit, the cast path, and the gather/scatter
+        # kernels) must all materialize the neg bit -- previously only the conj
+        # bit was honored, so `.imag` of a conjugate view, clone, .cpu(), and
+        # copy_ into/out-of non-contiguous tensors silently returned un-negated
+        # data.
+        xforms = [(lambda t: t, "contig"), (lambda t: t.T, "T")]
+        torch.manual_seed(0)
+        v_cpu = torch.randn(4, 4)
+        v = v_cpu.to("mps")
+        for src_xform, src_label in xforms:
+            for dst_xform, dst_label in xforms:
+                src_mps = src_xform(v)._neg_view()
+                src_cpu = src_xform(v_cpu)._neg_view()
+                expected = src_cpu.clone()
+                dst_mps = dst_xform(torch.empty(4, 4, device="mps"))
+                dst_cpu = dst_xform(torch.empty(4, 4))
+                dst_mps.copy_(src_mps)
+                dst_cpu.copy_(src_cpu)
+                with self.subTest(src=src_label, dst=dst_label, op="clone"):
+                    self.assertEqual(src_mps.clone().cpu(), expected)
+                with self.subTest(src=src_label, dst=dst_label, op="cpu"):
+                    self.assertEqual(src_mps.cpu(), expected)
+                with self.subTest(src=src_label, dst=dst_label, op="copy_"):
+                    self.assertEqual(dst_mps.cpu(), dst_cpu)
+
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
         def to_cpu(x):

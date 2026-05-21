@@ -735,6 +735,134 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
+// Castout registrations: kernel is templated on input dtype Tin, computes the
+// functor in Tin precision, and casts the result to the user-supplied output
+// dtype on store. Selected by exec_unary_kernel when the direct per-(out,in)
+// kernel isn't registered. Matches CPU semantics for cross-dtype unary ops
+// (compute in input precision, cast on store).
+#define INSTANTIATE_UNARY_CASTOUT_OPS(DTYPE_IN)    \
+  REGISTER_UNARY_OP_CASTOUT(angle, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(erf, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(erfc, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(erfcx, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(erfinv, DTYPE_IN);     \
+  REGISTER_UNARY_OP_CASTOUT(exp, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(expm1, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(sigmoid, DTYPE_IN);    \
+  REGISTER_UNARY_OP_CASTOUT(exp2, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(log, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(log10, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(log1p, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(log2, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(lgamma, DTYPE_IN);     \
+  REGISTER_UNARY_OP_CASTOUT(digamma, DTYPE_IN);    \
+  REGISTER_UNARY_OP_CASTOUT(trigamma, DTYPE_IN);   \
+  REGISTER_UNARY_OP_CASTOUT(sinc, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(sqrt, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(reciprocal, DTYPE_IN); \
+  REGISTER_UNARY_OP_CASTOUT(rsqrt, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(sinh, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(cosh, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(tanh, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(sin, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(cos, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(tan, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(asin, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(acos, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(atan, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(neg, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(round, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(abs, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(sqr, DTYPE_IN)
+
+INSTANTIATE_UNARY_CASTOUT_OPS(bfloat);
+INSTANTIATE_UNARY_CASTOUT_OPS(half);
+INSTANTIATE_UNARY_CASTOUT_OPS(float);
+
+// Subset of ops with complex overloads.
+#define INSTANTIATE_UNARY_CASTOUT_OPS_COMPLEX(DTYPE_IN) \
+  REGISTER_UNARY_OP_CASTOUT(angle, DTYPE_IN);           \
+  REGISTER_UNARY_OP_CASTOUT(neg, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(exp, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(expm1, DTYPE_IN);           \
+  REGISTER_UNARY_OP_CASTOUT(sigmoid, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(abs, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(exp2, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(log, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(log10, DTYPE_IN);           \
+  REGISTER_UNARY_OP_CASTOUT(log1p, DTYPE_IN);           \
+  REGISTER_UNARY_OP_CASTOUT(log2, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(sinh, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(cosh, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(tanh, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(sqrt, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(reciprocal, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(rsqrt, DTYPE_IN);           \
+  REGISTER_UNARY_OP_CASTOUT(sinc, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(sin, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(cos, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(tan, DTYPE_IN);             \
+  REGISTER_UNARY_OP_CASTOUT(asin, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(acos, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(atan, DTYPE_IN);            \
+  REGISTER_UNARY_OP_CASTOUT(sqr, DTYPE_IN)
+
+INSTANTIATE_UNARY_CASTOUT_OPS_COMPLEX(float2);
+INSTANTIATE_UNARY_CASTOUT_OPS_COMPLEX(half2);
+
+// Integer-input castout for the ops whose functor has an integral overload
+// (result is float for the floating ops, T for the type-preserving ops).
+#define INSTANTIATE_UNARY_CASTOUT_OPS_INT(DTYPE_IN) \
+  REGISTER_UNARY_OP_CASTOUT(angle, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(erf, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(erfc, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(erfcx, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(erfinv, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(exp, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(expm1, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(sigmoid, DTYPE_IN);     \
+  REGISTER_UNARY_OP_CASTOUT(exp2, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(log, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(log10, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(log1p, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(log2, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(lgamma, DTYPE_IN);      \
+  REGISTER_UNARY_OP_CASTOUT(digamma, DTYPE_IN);     \
+  REGISTER_UNARY_OP_CASTOUT(trigamma, DTYPE_IN);    \
+  REGISTER_UNARY_OP_CASTOUT(sinc, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(sqrt, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(reciprocal, DTYPE_IN);  \
+  REGISTER_UNARY_OP_CASTOUT(rsqrt, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(sinh, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(cosh, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(tanh, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(sin, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(cos, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(tan, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(asin, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(acos, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(atan, DTYPE_IN);        \
+  REGISTER_UNARY_OP_CASTOUT(neg, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(round, DTYPE_IN);       \
+  REGISTER_UNARY_OP_CASTOUT(abs, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(sqr, DTYPE_IN);         \
+  REGISTER_UNARY_OP_CASTOUT(bitwise_not, DTYPE_IN)
+
+INSTANTIATE_UNARY_CASTOUT_OPS_INT(int);
+INSTANTIATE_UNARY_CASTOUT_OPS_INT(long);
+INSTANTIATE_UNARY_CASTOUT_OPS_INT(short);
+INSTANTIATE_UNARY_CASTOUT_OPS_INT(char);
+INSTANTIATE_UNARY_CASTOUT_OPS_INT(uchar);
+// bool input: subset that has a bool overload.
+REGISTER_UNARY_OP_CASTOUT(log, bool);
+REGISTER_UNARY_OP_CASTOUT(log10, bool);
+REGISTER_UNARY_OP_CASTOUT(log1p, bool);
+REGISTER_UNARY_OP_CASTOUT(log2, bool);
+REGISTER_UNARY_OP_CASTOUT(lgamma, bool);
+REGISTER_UNARY_OP_CASTOUT(digamma, bool);
+REGISTER_UNARY_OP_CASTOUT(trigamma, bool);
+REGISTER_UNARY_OP_CASTOUT(bitwise_not, bool);
+
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
