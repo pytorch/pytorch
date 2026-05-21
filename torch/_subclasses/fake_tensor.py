@@ -1714,7 +1714,7 @@ class FakeTensorMode(TorchDispatchMode):
                     "shape_env_guard_state",
                     state.shape_env.frozen,
                     state.shape_env._error_on_new_guards,
-                    state.shape_env._suppress_guards_tls(),
+                    type(state.shape_env)._suppress_guards_tls(),
                 ]
             )
         key = _DispatchCacheKey(tuple(key_values))

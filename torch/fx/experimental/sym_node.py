@@ -21,7 +21,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, cast, overload, TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -597,7 +597,9 @@ class SymNode:
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
         return self.shape_env.guard_or_defer_runtime_assert(
-            self.expr, f"{file}:{line}", fx_node=self.fx_node
+            self.expr,
+            f"{file}:{line}",
+            fx_node=cast("torch.fx.Node | None", self.fx_node),
         )
 
     def statically_known_true(self, file: builtins.str, line: int) -> bool:

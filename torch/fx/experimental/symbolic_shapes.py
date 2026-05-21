@@ -8510,10 +8510,34 @@ class ShapeEnv:
                 return True
         return False
 
+    def _maybe_refine_frozen_runtime_assert(self, expr: SympyBoolean) -> None:
+        if not free_unbacked_symbols(expr):
+            return
+
+        # Frozen ShapeEnvs must not accumulate new guards/runtime asserts, but
+        # explicit runtime assert nodes in an already-exported graph still carry
+        # facts needed to propagate later unbacked SymInt uses.
+        self._maybe_guard_rel(expr)
+        expr = canonicalize_bool_expr(expr)
+        self.axioms.update(dict(self.get_implications(self.simplify(expr))))
+        self._update_version_counter()
+
     def guard_or_defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: object = None
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None = None,
     ) -> bool:
-        fx_node = cast(torch.fx.Node | None, fx_node)
+        """
+        Adds a guard that orig_expr is True if we can or fall back to adding an assert
+        that is checked at runtime.
+
+        Args:
+            orig_expr (sympy.Expr): Boolean expression to assert is true
+            msg (str): Message to display on assertion failure
+            fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
+                to the expression, if applicable
+        """
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
         error_on_new_guards = self._error_on_new_guards
         frozen = self.frozen
@@ -8539,16 +8563,6 @@ class ShapeEnv:
         _error_on_new_guards: bool,
         _frozen: bool,
     ) -> bool:
-        """
-        Adds a guard that orig_expr is True if we can or fall back to adding an assert
-        that is checked at runtime.
-
-        Args:
-            orig_expr (sympy.Expr): Boolean expression to assert is true
-            msg (str): Message to display on assertion failure
-            fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
-                to the expression, if applicable
-        """
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
@@ -8585,8 +8599,8 @@ class ShapeEnv:
         if (
             self._translation_validation_enabled
             and fx_node is not None
-            and not self._suppress_guards_tls()
-            and not self.frozen
+            and not _suppress_guards_tls
+            and not _frozen
         ):
             node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
             if node is None:
@@ -8594,13 +8608,14 @@ class ShapeEnv:
             if fresh:
                 self._add_fx_node_metadata(node)
 
-        if not self._suppress_guards_tls():
+        if not _suppress_guards_tls:
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
             if self._check_frozen(expr, sympy.true):
+                self._maybe_refine_frozen_runtime_assert(expr)
                 return True
             # eliminate symbols on equality tests / refine ranges
             self._maybe_guard_rel(expr)
