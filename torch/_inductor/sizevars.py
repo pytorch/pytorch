@@ -211,6 +211,9 @@ def statically_known_true(
     if expr in (True, False):
         return bool(expr)
 
+    if _statically_known_modular_indexing_bound(shape_env, expr, axioms, var_to_range):
+        return True
+
     # Hint fast-path: if the current concrete hints make `expr` evaluate to
     # False, it cannot be universally True, so bail out without running the
     # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
@@ -234,6 +237,34 @@ def statically_known_true(
         log.debug("Could not simplify  %s", expr, exc_info=True)
 
     return False
+
+
+def _statically_known_modular_indexing_bound(
+    shape_env: ShapeEnv,
+    expr: sympy.Basic | bool,
+    axioms: tuple[sympy.Expr] | None,
+    var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[Any]]] | None,
+) -> bool:
+    if not isinstance(expr, sympy.StrictLessThan):
+        return False
+
+    lhs, rhs = expr.args
+    if not isinstance(lhs, ModularIndexing):
+        return False
+
+    base, divisor, modulus = lhs.args
+    if modulus != rhs:
+        return False
+
+    constraints = (
+        sympy.Ge(base, 0),
+        sympy.Gt(divisor, 0),
+        sympy.Gt(modulus, 0),
+    )
+    return all(
+        statically_known_true(shape_env, constraint, axioms, var_to_range)
+        for constraint in constraints
+    )
 
 
 # This class is a little awkward, because ShapeEnv is doing most of the heavy
@@ -367,6 +398,40 @@ class SizeVarAllocator:
             )
             return bool(evaluated)
 
+        def join_mod_floor_terms(expr: Expr) -> Expr:
+            if not isinstance(expr, sympy.Add) or not expr.has(Mod, FloorDiv):
+                return expr
+
+            def split_scaled_floor_div(term: Expr):
+                if isinstance(term, FloorDiv):
+                    floor_div = term
+                    factor = sympy.S.One
+                elif isinstance(term, sympy.Mul):
+                    floor_divs = [arg for arg in term.args if isinstance(arg, FloorDiv)]
+                    if len(floor_divs) != 1:
+                        return None
+                    floor_div = floor_divs[0]
+                    factor = sympy.cancel(term / floor_div)
+                else:
+                    return None
+
+                base, divisor = floor_div.args
+                if not statically_known(sympy.Eq(factor, divisor)):
+                    return None
+                if not statically_known(base >= 0) or not statically_known(divisor > 0):
+                    return None
+                return base, divisor
+
+            for term1 in expr.args:
+                split = split_scaled_floor_div(term1)
+                if split is None:
+                    continue
+                base, divisor = split
+                for term2 in expr.args:
+                    if term1 != term2 and term2 == Mod(base, divisor):
+                        return join_mod_floor_terms(expr - term1 - term2 + base)
+            return expr
+
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
             if not statically_known(base >= 0):
@@ -384,6 +449,22 @@ class SizeVarAllocator:
                             base = m[rest]
             return base
 
+        def remove_modular_terms(base, modulus):
+            if not isinstance(base, sympy.Add):
+                return base
+            kept_terms = []
+            removed = False
+            for term in base.args:
+                if statically_known(sympy.Eq(Mod(term, modulus), 0)):
+                    removed = True
+                else:
+                    kept_terms.append(term)
+            if not removed:
+                return base
+            if not kept_terms:
+                return sympy.S.Zero
+            return sympy.Add(*kept_terms)
+
         def visit_indexing_div(base, divisor):
             base = remove_zero_terms(base, divisor)
             if statically_known(base >= 0) and statically_known(base < divisor):
@@ -398,6 +479,18 @@ class SizeVarAllocator:
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
 
+            if (
+                divisor == 1
+                and isinstance(base, ModularIndexing)
+                and statically_known(sympy.Eq(Mod(base.args[2], modulus), 0))
+                and statically_known(base.args[0] >= 0)
+                and statically_known(base.args[1] > 0)
+                and statically_known(base.args[2] > 0)
+                and statically_known(modulus > 0)
+            ):
+                inner_base, inner_divisor, _inner_modulus = base.args
+                return ModularIndexing(inner_base, inner_divisor, modulus)
+
             can_remove_mod = statically_known(base >= 0) and statically_known(
                 base < modulus * divisor
             )
@@ -405,6 +498,32 @@ class SizeVarAllocator:
             if can_remove_mod:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
+
+        def visit_mod(base, modulus):
+            if statically_known(base >= 0) and statically_known(modulus > 0):
+                reduced = remove_modular_terms(base, modulus)
+                if reduced != base:
+                    if reduced == 0:
+                        return sympy.S.Zero
+                    if not statically_known(reduced >= 0):
+                        return Mod(base, modulus)
+                    if statically_known(reduced < modulus):
+                        return reduced
+                    return Mod(reduced, modulus)
+                if statically_known(base < modulus):
+                    return base
+            return Mod(base, modulus)
+
+        expr = join_mod_floor_terms(expr)
+
+        if expr.has(Mod):
+            expr = expr.replace(
+                Mod(
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("modulus", integer=True),
+                ),
+                visit_mod,
+            )
 
         if expr.has(ModularIndexing):
             expr = expr.replace(
@@ -913,19 +1032,27 @@ class SizeVarAllocator:
         if self.guard_or_false(sympy.Le(right, left)):
             return right
 
-        # GCD fallback: if gcd(a, b) == a then a divides b, implying a <= b.
-        #
-        # TODO: This is NOT always sound for unbacked symints.  It can
-        # produce wrong results when:
-        #   - inputs can be negative: gcd(u0, 10*u0) = u0, returns u0,
-        #     but if u0 < 0 then u0 > 10*u0 (e.g. u0=-1: min(-1,-10) = -10)
-        #   - a factor can be zero: gcd(u0, u0*u1) = u0, returns u0,
-        #     but if u1=0 then u0*u1=0 < u0 (e.g. u0=5,u1=0: min(5,0) = 0)
-        # TODO shall we add a runtime assertion at least.
+        def divides_and_orders(a: Expr, b: Expr) -> bool:
+            """Return True when `a` divides `b` and we can prove `a <= b`."""
+            try:
+                quotient = sympy.cancel(b / a)
+            except Exception:
+                return False
+            diff_factor = quotient - 1
+            return (
+                self.statically_known_geq(a, 0)
+                and self.statically_known_geq(diff_factor, 0)
+            ) or (
+                self.statically_known_leq(a, 0)
+                and self.statically_known_leq(diff_factor, 0)
+            )
+
+        # GCD fallback: if gcd(a, b) == a then a divides b, but that alone
+        # does not imply a <= b. Also prove the ordering before simplifying.
         gcd = sympy.gcd(left, right)
-        if left == gcd:
+        if left == gcd and divides_and_orders(left, right):
             return left
-        if right == gcd:
+        if right == gcd and divides_and_orders(right, left):
             return right
 
         # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
@@ -1339,7 +1466,7 @@ class SizeVarAllocator:
         return index
 
     def expand_floor_div(
-        self, index: sympy.Expr
+        self, index: sympy.Expr, index_vars: Sequence[sympy.Symbol] | None = None
     ) -> bool | tuple[sympy.Expr, sympy.Expr]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
@@ -1352,7 +1479,7 @@ class SizeVarAllocator:
         '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
         for the numerator!
 
-        Return false if this optimization can be applied;
+        Return false if this optimization cannot be applied;
         Return the new expression and the denominator otherwise.
         The original expression will be equivalent to 'new_expression // denominator'
         """
@@ -1365,23 +1492,63 @@ class SizeVarAllocator:
         floor_div_index = -1
         varlist = []
         factorlist = []
+        index_var_set = OrderedSet(index_vars) if index_vars is not None else None
+
+        def split_mul_term(
+            term: sympy.Mul,
+        ) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if index_var_set is None:
+                if len(term.args) != 2:
+                    return None
+                factor, var = term.args
+            else:
+                term_index_vars = [
+                    arg
+                    for arg in term.args
+                    if isinstance(arg, sympy.Symbol) and arg in index_var_set
+                ]
+                if len(term_index_vars) != 1:
+                    return None
+                var = term_index_vars[0]
+                factor = sympy.cancel(term / var)
+                if not isinstance(factor, sympy.Expr) or any(
+                    symbol in index_var_set for symbol in factor.free_symbols
+                ):
+                    return None
+
+            if not isinstance(var, sympy.Symbol):
+                return None
+            if not isinstance(factor, sympy.Integer) and factor.is_integer is not True:
+                return None
+            return factor, var
+
+        def split_symbol_term(
+            term: sympy.Symbol,
+        ) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if index_var_set is None or term in index_var_set:
+                return sympy.S.One, term
+            return None
+
         for idx, term in enumerate(terms):
             if isinstance(term, sympy.Mul):
-                # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
-                # - A integer for 2
-                # - A symbol for s1
-                # - A symbol for x1
-                # Skip for now.
-                if len(term.args) != 2:
+                split = split_mul_term(term)
+                if split is None:
                     return False
-                factor, var = term.args
+                factor, var = split
                 varlist.append(var)
                 factorlist.append(factor)
-                if not isinstance(factor, sympy.Integer) or not isinstance(
-                    var, sympy.Symbol
-                ):
+                # It's easier to reason about the correctness of the transformation
+                # for non-negative integers.
+                if not self.statically_known_geq(var, 0):
                     return False
-                # It's easier to reason about the correceness of the transformation
+            elif isinstance(term, sympy.Symbol):
+                split = split_symbol_term(term)
+                if split is None:
+                    return False
+                factor, var = split
+                varlist.append(var)
+                factorlist.append(factor)
+                # It's easier to reason about the correctness of the transformation
                 # for non-negative integers.
                 if not self.statically_known_geq(var, 0):
                     return False
