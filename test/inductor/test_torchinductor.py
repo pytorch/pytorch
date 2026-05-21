@@ -6903,7 +6903,6 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
-    @xfail_if_mps
     def test_complex_real_imag_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that extracting real/imag from conjugated tensors works when compiled.
