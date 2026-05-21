@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
+import re
 from collections import defaultdict
 from torch import inf
 from torch.nn import Buffer, Parameter
@@ -14407,6 +14408,10 @@ class TestConsistency(TestCaseMPS):
                 atol = 7e-4
                 rtol = 1.5e-3
 
+            if op.name in ["nn.functional.group_norm"] and dtype == torch.float32:
+                atol = 1e-5
+                rtol = 1e-5
+
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
             else:
@@ -14591,6 +14596,47 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(op(x.t(), y), op(x.to("mps").t(), y.to("mps")).cpu())
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("affine_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_native_group_norm_mixed_dtypes(self, device, dtype, affine_dtype):
+        N = 3
+        C = 8
+        HxW = 10
+        num_groups = 4
+        x = torch.randn(N, C, HxW, device=device, dtype=dtype)
+        gamma = torch.randn(C, device=device, dtype=affine_dtype)
+
+        expected_error = None
+
+        x_cpu = x.cpu().requires_grad_(True)
+        gamma_cpu = gamma.cpu().requires_grad_(True)
+
+        try:
+            y_cpu, mean_cpu, rstd_cpu = torch.native_group_norm(
+                x_cpu, gamma_cpu, None, N, C, HxW, num_groups, 1e-5)
+        except RuntimeError as e:
+            # Not all dtype combinations are accepted, so detect the ones that aren't
+            expected_error = str(e)
+
+        if expected_error is not None:
+            with self.assertRaisesRegex(RuntimeError, rf"^{re.escape(expected_error)}$"):
+                y, mean, rstd = torch.native_group_norm(
+                    x, gamma, None, N, C, HxW, num_groups, 1e-5)
+        else:
+            x = x.requires_grad_(True)
+            gamma = gamma.requires_grad_(True)
+            y, mean, rstd = torch.native_group_norm(
+                x, gamma, None, N, C, HxW, num_groups, 1e-5)
+            self.assertEqual(y.cpu(), y_cpu)
+            self.assertEqual(mean.cpu(), mean_cpu)
+            self.assertEqual(rstd.cpu(), rstd_cpu)
+
+            y.backward(torch.ones_like(y))
+            y_cpu.backward(torch.ones_like(y_cpu))
+
+            self.assertEqual(x.grad.cpu(), x_cpu.grad)
+            self.assertEqual(gamma.grad.cpu(), gamma_cpu.grad)
 
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
