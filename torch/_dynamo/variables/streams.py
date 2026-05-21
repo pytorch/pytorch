@@ -623,6 +623,11 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return torch.Event
 
