@@ -77,7 +77,7 @@ aten_baddbmm = ExternKernelChoice(
 
 # This path targets vmapped dot products and similar tiny vector contractions,
 # where extern bmm launch overhead and lost fusion dominate. Keep the threshold
-# conservative so larger reductions with static or large hinted K continue
+# conservative so reductions proven to be larger than the threshold continue
 # through the normal bmm machinery.
 _BMM_DOT_K_DECOMPOSE_THRESHOLD = 32
 _BMM_DOT_DECOMPOSE_DTYPES = (
@@ -102,6 +102,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         # only a profitability signal, so avoid specializing dynamic dims here.
         return sizevars.optimization_hint(dim, fallback=2) == 1
 
+    def dim_is_not_known_gt(dim, threshold):
+        # Do not use optimization_hint() for K: the same symbolic FX graph can
+        # be code-cache reused across different concrete K values.
+        return not sizevars.statically_known_gt(dim, threshold)
+
     if (
         out_dtype is None
         and device_type in ("cuda", "xpu")
@@ -110,15 +115,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and dtype in _BMM_DOT_DECOMPOSE_DTYPES
         and dim_is_one_or_hint(mat1.get_size()[1])
         and dim_is_one_or_hint(mat2.get_size()[2])
-        and (
-            sizevars.statically_known_leq(
-                mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD
-            )
-            or sizevars.optimization_hint(
-                mat1.get_size()[2], fallback=_BMM_DOT_K_DECOMPOSE_THRESHOLD + 1
-            )
-            <= _BMM_DOT_K_DECOMPOSE_THRESHOLD
-        )
+        and dim_is_not_known_gt(mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD)
     ):
         # Preserve dot-shaped bmm as pointwise/reduction IR so surrounding
         # operations can fuse instead of dispatching a tiny extern bmm.
