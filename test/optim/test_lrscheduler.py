@@ -2681,12 +2681,10 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
-
     # NOTE: Expected-failure tests for known scheduler issues.
     #
     # These tests should be converted to normal regression tests once
     # the underlying behavior is fixed.
-
 
     @expectedFailure
     def test_sequentiallr_resume_reproducibility(self):
@@ -2771,6 +2769,7 @@ class TestLRScheduler(TestCase):
         self.assertEqual(loaded_optimizer_lr, loaded_scheduler_lr)
         self.assertEqual(resumed_lrs[0], reference_lrs[resume_step])
         self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
