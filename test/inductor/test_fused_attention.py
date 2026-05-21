@@ -1754,7 +1754,10 @@ if HAS_CPU:
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
         )
         test_sdpa_rewriter_2_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_2
-        test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
+        # see https://github.com/pytorch/pytorch/issues/177244
+        test_sdpa_rewriter_5_cpu = xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
+        )
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
