@@ -16823,20 +16823,15 @@ def forward(self, x):
             }
             _load_dynamic_shapes(spec, from_dict=True)
 
-    # Previously export run_decomp would dispatch
-    # sdpa to math backend which doesn't guarantee
-    # to return contiguous tensor. As a result, downstream
-    # view op would fail. In eager (or normal export), sdpa
-    # decomps to flash_attention which has correct handling
-    # for non-contiguous output. Since in normal export, we
-    # dispatch to flash_attention, we also force run_decomp
-    # to follow flash_attention.
+    # SDPA output strides are backend dependent. MHA must preserve its
+    # copy-if-needed flatten after permuting SDPA output so CPU export remains
+    # valid when the exported program is moved to CUDA.
     def test_attention(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.embed_dim = 768
-                self.num_heads = 12
+                self.embed_dim = 16
+                self.num_heads = 1
                 self.dropout = 0.0
                 self.batch_first = True
                 self.self_attention = torch.nn.MultiheadAttention(
@@ -16846,12 +16841,58 @@ def forward(self, x):
                     batch_first=self.batch_first,
                 )
 
-            def forward(self, input1: torch.Tensor):
-                x, _ = self.self_attention(input1, input1, input1, need_weights=False)
+            def forward(self, input1: torch.Tensor, mask: torch.Tensor):
+                x, _ = self.self_attention(
+                    input1,
+                    input1,
+                    input1,
+                    key_padding_mask=~mask,
+                    need_weights=False,
+                )
                 return x
 
-        inps = (torch.randn(1, 224, 768, device="cpu"),)
-        export(Foo(), inps)
+        model = Foo().eval()
+        inps = (
+            torch.randn(2, 7, 16, device="cpu"),
+            torch.tensor(
+                [
+                    [True, True, True, True, True, False, False],
+                    [True, True, True, False, False, False, False],
+                ],
+                device="cpu",
+            ),
+        )
+
+        with torch.no_grad():
+            ep = export(model, inps, strict=False)
+
+        has_sdpa_permute_reshape = False
+        for node in ep.graph.nodes:
+            if node.target != torch.ops.aten.reshape.default:
+                continue
+            permute = node.args[0]
+            if (
+                not isinstance(permute, torch.fx.Node)
+                or permute.target != torch.ops.aten.permute.default
+            ):
+                continue
+            sdpa = permute.args[0]
+            if (
+                isinstance(sdpa, torch.fx.Node)
+                and sdpa.target == torch.ops.aten.scaled_dot_product_attention.default
+            ):
+                has_sdpa_permute_reshape = True
+                break
+        self.assertTrue(has_sdpa_permute_reshape)
+
+        exported = ep.module()
+        with torch.no_grad():
+            self.assertEqual(exported(*inps), model(*inps))
+
+        if torch.cuda.is_available():
+            cuda_inps = tuple(inp.cuda() for inp in inps)
+            with torch.no_grad():
+                self.assertEqual(exported.cuda()(*cuda_inps), model.cuda()(*cuda_inps))
 
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
