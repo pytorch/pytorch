@@ -108,21 +108,44 @@ foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
   endif()
 endforeach()
 
-# Ensure Python's purelib is on CMAKE_PREFIX_PATH so CMake can find
-# packages installed there (e.g., pybind11, numpy).
+# Ensure Python's sys.prefix (the venv/conda env root) and purelib are on
+# CMAKE_PREFIX_PATH so CMake can find packages installed there.
+#
+# - sys.prefix is needed because conda-style envs put libraries under
+#   <prefix>/lib (Linux) or <prefix>/Library/lib (Windows). CMake 3.28
+#   removed the find_library() heuristic that derived <prefix>/lib from
+#   <prefix>/bin entries on PATH, so without sys.prefix on the prefix
+#   path, find_package(MKL) and similar fail to locate conda-provided
+#   libraries (e.g. mkl_intel_lp64, libiomp5md). The Linux CI scripts
+#   used to set CMAKE_PREFIX_PATH=$CONDA_PREFIX explicitly as a
+#   workaround for the same issue (see gh-119557); having it here makes
+#   that redundant and gives the same coverage to Windows pull-CI and
+#   to local builds outside of CI.
+# - purelib is needed for python-package CMake configs (e.g., pybind11,
+#   numpy headers).
 if(Python_EXECUTABLE)
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"
-    OUTPUT_VARIABLE _py_purelib
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import sys, sysconfig; print(sys.prefix); print(sysconfig.get_path('purelib'))"
+    OUTPUT_VARIABLE _py_paths
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
-  if(_py_purelib AND NOT "${_py_purelib}" STREQUAL "")
-    list(PREPEND CMAKE_PREFIX_PATH "${_py_purelib}")
+  if(_py_paths AND NOT "${_py_paths}" STREQUAL "")
+    string(REPLACE "\n" ";" _py_paths "${_py_paths}")
+    # On Windows, conda envs lay out installed libraries under
+    # <prefix>/Library/{lib,include,bin}, which CMake's find_library does
+    # not search by default. Prepend <prefix>/Library so the standard
+    # <prefix>/lib heuristic resolves <prefix>/Library/lib (where MKL,
+    # OpenSSL, libiomp5md, etc. live in conda-on-Windows installs).
+    list(GET _py_paths 0 _py_prefix)
+    if(WIN32 AND EXISTS "${_py_prefix}/Library")
+      list(PREPEND _py_paths "${_py_prefix}/Library")
+    endif()
+    list(PREPEND CMAKE_PREFIX_PATH ${_py_paths})
     # Preserve paths from the CMAKE_PREFIX_PATH environment variable.
     # Setting the cmake variable shadows the env var, so we must merge it in
-    # explicitly. This ensures conda's prefix (e.g. /opt/conda/envs/py_3.10)
-    # is present so cmake can find conda-provided libraries (libgomp, libnuma).
+    # explicitly.
     if(DEFINED ENV{CMAKE_PREFIX_PATH} AND NOT "$ENV{CMAKE_PREFIX_PATH}" STREQUAL "")
       if(WIN32)
         # On Windows the env var is already ;-separated and : appears in drive
@@ -135,4 +158,31 @@ if(Python_EXECUTABLE)
     endif()
     list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
   endif()
+endif()
+
+# MAX_JOBS -> CMAKE_BUILD_PARALLEL_LEVEL (scikit-build-core respects this)
+if(DEFINED ENV{MAX_JOBS} AND NOT DEFINED CMAKE_BUILD_PARALLEL_LEVEL)
+  set(ENV{CMAKE_BUILD_PARALLEL_LEVEL} "$ENV{MAX_JOBS}")
+endif()
+
+# BUILD_PYTHON_ONLY implies BUILD_LIBTORCHLESS=ON. This matches setup.py
+# behavior where BUILD_PYTHON_ONLY unconditionally forces BUILD_LIBTORCHLESS.
+if(BUILD_PYTHON_ONLY)
+  set(BUILD_LIBTORCHLESS ON CACHE BOOL "Build without libtorch" FORCE)
+endif()
+
+# USE_NIGHTLY bypasses the build entirely and downloads a pre-built wheel.
+# This is not supported via CMake -- use the standalone script instead.
+if(USE_NIGHTLY)
+  message(FATAL_ERROR
+    "USE_NIGHTLY is not supported with the scikit-build-core build system. "
+    "Use 'python tools/nightly_wheel.py' instead, or install directly with pip: "
+    "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu"
+  )
+endif()
+
+# Conflict check
+if(BUILD_LIBTORCH_WHL AND BUILD_PYTHON_ONLY)
+  message(FATAL_ERROR
+    "Conflict: BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY cannot both be ON.")
 endif()

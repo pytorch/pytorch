@@ -25,7 +25,22 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 endif()
 
 # ---[ Project and semantic versioning.
-project(Torch CXX C)
+# When built via scikit-build-core, these are set automatically.
+# Provide fallbacks for standalone cmake invocations.
+if(NOT DEFINED SKBUILD_PROJECT_NAME)
+  set(SKBUILD_PROJECT_NAME "torch")
+endif()
+if(NOT DEFINED SKBUILD_PROJECT_VERSION)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" SKBUILD_PROJECT_VERSION)
+  string(STRIP "${SKBUILD_PROJECT_VERSION}" SKBUILD_PROJECT_VERSION)
+  # version.txt may contain PEP 440 pre-release suffixes like "a0" that are
+  # not valid CMake version components. Strip everything after the last digit
+  # group so project(VERSION ...) still works.
+  string(REGEX MATCH "^[0-9]+\\.[0-9]+(\\.[0-9]+)?" SKBUILD_PROJECT_VERSION "${SKBUILD_PROJECT_VERSION}")
+endif()
+project(${SKBUILD_PROJECT_NAME}
+        VERSION ${SKBUILD_PROJECT_VERSION}
+        LANGUAGES CXX C)
 
 # When built via scikit-build-core, Python_EXECUTABLE is already set.
 # For standalone cmake invocations, find it via find_package.

@@ -1,5 +1,7 @@
 # Build System requirements
+scikit-build-core
 setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files support
+spin
 cmake>=3.27
 ninja
 numpy
