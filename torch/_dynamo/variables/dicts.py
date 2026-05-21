@@ -96,7 +96,9 @@ class ConstDictVariable(VariableTracker):
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
 
     _nonvar_fields = {
+        "gc_tracking_unknown",
         "user_cls",
+        "was_mutated",
         *VariableTracker._nonvar_fields,
     }
 
@@ -112,6 +114,8 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        gc_tracking_unknown = kwargs.pop("gc_tracking_unknown", False)
+        was_mutated = kwargs.pop("was_mutated", False)
 
         super().__init__(**kwargs)
 
@@ -142,6 +146,8 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         self.user_cls = user_cls
+        self.gc_tracking_unknown = gc_tracking_unknown
+        self.was_mutated = was_mutated
 
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
@@ -395,6 +401,12 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
+            for dict_key, dict_value in list(self.items.items()):
+                if getattr(dict_key, "_hash", None) != getattr(key, "_hash", None):
+                    continue
+                eq_result = dict_key.vt.call_method(tx, "__eq__", [arg], {})
+                if eq_result.is_python_constant() and eq_result.as_python_constant():
+                    return dict_value
             raise_observed_exception(KeyError, tx, args=[arg])
         return self.items[key]
 
@@ -496,6 +508,107 @@ class ConstDictVariable(VariableTracker):
         contains = item in self
         return VariableTracker.build(tx, contains)
 
+    def call_dict_eq(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        from .object_protocol import generic_bool, vt_identity_compare
+
+        if isinstance(other, ConstDictVariable):
+            other_dict = other
+        elif isinstance(other, variables.UserDefinedDictVariable):
+            base_vt = other._base_vt
+            if base_vt is None:
+                raise AssertionError("_base_vt must not be None in call_dict_eq")
+            if not isinstance(base_vt, ConstDictVariable):
+                raise AssertionError(f"Expected ConstDictVariable, got {type(base_vt)}")
+            other_dict = base_vt
+        else:
+            return ConstantVariable.create(NotImplemented)
+
+        self.install_dict_keys_match_guard()
+        other_dict.install_dict_keys_match_guard()
+        if self.source and not is_constant_source(self.source):
+            tx.output.guard_on_key_order.add(self.source)
+        if other_dict.source and not is_constant_source(other_dict.source):
+            tx.output.guard_on_key_order.add(other_dict.source)
+
+        if len(self.items) != len(other_dict.items):
+            return ConstantVariable.create(False)
+
+        def same_object(left: VariableTracker, right: VariableTracker) -> bool:
+            identity = vt_identity_compare(left, right)
+            return identity.as_python_constant() if identity is not None else False
+
+        def is_not_implemented(result: VariableTracker) -> bool:
+            if not result.is_python_constant():
+                return False
+            return result.as_python_constant() is NotImplemented
+
+        def strict_subclass(left: VariableTracker, right: VariableTracker) -> bool:
+            try:
+                left_type = left.python_type()
+                right_type = right.python_type()
+            except NotImplementedError:
+                return False
+            return left_type is not right_type and issubclass(left_type, right_type)
+
+        def rich_eq_as_bool(left: VariableTracker, right: VariableTracker) -> bool:
+            if same_object(left, right):
+                return True
+
+            tried_right = False
+            if strict_subclass(right, left):
+                result = right.call_method(tx, "__eq__", [left], {})
+                if not is_not_implemented(result):
+                    return generic_bool(tx, result).as_python_constant()
+                tried_right = True
+
+            result = left.call_method(tx, "__eq__", [right], {})
+            if not is_not_implemented(result):
+                return generic_bool(tx, result).as_python_constant()
+
+            if not tried_right:
+                result = right.call_method(tx, "__eq__", [left], {})
+                if not is_not_implemented(result):
+                    return generic_bool(tx, result).as_python_constant()
+
+            return False
+
+        class DictEqLookupKey(HashableTracker):
+            def __init__(self, key: HashableTracker) -> None:
+                self._hash = key._hash
+                self.vt = key.vt
+
+            def __hash__(self) -> int:
+                return self._hash
+
+            def __eq__(self, other: object) -> bool:
+                if not isinstance(other, HashableTracker):
+                    return False
+                return rich_eq_as_bool(other.vt, self.vt)
+
+        missing = object()
+        for left_key, left_value in self.items.items():
+            right_value = other_dict.items.get(DictEqLookupKey(left_key), missing)
+            if right_value is missing:
+                return ConstantVariable.create(False)
+            if not isinstance(right_value, VariableTracker):
+                raise AssertionError(
+                    f"Expected VariableTracker, got {type(right_value)}"
+                )
+            if not rich_eq_as_bool(left_value, right_value):
+                return ConstantVariable.create(False)
+
+        ordered_dict_eq = issubclass(
+            self.user_cls, collections.OrderedDict
+        ) and issubclass(other_dict.user_cls, collections.OrderedDict)
+        if ordered_dict_eq:
+            for left_key, right_key in zip(self.items.keys(), other_dict.items.keys()):
+                if not rich_eq_as_bool(left_key.vt, right_key.vt):
+                    return ConstantVariable.create(False)
+
+        return ConstantVariable.create(True)
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictIterator
 
@@ -526,9 +639,14 @@ class ConstDictVariable(VariableTracker):
             temp_dict_vt = DictBuiltinVariable.call_custom_dict(
                 tx, dict, *args, **kwargs
             )
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
             return ConstantVariable.create(None)
+        elif name == "fromkeys":
+            return DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.user_cls, *args, **kwargs
+            )
         elif name == "items":
             if args or kwargs:
                 raise_args_mismatch(
@@ -572,7 +690,12 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                items=self.items.copy(),
+                gc_tracking_unknown=self.gc_tracking_unknown
+                or (self.user_cls is dict and self.source is not None)
+                or self.was_mutated,
+                mutation_type=ValueMutationNew(),
+                source=None,
             )
         elif name == "__setitem__" and self.is_mutable():
             self.install_dict_keys_match_guard()
@@ -583,16 +706,41 @@ class ConstDictVariable(VariableTracker):
                     "2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 arg and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
                 self.install_dict_keys_match_guard()
+                key = Hashable(args[0])
+                if key not in self.items:
+                    for dict_key in list(self.items):
+                        if getattr(dict_key, "_hash", None) != getattr(
+                            key, "_hash", None
+                        ):
+                            continue
+                        eq_result = dict_key.vt.call_method(tx, "__eq__", [args[0]], {})
+                        if (
+                            eq_result.is_python_constant()
+                            and eq_result.as_python_constant()
+                        ):
+                            key = dict_key
+                            break
+                    else:
+                        raise_observed_exception(KeyError, tx, args=[args[0]])
                 self.should_reconstruct_all = True
+                self.was_mutated = True
                 tx.output.side_effects.mutation(self)
-                self.items.__delitem__(Hashable(args[0]))
+                self.items.__delitem__(key)
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
@@ -621,6 +769,7 @@ class ConstDictVariable(VariableTracker):
                 return args[1]
 
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
@@ -640,6 +789,7 @@ class ConstDictVariable(VariableTracker):
 
             k, v = self.items.popitem()
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
 
             return variables.TupleVariable([k.vt, v])
@@ -652,29 +802,58 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.should_reconstruct_all = True
+            self.was_mutated = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
-            # Either `b` or the kwargs is omittable, but not both.
+            # Either `b` or the kwargs is omittable.
             self.install_dict_keys_match_guard()
+            if len(args) > 1:
+                raise_args_mismatch(tx, name, "at most 1 args", f"{len(args)} args")
             has_arg = len(args) == 1
             has_kwargs = len(kwargs) > 0
-            if has_arg or has_kwargs:
-                tx.output.side_effects.mutation(self)
+            if has_arg or has_kwargs or not args:
+                if has_arg or has_kwargs:
+                    self.was_mutated = True
+                    tx.output.side_effects.mutation(self)
                 if has_arg:
-                    dict_vt: VariableTracker
+                    from .object_protocol import generic_getiter, vt_getitem
+
                     if isinstance(args[0], ConstDictVariable):
                         # NB - Guard on all the keys of the other dict to ensure
                         # correctness.
                         args[0].install_dict_keys_match_guard()
-                        dict_vt = args[0]
-                    else:
-                        dict_vt = DictBuiltinVariable.call_custom_dict(
-                            tx, dict, args[0]
+                        self.items.update(args[0].items)
+                    elif (
+                        isinstance(
+                            args[0],
+                            (variables.UserDefinedObjectVariable, MappingProxyVariable),
                         )
-                    self.items.update(dict_vt.items)  # type: ignore[attr-defined]
+                        and args[0].call_obj_hasattr(tx, "keys").as_python_constant()
+                    ):
+                        keys = args[0].call_method(tx, "keys", [], {})
+                        iterator = generic_getiter(tx, keys)
+                        for key in iterator.force_unpack_var_sequence(tx):
+                            self.items[Hashable(key)] = vt_getitem(tx, args[0], key)
+                    else:
+                        iterator = generic_getiter(tx, args[0])
+                        for idx, item in enumerate(
+                            iterator.force_unpack_var_sequence(tx)
+                        ):
+                            item_iterator = generic_getiter(tx, item)
+                            pair = item_iterator.force_unpack_var_sequence(tx)
+                            if len(pair) != 2:
+                                raise_observed_exception(
+                                    ValueError,
+                                    tx,
+                                    args=[
+                                        "dictionary update sequence element "
+                                        f"#{idx} has length {len(pair)}; 2 is required"
+                                    ],
+                                )
+                            self.items[Hashable(pair[0])] = pair[1]
                 if has_kwargs:
                     # Handle kwargs
                     kwargs_hashable = {
@@ -710,6 +889,7 @@ class ConstDictVariable(VariableTracker):
                     x = ConstantVariable.create(None)
                 else:
                     x = args[1]
+                self.was_mutated = True
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x
@@ -788,26 +968,12 @@ class ConstDictVariable(VariableTracker):
     def richcompare_impl(self, tx, other, op):
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
         # Only supports eq/ne; returns NotImplemented for ordering.
-        from .builder import SourcelessBuilder
-        from .user_defined import UserDefinedDictVariable
 
         if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
-        if not isinstance(other, ConstDictVariable):
-            # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-            # This is correct because CPython's dict_equal operates on the
-            # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-            # -- it never calls __getitem__ or __len__ on dict subclasses.
-            # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-            if isinstance(other, UserDefinedDictVariable):
-                if other._base_vt is None:
-                    raise AssertionError("expected _base_vt to be set")
-                other = other._base_vt
-            else:
-                return ConstantVariable.create(NotImplemented)
-        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
-        )
+        eq_result = self.call_dict_eq(tx, other)
+        if eq_result.is_constant_match(NotImplemented):
+            return ConstantVariable.create(NotImplemented)
         if op == "__ne__":
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result

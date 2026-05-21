@@ -108,7 +108,7 @@ from .base import (
 )
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
-from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
+from .object_protocol import generic_len, is_nb_not_implemented, type_implements_nb_slot
 from .sets import SetVariable
 
 
@@ -976,13 +976,34 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
+        elif name == "fromkeys" and (
             self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
+            or issubclass(self.value, dict)
         ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self, *args, **kwargs
             )
+        elif self.value is collections.defaultdict and name == "__copy__":
+            if not args:
+                raise_type_error(
+                    tx,
+                    "unbound method defaultdict.__copy__() needs an argument",
+                )
+            try:
+                receiver_type = args[0].python_type()
+            except NotImplementedError:
+                raise_type_error(
+                    tx,
+                    "descriptor '__copy__' for 'collections.defaultdict' "
+                    "objects doesn't apply to this object",
+                )
+            if not issubclass(receiver_type, collections.defaultdict):
+                raise_type_error(
+                    tx,
+                    "descriptor '__copy__' for 'collections.defaultdict' "
+                    f"objects doesn't apply to a '{receiver_type.__name__}' object",
+                )
+            return args[0].call_method(tx, name, args[1:], kwargs)
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
@@ -1066,8 +1087,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             get_device_context_manager,
         )
 
-        constant_args = check_constant_args(args, kwargs)
-
         if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
@@ -1086,7 +1105,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
-        if self.can_constant_fold_through() and constant_args:
+        if self.can_constant_fold_through() and check_constant_args(args, kwargs):
             # constant fold
             return VariableTracker.build(
                 tx,
@@ -2709,7 +2728,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .builder import SourcelessBuilder
 
         result = []
-        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        try:
+            iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"'{self.python_type_name()}' object is not iterable"],
+            )
 
         while True:
             try:
@@ -2719,6 +2746,132 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 handle_observed_exception(tx)
                 break
         return result
+
+    def validate_iterable_length_hint(
+        self,
+        tx: "InstructionTranslator",
+        result: VariableTracker,
+        source_name: str,
+    ) -> None:
+        if not result.is_python_constant():
+            try:
+                result_type = result.python_type()
+            except NotImplementedError:
+                result_type = None
+            if isinstance(result_type, type) and not issubclass(result_type, int):
+                if (
+                    source_name != "__len__"
+                    or inspect.getattr_static(result_type, "__index__", None) is None
+                ):
+                    if source_name == "__len__":
+                        msg = f"'{result_type.__name__}' object cannot be interpreted as an integer"
+                    else:
+                        msg = f"__length_hint__ must be an integer, not {result_type.__name__}"
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[msg],
+                    )
+            unimplemented(
+                gb_type="Cannot trace user-defined __len__",
+                context=f"{self.python_type_name()}.__len__()",
+                explanation=(
+                    f"Dynamo cannot trace len() on {self.python_type_name()} because the __len__ "
+                    "method is either not traceable (e.g., defined in C or built-in) or returns a "
+                    "non-constant value."
+                ),
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        value = result.as_python_constant()
+        if value is NotImplemented and source_name == "__length_hint__":
+            return
+        if not isinstance(value, int):
+            if source_name == "__len__":
+                msg = f"'{type(value).__name__}' object cannot be interpreted as an integer"
+            else:
+                msg = f"__length_hint__ must be an integer, not {type(value).__name__}"
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[msg],
+            )
+        if value < 0:
+            msg = f"{source_name}() should return >= 0"
+            raise_observed_exception(ValueError, tx, args=[msg])
+        if value > sys.maxsize:
+            raise_observed_exception(
+                OverflowError,
+                tx,
+                args=["Python int too large to convert to C ssize_t"],
+            )
+
+    def apply_iterable_length_hint(self, tx: "InstructionTranslator") -> None:
+        try:
+            length = generic_len(tx, self)
+            self.validate_iterable_length_hint(tx, length, "__len__")
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+        else:
+            return
+
+        type_attr = self.lookup_class_mro_attr("__length_hint__")
+        if type_attr is NO_SUCH_SUBOBJ or type_attr is None:
+            return
+        if (
+            not callable(type_attr)
+            and inspect.getattr_static(type(type_attr), "__get__", None) is None
+        ):
+            return
+
+        source = self.source and self.get_source_by_walking_mro(tx, "__length_hint__")
+        if isinstance(type_attr, property) and not self._is_c_defined_property(
+            type_attr
+        ):
+            method_var = variables.PropertyVariable(
+                type_attr, source=source
+            ).tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+        else:
+            method_var = self.resolve_type_attr(
+                tx, "__length_hint__", type_attr, source
+            )
+        if method_var.is_python_constant():
+            if not callable(method_var.as_python_constant()):
+                return
+        elif isinstance(method_var, UserDefinedVariable) and not callable(
+            method_var.value
+        ):
+            return
+        elif type(method_var).call_function is VariableTracker.call_function:
+            return
+        try:
+            length_hint = method_var.call_function(tx, [], {})
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return
+        self.validate_iterable_length_hint(tx, length_hint, "__length_hint__")
+
+    def force_apply_to_var_sequence(
+        self, tx: "InstructionTranslator", fn: Callable[[VariableTracker], Any]
+    ) -> None:
+        from .builder import SourcelessBuilder
+
+        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        self.apply_iterable_length_hint(tx)
+
+        if self._base_vt is not None and self._base_methods is not None:
+            iter_method = self._maybe_get_baseclass_method("__iter__")
+            if iter_method is not None and iter_method in self._base_methods:
+                return self._base_vt.force_apply_to_var_sequence(tx, fn)
+
+        while True:
+            try:
+                fn(iter_.tp_iternext_impl(tx))
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
 
     def is_supported_random(self) -> bool:
         try:
@@ -4154,6 +4307,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            name == "fromkeys"
+            and self._maybe_get_baseclass_method(name) in self._base_methods
+        ):
+            cls_vt = VariableTracker.build(tx, self.python_type(), self.cls_source)
+            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, cls_vt, *args, **kwargs
+            )
+
         # Dict subclasses can override __missing__ to provide fallback
         # behavior instead of raising a KeyError. This is used, for example,
         # by collections.Counter.
@@ -4469,6 +4631,16 @@ class DefaultDictVariable(UserDefinedDictVariable):
         new.call_method(tx, "update", [right], {})
         return new
 
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in nb_inplace_or_impl")
+        self._base_vt.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -4509,11 +4681,27 @@ class DefaultDictVariable(UserDefinedDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self._missing_impl(tx, args[0])
-        elif name == "copy":
+        elif name == "__ior__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.nb_inplace_or_impl(tx, args[0])
+        elif name in ("copy", "__copy__"):
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
             from .builder import SourcelessBuilder
 
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None in copy")
             new_dd = tx.output.side_effects.track_new_user_defined_object(

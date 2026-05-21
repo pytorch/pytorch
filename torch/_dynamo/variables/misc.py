@@ -66,7 +66,12 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
@@ -1658,6 +1663,15 @@ class TypingVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        if not isinstance(self.value, types.GenericAlias):
+            return super().tp_iter_impl(tx)
+        return variables.GenericAliasIteratorVariable(
+            [VariableTracker.build(tx, item) for item in self.value],
+            generic_alias=self,
+            mutation_type=ValueMutationNew(),
+        )
 
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False

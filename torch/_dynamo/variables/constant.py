@@ -253,10 +253,14 @@ class ConstantVariable(VariableTracker):
         return super().sq_contains(tx, item)
 
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
-        from .lists import ListIteratorVariable
+        from .lists import BytesIteratorVariable, StringIteratorVariable
 
         if istype(self.value, str):
-            return ListIteratorVariable(
+            return StringIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
+        if istype(self.value, bytes):
+            return BytesIteratorVariable(
                 self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
             )
         return super().tp_iter_impl(tx)
