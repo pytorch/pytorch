@@ -1067,7 +1067,9 @@ class CPUReproTests(TestCase):
         for dtype in [torch.float32, torch.double]:
             with torch.no_grad():
                 torch._dynamo.reset()
-                self.common(fn, (x.to(dtype),))
+                _x = x.to(dtype)
+                self.assertFalse(torch.cosh(_x).isinf().any())
+                self.common(fn, (_x,))
 
     @requires_vectorization
     def test_sinh_near_overflow(self):
@@ -1079,7 +1081,9 @@ class CPUReproTests(TestCase):
         for dtype in [torch.float32, torch.double]:
             with torch.no_grad():
                 torch._dynamo.reset()
-                self.common(fn, (x.to(dtype),))
+                _x = x.to(dtype)
+                self.assertFalse(torch.sinh(_x).isinf().any())
+                self.common(fn, (_x,))
 
     @requires_vectorization
     def test_acosh_near_overflow(self):
@@ -1091,7 +1095,9 @@ class CPUReproTests(TestCase):
         for dtype in [torch.float32, torch.double]:
             with torch.no_grad():
                 torch._dynamo.reset()
-                self.common(fn, (x.to(dtype),))
+                _x = x.to(dtype)
+                self.assertFalse(torch.acosh(_x).isinf().any())
+                self.common(fn, (_x,))
 
     @requires_vectorization
     def test_asinh_with_corner_inputs(self):

@@ -293,7 +293,9 @@ class Vectorized<float> {
       name, Sleef_##name##f4_u10)
 
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acos)
-  // Sleef acoshf overflows for large float inputs where std::acosh is finite
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> acosh() const {
     return map(std::acosh);
   }
