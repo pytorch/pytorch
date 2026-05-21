@@ -219,6 +219,19 @@ public:
   {
     return value_of(lh) == value_of(rh);
   }
+
+  [[nodiscard]]
+  friend
+  constexpr
+  auto
+  operator!=(
+    const type& lh,
+    const type& rh)
+  noexcept(noexcept(std::declval<const T&>() != std::declval<const T&>()))
+  -> decltype(std::declval<const T&>() != std::declval<const T&>())
+  {
+    return value_of(lh) != value_of(rh);
+  }
 };
 
 namespace impl
@@ -915,6 +928,34 @@ public:
   -> decltype(nullptr == std::declval<const TT&>())
   {
     return value_of(t) == nullptr;
+  }
+
+  template <typename TT = T>
+  [[nodiscard]]
+  friend
+  constexpr
+  auto
+  operator!=(
+    const type& t,
+    std::nullptr_t)
+  noexcept(noexcept(std::declval<const TT&>() != nullptr))
+  -> decltype(std::declval<const TT&>() != nullptr)
+  {
+    return value_of(t) != nullptr;
+  }
+
+  template <typename TT = T>
+  [[nodiscard]]
+  friend
+  constexpr
+  auto
+  operator!=(
+    std::nullptr_t,
+    const type& t)
+  noexcept(noexcept(nullptr != std::declval<const TT&>()))
+  -> decltype(nullptr != std::declval<const TT&>())
+  {
+    return value_of(t) != nullptr;
   }
 
   [[nodiscard]]

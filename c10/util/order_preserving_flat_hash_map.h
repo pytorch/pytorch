@@ -443,6 +443,11 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
         const templated_iterator& rhs) {
       return lhs.current == rhs.current;
     }
+    friend bool operator!=(
+        const templated_iterator& lhs,
+        const templated_iterator& rhs) {
+      return !(lhs == rhs);
+    }
 
     templated_iterator& operator++() {
       current = current->next;
@@ -2126,6 +2131,11 @@ class order_preserving_flat_hash_map
     }
     return true;
   }
+  friend bool operator!=(
+      const order_preserving_flat_hash_map& lhs,
+      const order_preserving_flat_hash_map& rhs) {
+    return !(lhs == rhs);
+  }
 
  private:
   struct convertible_to_value {
@@ -2193,6 +2203,9 @@ class flat_hash_set
         return false;
     }
     return true;
+  }
+  friend bool operator!=(const flat_hash_set& lhs, const flat_hash_set& rhs) {
+    return !(lhs == rhs);
   }
 };
 
