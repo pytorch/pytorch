@@ -1,5 +1,3 @@
-//  Copyright © 2022 Apple Inc.
-
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
@@ -42,8 +40,9 @@ static void GroupNormKernelImpl(const Tensor& X,
   TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == C);
   TORCH_INTERNAL_ASSERT(X.is_contiguous());
   TORCH_INTERNAL_ASSERT(!(gamma.defined() && beta.defined()) || (gamma.scalar_type() == beta.scalar_type()));
+  TORCH_INTERNAL_ASSERT(mean.scalar_type() == rstd.scalar_type());
 
-  if (N == 0) {
+  if (X.numel() == 0) {
     return;
   }
 
@@ -75,8 +74,9 @@ static void GroupNormKernelImpl(const Tensor& X,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state =
-          lib.getPipelineStateForFunc(fmt::format("group_norm_{}_{}_{}",
+          lib.getPipelineStateForFunc(fmt::format("group_norm_{}_{}_{}_{}",
                                                   scalarToMetalTypeString(X),
+                                                  scalarToMetalTypeString(mean),
                                                   gamma.defined() ? scalarToMetalTypeString(gamma) : "void",
                                                   beta.defined() ? scalarToMetalTypeString(beta) : "void"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X});
