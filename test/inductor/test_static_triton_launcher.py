@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
+import gc
 import os
 import random
 import tempfile
+import weakref
 from unittest import mock
 
 import torch
@@ -425,6 +427,56 @@ def kernel_many_args(out_tensor, {decl}):
         buf1 = torch.zeros(1, device=GPU_TYPE)
         launcher.run(1, 1, 1, stream, buf1, *kernel_args)
         self.assertEqual(buf0, buf1)
+
+    def test_launcher_keeps_module_owner_alive_until_release(self):
+        """
+        Generated launchers capture ``runner=self.kernel.run``.  That closure
+        must keep the static kernel owner alive, otherwise its module could be
+        unloaded while the launcher can still be called.
+        """
+        unloaded_modules = []
+
+        class FakeImpl:
+            @staticmethod
+            def _unload_kernel(mod):
+                unloaded_modules.append(mod)
+
+        class FakeKernelOwner:
+            __del__ = StaticallyLaunchedCudaKernel.__del__
+
+            def __init__(self):
+                self.name = "fake_kernel"
+                self.module = 0xC0FFEE
+                self.function = 0xF00D
+                self.C_impl = FakeImpl
+
+            def close(self):
+                return StaticallyLaunchedCudaKernel.close(self)
+
+            def run(self, *_args, **_kwargs):
+                return None
+
+        owner = FakeKernelOwner()
+        owner_ref = weakref.ref(owner)
+
+        class FakeLauncher:
+            def __init__(self, runner):
+                self.runner = runner
+
+            def __call__(self, stream):
+                return self.runner(1, 1, 1, stream)
+
+        launcher = FakeLauncher(owner.run)
+
+        del owner
+        gc.collect()
+        self.assertIsNotNone(owner_ref())
+        self.assertEqual(unloaded_modules, [])
+
+        del launcher
+        gc.collect()
+        self.assertIsNone(owner_ref())
+        self.assertEqual(unloaded_modules, [0xC0FFEE])
 
 
 @requires_gpu_and_triton
