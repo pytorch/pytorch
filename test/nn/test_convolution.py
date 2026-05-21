@@ -337,6 +337,33 @@ class TestConvolutionNN(NNTestCase):
                 output_mask,
             )
 
+    def test_conv_transpose2d_meta_invalid_output_padding(self):
+        input = torch.randn(1, 4, 5, 5, device="meta")
+        weight = torch.randn(4, 8, 3, 3, device="meta")
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "output padding must be smaller than either stride or dilation",
+        ):
+            F.conv_transpose2d(
+                input,
+                weight,
+                stride=2,
+                padding=(1, 0),
+                output_padding=2,
+                dilation=2,
+            )
+
+        out = F.conv_transpose2d(
+            input,
+            weight,
+            stride=2,
+            padding=(1, 0),
+            output_padding=2,
+            dilation=3,
+        )
+        self.assertEqual(out.shape, torch.Size([1, 8, 15, 17]))
+
     def test_conv3d_overflow_values(self):
         input = torch.full(
             (
