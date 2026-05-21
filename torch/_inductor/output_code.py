@@ -37,6 +37,8 @@ from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    get_input_storage_mutation_info,
+    get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
@@ -590,6 +592,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
+        storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -627,7 +630,14 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
+                storage_mutation_reason = get_input_storage_mutation_reason(
+                    storage_mutation_info,
+                )
+                if storage_mutation_reason is not None:
+                    self.disabled_cudagraphs_reason = storage_mutation_reason
+
                 cudagraph_tests = [
+                    (storage_mutation_reason is None, "input storage mutation"),
                     (not has_mutation, "mutated inputs"),
                     (
                         not config.force_disable_cudagraph_TESTING_ONLY,
