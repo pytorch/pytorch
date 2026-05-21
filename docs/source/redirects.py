@@ -159,4 +159,17 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
+    # Redirects for autosummary pages renamed via autosummary_filename_map in
+    # conf.py. Stream/stream classes and context-manager functions for each
+    # accelerator backend were renamed to *_class.html / *_function.html to
+    # disambiguate case-only collisions, which broke incoming links to the
+    # previous URLs (see #173318).
+    "generated/torch.cuda.Stream": "torch.cuda.Stream_class.html",
+    "generated/torch.cuda.stream": "torch.cuda.stream_function.html",
+    "generated/torch.cpu.Stream": "torch.cpu.Stream_class.html",
+    "generated/torch.cpu.stream": "torch.cpu.stream_function.html",
+    "generated/torch.mtia.Stream": "torch.mtia.Stream_class.html",
+    "generated/torch.mtia.stream": "torch.mtia.stream_function.html",
+    "generated/torch.xpu.Stream": "torch.xpu.Stream_class.html",
+    "generated/torch.xpu.stream": "torch.xpu.stream_function.html",
 }
