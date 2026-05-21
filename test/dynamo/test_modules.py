@@ -2306,6 +2306,70 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @unittest.skipIf(
+        "inductor" not in torch._dynamo.list_backends(),
+        "inductor backend is not available",
+    )
+    def test_celu_zero_alpha_raises(self):
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+
+        zero_alphas = (0.0,)
+        if np is not None:
+            zero_alphas += (np.float64(0.0),)
+
+        for alpha, inplace in itertools.product(zero_alphas, (False, True)):
+            with self.subTest(alpha=alpha, inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=alpha)
+                    return torch.celu(x, alpha=alpha)
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    fn(torch.randn(8))
+
+                opt_fn = torch.compile(
+                    fn, backend="inductor", fullgraph=True, dynamic=True
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    opt_fn(torch.randn(8))
+
+    @unittest.skipIf(
+        "inductor" not in torch._dynamo.list_backends(),
+        "inductor backend is not available",
+    )
+    def test_celu_numpy_alpha_matches_eager(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("NumPy is required for this test")
+
+        alpha = np.float64(1.5)
+        for inplace in (False, True):
+            with self.subTest(inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=alpha)
+                    return torch.celu(x, alpha=alpha)
+
+                inp = torch.linspace(-2, 2, 17)
+                expected_inp = inp.clone()
+                actual_inp = inp.clone()
+                expected = fn(expected_inp)
+                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+                actual = opt_fn(actual_inp)
+
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual_inp, expected_inp)
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
