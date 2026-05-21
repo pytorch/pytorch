@@ -12,14 +12,14 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
+from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
-from .. import config
-from ..kernel.bmm import bmm_template
-from ..kernel.mm import (
+from ... import config
+from ...kernel.bmm import bmm_template
+from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     get_scaling_options,
     get_tile_size,
@@ -29,9 +29,9 @@ from ..kernel.mm import (
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
-from ..kernel.mm_plus_mm import mm_plus_mm_template
-from ..kernel_inputs import KernelInputs, MMKernelInputs
-from ..utils import (
+from ...kernel.mm_plus_mm import mm_plus_mm_template
+from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...utils import (
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
@@ -40,9 +40,9 @@ from ..utils import (
     triton_type,
     using_b200,
 )
-from ..virtualized import V
+from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
+from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
@@ -913,7 +913,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         if not self.should_scale_configs:
             return configs
-        from ..runtime.runtime_utils import next_power_of_2
+        from ...runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
@@ -1164,18 +1164,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
-    def _limit_flex_configs(self, configs: list) -> list:
-        max_configs = config.test_configs.max_flex_configs
-        if max_configs is not None and len(configs) > max_configs:
-            return configs[:max_configs]
-        return configs
-
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1192,7 +1186,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1201,7 +1195,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -1209,7 +1203,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1218,7 +1212,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(block_n=64, num_stages=1, num_warps=2)
@@ -1226,7 +1220,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
@@ -1385,7 +1379,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1419,7 +1413,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1428,7 +1422,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
@@ -1493,7 +1487,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1506,7 +1500,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         if capability in [(9, 0), (10, 0), (10, 3)]:  # sm_90, sm_100, sm_103
@@ -1522,7 +1516,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class ROCmConfigHeuristic(BaseConfigHeuristic):
@@ -1822,7 +1816,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         capability = torch.cuda.get_device_capability()
@@ -1850,7 +1844,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1859,7 +1853,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1888,7 +1882,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -1897,7 +1891,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_kpack = get_default_kpack()
@@ -1906,7 +1900,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
@@ -1970,7 +1964,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_fwd_configs)
+                return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
         if head_dim <= 256:
@@ -1990,7 +1984,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_fwd_configs)
+        return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
         self, head_dim: int, dtype: Any
@@ -1999,7 +1993,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_attn_bwd_configs)
+                return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
@@ -2017,7 +2011,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_attn_bwd_configs)
+        return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
@@ -2026,7 +2020,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self._limit_flex_configs(self.exhaustive_flex_decode_configs)
+                return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(64, 1, 2)
@@ -2034,7 +2028,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
 
-        return self._limit_flex_configs(flex_decode_configs)
+        return flex_decode_configs
 
     def _prune_exhaustive_configs(
         self,
@@ -2624,7 +2618,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
         bias = bias[0] if bias else None
         # Prepare triton input nodes and create kernel_inputs at the top
-        from ..lowering import lowerings as L
+        from ...lowering import lowerings as L
 
         aten = torch.ops.aten
         if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
@@ -2712,7 +2706,7 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         op_name: str,
     ) -> dict[str, Any]:
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
-        from ..kernel.mm_common import scale_mm_epilogue
+        from ...kernel.mm_common import scale_mm_epilogue
 
         return {
             **kwargs,
