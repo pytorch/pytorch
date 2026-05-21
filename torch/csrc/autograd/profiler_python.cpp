@@ -934,8 +934,7 @@ static void unregisterMonitoringCallback() {
   if (strcmp(str, "PyTorch Profiler") != 0) {
     return;
   }
-  auto none = THPObjectPtr(Py_None);
-  Py_INCREF(Py_None);
+  auto none = THPObjectPtr(Py_NewRef(Py_None));
   auto result = THPObjectPtr(PyObject_CallMethod(
       monitoring,
       "register_callback",
