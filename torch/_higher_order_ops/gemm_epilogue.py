@@ -118,6 +118,54 @@ def _(amax: torch.Tensor) -> torch.Tensor:
     )
 
 
+@torch.library.custom_op("flex_gemm::silu_tanh", mutates_args=())
+def silu_tanh(x: torch.Tensor) -> torch.Tensor:
+    """SiLU through the tanh identity for QUACK fastmath epilogue lowering.
+
+    This is numerically the same expression used by QuACK's optimized built-in
+    ``activation=\"silu-tanh\"`` path:
+
+        silu(x) = h * tanh(h) + h, where h = 0.5 * x
+
+    Eager uses PyTorch tanh. QUACK TensorSSA lowering uses
+    ``cute.math.tanh(..., fastmath=True)`` so the generated code uses the fast
+    MUFU.TANH path instead of generic exp/rcp SiLU lowering.
+    """
+    h = x * 0.5
+    return h * torch.tanh(h) + h
+
+
+@silu_tanh.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_strided(
+        tuple(x.shape),
+        tuple(x.stride()),
+        device=x.device,
+        dtype=x.dtype,
+    )
+
+
+@torch.library.custom_op("flex_gemm::tanh_fast", mutates_args=())
+def tanh_fast(x: torch.Tensor) -> torch.Tensor:
+    """Tanh marker for QUACK fastmath epilogue lowering.
+
+    Eager uses ``torch.tanh``. QUACK lowers this op to
+    ``cute.math.tanh(..., fastmath=True)`` to select the compact MUFU.TANH path
+    for activation-style approximate tanh epilogues.
+    """
+    return torch.tanh(x)
+
+
+@tanh_fast.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_strided(
+        tuple(x.shape),
+        tuple(x.stride()),
+        device=x.device,
+        dtype=x.dtype,
+    )
+
+
 def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> torch.Tensor:
     if x.dtype is not torch.float32:
         x = x.float()
@@ -501,7 +549,13 @@ def _quack_cute_call_function(
             raise NotImplementedError(
                 f"unsupported kwargs for QUACK epilogue op {target}: {kwargs}"
             )
-        return ops.mul(args[0], ops.sigmoid(args[0])).value
+        # Prefer the tanh identity over sigmoid/exp/div for QUACK TensorSSA:
+        #   silu(x) = h * tanh(h) + h, h = 0.5 * x
+        # The explicit flex_gemm::silu_tanh op lowers this with fastmath=True;
+        # plain F.silu still uses the generic ops handler here, so use tanh form
+        # to avoid the much slower exp2+divide path.
+        half = ops.mul(args[0], 0.5).value
+        return ops.add(ops.mul(half, ops.tanh(half)).value, half).value
     if target == torch._C._nn.gelu:
         approximate = kwargs.get("approximate", args[1] if len(args) > 1 else "none")
         if approximate != "none":
@@ -1645,6 +1699,29 @@ def _compile_quack_pointwise_nodes(
                             env[node] = _quack_cute_arg(node.args[0], env)
                             grouped_tensors[node] = input_info
                             continue
+                    if node.target == torch.ops.flex_gemm.silu_tanh.default:
+                        source = _quack_cute_arg(node.args[0], env)
+                        half = _emit_quack_tensorssa_expr(
+                            kernel,
+                            f"({source} * cute.full_like({source}, 0.5))",
+                            like=source,
+                        )
+                        env[node] = _emit_quack_tensorssa_expr(
+                            kernel,
+                            f"({half} * cute.math.tanh({half}, fastmath=True) + {half})",
+                            like=source,
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if node.target == torch.ops.flex_gemm.tanh_fast.default:
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_tensorssa_expr(
+                            kernel,
+                            f"cute.math.tanh({source}, fastmath=True)",
+                            like=source,
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
                     if node.target == torch.ops.flex_gemm.mx_e8m0_scale.default:
                         source = _quack_cute_arg(node.args[0], env)
                         max_power = node.args[1] if len(node.args) > 1 else node.kwargs.get("max_power", 8)

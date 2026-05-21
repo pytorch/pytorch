@@ -1137,7 +1137,7 @@ class GemmEpilogueFusionTests(TestCase):
                     def epilogue(acc):
                         x = acc.float().view(M, -1, group)
                         denom = x.sum(-1, keepdim=True)
-                        return (x / denom).view(M, N)
+                        return (x * denom.reciprocal()).view(M, N)
 
                     return gemm_epilogue_fusion(
                         torch.ops.aten.mm.default,
@@ -1173,7 +1173,7 @@ class GemmEpilogueFusionTests(TestCase):
                     def epilogue(acc):
                         x = acc.float().view(M, -1, group)
                         denom = x.abs().amax(-1, keepdim=True)
-                        return (x / denom).view(M, N)
+                        return (x * denom.reciprocal()).view(M, N)
 
                     return gemm_epilogue_fusion(
                         torch.ops.aten.mm.default,
@@ -1207,7 +1207,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 denom = x.amax(-1, keepdim=True)
-                return (x / denom).view(M, N)
+                return (x * denom.reciprocal()).view(M, N)
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -1234,7 +1234,7 @@ class GemmEpilogueFusionTests(TestCase):
                     def epilogue(acc):
                         x = acc.float().view(-1, group, N)
                         denom = x.sum(1, keepdim=True)
-                        return (x / denom).view(M, N)
+                        return (x * denom.reciprocal()).view(M, N)
 
                     return gemm_epilogue_fusion(
                         torch.ops.aten.mm.default,
@@ -1270,7 +1270,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 denom = x.sum(-1, keepdim=True)
-                return (x / denom).view(M, N)
+                return (x * denom.reciprocal()).view(M, N)
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -1506,7 +1506,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, 32)
                 denom = x.sum(-1, keepdim=True)
-                return (x / denom).view(M, N)
+                return (x * denom.reciprocal()).view(M, N)
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.mm.default,
@@ -1658,7 +1658,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True) / 448.0
-                q = (x / scale).view(M, N)
+                q = (x * scale.reciprocal()).view(M, N)
                 # Recompute the reduced scale for aux output so the main-output
                 # TensorSSA expression and store-only aux reduction can be lowered
                 # independently for now.
@@ -1697,7 +1697,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True) / 448.0
-                q = (x / scale).view(M, N)
+                q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
             return gemm_epilogue_fusion(
@@ -1733,7 +1733,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True) / 448.0
-                q = (x / scale).clamp(min=-448.0, max=448.0).view(M, N)
+                q = (x * scale.reciprocal()).clamp(min=-448.0, max=448.0).view(M, N)
                 return q.to(torch.float8_e4m3fn), scale.view(M, -1)
 
             return gemm_epilogue_fusion(
@@ -1774,7 +1774,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True) / 448.0
-                q = (x / scale).clamp(min=-448.0, max=448.0).view(M, N)
+                q = (x * scale.reciprocal()).clamp(min=-448.0, max=448.0).view(M, N)
                 return q.to(torch.float8_e4m3fn), scale.view(M, -1).to(
                     torch.float8_e8m0fnu
                 )
@@ -1821,7 +1821,7 @@ class GemmEpilogueFusionTests(TestCase):
                     def epilogue(acc):
                         x = acc.float().view(M, -1, group)
                         scale_e8m0 = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-                        q = (x / scale_e8m0.float()).clamp(
+                        q = (x * scale_e8m0.float().reciprocal()).clamp(
                             min=-448.0, max=448.0
                         ).view(M, N)
                         return q.to(torch.float8_e4m3fn), scale_e8m0.view(M, -1)
@@ -1900,7 +1900,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = (acc + bias).float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True)
-                q = (x / scale).view(M, N)
+                q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
             return gemm_epilogue_fusion(
@@ -1937,7 +1937,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.relu().float().view(M, -1, group)
                 scale = x.abs().amax(-1, keepdim=True)
-                q = (x / scale).view(M, N)
+                q = (x * scale.reciprocal()).view(M, N)
                 return q, scale.view(M, -1)
 
             return gemm_epilogue_fusion(
@@ -2201,7 +2201,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(B, -1, group, N)
                 denom = x.sum(2, keepdim=True)
-                return (x / denom).view(B, M, N)
+                return (x * denom.reciprocal()).view(B, M, N)
 
             return gemm_epilogue_fusion(
                 torch.ops.aten.bmm.default,
@@ -2333,7 +2333,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(B, M, -1, group)
                 scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-                q = (x / scale.float()).clamp(min=-448.0, max=448.0).view(B, M, N)
+                q = (x * scale.float().reciprocal()).clamp(min=-448.0, max=448.0).view(B, M, N)
                 return q.to(torch.float8_e4m3fn), scale.view(B, M, -1)
 
             return gemm_epilogue_fusion(
@@ -2390,7 +2390,7 @@ class GemmEpilogueFusionTests(TestCase):
                     def epilogue(acc):
                         x = acc.float().view(B, M, -1, group)
                         denom = reduce_fn(x)
-                        return (x / denom).view(B, M, N)
+                        return (x * denom.reciprocal()).view(B, M, N)
 
                     return gemm_epilogue_fusion(
                         torch.ops.aten.bmm.default,
@@ -2584,7 +2584,7 @@ class GemmEpilogueFusionTests(TestCase):
             def epilogue(acc):
                 x = acc.float().view(M, -1, group)
                 scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
-                q = (x / scale.float()).clamp(min=-6.0, max=6.0).view(M, N)
+                q = (x * scale.float().reciprocal()).clamp(min=-6.0, max=6.0).view(M, N)
                 return q, scale.view(M, -1)
 
             return gemm_epilogue_fusion(

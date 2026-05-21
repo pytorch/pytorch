@@ -8432,7 +8432,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
-    tuned = kernel_options.get("tuned", True)
+    tuned = kernel_options.get("tuned", False)
     if gemm_op == torch.ops.aten._scaled_mm_v2.default:
         if backend != "TRITON" or split_k:
             raise NotImplementedError(
