@@ -384,6 +384,56 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )
     @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_collective_cuda_graph(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(out, group=group_name)
+        graph_all_reduce = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_all_reduce):
+            c10d.all_reduce(out)
+        graph_all_reduce.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(
+            out, torch.full_like(out, (self.world_size - 1) * self.world_size / 2)
+        )
+
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(inp, group=group_name)
+        graph_one_shot_all_reduce = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_one_shot_all_reduce):
+            res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+        graph_one_shot_all_reduce.replay()
+        self.assertEqual(out, res)
+
+        for repeat in range(3):
+            offset = 13 + repeat
+            inp.fill_(self.rank + offset)
+            out.fill_(self.rank + offset)
+            res.fill_(0.0)
+            expected_sum = float(
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+            )
+            graph_all_reduce.replay()
+            graph_one_shot_all_reduce.replay()
+            self.assertEqual(out, torch.full_like(out, expected_sum))
+            self.assertEqual(res, out)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
