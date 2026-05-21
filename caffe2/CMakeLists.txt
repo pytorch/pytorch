@@ -1199,7 +1199,7 @@ if(USE_XPU)
   list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
-  add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
+  pytorch_add_thirdparty_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
       ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")

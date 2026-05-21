@@ -473,7 +473,7 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
 endif()
 
-install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}" COMPONENT torch)
 
 # Build the torch._C Python extension module from the thin stub that
 # forwards to torch_python.  This was historically built by setuptools;
@@ -501,6 +501,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     RUNTIME DESTINATION "."
     LIBRARY DESTINATION "."
     ARCHIVE DESTINATION "lib"
+    COMPONENT torch
   )
 endif()
 
@@ -531,7 +532,7 @@ add_custom_target(
 add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
-install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION "." COMPONENT torch)
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930

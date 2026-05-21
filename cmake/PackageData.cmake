@@ -19,6 +19,7 @@ endif()
 # Type stubs
 install(DIRECTORY "${TORCH_SRC_DIR}/"
   DESTINATION "."
+  COMPONENT torch
   FILES_MATCHING
   PATTERN "*.pyi"
   PATTERN "py.typed"
@@ -40,10 +41,12 @@ install(FILES
   "${TORCH_SRC_DIR}/utils/model_dump/skeleton.html"
   "${TORCH_SRC_DIR}/utils/model_dump/code.js"
   DESTINATION "utils/model_dump"
+  COMPONENT torch
   OPTIONAL
 )
 install(DIRECTORY "${TORCH_SRC_DIR}/utils/model_dump/"
   DESTINATION "utils/model_dump"
+  COMPONENT torch
   FILES_MATCHING PATTERN "*.mjs"
 )
 
@@ -60,16 +63,19 @@ install(DIRECTORY "${TORCH_SRC_DIR}/_inductor/codegen/"
 )
 install(DIRECTORY "${TORCH_SRC_DIR}/_inductor/kernel/flex/templates/"
   DESTINATION "_inductor/kernel/flex/templates"
+  COMPONENT torch
   FILES_MATCHING PATTERN "*.jinja"
 )
 install(DIRECTORY "${TORCH_SRC_DIR}/_inductor/kernel/templates/"
   DESTINATION "_inductor/kernel/templates"
+  COMPONENT torch
   FILES_MATCHING PATTERN "*.jinja"
 )
 
 # Export serde data
 install(DIRECTORY "${TORCH_SRC_DIR}/_export/serde/"
   DESTINATION "_export/serde"
+  COMPONENT torch
   FILES_MATCHING
   PATTERN "*.yaml"
   PATTERN "*.thrift"
@@ -85,10 +91,12 @@ install(FILES "${TORCH_SRC_DIR}/csrc/inductor/aoti_runtime/model.h"
 # package scanning; install explicitly so it ends up in the wheel).
 install(FILES "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   DESTINATION "testing/_internal/generated"
+  COMPONENT torch
 )
 
 # Dynamo data
 install(FILES "${TORCH_SRC_DIR}/_dynamo/graph_break_registry.json"
   DESTINATION "_dynamo"
+  COMPONENT torch
   OPTIONAL
 )
