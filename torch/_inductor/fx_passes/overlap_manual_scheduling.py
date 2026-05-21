@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 
 import torch  # noqa: TC001
 import torch.fx as fx  # noqa: TC001
-from torch._dynamo.graph_deduplication import _stable_topological_sort
 from torch._inductor.fx_passes.bucketing import (
     _get_collective_node_from_wait,
     _schedulable_wait_node,
@@ -39,6 +38,106 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+def _collect_exclusive_users(start: fx.Node) -> list[fx.Node]:
+    """BFS collecting nodes whose inputs are all within the chain."""
+    chain: list[fx.Node] = [start]
+    chain_set: set[fx.Node] = {start}
+    i = 0
+    while i < len(chain):
+        for user in chain[i].users:
+            if user not in chain_set and all(
+                inp in chain_set for inp in user.all_input_nodes
+            ):
+                chain_set.add(user)
+                chain.append(user)
+        i += 1
+    return chain
+
+
+def _collect_chain_to_node(target: fx.Node) -> list[fx.Node]:
+    """Collect the AG start chain ending at target in topological order.
+
+    Walks backward from target through non-placeholder parents to find
+    the root (e.g. _pre_bucket_all_gather), then BFS forward collecting
+    nodes whose non-placeholder inputs are all within the chain.
+    The bucketed AG pattern is: root -> slice -> all_gather_into_tensor_out.
+    """
+    root = target
+    while root.op != "placeholder":
+        parents = [inp for inp in root.all_input_nodes if inp.op != "placeholder"]
+        if not parents:
+            break
+        root = parents[0]
+
+    chain: list[fx.Node] = [root]
+    chain_set: set[fx.Node] = {root}
+    i = 0
+    while i < len(chain):
+        for user in chain[i].users:
+            if user not in chain_set and all(
+                inp in chain_set or inp.op == "placeholder"
+                for inp in user.all_input_nodes
+            ):
+                chain_set.add(user)
+                chain.append(user)
+                if user is target:
+                    return chain
+        i += 1
+    return chain
+
+
+def _move_overlap_nodes(
+    graph: fx.Graph,
+    overlap_deps: dict[fx.Node, OrderedSet[fx.Node]],
+    bucketed_node_types: dict[fx.Node, str],
+) -> None:
+    """Directly move AG/RS chain nodes to satisfy overlap_deps.
+
+    Instead of re-sorting the graph, moves only the specific chains:
+    - AG start chains are moved earlier (before the anchor wait node)
+    - RS wait chains are moved later (after the latest RS start)
+    No-op when overlap_deps is empty.
+    """
+    if not overlap_deps:
+        return
+
+    rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+
+    for target, sources in overlap_deps.items():
+        for source in sources:
+            source_type = bucketed_node_types.get(source, "")
+            if source_type.startswith("bucketed_reduce_scatter"):
+                rs_defer[target].append(source)
+            elif source_type.startswith("bucketed_all_gather"):
+                ag_prefetch[target].append(source)
+
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    # RS defer: move each wait+unpack chain after the latest RS start
+    for rs_wait, rs_starts in rs_defer.items():
+        anchor = max(rs_starts, key=lambda n: node_positions[n])
+        chain = _collect_exclusive_users(rs_wait)
+        cursor = anchor
+        for node in chain:
+            cursor.append(node)
+            cursor = node
+
+    # Recompute positions after RS moves
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    # AG prefetch: move each start chain before the anchor wait
+    for anchor, ag_starts in ag_prefetch.items():
+        anchor_pos = node_positions[anchor]
+        sorted_starts = sorted(ag_starts, key=lambda n: node_positions[n])
+        for ag_start in sorted_starts:
+            if node_positions[ag_start] < anchor_pos:
+                continue
+            chain = _collect_chain_to_node(ag_start)
+            for node in chain:
+                anchor.prepend(node)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
@@ -101,9 +200,9 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             for n in new_nodes
             if (start := _get_collective_node_from_wait(n)) is not None
         }
-        assert len(wait_to_start) >= 1, (
-            f"Expected at least one new wait, got none in {new_nodes}"
-        )
+        assert (
+            len(wait_to_start) >= 1
+        ), f"Expected at least one new wait, got none in {new_nodes}"
         new_waits = list(wait_to_start)
         new_start: fx.Node = wait_to_start[new_waits[0]]
         # Use last wait as the canonical wait for scheduling (same node when len == 1)
@@ -318,7 +417,7 @@ class ManualOverlapScheduler(OverlapScheduler):
             for ag in picked_ag:
                 overlap_deps[last_compute].add(ag)
 
-        _stable_topological_sort(self.graph, overlap_deps)
+        _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
         self.graph.lint()
 
         if self.insert_overlap_deps:
