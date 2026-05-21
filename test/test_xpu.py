@@ -2562,6 +2562,73 @@ if __name__ == "__main__":
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
+    def test_graph_make_graphed_callables_propagates_input_mutation(self):
+        def fn(x, y):
+            x.add_(y)
+            return x * 2
+
+        sample_x = torch.zeros(4, device="xpu")
+        sample_y = torch.ones(4, device="xpu")
+        graphed_fn = torch.xpu.make_graphed_callables(
+            fn, (sample_x, sample_y), num_warmup_iters=1
+        )
+
+        x = torch.arange(4, device="xpu", dtype=torch.float)
+        y = torch.full_like(x, 3)
+        expected_x = x + y
+        x_version = x._version
+        y_version = y._version
+
+        out = graphed_fn(x, y)
+        torch.xpu.synchronize()
+
+        self.assertEqual(x, expected_x)
+        self.assertEqual(out, expected_x * 2)
+        self.assertGreater(x._version, x_version)
+        self.assertEqual(y._version, y_version)
+
+    def test_graph_make_graphed_callables_rejects_grad_input_mutation(self):
+        def fn(x):
+            x.mul_(2)
+            return x * 3
+
+        base = torch.ones(4, device="xpu", requires_grad=True)
+        sample = base * 1
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place mutations on user inputs that require grad",
+        ):
+            torch.xpu.make_graphed_callables(fn, (sample,), num_warmup_iters=1)
+
+        sample = torch.ones(4, device="xpu")
+        graphed_fn = torch.xpu.make_graphed_callables(fn, (sample,), num_warmup_iters=1)
+        live_base = torch.ones(4, device="xpu", requires_grad=True)
+        live = live_base * 1
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place mutations on user inputs that require grad",
+        ):
+            graphed_fn(live)
+
+    def test_xpu_graph_inference_mode_make_graphed_callables(self):
+        def fn(x):
+            return x + 1
+
+        with torch.inference_mode():
+            inference_x = torch.randn(10, 10, device="xpu")
+            captured_fn = torch.xpu.make_graphed_callables(fn, (inference_x,))
+
+        inp = torch.ones(10, 10, device="xpu")
+        expected_inp = inp.clone()
+        expected_out = expected_inp + 1
+        inp_version = inp._version
+        with torch.inference_mode():
+            out = captured_fn(inp)
+        self.assertEqual(out, expected_out)
+        self.assertEqual(inp, expected_inp)
+        self.assertEqual(inp._version, inp_version)
+
     def test_graph_optims_with_explicitly_capturable_param_groups(self):
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product(

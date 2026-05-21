@@ -527,6 +527,13 @@ def make_graphed_callables(
         they appeared in that callable's ``sample_args``.
 
     .. warning::
+        In-place mutations to user-provided inputs that do not require grad are copied back to the
+        runtime inputs after graph replay. In-place mutations to user-provided inputs that require
+        grad are not supported and raise an error during graphing or replay. In-place mutations
+        to user-provided inputs in ``sample_args`` that are inference tensors are not supported
+        because inference tensors do not track version counters.
+
+    .. warning::
         The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
         caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
     """
@@ -622,14 +629,47 @@ def make_graphed_callables(
     # the safest approach is to capture all passes in the same order they'll run:
     # fwd 1, fwd 2, ... fwd N, then bwd N, bwd N-1, ... bwd 1.
 
+    # Inference tensors have no version counter, so their mutations are not detectable here.
+    def _version_or_none(t: Tensor) -> int | None:
+        if t.is_inference():
+            return None
+        return t._version
+
     # Capture forward graphs
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
-    for func, args, fwd_graph in zip(callables, _sample_args, fwd_graphs):
+    per_callable_mutated_user_inputs = []
+    for func, args, fwd_graph, static_input_surface, len_user_args in zip(
+        callables,
+        _sample_args,
+        fwd_graphs,
+        per_callable_static_input_surfaces,
+        per_callable_len_user_args,
+    ):
+        prior_user_input_versions = tuple(
+            _version_or_none(t) for t in static_input_surface[:len_user_args]
+        )
         with torch.cuda.graph(fwd_graph, pool=mempool):
             func_outputs = func(*args)
 
+        mutated_user_inputs = tuple(
+            prior_version is not None and _version_or_none(t) != prior_version
+            for t, prior_version in zip(
+                static_input_surface[:len_user_args], prior_user_input_versions
+            )
+        )
+        if any(
+            mutated and arg.requires_grad
+            for mutated, arg in zip(
+                mutated_user_inputs, static_input_surface[:len_user_args]
+            )
+        ):
+            raise RuntimeError(
+                "make_graphed_callables does not support in-place mutations "
+                "on user inputs that require grad"
+            )
         flatten_outputs, spec = torch.utils._pytree.tree_flatten(func_outputs)
+        per_callable_mutated_user_inputs.append(mutated_user_inputs)
         per_callable_static_outputs.append(tuple(flatten_outputs))
         per_callable_output_unflatten_spec.append(spec)
 
@@ -685,6 +725,7 @@ def make_graphed_callables(
         bwd_graph: CUDAGraph,
         module_params: tuple[torch.nn.Parameter, ...],
         len_user_args: int,
+        mutated_user_inputs: tuple[bool, ...],
         output_unflatten_spec: torch.utils._pytree.TreeSpec,
         static_input_surface: tuple[Tensor, ...],
         static_outputs: tuple[Tensor, ...],
@@ -697,9 +738,21 @@ def make_graphed_callables(
             def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
+                    if mutated_user_inputs[i] and inputs[i].requires_grad:
+                        raise RuntimeError(
+                            "make_graphed_callables does not support in-place mutations "
+                            "on user inputs that require grad"
+                        )
+                for i in range(len_user_args):
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
                         static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
+                for i in range(len_user_args):
+                    if (
+                        mutated_user_inputs[i]
+                        and static_input_surface[i].data_ptr() != inputs[i].data_ptr()
+                    ):
+                        inputs[i].copy_(static_input_surface[i])
                 if not isinstance(static_outputs, tuple):
                     raise AssertionError(
                         f"static_outputs must be tuple, got {type(static_outputs)}"
@@ -751,6 +804,7 @@ def make_graphed_callables(
             bwd_graphs[i],
             per_callable_module_params[i],
             per_callable_len_user_args[i],
+            per_callable_mutated_user_inputs[i],
             per_callable_output_unflatten_spec[i],
             per_callable_static_input_surfaces[i],
             per_callable_static_outputs[i],
