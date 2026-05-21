@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
 import inspect
 import contextlib
 import os
@@ -70,38 +70,16 @@ def CDNA3OrLater():
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
 
-def evaluate_platform_supports_flash_attention():
-    if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
-        if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
-        return evaluate_gfx_arch_within(arch_list)
-    if TEST_CUDA:
-        return not IS_WINDOWS and SM80OrLater
-    if TEST_XPU:
-        return True
-    return False
+def evaluate_platform_supports_cudnn_attention():
+    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
+
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
 
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
         return torch.backends.cuda.is_ck_sdpa_available()
     else:
         return False
-
-def evaluate_platform_supports_efficient_attention():
-    if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
-        if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
-        return evaluate_gfx_arch_within(arch_list)
-    if TEST_CUDA:
-        return True
-    if TEST_XPU:
-        return True
-    return False
-
-def evaluate_platform_supports_cudnn_attention():
-    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
     if IS_WINDOWS:
@@ -113,48 +91,9 @@ def evaluate_platform_supports_green_context():
         return False
     return int(driver_version.split('.')[0]) >= 570
 
-PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
-PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
-PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
-# This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
-PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
-                                                  PLATFORM_SUPPORTS_CUDNN_ATTENTION or
-                                                  PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
-
-PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
-
-
-def evaluate_platform_supports_bf16():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return True
-    elif TEST_XPU:
-        return True
-    return False
-
-
-def evaluate_platform_supports_bf16_atomics():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return ROCM_VERSION >= (8, 0)
-    return False
-
-
-def evaluate_platform_supports_half_atomics():
-    if torch.version.hip:
-        return ROCM_VERSION >= (8, 0)
-    return True
-
-
-PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
-PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
-PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
-
-PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
     if IS_WINDOWS:
@@ -167,71 +106,6 @@ def evaluate_platform_supports_workqueue_config():
     return int(driver_version.split('.')[0]) >= 590
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
-
-def evaluate_platform_supports_fp8():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            archs = ['gfx94']
-            if ROCM_VERSION >= (6, 3):
-                archs.extend(['gfx120'])
-            if ROCM_VERSION >= (6, 5):
-                archs.append('gfx95')
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
-            return False
-        else:
-            return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
-    if torch.xpu.is_available():
-        return True
-    # As CPU supports FP8 and is always available, return True.
-    return True
-
-def evaluate_platform_supports_fp8_grouped_gemm():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            if "USE_MSLK" not in torch.__config__.show():
-                return False
-            archs = ['gfx942', 'gfx950']
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
-        else:
-            return SM90OrLater and not SM100OrLater
-    return False
-
-def evaluate_platform_supports_mx_gemm():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            if ROCM_VERSION >= (7, 0):
-                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
-        else:
-            return SM100OrLater
-    return False
-
-def evaluate_platform_supports_mxfp8_grouped_gemm():
-    if torch.cuda.is_available() and not torch.version.hip:
-        built_with_mslk = "USE_MSLK" in torch.__config__.show()
-        return built_with_mslk and IS_SM100
-    return False
-
-def evaluate_platform_supports_fp8_sparse():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
-        else:
-            return (
-                (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
-                and torch.backends.cusparselt.is_available()
-                and torch.backends.cusparselt.version() >= 602
-            )
-    return False
-
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
-PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
-PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
-PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
     try:

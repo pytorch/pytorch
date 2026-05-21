@@ -22,13 +22,14 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 
 import torch.distributed as dist
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
 )
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,

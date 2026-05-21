@@ -46,10 +46,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
     SM90OrLater,
@@ -64,6 +60,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     highest_precision_complex,
     highest_precision_float,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,

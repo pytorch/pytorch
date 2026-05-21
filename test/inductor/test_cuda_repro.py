@@ -29,12 +29,10 @@ from torch._inductor.utils import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
+from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_gpu import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM80OrLater,
-    SM90OrLater,
-    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,

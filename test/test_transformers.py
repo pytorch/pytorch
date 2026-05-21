@@ -47,14 +47,16 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     IS_JETSON,
-    SM80OrLater,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_CK_SDPA,
-    tf32_on_and_off,
+    SM80OrLater,
     tf32_enabled,
+    tf32_on_and_off,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
