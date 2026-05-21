@@ -67,10 +67,9 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
         equal to `quant_max`.");
 
   if(!at::isFloatingType(zero_point.scalar_type())){
-      auto [zp_min, zp_max] = at::aminmax(zero_point);
       TORCH_CHECK(
-          zp_min.item<int>() >= quant_min &&
-              zp_max.item<int>() <= quant_max,
+          at::min(zero_point).item().toInt() >= quant_min &&
+              at::max(zero_point).item().toInt() <= quant_max,
           "`zero_point` must be between `quant_min` and `quant_max`.");
   }
   TORCH_CHECK(
@@ -205,10 +204,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       scale_.numel() == X_.size(axis),
       "dimensions of scale and zero-point are not consistent with input tensor")
 
-  auto [zp_min, zp_max] = at::aminmax(zero_point_rounded);
   TORCH_CHECK(
-      zp_min.item<int64_t>() >= quant_min &&
-          zp_max.item<int64_t>() <= quant_max,
+      at::min(zero_point_rounded).item().toLong() >= quant_min &&
+          at::max(zero_point_rounded).item().toLong() <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
