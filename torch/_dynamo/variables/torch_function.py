@@ -28,7 +28,7 @@ import collections
 import contextlib
 import inspect
 import operator
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
 from typing import Any, TYPE_CHECKING
 
@@ -750,7 +750,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override

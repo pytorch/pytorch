@@ -44,6 +44,8 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.higher_order_ops import SubgraphTracingInfo
 
@@ -875,7 +877,7 @@ def save_reuse_entry(
 def trace_reuse_hash_fn(
     tx: "InstructionTranslator",
     reuse_hash_fn: Any,
-    fn_args_vt: "list[VariableTracker]",
+    fn_args_vt: "Sequence[VariableTracker]",
     kwargs: dict[str, VariableTracker],
 ) -> int:
     """Trace the user's reuse_hash_fn to get a constant integer hash key.
@@ -1122,7 +1124,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         self,
         tx: "InstructionTranslator",
         fn_vt: VariableTracker,
-        fn_args_vt: "list[VariableTracker]",
+        fn_args_vt: "Sequence[VariableTracker]",
         kwargs: dict[str, VariableTracker],
         body_gmod: GraphModule,
         attr_name: str,
@@ -1202,7 +1204,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: "Sequence[VariableTracker]",
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._dynamo.utils import dynamo_timed

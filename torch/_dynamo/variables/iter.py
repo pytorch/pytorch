@@ -15,7 +15,7 @@ handling of iterator operations during code transformation and optimization.
 
 import itertools
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
@@ -73,7 +73,7 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: list["VariableTracker"],
+        args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
