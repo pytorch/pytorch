@@ -108,7 +108,7 @@ from .base import (
 )
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
-from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
+from .object_protocol import generic_len, is_nb_not_implemented, type_implements_nb_slot
 from .sets import SetVariable
 
 
@@ -2728,7 +2728,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .builder import SourcelessBuilder
 
         result = []
-        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        try:
+            iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"'{self.python_type_name()}' object is not iterable"],
+            )
 
         while True:
             try:
@@ -2738,6 +2746,132 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 handle_observed_exception(tx)
                 break
         return result
+
+    def validate_iterable_length_hint(
+        self,
+        tx: "InstructionTranslator",
+        result: VariableTracker,
+        source_name: str,
+    ) -> None:
+        if not result.is_python_constant():
+            try:
+                result_type = result.python_type()
+            except NotImplementedError:
+                result_type = None
+            if isinstance(result_type, type) and not issubclass(result_type, int):
+                if (
+                    source_name != "__len__"
+                    or inspect.getattr_static(result_type, "__index__", None) is None
+                ):
+                    if source_name == "__len__":
+                        msg = f"'{result_type.__name__}' object cannot be interpreted as an integer"
+                    else:
+                        msg = f"__length_hint__ must be an integer, not {result_type.__name__}"
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[msg],
+                    )
+            unimplemented(
+                gb_type="Cannot trace user-defined __len__",
+                context=f"{self.python_type_name()}.__len__()",
+                explanation=(
+                    f"Dynamo cannot trace len() on {self.python_type_name()} because the __len__ "
+                    "method is either not traceable (e.g., defined in C or built-in) or returns a "
+                    "non-constant value."
+                ),
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        value = result.as_python_constant()
+        if value is NotImplemented and source_name == "__length_hint__":
+            return
+        if not isinstance(value, int):
+            if source_name == "__len__":
+                msg = f"'{type(value).__name__}' object cannot be interpreted as an integer"
+            else:
+                msg = f"__length_hint__ must be an integer, not {type(value).__name__}"
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[msg],
+            )
+        if value < 0:
+            msg = f"{source_name}() should return >= 0"
+            raise_observed_exception(ValueError, tx, args=[msg])
+        if value > sys.maxsize:
+            raise_observed_exception(
+                OverflowError,
+                tx,
+                args=["Python int too large to convert to C ssize_t"],
+            )
+
+    def apply_iterable_length_hint(self, tx: "InstructionTranslator") -> None:
+        try:
+            length = generic_len(tx, self)
+            self.validate_iterable_length_hint(tx, length, "__len__")
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+        else:
+            return
+
+        type_attr = self.lookup_class_mro_attr("__length_hint__")
+        if type_attr is NO_SUCH_SUBOBJ or type_attr is None:
+            return
+        if (
+            not callable(type_attr)
+            and inspect.getattr_static(type(type_attr), "__get__", None) is None
+        ):
+            return
+
+        source = self.source and self.get_source_by_walking_mro(tx, "__length_hint__")
+        if isinstance(type_attr, property) and not self._is_c_defined_property(
+            type_attr
+        ):
+            method_var = variables.PropertyVariable(
+                type_attr, source=source
+            ).tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+        else:
+            method_var = self.resolve_type_attr(
+                tx, "__length_hint__", type_attr, source
+            )
+        if method_var.is_python_constant():
+            if not callable(method_var.as_python_constant()):
+                return
+        elif isinstance(method_var, UserDefinedVariable) and not callable(
+            method_var.value
+        ):
+            return
+        elif type(method_var).call_function is VariableTracker.call_function:
+            return
+        try:
+            length_hint = method_var.call_function(tx, [], {})
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return
+        self.validate_iterable_length_hint(tx, length_hint, "__length_hint__")
+
+    def force_apply_to_var_sequence(
+        self, tx: "InstructionTranslator", fn: Callable[[VariableTracker], Any]
+    ) -> None:
+        from .builder import SourcelessBuilder
+
+        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
+        self.apply_iterable_length_hint(tx)
+
+        if self._base_vt is not None and self._base_methods is not None:
+            iter_method = self._maybe_get_baseclass_method("__iter__")
+            if iter_method is not None and iter_method in self._base_methods:
+                return self._base_vt.force_apply_to_var_sequence(tx, fn)
+
+        while True:
+            try:
+                fn(iter_.tp_iternext_impl(tx))
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
 
     def is_supported_random(self) -> bool:
         try:
