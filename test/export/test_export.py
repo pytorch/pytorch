@@ -15920,7 +15920,6 @@ graph():
             str(ep.graph).strip(),
             """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
@@ -15939,7 +15938,6 @@ graph():
                 str(ep.graph).strip(),
                 """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
@@ -15951,7 +15949,6 @@ graph():
                 str(ep.graph).strip(),
                 """\
 graph():
-    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
     %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
     %x : [num_users=2] = placeholder[target=x]
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})

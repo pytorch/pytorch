@@ -850,6 +850,9 @@ def _remove_unused_new_graph_buffers(
             and len(node.users) == 0
         ):
             if spec.target in unwrapped_params_buffers:
+                # Keep the real tensor available to nested HOP subgraphs that
+                # still read it through get_attr after the dead top-level
+                # placeholder is removed from the ExportGraphSignature.
                 torch.fx.graph_module._assign_attr(
                     unwrapped_params_buffers[spec.target], gm, spec.target
                 )
