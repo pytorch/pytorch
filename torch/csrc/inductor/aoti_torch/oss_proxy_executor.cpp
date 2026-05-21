@@ -615,18 +615,9 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    bool is_cpu,
-    std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs,
-    const std::string& device_str) {
-  if (is_cpu) {
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
-  } else if (!device_str.empty()) {
-    device_ = std::make_unique<c10::Device>(device_str);
-  } else {
-    // Legacy fallback: assume CUDA for backward compatibility
-    int device_idx = -1;
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
-  }
+    const std::string& device_str,
+    std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
+  device_ = std::make_unique<c10::Device>(device_str);
 
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from
