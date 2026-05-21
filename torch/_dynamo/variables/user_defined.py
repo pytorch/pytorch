@@ -1087,8 +1087,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             get_device_context_manager,
         )
 
-        constant_args = check_constant_args(args, kwargs)
-
         if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
@@ -1107,7 +1105,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
-        if self.can_constant_fold_through() and constant_args:
+        if self.can_constant_fold_through() and check_constant_args(args, kwargs):
             # constant fold
             return VariableTracker.build(
                 tx,

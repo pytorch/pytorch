@@ -4736,6 +4736,29 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(normal_lookup(x), torch.tensor(3.0))
         self.assertEqual(direct_descriptor_call(x), torch.tensor(10.0))
 
+    def test_wrong_class_slot_wrapper_raises(self):
+        class A(int):
+            __eq__ = str.__eq__
+            __add__ = str.__add__
+
+        a = A()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            caught = 0
+            try:
+                caught += int(a == a)
+            except TypeError:
+                caught += 1
+            try:
+                caught += int(a + a)
+            except TypeError:
+                caught += 1
+            return x + caught
+
+        x = torch.tensor(0)
+        self.assertEqual(fn(x), torch.tensor(2))
+
     def test_member_descriptor_isinstance_on_class(self):
         class A:
             __slots__ = ("x",)
