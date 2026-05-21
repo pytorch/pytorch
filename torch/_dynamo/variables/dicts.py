@@ -621,6 +621,10 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
             return ConstantVariable.create(None)
+        elif name == "fromkeys":
+            return DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.user_cls, *args, **kwargs
+            )
         elif name == "items":
             if args or kwargs:
                 raise_args_mismatch(
