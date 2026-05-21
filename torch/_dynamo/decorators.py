@@ -1639,12 +1639,17 @@ def disable_nested_graph_breaks(fn: Any | None = None) -> Any:
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
+        self.prev_error_on_graph_break: list[bool | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_error_on_graph_break = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.error_on_graph_break)
+        current_error_on_graph_break = _get_error_on_graph_break()
+        if current_error_on_graph_break != self.error_on_graph_break:
+            self.prev_error_on_graph_break.append(current_error_on_graph_break)
+            _set_error_on_graph_break(self.error_on_graph_break)
+        else:
+            self.prev_error_on_graph_break.append(None)
 
     def __exit__(
         self,
@@ -1652,7 +1657,9 @@ class ErrorOnGraphBreakDecoratorContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _set_error_on_graph_break(self.prev_error_on_graph_break)
+        prev_error_on_graph_break = self.prev_error_on_graph_break.pop()
+        if prev_error_on_graph_break is not None:
+            _set_error_on_graph_break(prev_error_on_graph_break)
 
 
 def error_on_graph_break(

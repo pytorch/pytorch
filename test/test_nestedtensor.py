@@ -7974,6 +7974,57 @@ torch.cuda.synchronize()
             self.assertEqual(result._maybe_min_seqlen, ref._maybe_min_seqlen)
 
     @dtypes(torch.float32)
+    @parametrize("first_attr", ["_max_seqlen", "_min_seqlen"])
+    @parametrize("use_lengths", [False, True])
+    @skipIfTorchDynamo("Test compiles internally")
+    @skipMeta
+    def test_compile_with_both_uncached_seq_lens(
+        self, device, dtype, first_attr, use_lengths
+    ):
+        values = torch.randn(10, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 4, 6, 10], device=device, dtype=torch.int64)
+        lengths = torch.tensor([1, 3, 2, 4], device=device, dtype=torch.int64)
+
+        def clone_nt(nt):
+            lengths = nt.lengths()
+            if lengths is not None:
+                lengths = lengths.clone()
+            return NestedTensor(
+                nt.values().clone(), nt.offsets().clone(), lengths=lengths
+            )
+
+        def read_seqlen(nt, attr):
+            if attr == "_max_seqlen":
+                return nt._max_seqlen
+            return nt._min_seqlen
+
+        def f(nt):
+            nt = nt.clamp(0.1, 0.5)
+            second_attr = (
+                "_min_seqlen" if first_attr == "_max_seqlen" else "_max_seqlen"
+            )
+            nt *= read_seqlen(nt, first_attr)
+            nt *= read_seqlen(nt, second_attr)
+            return nt
+
+        nt = NestedTensor(values, offsets, lengths=lengths if use_lengths else None)
+        self.assertNotIn("max_seqlen", nt._metadata_cache)
+        self.assertNotIn("min_seqlen", nt._metadata_cache)
+
+        ref = f(clone_nt(nt))
+        compiled_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        result = compiled_f(clone_nt(nt))
+
+        self.assertEqual(result.values(), ref.values())
+        self.assertEqual(result.offsets(), ref.offsets())
+        self.assertEqual(result.lengths(), ref.lengths())
+        self.assertEqual(
+            set(result._metadata_cache.keys()), {"max_seqlen", "min_seqlen"}
+        )
+        self.assertEqual(result._maybe_max_seqlen, ref._maybe_max_seqlen)
+        self.assertEqual(result._maybe_min_seqlen, ref._maybe_min_seqlen)
+
+    @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
