@@ -1080,6 +1080,55 @@ class TestTypedExpr(TestCase):
         self.assertEqual(typed_I.expr, 1)
 
 
+class TestCCodePrinting(TestCase):
+    """Test _ccode methods on sympy function classes."""
+
+    def test_floor_to_int_ccode(self):
+        from torch.utils._sympy.functions import FloorToInt
+
+        x = sympy.Symbol("x")
+        expr = FloorToInt(x)
+        self.assertEqual(sympy.ccode(expr), "(int64_t)(floor(x))")
+
+    def test_floor_to_int_ccode_compound(self):
+        from torch.utils._sympy.functions import FloorToInt
+
+        x, y = sympy.symbols("x y")
+        expr = FloorToInt(x + y)
+        self.assertEqual(sympy.ccode(expr), "(int64_t)(floor(x + y))")
+
+    def test_ceil_to_int_ccode(self):
+        from torch.utils._sympy.functions import CeilToInt
+
+        x = sympy.Symbol("x")
+        expr = CeilToInt(x)
+        self.assertEqual(sympy.ccode(expr), "(int64_t)(ceil(x))")
+
+    def test_trunc_to_int_ccode(self):
+        from torch.utils._sympy.functions import TruncToInt
+
+        x = sympy.Symbol("x")
+        expr = TruncToInt(x)
+        self.assertEqual(sympy.ccode(expr), "(int64_t)(trunc(x))")
+
+    def test_to_float_ccode(self):
+        from torch.utils._sympy.functions import ToFloat
+
+        x = sympy.Symbol("x", integer=True)
+        expr = ToFloat(x)
+        self.assertEqual(sympy.ccode(expr), "(double)(x)")
+
+    def test_ccode_in_compound_expr(self):
+        from torch.utils._sympy.functions import FloorToInt, ToFloat
+
+        x = sympy.Symbol("x")
+        expr = FloorToInt(ToFloat(x) + 1)
+        result = sympy.ccode(expr)
+        self.assertIn("int64_t", result)
+        self.assertIn("floor", result)
+        self.assertIn("double", result)
+
+
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
 instantiate_parametrized_tests(TestSympySolve)
