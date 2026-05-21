@@ -422,7 +422,8 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
 def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
-    col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
+    with torch.fx.traceback.annotate({"fallback_to_eager": True}):
+        col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
         num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
         col_indices.to(torch.int32, memory_format=torch.contiguous_format),
@@ -1804,6 +1805,15 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         )
 
 
+def _validate_no_nested_tensors(query: Tensor, key: Tensor, value: Tensor) -> None:
+    if query.is_nested or key.is_nested or value.is_nested:
+        raise NotImplementedError(
+            "flex_attention does not support NestedTensor inputs, including "
+            "torch.compile(flex_attention) with jagged NestedTensor inputs. "
+            "Convert inputs to dense tensors before calling flex_attention."
+        )
+
+
 def _enforce_mem_layouts(
     query: Tensor, key: Tensor, value: Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2011,6 +2021,7 @@ def flex_attention(
 
     """
     # Some basic input validation
+    _validate_no_nested_tensors(query, key, value)
     _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
@@ -2126,16 +2137,19 @@ def flex_attention(
         *,
         return_aux: AuxRequest | None,
         return_lse: bool,
+        stats_are_log2: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""
         ln2 = math.log(2.0)
         return_lse = return_lse or return_aux is not None and return_aux.lse
         return_max = return_aux is not None and return_aux.max_scores
 
-        lse_scaled = lse * ln2 if (return_lse and lse.numel() > 0) else None
-        max_scaled = (
-            max_scores * ln2 if (return_max and max_scores.numel() > 0) else None
-        )
+        lse_scaled = lse if (return_lse and lse.numel() > 0) else None
+        max_scaled = max_scores if (return_max and max_scores.numel() > 0) else None
+
+        if stats_are_log2:
+            lse_scaled = lse_scaled * ln2 if lse_scaled is not None else None
+            max_scaled = max_scaled * ln2 if max_scaled is not None else None
 
         if return_aux is not None:
             return out, AuxOutput(
@@ -2164,7 +2178,12 @@ def flex_attention(
             kernel_options,  # type: ignore[union-attr]
         )
         return _finalize_outputs(
-            out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+            out,
+            lse,
+            max_scores,
+            return_aux=return_aux,
+            return_lse=return_lse,
+            stats_are_log2=kernel_options["BACKEND"] != "FLASH",
         )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
@@ -2205,5 +2224,11 @@ def flex_attention(
             kernel_options,
         )
     return _finalize_outputs(
-        out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+        out,
+        lse,
+        max_scores,
+        return_aux=return_aux,
+        return_lse=return_lse,
+        stats_are_log2=_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        or kernel_options["BACKEND"] != "FLASH",
     )

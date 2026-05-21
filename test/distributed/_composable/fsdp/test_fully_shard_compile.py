@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._dynamo.compiled_autograd as compiled_autograd
 import torch._dynamo.testing
+import torch.distributed as dist
 import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch.distributed.device_mesh import init_device_mesh
@@ -18,6 +19,8 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
 from torch.testing._internal.common_utils import run_tests
@@ -153,6 +156,69 @@ class TestFullyShardCompileCompute(FSDPTest):
         # Compiled optimizer step
         model(x).sum().backward()
         torch.compile(opt.step)()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(4)
+    def test_tp_mixed_precision_dtensor_spec_dtype(self):
+        torch._dynamo.reset()
+        if self.world_size % 2 != 0:
+            self.skipTest(f"Expects even world size but got {self.world_size}")
+
+        dim, tp_size = 16, 2
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size // tp_size, tp_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+        dp_mesh, tp_mesh = mesh["dp"], mesh["tp"]
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=False,
+        )
+
+        class RowwiseLinear(torch.nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.proj = nn.Linear(dim, dim, bias=False, device=device_type)
+
+            def forward(self, x):
+                return self.proj(x).clone()
+
+        def shard_placement_fn(param: nn.Parameter) -> Shard:
+            if isinstance(param, DTensor):
+                for placement in param.placements:
+                    if isinstance(placement, Shard):
+                        return Shard(param.ndim - 1 - placement.dim)
+            return Shard(0)
+
+        for compile_model in (False, True):
+            model = RowwiseLinear(dim)
+            parallelize_module(model, tp_mesh, {"proj": RowwiseParallel()})
+            if compile_model:
+                model.compile(backend="eager")
+            fully_shard(
+                model,
+                mesh=dp_mesh,
+                mp_policy=mp_policy,
+                shard_placement_fn=shard_placement_fn,
+                reshard_after_forward=False,
+            )
+
+            x = torch.randn(
+                2,
+                dim // tp_size,
+                device=device_type,
+                dtype=torch.bfloat16,
+            )
+            y = model(x)
+            weight = model.proj.weight
+            self.assertIsInstance(weight, DTensor)
+            self.assertEqual(weight._local_tensor.dtype, torch.bfloat16)
+            self.assertIsNotNone(weight._spec.tensor_meta)
+            self.assertEqual(weight._spec.tensor_meta.dtype, torch.bfloat16)
+            y.sum().backward()
+            dist.barrier()
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

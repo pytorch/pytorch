@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import os
 import re
 import sys
 import unittest
@@ -839,7 +840,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 
@@ -868,7 +869,7 @@ if HAS_CUDA_AND_TRITON:
                 FxGraphCache.clear()
                 AOTAutogradCache.clear()
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -881,11 +882,9 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-                    # Run backward without complex memory overlap being set
-
-                # Run the backward without complex memory overlap reason
-                # cache should miss, but cudagraphs should not run
-                # because forward skipped it
+                # Run the backward without the force-disable knob; cache should
+                # miss for the backward, but cudagraphs should not run because
+                # the forward already skipped.
                 back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                 out.backward(back_inp)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
@@ -1253,6 +1252,46 @@ if HAS_CUDA_AND_TRITON:
             num_partitions_overload = get_num_partitions(code)
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
+
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_topk_skips_cudagraph_on_hip(self):
+            # rocm workaround: topk kernels fault under cudagraph trees
+            # on the 2nd replay of a recorded graph.
+            BEAM_SIZE = 64
+            VOCAB_SIZE = 512
+
+            @torch.no_grad()
+            def generate(h0):
+                scores, _ = torch.topk(h0, k=BEAM_SIZE, dim=-1)
+                return scores
+
+            compiled = torch.compile(generate, fullgraph=True, mode="reduce-overhead")
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    h0 = torch.randn(
+                        8,
+                        BEAM_SIZE * VOCAB_SIZE,
+                        device="cuda",
+                        dtype=torch.bfloat16,
+                    )
+                    compiled(h0)
+                    torch.cuda.synchronize()
+
+            if torch.version.hip is not None:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to "
+                    "incompatible op aten.topk.default"
+                ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
@@ -1943,6 +1982,7 @@ if HAS_CUDA_AND_TRITON:
         )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
+        @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
@@ -2303,6 +2343,46 @@ if HAS_CUDA_AND_TRITON:
                 out2 + out2
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+
+        def test_error_on_dealloc_use_after_recording_and_execution(self):
+            def run(loop_count):
+                torch._dynamo.reset()
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
+                for _ in range(loop_count):
+                    x = cfn2(torch.randn(5, device="cuda"))
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    y = cfn(x)
+                    _ = y.cpu()
+
+                del x
+
+            for loop_count in (2, 3):
+                run(loop_count)
+
+        def test_error_on_dealloc_use_after_cached_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            stale = None
+            for _ in range(3):
+                stale = foo(torch.rand([4], device="cuda"))
+
+            self.assertIsNotNone(stale)
+            node = self.curr_node()
+            self.assertIs(stale, node.cached_tensor_outputs[0])
+
+            new = foo(torch.rand([4], device="cuda"))
+            self.assertIsNot(stale, new)
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+            _ = new.cpu()
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale + 1
+
+            del stale, new
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
@@ -2905,6 +2985,31 @@ if HAS_CUDA_AND_TRITON:
             # (bwd w/ p1, Graph 1)            (bwd w/p2, Graph3)
             self.run_static_input_param_test(fn, 4)
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
+        def test_param_ptr_churn_does_not_count_toward_rerecord_limit(self):
+            # Distinct nn parameter pointers across calls trigger
+            # StaticInputIdxMismatch each time. Those mismatches re-record but
+            # must not count against cudagraph_unexpected_rerecord_limit, since
+            # parameter identity churn is expected under inline_inbuilt_nn_modules.
+            def fn(x, y):
+                return x * y
+
+            with torch.device("cuda"):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                # Burn through more distinct params than the limit (1) allows
+                # if they were counted.
+                for _ in range(5):
+                    p = torch.nn.Parameter(torch.rand([2, 2]))
+                    self._assert_equal_multi_loop(p, fn, fn_compiled)
+
+            # No fallback to eager triggered by re-record limit.
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            # Counter never bumped for any (node, function).
+            for fn_to_count in self.get_manager().num_rerecord.values():
+                for count in fn_to_count.values():
+                    self.assertEqual(count, 0)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_no_rerecord_with_mark_static_address(self):
@@ -3957,7 +4062,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 

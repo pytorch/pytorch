@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
@@ -174,8 +175,10 @@ Tensor& set_storage_quantized_(
     int64_t storage_offset,
     IntArrayRef sizes,
     IntArrayRef strides) {
+  checkSetStorage(self, std::move(storage), storage_offset, sizes, strides);
+  checkInBoundsForStorage(
+      sizes, strides, storage_offset, self.dtype(), self.storage());
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -255,8 +258,8 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void* self_data = self_contig.data_ptr();
-  void* other_data = other_contig.data_ptr();
+  const void* self_data = self_contig.const_data_ptr();
+  const void* other_data = other_contig.const_data_ptr();
   auto data_size = self.numel() * self.element_size();
   // For QUint4x2 and QUInt2x4, two elements are packed in one byte
   if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {

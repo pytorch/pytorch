@@ -43,6 +43,7 @@ project-excludes = [
   "*/.*",
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  "torch/_vendor/quack/**",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support

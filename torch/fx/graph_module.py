@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import copy
 import hashlib
 import itertools
@@ -15,7 +16,7 @@ from typing import Any, cast, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterator
     from typing import Self
 
     from ._symbolic_trace import Tracer
@@ -110,6 +111,24 @@ class _EvalCacheLoader:
 
 
 _loader = _EvalCacheLoader()
+
+
+_share_torchbind_and_process_group = contextvars.ContextVar(
+    "_share_torchbind_and_process_group", default=False
+)
+
+
+@contextlib.contextmanager
+def _share_torchbind_and_process_group_on_deepcopy() -> Iterator[None]:
+    """Inside this context, ``GraphModule.__deepcopy__`` smuggles torchbind
+    objects without ``__getstate__``/``__setstate__`` (e.g. ProcessGroup)
+    through deepcopy as shared references instead of crashing.
+    """
+    token = _share_torchbind_and_process_group.set(True)
+    try:
+        yield
+    finally:
+        _share_torchbind_and_process_group.reset(token)
 
 
 def _exec_with_source(
@@ -1047,6 +1066,20 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo: dict[int, Any]) -> GraphModule:
         res = type(self).__new__(type(self))
         memo[id(self)] = res
+        # Opt-in: smuggle non-pickleable torchbind / ProcessGroup objects
+        # through deepcopy as shared references.
+        if _share_torchbind_and_process_group.get():
+            import torch.distributed as _dist
+
+            _PG = _dist.ProcessGroup if _dist.is_available() else ()
+            for v in self.__dict__.values():
+                if isinstance(v, torch.ScriptObject) and not (
+                    v._has_method("__getstate__")  # type: ignore[attr-defined]
+                    and v._has_method("__setstate__")  # type: ignore[attr-defined]
+                ):
+                    memo.setdefault(id(v), v)
+                elif isinstance(v, _PG):
+                    memo.setdefault(id(v), v)
         fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
         self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over

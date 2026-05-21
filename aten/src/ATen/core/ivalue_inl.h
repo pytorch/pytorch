@@ -1736,6 +1736,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
+DEFINE_TO(at::DimVector, toDimVector)
 DEFINE_TO(c10::List<c10::SymInt>, toSymIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
 DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
@@ -1941,7 +1942,7 @@ Tuple generic_to_tuple_impl(
     const ivalue::TupleElements& t,
     std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
-      t[INDEX].to<std::tuple_element_t<INDEX, Tuple>>()...);
+      t[INDEX].template to<std::tuple_element_t<INDEX, Tuple>>()...);
 }
 } // namespace detail
 

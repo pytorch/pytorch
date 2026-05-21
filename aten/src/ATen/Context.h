@@ -47,7 +47,10 @@ enum class CuBLASReductionOption : uint8_t {
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
-enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
+// DEFAULT is an internal-only sentinel meaning "use legacy backend default
+// unless a parent setting overrides it". NONE means "explicitly set to
+// inherit/no-op".
+enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16, DEFAULT };
 
 enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 
@@ -543,8 +546,8 @@ class TORCH_API Context {
       {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
       {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
       {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
-      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
-      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::DEFAULT},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::DEFAULT},
       {{Float32Backend::CUDA, Float32Op::MATMUL},
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE
