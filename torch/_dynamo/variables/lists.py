@@ -15,10 +15,11 @@ variable tracking system.
 """
 
 import collections
+import functools
 import operator
 import sys
 from collections.abc import Sequence
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, cast, Optional, Self, SupportsIndex, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -47,7 +48,7 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
+from .functions import CmpToKeyVariable, UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import type_implements_nb_index, validate_sequence_index
 
@@ -55,6 +56,80 @@ from .object_protocol import type_implements_nb_index, validate_sequence_index
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+class SortMutationTracker(list[Any]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mutation_count = 0
+
+    def mark_mutated(self) -> None:
+        self.mutation_count += 1
+
+    def mark_if_changed(self, before: list[Any]) -> None:
+        if list(self) != before:
+            self.mark_mutated()
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        before = list(self)
+        super().__setitem__(key, value)
+        self.mark_if_changed(before)
+
+    def __delitem__(self, key: Any) -> None:
+        before = list(self)
+        super().__delitem__(key)
+        self.mark_if_changed(before)
+
+    def __iadd__(self, value: Any) -> Self:
+        before = list(self)
+        super().__iadd__(value)
+        self.mark_if_changed(before)
+        return self
+
+    def __imul__(self, value: Any) -> Self:
+        before = list(self)
+        super().__imul__(value)
+        self.mark_if_changed(before)
+        return self
+
+    def append(self, item: Any) -> None:
+        super().append(item)
+        self.mark_mutated()
+
+    def clear(self) -> None:
+        before = list(self)
+        super().clear()
+        self.mark_if_changed(before)
+
+    def extend(self, items: Any) -> None:
+        before = list(self)
+        super().extend(items)
+        self.mark_if_changed(before)
+
+    def insert(self, index: SupportsIndex, item: Any) -> None:
+        super().insert(index, item)
+        self.mark_mutated()
+
+    def pop(self, index: SupportsIndex = -1) -> Any:
+        before = list(self)
+        result = super().pop(index)
+        self.mark_if_changed(before)
+        return result
+
+    def remove(self, item: Any) -> None:
+        before = list(self)
+        super().remove(item)
+        self.mark_if_changed(before)
+
+    def reverse(self) -> None:
+        before = list(self)
+        super().reverse()
+        self.mark_if_changed(before)
+
+    def sort(self, *args: Any, **kwargs: Any) -> None:
+        before = list(self)
+        super().sort(*args, **kwargs)
+        self.mark_if_changed(before)
 
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
@@ -299,6 +374,8 @@ class BaseListVariable(VariableTracker):
         count: VariableTracker,
     ) -> VariableTracker:
         n = count.as_python_constant()
+        if pytuple_checkexact(self) and (n == 1 or not self.items):
+            return self
         try:
             new_items = self.items * n
         except (MemoryError, OverflowError) as e:
@@ -1109,6 +1186,52 @@ class ListVariable(CommonListMethodsVariable):
             ).as_python_constant()
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+
+            if isinstance(key_fn_var, CmpToKeyVariable):
+                original_items = list(self.items)
+                sort_items = SortMutationTracker()
+
+                def compare(left: VariableTracker, right: VariableTracker) -> int:
+                    result = key_fn_var.compare(tx, left, right)
+                    if not result.is_python_constant():
+                        first_non_constant_key = result
+                        try:
+                            python_type = str(first_non_constant_key.python_type())
+                        except NotImplementedError:
+                            python_type = "unknown"
+                        unimplemented(
+                            gb_type="sort with non-constant keys",
+                            context=str(first_non_constant_key),
+                            explanation=(
+                                f"Cannot perform sort with non-constant key. "
+                                f"First non-constant key type: {python_type}. "
+                                f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
+                                f"sort ints."
+                            ),
+                            hints=["Use something else as the key."],
+                        )
+                    return cast(int, result.as_python_constant())
+
+                try:
+                    tx.output.side_effects.mutation(self)
+                    self.items = sort_items
+                    sorted_items = sorted(
+                        original_items,
+                        key=functools.cmp_to_key(compare),
+                        reverse=reverse,
+                    )
+                    self.items = sorted_items
+                except (TypeError, ValueError) as e:
+                    self.items = original_items
+                    raise_observed_exception(type(e), tx, args=list(e.args))
+                except BaseException:
+                    self.items = original_items
+                    raise
+                if sort_items.mutation_count:
+                    raise_observed_exception(
+                        ValueError, tx, args=["list modified during sort"]
+                    )
+                return ConstantVariable.create(None)
 
             if key_fn_var.is_constant_none():
                 keys = self.items.copy()
