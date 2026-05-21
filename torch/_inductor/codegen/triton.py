@@ -235,9 +235,9 @@ def _val_expressible_in_32_bits(val: Any) -> bool:
 
 
 def _range_expressible_in_32_bits(bounds: ValueRanges[Any]) -> bool:
-    return _val_expressible_in_32_bits(
-        bounds.lower
-    ) and _val_expressible_in_32_bits(bounds.upper)
+    return _val_expressible_in_32_bits(bounds.lower) and _val_expressible_in_32_bits(
+        bounds.upper
+    )
 
 
 def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
@@ -1259,10 +1259,10 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
             def maybe_cast_arg(arg) -> str:
-                if func.__name__ == "sqrt" and (
-                    arg_dtype := triton_arg_dtype(arg)
-                ) is not None and (
-                    arg_dtype == torch.bool or is_integer_dtype(arg_dtype)
+                if (
+                    func.__name__ == "sqrt"
+                    and (arg_dtype := triton_arg_dtype(arg)) is not None
+                    and (arg_dtype == torch.bool or is_integer_dtype(arg_dtype))
                 ):
                     return TritonOverrides._cast_libdevice_arg(arg, torch.float32)
                 return maybe_upcast_arg(arg)
@@ -2278,7 +2278,7 @@ class TritonKernelOverrides(TritonOverrides):
         return cls._shaped_constant(value, dtype, shape=shape)
 
     @classmethod
-    def index_expr(cls, expr, dtype):
+    def _prepare_expr_indexing(cls, expr, dtype):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
@@ -2290,7 +2290,35 @@ class TritonKernelOverrides(TritonOverrides):
             shape = indexing.expand_shape
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
+        return expr, indexing, shape
 
+    @classmethod
+    def _emit_expr_indexing(
+        cls,
+        expr,
+        indexing,
+        shape,
+        index_str,
+        cast_dtype,
+        output_dtype,
+        *,
+        use_compute_types,
+    ):
+        var = V.kernel.cse.generate(
+            V.kernel.compute,
+            cls.to_dtype(
+                f"({index_str})", cast_dtype, use_compute_types=use_compute_types
+            ),
+            dtype=output_dtype,
+            bounds=get_bounds_index_expr(expr),
+            shape=shape,
+        )
+        var.mask_vars = indexing.mask_vars
+        return var
+
+    @classmethod
+    def index_expr(cls, expr, dtype):
+        expr, indexing, shape = cls._prepare_expr_indexing(expr, dtype)
         # index_expr is the materialization point for SymPy expressions on the
         # indexing path.  int32/int64 requests are normalized to the kernel's
         # selected index dtype; smaller integer and non-integer requests still
@@ -2302,16 +2330,15 @@ class TritonKernelOverrides(TritonOverrides):
         # dtype.  For example, float16 requests emit tl.float32 when compute
         # upcasting is enabled, and should be recorded as torch.float32.
         output_dtype = upcast_compute_type(cast_dtype)
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            cls.to_dtype(f"({indexing.index_str})", cast_dtype),
-            dtype=output_dtype,
-            bounds=get_bounds_index_expr(expr),
-            shape=shape,
+        return cls._emit_expr_indexing(
+            expr,
+            indexing,
+            shape,
+            indexing.index_str,
+            cast_dtype,
+            output_dtype,
+            use_compute_types=True,
         )
-
-        var.mask_vars = indexing.mask_vars
-        return var
 
     @classmethod
     def value_expr(cls, expr, dtype):
@@ -2320,18 +2347,7 @@ class TritonKernelOverrides(TritonOverrides):
         the user explicitly requested ``dtype`` (e.g. ``arange(int64)``
         whose result participates in tensor computation).
         """
-        expr = _materialize_trunc_to_float_expr(expr, dtype)
-        indexing = V.kernel.indexing(
-            expr, block_ptr=False, tma_compatibility_checker=None
-        )
-        assert isinstance(indexing, IndexingOptions)
-
-        shape: BlockShapeType
-        if indexing.expand_shape:
-            shape = indexing.expand_shape
-        else:
-            shape = TritonSymbols.get_block_shape(indexing.index)
-
+        expr, indexing, shape = cls._prepare_expr_indexing(expr, dtype)
         is_predicate = bool(
             getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False)
         )
@@ -2355,19 +2371,15 @@ class TritonKernelOverrides(TritonOverrides):
         index_str = cls._cast_expr_vars_to(
             indexing.index, indexing.index_str, operand_dtype
         )
-
-        orig = config.test_configs.runtime_triton_dtype_assert
-        try:
-            config.test_configs.runtime_triton_dtype_assert = False
-            var = V.kernel.cse.generate(
-                V.kernel.compute,
-                index_str,
-                bounds=get_bounds_index_expr(expr),
-                dtype=result_dtype,
-                shape=shape,
-            )
-        finally:
-            config.test_configs.runtime_triton_dtype_assert = orig
+        var = cls._emit_expr_indexing(
+            expr,
+            indexing,
+            shape,
+            index_str,
+            result_dtype,
+            result_dtype,
+            use_compute_types=False,
+        )
 
         if result_dtype != dtype:
             var = V.kernel.cse.generate(
@@ -2376,8 +2388,7 @@ class TritonKernelOverrides(TritonOverrides):
                 dtype=upcast_compute_type(dtype),
                 shape=var.shape,
             )
-
-        var.mask_vars = indexing.mask_vars
+            var.mask_vars = indexing.mask_vars
         return var
 
     @classmethod

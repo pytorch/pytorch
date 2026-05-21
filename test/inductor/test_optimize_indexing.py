@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import operator
+
 import sympy
 
 import torch
@@ -29,7 +31,7 @@ class TestOptimizeIndexing(TestCase):
             def __init__(self):
                 self.root_block = FakeBlock(graph)
                 self.subblocks = {
-                    f"subblock{i}": FakeBlock(subgraph)
+                    f"masked_subblock{i}": FakeBlock(subgraph)
                     for i, subgraph in enumerate(subgraphs)
                 }
                 self.indexing_exprs = indexing_exprs
@@ -133,12 +135,8 @@ class TestOptimizeIndexing(TestCase):
         graph = Graph()
         ops = graph.placeholder("ops")
         get_index = graph.call_module("get_index", ("i0",))
-        sort_index_expr = graph.call_method(
-            "index_expr", (ops, get_index, torch.int64)
-        )
-        scan_index_expr = graph.call_method(
-            "index_expr", (ops, get_index, torch.int64)
-        )
+        sort_index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        scan_index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
         sort = graph.call_method(
             "sort",
             (ops, (torch.int64,), (sort_index_expr,), False, False),
@@ -250,6 +248,34 @@ class TestOptimizeIndexing(TestCase):
 
         self.assertEqual(index_expr.target, "value_expr")
         self.assertEqual(index_expr.args[2], torch.int32)
+
+    def test_index_expr_getitem_value_use_propagates_to_tuple_source(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.float32))
+        frexp = graph.call_method("frexp", (ops, index_expr))
+        getitem = graph.call_function(operator.getitem, (frexp, 0))
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, getitem, None))
+        graph.output(store)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 1),
+                frexp: ValueRanges(0, 1),
+                getitem: ValueRanges(0, 1),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(index_expr.target, "value_expr")
+        self.assertEqual(index_expr.args[2], torch.float32)
 
 
 if __name__ == "__main__":

@@ -3313,6 +3313,30 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(2, device=self.device),))
 
+    @skipCPUIf(True, "requires CUDA/Triton")
+    @requires_cuda_and_triton
+    def test_arange_int64_large_multiplier(self):
+        def fn(x):
+            return torch.arange(
+                0, 11, device=x.device, dtype=torch.int64
+            ) * torch.tensor([int(1e9)], dtype=torch.int64, device=x.device)
+
+        x = torch.zeros(1, device=self.device)
+        fn_opt = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn_opt(x), fn(x))
+
+    @skipCPUIf(True, "requires CUDA/Triton")
+    @requires_cuda_and_triton
+    def test_arange_int64_masked_value(self):
+        def fn(mask):
+            idx = torch.arange(0, 4, device=mask.device, dtype=torch.int64)
+            values = idx * 2147483648
+            return torch.ops.aten._unsafe_masked_index.default(values, mask, [idx], 0)
+
+        mask = torch.tensor([True, False, True, True], device=self.device)
+        fn_opt = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn_opt(mask), fn(mask))
+
     @xfail_if_triton_cpu
     def test_arange9(self):
         # int64 arange used inside a reduction: reduction must accumulate
@@ -3627,6 +3651,23 @@ class CommonTemplate:
 
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
+
+    @skipCPUIf(True, "requires CUDA/Triton")
+    @requires_cuda_and_triton
+    def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
+        def fn(x, i):
+            return x + round(i / 2 * 123.4567, -1)
+
+        fn_opt = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        x = torch.zeros(2, device=self.device)
+        i = 2
+        with torch.no_grad():
+            self.assertEqual(fn_opt(x, i), fn(x, i))
+
+        code = run_and_get_triton_code(fn_opt, x, i)
+        FileCheck().check_regex(r"tmp\d+ = \(ks0\)\.to\(tl\.float32\)").check(
+            "libdevice.nearbyint"
+        ).run(code)
 
     def test_builtins_round_int_ndigits_pos(self):
         def fn(x, i):
@@ -17412,9 +17453,7 @@ if RUN_GPU:
 
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [
-                torch.tensor(
-                    [[0.0, 1.0, 2.0], [0.0, 1.0, 2.0]], device=GPU_TYPE
-                ),
+                torch.tensor([[0.0, 1.0, 2.0], [0.0, 1.0, 2.0]], device=GPU_TYPE),
                 torch.tensor([[0.1, 0.5], [1.5, 2.5]], device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
