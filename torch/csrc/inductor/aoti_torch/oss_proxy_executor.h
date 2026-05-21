@@ -115,7 +115,8 @@ class OSSProxyExecutor : public ProxyExecutor {
       const std::string& json_path,
       bool is_cpu,
       std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs =
-          std::nullopt);
+          std::nullopt,
+      const std::string& device_str = "");
 
   void call_function(
       int extern_node_index,
