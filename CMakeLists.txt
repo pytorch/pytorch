@@ -81,6 +81,18 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   )
 endif()
 
+# --- [ Check that minimal clang version is 16+
+# Older clangs (e.g. clang-14) fail to compile C++20 ranges adaptors such as
+# `std::views::filter` over associative containers when paired with libstdc++,
+# see https://github.com/pytorch/pytorch/issues/184630. AppleClang uses its
+# own versioning scheme and is excluded from this check.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+  message(
+    FATAL_ERROR
+      "Clang-16 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+  )
+endif()
+
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
 # https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
