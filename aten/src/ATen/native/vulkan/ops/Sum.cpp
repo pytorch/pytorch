@@ -112,7 +112,7 @@ Tensor sum_dim_IntList(
           dim);
       // Normalize dim into range [0, self.dim() - 1]
       int64_t dim_normalized = utils::normalize(dim, self.dim());
-      if (dims_set.find(dim_normalized) != dims_set.end()) {
+      if (dims_set.contains(dim_normalized)) {
         TORCH_CHECK(
             false,
             "dim ",
@@ -134,6 +134,7 @@ Tensor sum_dim_IntList(
 
 Tensor sum(const Tensor& self, const std::optional<ScalarType> dtype) {
   std::vector<int64_t> dims;
+  dims.reserve(self.dim());
   for (int64_t d = 0; d < self.dim(); d++) {
     // If any dimension has zero elements, we will shortcut to a zero-dim.
     if (self.size(d) == 0) {

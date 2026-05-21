@@ -2,6 +2,8 @@
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
 
+#include <unordered_set>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -24,7 +26,7 @@ Tensor var_dim_IntList(
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
 
-  std::set<int64_t> dims_set;
+  std::unordered_set<int64_t> dims_set;
   if (opt_dim.has_value()) {
     int sample_size = 1;
     auto dims = opt_dim.value();
@@ -33,7 +35,7 @@ Tensor var_dim_IntList(
       TORCH_CHECK(d >= -self.dim() || d < self.dim(), "Dimension out of range");
 
       int64_t dim_normalized = utils::normalize(d, self.dim());
-      if (dims_set.find(dim_normalized) != dims_set.end()) {
+      if (dims_set.contains(dim_normalized)) {
         TORCH_CHECK(
             false,
             "dim ",
