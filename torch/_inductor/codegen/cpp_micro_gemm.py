@@ -1021,7 +1021,7 @@ class CppMicroGemmAVX512VNNI(CppMicroGemm):
                 break;
 {%- endfor %}
             default:
-                {{kernel.assert_function}}(false, "Unsupported M_TAIL: {}", M_TAIL);
+                {{kernel.assert_function}}(false, "Unsupported M_TAIL");
         } // switch M_TAIL
     } // if M_TAIL
 }
