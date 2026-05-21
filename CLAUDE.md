@@ -64,6 +64,9 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
+When describing the testing strategy in a commit message, include the literal
+commands that were run in fenced Markdown code blocks.
+
 Disclose that the PR was authored with an AI assistant. Do this informally in
 the commit body (e.g., "Authored by Claude." or a similar attribution for
 whichever assistant was used). NEVER add a `Co-authored-by:` trailer
