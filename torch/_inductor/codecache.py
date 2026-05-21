@@ -4341,9 +4341,15 @@ class PyCodeCache:
         return write(source_code, "py", extra=extra)
 
     @classmethod
-    def load(cls, source_code: str, extra: str = "") -> ModuleType:
+    def load(
+        cls,
+        source_code: str,
+        extra: str = "",
+        *,
+        set_sys_modules: bool | None = None,
+    ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path)
+        return cls.load_by_key_path(key, path, set_sys_modules=set_sys_modules)
 
     @classmethod
     def load_by_key_path(
@@ -4352,19 +4358,26 @@ class PyCodeCache:
         path: str,
         linemap: list[tuple[int, str]] | None = None,
         attrs: dict[str, Any] | None = None,
+        *,
+        set_sys_modules: bool | None = None,
     ) -> ModuleType:
         if linemap is None:
             linemap = []
 
+        in_toplevel = in_toplevel_process()
+        set_sys_modules = in_toplevel if set_sys_modules is None else set_sys_modules
+
         # we only cache when attrs is None
         if attrs is None and path in cls.modules_no_attr:
-            return cls.modules_no_attr[path]
+            mod = cls.modules_no_attr[path]
+            if set_sys_modules:
+                sys.modules.setdefault(mod.__name__, mod)
+            return mod
 
-        in_toplevel = in_toplevel_process()
-        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
-        if in_toplevel:
+        if set_sys_modules:
             cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:

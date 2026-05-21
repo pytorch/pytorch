@@ -657,7 +657,11 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
         self._benchmark_module = mod
         autotuning_log.debug(
             "benchmark module key: %s, path: %s",
@@ -736,12 +740,17 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         if mod is not None:
             kernel = getattr(mod, self.kernel_name, None)
+            release_benchmark_artifacts = getattr(
+                kernel, "release_benchmark_artifacts", None
+            )
+            if release_benchmark_artifacts is not None:
+                release_benchmark_artifacts()
             release_static_launchers = getattr(
                 kernel, "_release_static_launchers_except", None
             )
-            if release_static_launchers is not None:
+            if release_benchmark_artifacts is None and release_static_launchers is not None:
                 release_static_launchers(None)
-            else:
+            elif release_benchmark_artifacts is None:
                 for launcher in getattr(kernel, "launchers", ()) or ():
                     close = getattr(getattr(launcher, "__self__", None), "close", None)
                     if close is not None:
@@ -750,13 +759,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                     close = getattr(getattr(compile_result, "kernel", None), "close", None)
                     if close is not None:
                         close()
-
-            module_name = getattr(mod, "__name__", None)
-            if module_name is not None:
-                sys.modules.pop(module_name, None)
-                loaded_module_names = getattr(PyCodeCache, "_loaded_module_names", None)
-                if loaded_module_names is not None:
-                    loaded_module_names.discard(module_name)
 
         PyCodeCache.modules[:] = [
             module
@@ -767,7 +769,11 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
     def precompile(self):
         try:
-            mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+            mod = PyCodeCache.load_by_key_path(
+                self.module_cache_key,
+                self.module_path,
+                set_sys_modules=False,
+            )
             self._benchmark_module = mod
             kernel = getattr(mod, self.kernel_name)
             kernel.precompile()
@@ -903,7 +909,11 @@ class SubgraphBenchmarkRequest(BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
         sym_input_values = self.sym_input_values
         # Create a new list each call since mod.call does args.clear()
         return lambda: mod.call([*sym_input_values, *input_tensors])
@@ -1166,7 +1176,11 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         Create a function to run the CuteDSL kernel with the given input and output tensors.
         Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
         """
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
 
         # Logic replicated async_compile
         from .codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX

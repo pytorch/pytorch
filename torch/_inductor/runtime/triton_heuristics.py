@@ -548,6 +548,37 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
+    @staticmethod
+    def _close_compiled_kernel(kernel: Any) -> None:
+        if kernel is None:
+            return
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+            return
+        module = getattr(kernel, "module", None)
+        if module is not None:
+            # Triton CompiledKernel unloads in __del__.  Calling it explicitly
+            # lets benchmark-only kernels release modules before the whole
+            # autotune site completes.
+            delete = getattr(kernel, "__del__", None)
+            if delete is not None:
+                delete()
+
+    def release_benchmark_artifacts(self) -> None:
+        for launcher in self.launchers:
+            kernel = getattr(launcher, "__self__", None)
+            self._close_compiled_kernel(kernel)
+
+        for result in self.compile_results:
+            self._close_compiled_kernel(getattr(result, "kernel", None))
+
+        self.launchers = []
+        self.compile_results = []
+        self.benchmark_failure_reasons.clear()
+        self._cached_launcher = None
+        self._debug_call = None
+
     def is_statically_launchable(self):
         """
         Checks if every compiled kernel is statically launchable, which
