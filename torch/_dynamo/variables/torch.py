@@ -1535,15 +1535,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor():
-                # Decompose: create empty tensor and fill it
-                # This avoids the scalar extraction at compile time
-                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
-                    tx, [size], kwargs
-                )
-                # Call fill_ method on the empty tensor
-                return empty_result.call_method(tx, "fill_", [fill_value], {})
-            return None
+            if not isinstance(fill_value, TensorVariable) or fill_value.ndim != 0:
+                return None
+
+            fill_value_example = fill_value.as_proxy().node.meta["example_value"]
+            if isinstance(fill_value_example, torch.nn.Parameter):
+                return None
+
+            # Decompose: create empty tensor and fill it.
+            # This avoids the scalar extraction at compile time.
+            empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
+                tx, [size], kwargs
+            )
+            # Call fill_ method on the empty tensor
+            return empty_result.call_method(tx, "fill_", [fill_value], {})
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
