@@ -57,6 +57,10 @@ class SetVariable(VariableTracker):
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
     _cpython_type = set
+    _nonvar_fields = {
+        "use_python_constant_iteration_order",
+        *VariableTracker._nonvar_fields,
+    }
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
@@ -66,6 +70,9 @@ class SetVariable(VariableTracker):
         items: Iterable[VariableTracker | HashableTracker],
         **kwargs: Any,
     ) -> None:
+        use_python_constant_iteration_order = kwargs.pop(
+            "use_python_constant_iteration_order", False
+        )
         # .clone() passes these arguments in kwargs but they're recreated below
         if "original_items" in kwargs:
             kwargs.pop("original_items")
@@ -73,6 +80,7 @@ class SetVariable(VariableTracker):
             kwargs.pop("should_reconstruct_all")
 
         super().__init__(**kwargs)
+        self.use_python_constant_iteration_order = use_python_constant_iteration_order
 
         # Items can be either VariableTrackers or HashableTrackers (from set ops).
         # For VariableTrackers, realize them to ensure aliasing guards are installed
@@ -155,6 +163,11 @@ class SetVariable(VariableTracker):
         return id(value) != id(other)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        if self.use_python_constant_iteration_order and all(
+            k.vt.is_python_constant() for k in self.items
+        ):
+            vt_by_value = {k.vt.as_python_constant(): k.vt for k in self.items}
+            return [vt_by_value[x] for x in self.as_python_constant()]
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -605,7 +618,17 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        if isinstance(self_, variables.UserDefinedSetVariable):
+            result_source = self_._base_vt
+            if result_source is None:
+                raise AssertionError("_base_vt must not be None")
+        else:
+            result_source = self_
+        result = result_source.clone(
+            items=result_source.items.copy(),  # type: ignore[missing-attribute]
+            mutation_type=ValueMutationNew(),
+            source=None,
+        )
         if self_ is other_:
             return result
         result.items.update(other_.items)  # type: ignore[missing-attribute]
@@ -631,7 +654,17 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        if isinstance(self_, variables.UserDefinedSetVariable):
+            result_source = self_._base_vt
+            if result_source is None:
+                raise AssertionError("_base_vt must not be None")
+        else:
+            result_source = self_
+        result = result_source.clone(
+            items=result_source.items.copy(),  # type: ignore[missing-attribute]
+            mutation_type=ValueMutationNew(),
+            source=None,
+        )
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
         return result
@@ -720,6 +753,9 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        return [x.vt for x in self.items]
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -830,8 +866,23 @@ class FrozensetVariable(SetVariable):
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
             return ConstantVariable.create(None)
+        elif name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if (
+                self.source is not None
+                and type(tx.output.resolve_source_value(self.source)) is not frozenset
+            ):
+                return FrozensetVariable(
+                    self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                )
+            return self
         elif name in (
-            "copy",
             "difference",
             "intersection",
             "symmetric_difference",
