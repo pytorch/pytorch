@@ -491,6 +491,13 @@ def meta_select(
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
+
     new_size = list(self.size())
     new_stride = list(self.stride())
 
@@ -640,6 +647,69 @@ def _compute_stride(
     if view_d != -1:
         return None
     return new_stride
+
+
+def _optimization_hint_or_none(value: Any) -> int | None:
+    if type(value) is int:
+        return value
+    if isinstance(value, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+        return optimization_hint(value, fallback=None)
+    return None
+
+
+def _hinted_eq(lhs: Any, rhs: Any) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(lhs == rhs):
+        return True
+
+    lhs_hint = _optimization_hint_or_none(lhs)
+    rhs_hint = _optimization_hint_or_none(rhs)
+    if lhs_hint is None or rhs_hint is None or lhs_hint != rhs_hint:
+        return False
+
+    # Hints are not shape semantics. They only show that the equality is true
+    # for the traced example, so record the symbolic equality required for the
+    # view rather than specializing either side to a concrete value.
+    torch._check(lhs == rhs)
+    return True
+
+
+def _is_contiguous_with_hinted_checks(a: torch.Tensor) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
+
+    if guard_or_false(a.numel() < 2):
+        return True
+
+    numel_hint = _optimization_hint_or_none(a.numel())
+    if numel_hint is None:
+        return False
+    if numel_hint < 2:
+        torch._check(a.numel() < 2)
+        return True
+
+    expected_stride = 1
+    expected_stride_max = 1
+    for size, stride in reversed(tuple(zip(a.shape, a.stride()))):
+        if guard_or_false(size == 1):
+            continue
+
+        size_hint = _optimization_hint_or_none(size)
+        if size_hint == 1:
+            torch._check(size == 1)
+            continue
+
+        if not _hinted_eq(stride, expected_stride) and not _hinted_eq(
+            stride, expected_stride_max
+        ):
+            return False
+
+        expected_stride_max *= size if is_nested_int(size) else torch.sym_max(size, 1)
+        expected_stride *= size
+
+    return True
 
 
 def _view_has_unbacked_input(
@@ -833,6 +903,10 @@ def _view_unbacked_meta(
                 allow_copy=allow_copy,
                 tried_duck_specialize=True,
             )
+
+        if _is_contiguous_with_hinted_checks(a):
+            strides = make_contiguous_strides_for(shape)
+            return a.as_strided(shape, strides)  # type: ignore[return-value]
 
         return _view_unbacked_meta(
             a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
