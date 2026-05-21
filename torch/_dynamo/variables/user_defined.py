@@ -77,6 +77,7 @@ from ..source import (
 )
 from ..utils import (
     base_exception_methods,
+    build_checkpoint_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -88,6 +89,7 @@ from ..utils import (
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
+    is_utils_checkpoint_wrapped,
     istype,
     list_methods,
     namedtuple_fields,
@@ -3028,6 +3030,49 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
                 type_attr, "__wrapped__", self, source=source
+            )
+        elif is_utils_checkpoint_wrapped(type_attr):
+            from .higher_order_ops import CheckpointFunctionVariable
+
+            if can_use_mro_source:
+                source = self.get_source_by_walking_mro(tx, name)
+            fn_source = (
+                AttrSource(source, "_torch_checkpoint_wrapped_function")
+                if source
+                else None
+            )
+            fn = variables.UserMethodVariable(
+                type_attr._torch_checkpoint_wrapped_function,  # pyrefly: ignore[missing-attribute]
+                self,
+                source_fn=fn_source,
+            )
+
+            kwargs_source = (
+                AttrSource(source, "_torch_checkpoint_kwargs") if source else None
+            )
+            checkpoint_kwargs = {}
+            for (
+                k,
+                v,
+            ) in (
+                type_attr._torch_checkpoint_kwargs.items()  # pyrefly: ignore[missing-attribute]
+            ):
+                checkpoint_kwargs[k] = VariableTracker.build(
+                    tx,
+                    v,
+                    DictGetItemSource(kwargs_source, k) if kwargs_source else None,
+                )
+
+            if source and kwargs_source:
+                install_guard(
+                    source.make_guard(GuardBuilder.CLOSURE_MATCH),
+                    kwargs_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+                )
+            return CheckpointFunctionVariable(
+                build_checkpoint_variable(source=source),
+                fn,
+                checkpoint_kwargs,
+                source=source,
             )
         elif isinstance(type_attr, types.FunctionType):
             while hasattr(type_attr, "_torchdynamo_inline"):

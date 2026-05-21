@@ -926,6 +926,154 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
+    def test_curried_checkpoint_kwargs(self):
+        def gn(
+            x,
+            preserve_rng_state,
+            use_reentrant,
+            context_fn,
+            determinism_check,
+            debug,
+            early_stop,
+        ):
+            return (
+                x.sin()
+                * preserve_rng_state
+                * use_reentrant
+                * context_fn
+                * determinism_check
+                * debug
+                * early_stop
+            )
+
+        def fn(x, y):
+            return checkpoint(use_reentrant=False, preserve_rng_state=False)(gn)(
+                x,
+                preserve_rng_state=y,
+                use_reentrant=y + 1,
+                context_fn=y + 2,
+                determinism_check=y + 3,
+                debug=y + 4,
+                early_stop=y + 5,
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        args = (x, y)
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = fn(*args)
+        result = torch.compile(fn, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertEqual(len(wrap_node.args), 8)
+
+    def test_precreated_curried_checkpoint(self):
+        def gn(x):
+            return x.sin().cos()
+
+        checkpointed_gn = checkpoint(use_reentrant=False)(gn)
+
+        def fn(x):
+            return checkpointed_gn(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        expected = fn(x)
+        result = torch.compile(fn, backend=cnt)(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertIsNotNone(wrap_node)
+
+    def test_curried_checkpoint_function_kwarg(self):
+        def gn(x):
+            return x.sin().cos()
+
+        def fn(x):
+            return checkpoint(use_reentrant=False)(function=gn)(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        expected = fn(x)
+        result = torch.compile(fn, backend=cnt)(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertIsNotNone(wrap_node)
+
+    def test_curried_checkpoint_method(self):
+        class Model:
+            @checkpoint(use_reentrant=False)
+            def gn(self, x):
+                return x.sin().cos()
+
+        model = Model()
+
+        def fn(x):
+            return model.gn(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        expected = fn(x)
+        result = torch.compile(fn, backend=cnt)(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertIsNotNone(wrap_node)
+
+    def test_curried_checkpoint_unexpected_kwargs(self):
+        def gn(x):
+            return x.sin()
+
+        def fn(x):
+            return checkpoint(use_reentrant=False, typo=True)(gn)(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        with self.assertRaisesRegex(Exception, "Unexpected keyword arguments: typo"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_curried_checkpoint_preserves_context_fn_with_functionalized_rng(self):
+        log = []
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            log.append(op)
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        def gn(x):
+            return x.sin().cos()
+
+        def fn(x):
+            return checkpoint(gn, x, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            out = torch.compile(fn, backend="aot_eager")(x)
+            out.sum().backward()
+
+        self.assertTrue(log)
+
     @requires_cuda_and_triton
     def test_symints_location(self, device):
         def gn(x, y):
