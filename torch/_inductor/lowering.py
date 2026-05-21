@@ -4946,8 +4946,12 @@ def _create_constants(*args, dtype):
 @register_lowering(prims.rev.default)
 def rev(x, dims):
     # note - dims pre-canonicalized
-    x_loader = x.make_loader()
     sizes = x.get_size()
+
+    if len(sizes) == 0:
+        return clone(x)
+
+    x_loader = x.make_loader()
 
     def loader(idx):
         idx = list(idx)
