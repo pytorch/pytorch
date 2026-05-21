@@ -5122,16 +5122,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn, ctxs):
+def make_wrapped(fn, ctx_fns):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        stack = contextlib.ExitStack()
-        for ctx in ctxs:
-            stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
-        return out
+        with contextlib.ExitStack() as stack:
+            for ctx_fn in ctx_fns:
+                stack.enter_context(ctx_fn())
+            return fn(self)
 
     return wrapped
 
@@ -5165,16 +5163,15 @@ def wrap_test_class(orig_cls):
             backend = lookup_backend(name)
             if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
-            ctxs = [
-                compiled_autograd._enable(
-                    make_compiler_fn(
-                        backend=backend,
-                        fullgraph=name not in known_graph_breaks_tests,
-                    )
-                ),
-                test_contexts.get(name, contextlib.nullcontext()),
+            compiler_fn = make_compiler_fn(
+                backend=backend,
+                fullgraph=name not in known_graph_breaks_tests,
+            )
+            ctx_fns = [
+                functools.partial(compiled_autograd._enable, compiler_fn),
+                test_contexts.get(name, contextlib.nullcontext),
             ]
-            dct[name] = make_wrapped(fn, ctxs)
+            dct[name] = make_wrapped(fn, ctx_fns)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -5201,6 +5198,59 @@ class WrapTestClassTests(TestCase):
         test.setUp()
         test.tearDown()
         self.assertTrue(getattr(test, "super_called", False))
+
+    def test_wrap_recreates_contexts_for_repeated_runs(self):
+        class DummyTest(unittest.TestCase):
+            def test_repeated_contexts(self):
+                self.calls = getattr(self, "calls", 0) + 1
+
+        events = []
+
+        @contextlib.contextmanager
+        def ctx():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        # Use a CPU-capable backend so this test still exercises the wrapper on
+        # builds where the inductor backend is skipped by HAS_CUDA_AND_TRITON.
+        test_name = "test_repeated_contexts"
+        xfail_by_backend["inductor"][test_name] = None
+        test_contexts[test_name] = ctx
+        try:
+            wrapped = wrap_test_class(DummyTest)
+        finally:
+            del xfail_by_backend["inductor"][test_name]
+            del test_contexts[test_name]
+
+        test = wrapped(test_name)
+        test.test_repeated_contexts()
+        test.test_repeated_contexts()
+        self.assertEqual(test.calls, 2)
+        self.assertEqual(events, ["enter", "exit", "enter", "exit"])
+
+    def test_wrap_closes_contexts_on_exceptions(self):
+        events = []
+
+        @contextlib.contextmanager
+        def ctx():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        def fn(self):
+            events.append("body")
+            raise RuntimeError("boom")
+
+        wrapped = make_wrapped(fn, [ctx])
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            wrapped(self)
+        self.assertEqual(events, ["enter", "body", "exit"])
 
 
 known_graph_breaks_tests = {
@@ -5305,9 +5355,11 @@ known_graph_breaks_tests = {
 }
 
 test_contexts = {
-    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
-    "test_index_backward_does_not_save_tensor": config.patch(
-        capture_dynamic_output_shape_ops=True
+    "test_setitem_mask": functools.partial(
+        config.patch, capture_dynamic_output_shape_ops=True
+    ),
+    "test_index_backward_does_not_save_tensor": functools.partial(
+        config.patch, capture_dynamic_output_shape_ops=True
     ),
 }
 

@@ -1414,6 +1414,25 @@ print(t.is_pinned())
         self.assertEqual(external_result[0], 0)
         self.assertEqual(external_result[1], external_stream.cuda_stream)
 
+    def test_external_stream_wraps_null_handle(self):
+        # Regression for https://github.com/pytorch/pytorch/issues/182960
+        # ExternalStream(0) must wrap the NULL stream (handle 0x0), not return
+        # a pooled stream, and must behave identically to
+        # torch.cuda.get_stream_from_external(0).
+        device = torch.cuda.current_device()
+        external_stream = torch.cuda.ExternalStream(0, device=device)
+        from_get_stream_from_external = torch.cuda.get_stream_from_external(
+            0, device=device
+        )
+        default = torch.cuda.default_stream(device)
+
+        self.assertEqual(external_stream.cuda_stream, 0)
+        self.assertEqual(from_get_stream_from_external.cuda_stream, 0)
+        self.assertEqual(external_stream.cuda_stream, default.cuda_stream)
+
+        self.assertEqual(external_stream.device, from_get_stream_from_external.device)
+        self.assertEqual(external_stream.device, default.device)
+
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)

@@ -185,6 +185,23 @@ When a helper is justified, do not default to a leading underscore. Prefer a
 plain descriptive name such as `validate_sequence_repeat_count` unless the
 surrounding module consistently uses private helper names for the same pattern.
 
+Before reporting a gate as ready, audit any new imports and annotations for
+minimum-supported Python compatibility. Do not import typing features from the
+stdlib if they are newer than PyTorch's minimum supported Python; use
+`typing_extensions` instead. In particular, use
+`from typing_extensions import Self` rather than `from typing import Self`.
+If a Python 3.10 interpreter is available, run a cheap import smoke after source
+changes:
+
+```bash
+python3.10 - <<'PY'
+import torch._dynamo
+PY
+```
+
+If Python 3.10 is not available locally, report that explicitly and do the
+static import audit anyway.
+
 Run the single repro, the focused regression test, the affected CPython file,
 and the active gate subset needed by the plan. Before the gate commit, run the
 CPU fast validation loop:
@@ -241,6 +258,9 @@ Review for:
   helper is named like `_validate_sequence_repeat_count` without a local module
   convention or real private-helper reason; prefer a descriptive public-style
   helper name if the helper is kept.
+- Minimum Python compatibility regressions, especially new stdlib `typing`
+  imports or annotations that require a newer Python than PyTorch supports.
+  Prefer `typing_extensions` for compatibility aliases such as `Self`.
 - Markdown files staged for a gate commit
 - Accidental files, caches, logs, or scratch output
 - Test evidence that is too narrow for the claimed fix
