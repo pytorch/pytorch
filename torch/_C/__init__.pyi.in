@@ -2457,8 +2457,11 @@ class _CudaStreamBase(Stream):
     def synchronize(self) -> None: ...
     def priority_range(self) -> tuple[_int, _int]: ...
 
-# Defined in torch/csrc/cuda/Event.cpp
-class _CudaEventBase:
+# Defined in torch/csrc/cuda/Event.cpp.  At the Python C-API level
+# ``THCPEventType.tp_base = THPEventClass`` (see Event.cpp), so this
+# binding really does inherit from ``torch._C.Event``.  Declaring the
+# base here lets static checkers (pyrefly, mypy) see the relationship.
+class _CudaEventBase(torch._C.Event):
     device: _device
     cuda_event: _int
 

@@ -1,11 +1,11 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <iostream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -203,21 +203,17 @@ static variable_list call_function(
     const ivalue_list& packed_args,
     const c10::IValue& output_metadata) {
   // convert ivalue_list -> PyObject*
-  PyObject* py_packed_args =
-      PyTuple_New(static_cast<Py_ssize_t>(packed_args.size()));
-  for (const auto i : c10::irange(packed_args.size())) {
-    py::object obj = jit::toPyObject(packed_args[i]);
-    Py_INCREF(obj.ptr());
-    PyTuple_SET_ITEM(py_packed_args, i, obj.ptr());
+  py::tuple py_packed_args(packed_args.size());
+  size_t i = 0;
+  for (const auto& arg : packed_args) {
+    PyTuple_SET_ITEM(
+        py_packed_args.ptr(), i++, jit::toPyObject(arg).release().ptr());
   }
 
   // call the corresponding method on the py_compiler
   py::handle handle(py_compiler);
   py::object stuff = handle.attr(method_name)(
-      fn_name,
-      inputs,
-      py::handle(py_packed_args),
-      jit::toPyObject(output_metadata));
+      fn_name, inputs, py_packed_args, jit::toPyObject(output_metadata));
 
   // Convert the output from PyObject* to vector<Tensor>
   auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
@@ -344,9 +340,7 @@ static variable_list validate_outputs(
 
   torch::autograd::validate_outputs(
       value, new_outputs, [&](const std::string& msg) {
-        std::ostringstream ss;
-        ss << "[Compiled Autograd Tracing:]" << msg;
-        return ss.str();
+        return fmt::format("[Compiled Autograd Tracing:]{}", msg);
       });
   return new_outputs;
 }
@@ -374,8 +368,11 @@ struct PythonLogger {
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    PyObject* result =
-        PyObject_CallFunction(pyfunc.get(), "s", std::string(msg).c_str());
+    THPObjectPtr py_msg(PyUnicode_FromStringAndSize(msg.data(), msg.size()));
+    if (py_msg == nullptr) {
+      throw_python_error();
+    }
+    THPObjectPtr result(PyObject_CallOneArg(pyfunc.get(), py_msg.get()));
     if (result == nullptr) {
       throw_python_error();
     }
@@ -420,22 +417,17 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    std::ostringstream oss;
-    oss << "Cache miss due to new autograd node: " << node_name
-        << " with key size " << std::to_string(key.key_size)
-        << ", previous key sizes=[";
-
-    for (auto it = cached_keys.begin(); it != cached_keys.end(); it++) {
-      if (it->node_type != node_type) {
-        continue;
-      }
-      oss << it->key_size;
-      if (std::next(it) != cached_keys.end()) {
-        oss << ',';
+    std::vector<size_t> matching_sizes;
+    for (const auto& k : cached_keys) {
+      if (k.node_type == node_type) {
+        matching_sizes.push_back(k.key_size);
       }
     }
-    oss << ']';
-    std::string compile_reason = oss.str();
+    std::string compile_reason = fmt::format(
+        "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
+        node_name,
+        key.key_size,
+        fmt::join(matching_sizes, ","));
     log(PythonLogger::DEBUG, compile_reason);
     return compile_reason;
   }
@@ -443,16 +435,11 @@ struct VerboseLogger : public PythonLogger {
   std::string log_dynamic_shapes_miss(
       const std::vector<size_t>& new_dyn_sizes_idx,
       size_t all_dyn_sizes_len) const {
-    std::ostringstream oss;
-    oss << "Cache miss due to " << new_dyn_sizes_idx.size()
-        << " changed tensor shapes (total of " << all_dyn_sizes_len << "): ";
-    for (const auto i : c10::irange(new_dyn_sizes_idx.size() - 1)) {
-      oss << "sizes[" << std::to_string(new_dyn_sizes_idx[i]) << "], ";
-    }
-    oss << "sizes["
-        << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
-        << ']';
-    std::string recompile_reason = oss.str();
+    std::string recompile_reason = fmt::format(
+        "Cache miss due to {} changed tensor shapes (total of {}): sizes[{}]",
+        new_dyn_sizes_idx.size(),
+        all_dyn_sizes_len,
+        fmt::join(new_dyn_sizes_idx, "], sizes["));
     log(PythonLogger::DEBUG, recompile_reason);
     return recompile_reason;
   }
@@ -1271,8 +1258,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   }
 
   if (prior_compiler == nullptr) {
-    Py_INCREF(Py_None);
-    prior_compiler = Py_None;
+    prior_compiler = Py_NewRef(Py_None);
   }
   PyObject* prior = PyTuple_New(2);
   Py_INCREF(prior_dynamic);
