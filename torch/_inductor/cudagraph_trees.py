@@ -2069,6 +2069,8 @@ class CUDAGraphTreeManager:
 
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
+        self.warned_cudagraph_managed_leaf_grad: OrderedSet[FunctionID] = OrderedSet()
+        self.leaf_input_weakrefs: dict[int, weakref.ReferenceType[torch.Tensor]] = {}
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
@@ -2166,6 +2168,7 @@ class CUDAGraphTreeManager:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         self.mode = self.id_to_mode[function_id]
         self.compile_id = self.id_to_compile_id[function_id]
+        self._remember_leaf_inputs(new_inputs)
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -2179,6 +2182,85 @@ class CUDAGraphTreeManager:
     def set_to_running_backward(self) -> None:
         self.running_forwards_with_pending_backwards = False
         self.mode = CompilationMode.BACKWARD
+
+    def _remember_leaf_inputs(self, inputs: list[InputType]) -> None:
+        for key, inp_ref in list(self.leaf_input_weakrefs.items()):
+            if inp_ref() is None:
+                del self.leaf_input_weakrefs[key]
+
+        for inp in inputs:
+            if isinstance(inp, torch.Tensor) and inp.is_leaf and inp.requires_grad:
+                self.leaf_input_weakrefs[id(inp)] = weakref.ref(inp)
+
+    def _iter_live_leaf_inputs(self) -> Iterator[torch.Tensor]:
+        for key, inp_ref in list(self.leaf_input_weakrefs.items()):
+            inp = inp_ref()
+            if inp is None:
+                del self.leaf_input_weakrefs[key]
+                continue
+            yield inp
+
+    def _get_cudagraph_managed_leaf_grads(
+        self,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        assert self.current_node is not None
+
+        # AccumulateGrad can steal a backward output into a leaf input's .grad.
+        # Those graph-owned grad buffers must not be invalidated while the .grad
+        # slot is still holding them.
+        leaf_grads: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for inp in self._iter_live_leaf_inputs():
+            grad = inp.grad
+            if not isinstance(grad, torch.Tensor) or not grad.is_cuda:
+                continue
+
+            leaf_grads.append((inp, grad))
+
+        if not leaf_grads:
+            return []
+
+        live_storage_data_ptrs = OrderedSet(
+            storage_ref.data_ptr()
+            for storage_ref in self.current_node.path_live_weakrefs()
+        )
+        if not live_storage_data_ptrs:
+            return []
+
+        return [
+            (inp, grad)
+            for inp, grad in leaf_grads
+            if grad.untyped_storage().data_ptr() in live_storage_data_ptrs
+        ]
+
+    def _handle_cudagraph_managed_leaf_grads(self) -> bool:
+        graph_owned_leaf_grads = self._get_cudagraph_managed_leaf_grads()
+        if not graph_owned_leaf_grads:
+            return True
+
+        if not config.triton.cudagraph_clone_graph_owned_leaf_grads:
+            return False
+
+        for inp, grad in graph_owned_leaf_grads:
+            with torch.no_grad():
+                inp.grad = grad.clone(memory_format=torch.preserve_format)
+        return True
+
+    def _run_eager_due_to_cudagraph_managed_leaf_grad(
+        self, new_inputs: list[InputType], function_id: FunctionID
+    ) -> OutputType:
+        if (
+            function_id not in self.warned_cudagraph_managed_leaf_grad
+            or config.triton.cudagraph_or_error
+        ):
+            self.warned_cudagraph_managed_leaf_grad.add(function_id)
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs due to live leaf .grad tensors backed by "
+                "CUDAGraph output storage. Clear .grad or set "
+                "torch._inductor.config.triton."
+                "cudagraph_clone_graph_owned_leaf_grads=True "
+                "to clone these grads before CUDAGraph generation cleanup."
+            )
+        return self.ids_to_funcs[function_id].model(new_inputs)
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2230,16 +2312,25 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            if not self.try_end_curr_recording(function_id):
+                return self._run_eager_due_to_cudagraph_managed_leaf_grad(
+                    new_inputs, function_id
+                )
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            if not self.try_end_curr_warmup(function_id):
+                return self._run_eager_due_to_cudagraph_managed_leaf_grad(
+                    new_inputs, function_id
+                )
 
         if (
             self.path_state == ExecutionState.EXECUTION
             and self.can_start_new_generation()
         ):
-            self.try_end_curr_execution()
+            if not self.try_end_curr_execution():
+                return self._run_eager_due_to_cudagraph_managed_leaf_grad(
+                    new_inputs, function_id
+                )
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2319,7 +2410,10 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                if not self.try_end_curr_execution():
+                    return self._run_eager_due_to_cudagraph_managed_leaf_grad(
+                        new_inputs, function_id
+                    )
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2359,7 +2453,10 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            if not self.try_end_curr_execution():
+                return self._run_eager_due_to_cudagraph_managed_leaf_grad(
+                    new_inputs, function_id
+                )
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2561,7 +2658,7 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def try_end_curr_recording(self, function_id: FunctionID) -> bool:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2572,17 +2669,20 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
+            if not self._handle_cudagraph_managed_leaf_grads():
+                return False
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
-            return
+            return True
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
-            return
+            return True
 
         self.check_warn_on_unable_to_start_executing(function_id)
+        return True
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(self) -> bool:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2591,30 +2691,37 @@ class CUDAGraphTreeManager:
 
         assert not self.in_recording
         if self.current_node is None:
-            return
+            return True
 
         if self.can_start_new_generation():
+            if not self._handle_cudagraph_managed_leaf_grads():
+                return False
             if not self.current_node.all_outputs_are_dead():
                 self.apply_checkpoint_execution_state_in_allocator()
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
-            return
+            return True
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+        return True
+
+    def try_end_curr_warmup(self, function_id: FunctionID) -> bool:
         if self.can_start_new_generation():
+            if not self._handle_cudagraph_managed_leaf_grads():
+                return False
             self.dealloc_current_path_weakrefs()
             self.current_node = None
-            return
+            return True
 
         assert self.current_node is not None
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
-            return
+            return True
 
         self.check_warn_on_unable_to_start_executing(function_id)
+        return True
 
     def check_warn_on_unable_to_start_executing(self, function_id: FunctionID) -> None:
         "Warn if we in a potential loop where we are unable to hit fast path"

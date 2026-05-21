@@ -1850,6 +1850,12 @@ class triton:
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
 
+    # When CUDAGraph backward outputs have escaped into leaf .grad tensors,
+    # clone those grads before the next generation invalidates their backing
+    # storage. Disabling this skips CUDAGraphs until the user clears those
+    # grads instead.
+    cudagraph_clone_graph_owned_leaf_grads = True
+
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 
