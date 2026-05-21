@@ -97,11 +97,17 @@ def _reduce_op_for(dtype):
 
 
 def _make_kernel(
-    dtype, elem_bytes: int, N: int, chunk_elems: int, reduce_op, contig: bool
+    dtype,
+    elem_bytes: int,
+    N: int,
+    chunk_elems: int,
+    reduce_op,
+    contig: bool,
+    scale: bool,
 ):
     """Build a dtype-specialized kernel closure. dtype/elem_bytes/N
-    /chunk_elems/contig are Python-time constants that the preprocessor
-    folds at cute.compile time.
+    /chunk_elems/contig/scale are Python-time constants that the
+    preprocessor folds at cute.compile time.
 
     ``chunk_elems`` is baked in at compile time. The TMA descriptor
     built in ``_launch`` (via ``make_tiled_tma_atom`` on the source
@@ -120,6 +126,13 @@ def _make_kernel(
     ``out_row_stride`` arg so outer-strided outputs (e.g. slices) work.
     The TMA load always goes through the descriptor and doesn't use
     ``contig``.
+
+    When ``scale`` is True, after ``consumer_wait`` the driver thread
+    multiplies the chunk_elems smem buffer in place before the
+    bulk-reduce, followed by ``fence_view_async_shared`` so the
+    bulk-reduce sees the scaled values through the async proxy. The
+    ``alpha == 1`` fast path uses ``scale=False`` and avoids the smem
+    pass + proxy fence entirely.
     """
 
     chunk_bytes = chunk_elems * elem_bytes
@@ -135,6 +148,51 @@ def _make_kernel(
     # not a multiple of 128 (e.g. fp32 N=36 -> 144 B).
     stage_stride_elems = _round_up(chunk_elems, _SMEM_ALIGN_BYTES // elem_bytes)
 
+    # Split chunk_elems into a 32-aligned bulk + a < 32 tail. fp32
+    # row_bytes >= 16 allows chunk_elems == 4; bf16/fp16 allows
+    # chunk_elems == 8; neither dtype's chunk_elems is required to be
+    # a multiple of 32 (e.g. bf16 N=40 -> chunk_elems=40 hits
+    # bulk_slots=32, tail_slots=8). Both branches must work.
+    _bulk_slots = (chunk_elems // 32) * 32
+    _tail_slots = chunk_elems - _bulk_slots
+
+    @cute.jit
+    def _scale_smem(cbuf_ptr, alpha, dtype, lane_id):
+        """Multiply chunk_elems smem slots starting at cbuf_ptr by
+        ``alpha`` (cast to ``dtype``) using up to 32 warp lanes
+        cooperatively. The 32-aligned bulk is handled via a
+        (32, slots_per_lane) strided view -- each lane vector-loads
+        its column, multiplies, vector-stores -- and any tail of
+        chunk_elems % 32 slots is handled by the first ``_tail_slots``
+        lanes.
+
+        Caller is responsible for the post-pass synchronization before
+        any bulk-reduce reads these slots: a ``cute.arch.sync_warp()``
+        (so lane 0 sees every other lane's writes) and a
+        ``cute.arch.fence_view_async_shared()`` (so the async proxy
+        sees the writes).
+
+        Must be called outside any ``if lane_id == 0:`` gate so all
+        lanes participate.
+        """
+        alpha_t = dtype(alpha)
+        if const_expr(_bulk_slots > 0):
+            slots_per_lane = _bulk_slots // 32
+            buf_2d = cute.make_tensor(
+                cbuf_ptr,
+                cute.make_layout((32, slots_per_lane), stride=(1, 32)),
+            )
+            lane_slice = buf_2d[lane_id, None]
+            vals = lane_slice.load()
+            lane_slice.store(vals * alpha_t)
+        if const_expr(_tail_slots > 0):
+            if lane_id < Int32(_tail_slots):
+                slot = cute.make_tensor(
+                    cbuf_ptr + Int32(_bulk_slots) + lane_id, cute.make_layout(1)
+                )
+                slot[0] = slot[0] * alpha_t
+        cute.arch.fence_view_async_shared()
+
     @cute.kernel
     def _kernel(
         tma_atom: cute.CopyAtom,
@@ -143,10 +201,13 @@ def _make_kernel(
         mOut: cute.Tensor,
         chunks_per_cta: Int32,
         out_row_stride: Int64,
+        alpha: cute.Numeric,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, bidy, _ = cute.arch.block_idx()
         gdim_x, _, _ = cute.arch.grid_dim()
+        # Single warp per CTA; lane_id == tidx.
+        lane_id = tidx % Int32(32)
 
         # num_entries (M_src) comes from mIndex's shape; mIndex is 1D
         # of length M_src after host-side flattening.
@@ -222,30 +283,51 @@ def _make_kernel(
 
             chunk_idx = chunk_start
             while chunk_idx < chunk_end:
-                if tidx == Int32(0):
-                    r = Int64(mIndex[entry_id])
-                    # Bounds check: index values must be valid output
-                    # rows. Compiling with ``--enable-assertions`` turns
-                    # this into a device-side trap; otherwise it folds
-                    # away. Driver thread only -- no need to replicate
-                    # the check across all 32 lanes.
+                # All 32 lanes execute the loop body in lockstep. The
+                # mbarrier ops with arrive_count=1 (producer_acquire,
+                # consumer_release) are gated on lane 0 so we don't
+                # over-arrive. Per-thread ops (consumer_wait,
+                # mbarrier_wait inside) and the cute.copy TMA load
+                # (which elects internally per CuTeDSL contract) run
+                # on all 32 lanes; this keeps the warp converged so
+                # sync_warp + warp-cooperative scale work.
+                # Driver-thread-only ops (bulk-reduce gmem issue) stay
+                # lane-0-gated. mIndex[entry_id] is read by all lanes
+                # (uniform load, coalesces) but the bounds assert is
+                # lane-0-only -- 32 redundant trap checks per row would
+                # be 32x the assertion cost under --enable-assertions.
+                r = Int64(mIndex[entry_id])
+                if lane_id == Int32(0):
                     cute_testing.assert_(r >= Int64(0))
                     cute_testing.assert_(r < Int64(mOut.shape[0]))
 
-                    pipe.producer_acquire(producer_state)
-                    cute.copy(
-                        tma_atom,
-                        tma_gmem[None, entry_id, chunk_idx],
-                        tma_smem[None, producer_state.index],
-                        tma_bar_ptr=pipe.producer_get_barrier(producer_state),
-                    )
-                    pipe.producer_commit(producer_state)
-                    producer_state.advance()
+                # producer_acquire on ALL lanes -- stock
+                # PipelineTmaAsync uses elect_one() internally for the
+                # arrive_and_expect_tx, and elect.sync requires the
+                # warp to be converged. Calling from `if lane_id == 0`
+                # would deadlock.
+                pipe.producer_acquire(producer_state)
+                cute.copy(
+                    tma_atom,
+                    tma_gmem[None, entry_id, chunk_idx],
+                    tma_smem[None, producer_state.index],
+                    tma_bar_ptr=pipe.producer_get_barrier(producer_state),
+                )
+                pipe.producer_commit(producer_state)  # no-op for TMA
+                producer_state.advance()
 
-                    if pair_count > Int32(0):
-                        pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf[None, consumer_state.index].iterator
+                if pair_count > Int32(0):
+                    pipe.consumer_wait(consumer_state)
+                    cbuf_ptr = sBuf[None, consumer_state.index].iterator
+                    if const_expr(scale):
+                        # Warp-cooperative scale: each lane scales a
+                        # strided subset of the chunk's smem slots,
+                        # then sync_warp so lane 0's bulk-reduce sees
+                        # every lane's writes via the async proxy.
+                        _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
+                        cute.arch.sync_warp()
 
+                    if lane_id == Int32(0):
                         # Partial-chunk handling: actual valid element
                         # count is min(chunk_elems, N - off). TMA
                         # OOB-clamped the tail to 0 in smem, we reduce
@@ -262,22 +344,25 @@ def _make_kernel(
                         cute.arch.cp_async_bulk_commit_group()
                         cute.arch.cp_async_bulk_wait_group(0, read=False)
                         pipe.consumer_release(consumer_state)
-                        consumer_state.advance()
+                    consumer_state.advance()
 
-                    prev_chunk_idx = chunk_idx
-                    prev_r = r
-                    pair_count = pair_count + Int32(1)
+                prev_chunk_idx = chunk_idx
+                prev_r = r
+                pair_count = pair_count + Int32(1)
 
                 chunk_idx = chunk_idx + Int32(1)
 
             base = base + gdim_x
 
         # Epilogue: drain the last outstanding TMA load.
-        if tidx == Int32(0):
-            if pair_count > Int32(0):
-                pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf[None, consumer_state.index].iterator
+        if pair_count > Int32(0):
+            pipe.consumer_wait(consumer_state)
+            cbuf_ptr = sBuf[None, consumer_state.index].iterator
+            if const_expr(scale):
+                _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
+                cute.arch.sync_warp()
 
+            if lane_id == Int32(0):
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
                 if cur_elems > Int32(chunk_elems):
@@ -301,6 +386,7 @@ def _make_kernel(
         grid_x: Int32,
         grid_y: Int32,
         out_row_stride: Int64,
+        alpha: cute.Numeric,
     ):
         # Build the tile-mode TMA descriptor. Shape (M_src, N) comes
         # from mSrc; TMA clamps OOB column reads to 0, so rows with
@@ -318,6 +404,7 @@ def _make_kernel(
             mOut,
             chunks_per_cta,
             out_row_stride,
+            alpha,
         ).launch(
             grid=[grid_x, grid_y, 1],
             block=[_THREADS_PER_CTA, 1, 1],
@@ -341,13 +428,19 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     return chunk_bytes // elem_bytes
 
 
+def _alpha_dtype_for(torch_dtype: torch.dtype):
+    """Alpha is passed as fp32 across the ABI; tvm_ffi doesn't support
+    fp16/bf16 scalar args. Kernel casts to src dtype inside."""
+    return Float32
+
+
 @jit_cache
-def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
+def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     chunk_elems = _chunk_elems_for(torch_dtype, N)
     reduce_op = _reduce_op_for(dtype)
-    launcher = _make_kernel(dtype, elem_bytes, N, chunk_elems, reduce_op, contig)
+    launcher = _make_kernel(dtype, elem_bytes, N, chunk_elems, reduce_op, contig, scale)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
@@ -358,6 +451,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
+    alpha_dtype = _alpha_dtype_for(torch_dtype)
     return cute.compile(
         launcher,
         mSrc_fake,
@@ -368,6 +462,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
         Int32(0),  # grid_x
         Int32(0),  # grid_y
         Int64(0),  # out_row_stride
+        alpha_dtype(0.0),
         # ``--enable-assertions`` keeps the ``cute_testing.assert_``
         # bounds checks on ``r`` live in production. Cost is roughly
         # +1-10% (geomean +7.7%) on most shapes; the safety net is
@@ -430,21 +525,27 @@ def tma_scatter_add_into(
     out: torch.Tensor,
     index_1d: torch.Tensor,
     src: torch.Tensor,
+    alpha: float = 1.0,
 ) -> None:
-    """In-place: ``out[index_1d[i], :] += src[i, :]`` for every i.
+    """In-place: ``out[index_1d[i], :] += alpha * src[i, :]`` for every i.
 
     ``out`` / ``src`` are 2D with inner-dim stride 1 (outer row stride
     can differ from N, e.g. a slice of a wider buffer). ``index_1d`` is
     1D int64 of length M_src. ``row_bytes = N * elem_size`` must be a
     multiple of 16; the host cond enforces this.
+
+    ``alpha == 1.0`` dispatches to the non-scaling variant (no smem
+    scale pass, no proxy fence).
     """
     M, N = src.shape
     chunk_elems = _chunk_elems_for(src.dtype, N)
     contig = src.stride(0) == N and out.stride(0) == N
-    compiled = _compile_tma_scatter(src.dtype, N, contig)
+    scale = alpha != 1.0
+    compiled = _compile_tma_scatter(src.dtype, N, contig, scale)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
 
     grid_x, grid_y, chunks_per_cta = _plan_grid(M, N, chunk_elems, sm)
+    alpha_dtype = _alpha_dtype_for(src.dtype)
     compiled(
         src,
         index_1d,
@@ -453,4 +554,5 @@ def tma_scatter_add_into(
         grid_x,
         grid_y,
         out.stride(0),
+        alpha_dtype(float(alpha)),
     )
