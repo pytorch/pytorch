@@ -6097,11 +6097,12 @@ class Scheduler:
             cur_memory=cur_memory,
         )
 
-        # Compare against the *original* baseline peak (not the running
-        # peak) to cap total drift across many accepts.
         original_peak = mem_ctx.baseline_peak
-        new_peak = max(mem_ctx.running_peak, region_peak)
-        delta = new_peak - original_peak
+        live_before = mem_ctx.baseline_live_before
+        region_baseline_peak = max(live_before[region_start : region_end + 2])
+        region_growth = max(0, region_peak - region_baseline_peak)
+        projected_running_peak = mem_ctx.running_peak + region_growth
+        delta = projected_running_peak - original_peak
         abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
         pct_thr = config.combo_kernel_peak_memory_pct_threshold
         limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
@@ -6114,8 +6115,9 @@ class Scheduler:
         if not accept:
             log.debug(
                 "ComboKernels memory-aware: rejected %d nodes "
-                "(peak delta %+d bytes = %.3f%%)",
+                "(region growth %+d, projected delta %+d bytes = %.3f%%)",
                 len(group_nodes),
+                region_growth,
                 delta,
                 pct,
             )
@@ -6123,12 +6125,13 @@ class Scheduler:
 
         log.info(
             "ComboKernels memory-aware: accepted %d nodes "
-            "(peak delta %+d bytes = %.3f%%)",
+            "(region growth %+d, projected delta %+d bytes = %.3f%%)",
             len(group_nodes),
+            region_growth,
             delta,
             pct,
         )
-        mem_ctx.running_peak = new_peak
+        mem_ctx.running_peak = projected_running_peak
         return combo_node, combo_step
 
     def _try_combo_with_halving(
