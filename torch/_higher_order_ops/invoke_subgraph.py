@@ -1027,7 +1027,29 @@ def _(ctx, subgraph, identifier, *operands):
 
     unwrapped_operands = ctx.unwrap_tensors(operands)
 
-    hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
+    functionalize_schema = None
+    schema_cache_key = None
+    if invoke_subgraph_cache:
+        schema_cache_key = (
+            id(subgraph),
+            identifier,
+            tuple(type(operand) for operand in operands),
+        )
+        functionalize_schema = invoke_subgraph_cache.get_functionalize_schema_entry(
+            schema_cache_key
+        )
+
+    if functionalize_schema is None:
+        hop_instance = HopInstance.create(
+            invoke_subgraph, subgraph, identifier, *operands
+        )
+        if invoke_subgraph_cache and schema_cache_key is not None:
+            invoke_subgraph_cache.add_functionalize_schema_entry(
+                schema_cache_key, hop_instance._schema
+            )
+    else:
+        hop_instance = HopInstance(invoke_subgraph, functionalize_schema)
+
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
         # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
