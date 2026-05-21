@@ -8182,9 +8182,9 @@ class UserDefinedTritonKernel(ExternKernel):
             )
         }
 
-        tracked = OrderedSet([
-            dep.name for dep in self.formal_accesses.read_writes.reads_and_writes()
-        ])
+        tracked = OrderedSet(
+            [dep.name for dep in self.formal_accesses.read_writes.reads_and_writes()]
+        )
         reads = OrderedSet(
             dep.rename(formal_to_inductor)
             for dep in self.formal_accesses.read_writes.reads_and_writes()
