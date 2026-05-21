@@ -916,7 +916,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     deviceTypeToBackendType_[deviceType] = backendType;
     deviceTypes_.insert(deviceType);
     // if the backendType is already set then reuse it for this device
-    if (backendTypeToBackend_.contains(backendType)) {
+    if (backendTypeToBackend_.find(backendType) !=
+        backendTypeToBackend_.end()) {
       auto existingBackend = backendTypeToBackend_.at(backendType);
       deviceTypeToBackend_[deviceType] = existingBackend;
       TORCH_CHECK(

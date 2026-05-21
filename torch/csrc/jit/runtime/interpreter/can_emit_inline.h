@@ -80,7 +80,7 @@ struct CanEmitInline {
 
   Node* scanNode(Node* n) {
     // don't bother to scan nodes we have already determined to be inline
-    if (can_emit_inline_.contains(n)) {
+    if (can_emit_inline_.count(n)) {
       return nullptr;
     }
     for (auto b : n->blocks()) {
