@@ -6627,6 +6627,23 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+
+        def add_nested_ir_reads(value: Any) -> None:
+            if isinstance(value, IRNode):
+                read_writes.reads.add(dependencies.StarDep(value.get_name()))
+            elif isinstance(value, dict):
+                for nested_value in value.values():
+                    add_nested_ir_reads(nested_value)
+            elif isinstance(value, (list, tuple)):
+                for nested_value in value:
+                    add_nested_ir_reads(nested_value)
+
+        add_nested_ir_reads(self.constant_args)
+        add_nested_ir_reads(self.kwargs)
+        return read_writes
+
     def collect_arg_kwarg_properties(self) -> None:
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
