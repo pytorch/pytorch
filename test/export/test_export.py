@@ -16841,26 +16841,22 @@ def forward(self, x):
                     batch_first=self.batch_first,
                 )
 
-            def forward(self, input1: torch.Tensor, mask: torch.Tensor):
+            def forward(self, input1: torch.Tensor, attn_mask: torch.Tensor):
                 x, _ = self.self_attention(
                     input1,
                     input1,
                     input1,
-                    key_padding_mask=~mask,
+                    attn_mask=attn_mask,
                     need_weights=False,
                 )
                 return x
 
         model = Foo().eval()
+        attn_mask = torch.zeros(7, 7, device="cpu")
+        attn_mask[:, -2:] = -10000.0
         inps = (
             torch.randn(2, 7, 16, device="cpu"),
-            torch.tensor(
-                [
-                    [True, True, True, True, True, False, False],
-                    [True, True, True, False, False, False, False],
-                ],
-                device="cpu",
-            ),
+            attn_mask,
         )
 
         with torch.no_grad():
@@ -16883,13 +16879,17 @@ def forward(self, x):
             ):
                 has_sdpa_permute_reshape = True
                 break
-        self.assertTrue(has_sdpa_permute_reshape)
+
+        # Generated export test variants patch export() to run extra transforms,
+        # such as run_decompositions(), which may legitimately rewrite reshape.
+        if export is torch.export.export:
+            self.assertTrue(has_sdpa_permute_reshape)
 
         exported = ep.module()
         with torch.no_grad():
             self.assertEqual(exported(*inps), model(*inps))
 
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and export is torch.export.export:
             cuda_inps = tuple(inp.cuda() for inp in inps)
             with torch.no_grad():
                 self.assertEqual(exported.cuda()(*cuda_inps), model.cuda()(*cuda_inps))
