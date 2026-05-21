@@ -93,23 +93,25 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
-    def _print_Min(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::min only supported for 2 args")
+    def _print_min_max(self, expr: sympy.Expr, fn: str) -> str:
         # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
+        args = list(map(self._print, expr.args))
+        result = args[0]
+        for arg in args[1:]:
+            result = self._print_binary_min_max(result, arg, fn)
+        return result
+
+    @staticmethod
+    def _print_binary_min_max(a: str, b: str, fn: str) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::min({typecast_a}, {typecast_b})"
+        return f"metal::{fn}({typecast_a}, {typecast_b})"
+
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        return self._print_min_max(expr, "min")
 
     def _print_Max(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::max only supported for 2 args")
-        # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
-        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
-        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::max({typecast_a}, {typecast_b})"
+        return self._print_min_max(expr, "max")
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -927,8 +929,11 @@ class MetalKernel(SIMDKernel):
                 )
             )
             # And loop codegen
-            while self.multistage_reduction_entry:
-                self.multistage_reduction_entry.pop().cache_clear()
+            roots = [e.root for e in self.multistage_reduction_entry]
+            self.multistage_reduction_entry.clear()
+            for node in self.range_tree_nodes.values():
+                if any(node.root is r for r in roots):
+                    node.cache_clear()
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
