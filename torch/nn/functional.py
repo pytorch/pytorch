@@ -36,10 +36,8 @@ from torch.overrides import (
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
-from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
-
-
 if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3666,7 +3664,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
-    options: LinearCrossEntropyOptions | None = None,
+    options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 

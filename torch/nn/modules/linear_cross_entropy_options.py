@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import torch
 
@@ -7,18 +7,26 @@ import torch
 __all__ = ["LinearCrossEntropyOptions"]
 
 
-# Per-(device_type, input_dtype) "auto" picks for (acc_policy,
-# chunking_method). Established by sweeping against an fp64 reference
-# jacobian; CPU picks "accurate" because it's the only policy that
-# stages the weight-grad mm through fp32 (20-50x vs. CPU emulation).
-# acc_dtype is resolved separately by ``_resolve_auto_acc_dtype``.
-_AUTO_DEFAULTS: dict[tuple[str, torch.dtype], tuple[str, str]] = {
-    ("cuda", torch.bfloat16): ("compact", "aspect_ratio:2"),
-    ("cuda", torch.float16): ("compact", "aspect_ratio:2"),
-    ("cpu", torch.bfloat16): ("accurate", "aspect_ratio"),
-    ("cpu", torch.float16): ("accurate", "aspect_ratio"),
+class _AutoDefault(NamedTuple):
+    acc_policy: str
+    chunking_method: str
+
+
+# Defaults filled in for the ``"auto"`` sentinel of ``acc_policy`` and
+# ``chunking_method``, keyed by ``(device_type, input_dtype)``. Each
+# pick is the Pareto-best throughput / accuracy trade-off observed in
+# a sweep against an fp64 reference jacobian. CPU entries pick
+# ``"accurate"`` because it is the only chunked policy that runs the
+# weight-grad mm in fp32 on CPU; the others fall through to CPU's
+# emulated low-precision matmul (20-50x slower). Hardware-conditional
+# ``acc_dtype`` is resolved separately by ``_resolve_auto_acc_dtype``.
+_AUTO_DEFAULTS: dict[tuple[str, torch.dtype], _AutoDefault] = {
+    ("cuda", torch.bfloat16): _AutoDefault("compact", "aspect_ratio:2"),
+    ("cuda", torch.float16): _AutoDefault("compact", "aspect_ratio:2"),
+    ("cpu", torch.bfloat16): _AutoDefault("accurate", "aspect_ratio"),
+    ("cpu", torch.float16): _AutoDefault("accurate", "aspect_ratio"),
 }
-_AUTO_FALLBACK: tuple[str, str] = ("compact", "aspect_ratio:2")
+_AUTO_FALLBACK: _AutoDefault = _AutoDefault("compact", "aspect_ratio:2")
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
