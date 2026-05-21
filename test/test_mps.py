@@ -11328,8 +11328,10 @@ class TestSDPA(TestCaseMPS):
             attn_mask = torch.ones(B, NH_q, qL, kL, dtype=torch.bool, device="mps")
             attn_mask[..., kL // 2:] = False
         elif variant == "float_mask":
+            # Use a moderate negative value: -1e4 saturates exp() to 0 and
+            # hides scaling bugs in the softmax (e.g. missing log2(e) factor).
             attn_mask = torch.zeros(B, NH_q, qL, kL, dtype=dtype, device="mps")
-            attn_mask[..., kL // 2:] = -1e4
+            attn_mask[..., kL // 2:] = -3.0
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -11371,7 +11373,7 @@ class TestSDPA(TestCaseMPS):
             mask[..., kL // 2:] = False
         elif mask_layout == "sliced":
             mask_full = torch.zeros(B, NH, qL, kL * 2 + 1, dtype=dtype, device="mps")
-            mask_full[..., 1 + kL // 2:1 + kL] = -1e4
+            mask_full[..., 1 + kL // 2:1 + kL] = -3.0
             mask = mask_full[..., 1:kL + 1]
         else:
             raise ValueError(f"Unknown mask_layout: {mask_layout}")
