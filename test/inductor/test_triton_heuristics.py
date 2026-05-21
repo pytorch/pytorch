@@ -1,10 +1,18 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import io
 import os
+import pickle
+import queue
+import socket
+import stat
 import sys
 import tempfile
+import threading
+import time
 import unittest
+from concurrent.futures import Future
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
@@ -594,6 +602,629 @@ class TestCachingAutotunerPlugin(TestCase):
         revived = CachingAutotuner.__new__(CachingAutotuner)
         revived.__setstate__(state)
         self.assertEqual(revived._plugins, [])
+
+
+class TestPipelineCachingAutotunerPlugin(TestCase):
+    """Synchronization between ``_bg_drain_kernel`` and the plugin's
+    ``pre_dispatch`` hook on multi-config, single-config, overlap, and
+    error paths."""
+
+    device_type = GPU_TYPE
+
+    @staticmethod
+    def _make_handle(
+        *,
+        num_configs,
+        drain_done=True,
+        drain_exc=None,
+        push_launcher_end=True,
+    ):
+        """Build a ``PipelineCachingAutotunerHandle`` with the drain
+        future pre-resolved per the simulation knobs."""
+        from torch._inductor.async_compile import (
+            _LAUNCHER_END,
+            PipelineCachingAutotunerHandle,
+        )
+
+        drain_fut: Future = Future()
+        if drain_exc is not None:
+            drain_fut.set_exception(drain_exc)
+        elif drain_done:
+            drain_fut.set_result(None)
+        launcher_q: queue.Queue = queue.Queue()
+        if push_launcher_end:
+            launcher_q.put(_LAUNCHER_END)
+        return PipelineCachingAutotunerHandle(
+            launcher_q=launcher_q,
+            drain_future=drain_fut,
+            num_configs=num_configs,
+            kernel_name="test_kernel",
+        )
+
+    def _make_autotuner(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        return CachingAutotuner(**args)
+
+    def _make_plugin(self):
+        from torch._inductor.async_compile import (
+            _make_pipeline_caching_autotuner_plugin,
+        )
+
+        return _make_pipeline_caching_autotuner_plugin()
+
+    def test_pre_dispatch_no_op_without_handle(self):
+        """No stashed handle → ``pre_dispatch`` is a no-op (returns
+        ``DEFER``)."""
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        result = plugin.pre_dispatch(autotuner, stream=0)
+        self.assertIs(result, DEFER)
+
+    def test_pre_dispatch_single_config_waits_for_drain_no_bench(self):
+        """Single-config kernel: plugin awaits ``drain_future`` and
+        proceeds without bench. ``run()``'s standard flow then sees
+        ``len(launchers) == 1`` and skips autotune."""
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        launcher = MagicMock()
+        autotuner.launchers = [launcher]
+        autotuner.compile_results = [MagicMock()]
+        autotuner._pipeline_caching_autotuner_handle = self._make_handle(
+            num_configs=1
+        )
+        autotuner.bench = MagicMock()
+
+        result = plugin.pre_dispatch(autotuner, stream=0)
+
+        self.assertIs(result, DEFER)
+        autotuner.bench.assert_not_called()
+        self.assertEqual(autotuner.launchers, [launcher])
+        self.assertIsNone(autotuner._pipeline_caching_autotuner_handle)
+
+    def test_pre_dispatch_multi_config_drains_launcher_q_picks_winner(self):
+        """Multi-config kernel: plugin pulls launchers from
+        ``handle.launcher_q``, benches each via ``_bench_launchers``,
+        and ``_finalize_autotune_winner`` reduces ``autotuner.launchers``
+        to ``[winner]``."""
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        launcher_fast, launcher_slow = MagicMock(), MagicMock()
+        launcher_fast.cache_hash = "lf"
+        launcher_slow.cache_hash = "ls"
+        autotuner.launchers = [launcher_fast, launcher_slow]
+        autotuner.compile_results = [MagicMock(), MagicMock()]
+        handle = self._make_handle(num_configs=2)
+        for launcher in (launcher_fast, launcher_slow):
+            # Insert before the LAUNCHER_END that _make_handle pushed.
+            handle.launcher_q.queue.insert(-1, launcher)
+        autotuner._pipeline_caching_autotuner_handle = handle
+        autotuner.bench = MagicMock(side_effect=[1.0, 5.0])
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.save_cache_hook = None
+        autotuner.get_device_interface = MagicMock()
+
+        with patch("torch._dynamo.device_interface.DeviceGuard"):
+            result = plugin.pre_dispatch(autotuner, stream=0)
+
+        self.assertIs(result, DEFER)
+        self.assertEqual(autotuner.bench.call_count, 2)
+        self.assertEqual(autotuner.launchers, [launcher_fast])
+        self.assertIsNone(autotuner._pipeline_caching_autotuner_handle)
+
+    def test_pre_dispatch_multi_config_overlaps_with_bg_drain(self):
+        """Plugin consumes ``launcher_q`` blocking-style — it begins
+        benching as soon as the FIRST launcher arrives, without waiting
+        for the bg drain to finish making all of them."""
+        from torch._inductor.async_compile import _LAUNCHER_END
+        from torch._inductor.runtime.triton_heuristics import DEFER
+
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        launcher_a, launcher_b = MagicMock(), MagicMock()
+        launcher_a.cache_hash = "la"
+        launcher_b.cache_hash = "lb"
+        autotuner.launchers = [launcher_a, launcher_b]
+        autotuner.compile_results = [MagicMock(), MagicMock()]
+        handle = self._make_handle(num_configs=2, push_launcher_end=False)
+        autotuner._pipeline_caching_autotuner_handle = handle
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.save_cache_hook = None
+        autotuner.get_device_interface = MagicMock()
+
+        bench_results = [1.0, 5.0]
+        bench_call_observed = threading.Event()
+
+        def bench_side_effect(*args, **kwargs):
+            bench_call_observed.set()
+            return bench_results.pop(0)
+
+        autotuner.bench = MagicMock(side_effect=bench_side_effect)
+
+        def pusher():
+            handle.launcher_q.put(launcher_a)
+            # Wait until the plugin has actually started benching
+            # launcher_a before we push launcher_b — proves the plugin
+            # didn't block waiting for all launchers up-front.
+            bench_call_observed.wait(timeout=2.0)
+            handle.launcher_q.put(launcher_b)
+            handle.launcher_q.put(_LAUNCHER_END)
+
+        t = threading.Thread(target=pusher, daemon=True)
+        t.start()
+
+        with patch("torch._dynamo.device_interface.DeviceGuard"):
+            result = plugin.pre_dispatch(autotuner, stream=0)
+        t.join(timeout=2.0)
+
+        self.assertIs(result, DEFER)
+        self.assertEqual(autotuner.bench.call_count, 2)
+        self.assertEqual(autotuner.launchers, [launcher_a])
+
+    def test_pre_dispatch_reraises_drain_exception(self):
+        """If the bg drainer caught an exception, ``drain_future`` is
+        resolved with it (and ``_LAUNCHER_END`` is pushed so the plugin's
+        bench loop terminates). The plugin re-raises via
+        ``drain_future.result()`` so the user sees the failure."""
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        autotuner.launchers = []
+        autotuner.compile_results = []
+        autotuner._pipeline_caching_autotuner_handle = self._make_handle(
+            num_configs=1, drain_exc=RuntimeError("boom")
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            plugin.pre_dispatch(autotuner, stream=0)
+
+    def test_pre_dispatch_raises_when_zero_results_streamed(self):
+        """Worker-side total-failure surfaces ``NoTritonConfigsError``
+        when the bg drainer ends with no compile_results AND no launchers."""
+        from torch._inductor.runtime.triton_heuristics import (
+            NoTritonConfigsError,
+        )
+
+        plugin = self._make_plugin()
+        autotuner = self._make_autotuner()
+        autotuner.launchers = []
+        autotuner.compile_results = []
+        autotuner._pipeline_caching_autotuner_handle = self._make_handle(
+            num_configs=1
+        )
+
+        with self.assertRaises(NoTritonConfigsError):
+            plugin.pre_dispatch(autotuner, stream=0)
+
+
+class TestStreamingPickler(TestCase):
+    """Wire-format coverage for ``_StreamingPickler`` /
+    ``_StreamingUnpickler``: every object the persistent_id callback
+    substitutes must round-trip to ``None`` on the parent side, and
+    everything else must pass through untouched."""
+
+    @staticmethod
+    def _round_trip(obj):
+        from torch._inductor.runtime.compile_tasks import (
+            _StreamingPickler,
+            _StreamingUnpickler,
+        )
+
+        buf = io.BytesIO()
+        _StreamingPickler(buf, protocol=pickle.HIGHEST_PROTOCOL).dump(obj)
+        buf.seek(0)
+        return _StreamingUnpickler(buf).load()
+
+    def test_rlock_substituted_with_none(self):
+        loaded = self._round_trip({"lock": threading.RLock(), "value": 42})
+        self.assertIsNone(loaded["lock"])
+        self.assertEqual(loaded["value"], 42)
+
+    def test_module_substituted_with_none(self):
+        loaded = self._round_trip({"mod": os, "name": "hello"})
+        self.assertIsNone(loaded["mod"])
+        self.assertEqual(loaded["name"], "hello")
+
+    def test_dyn_module_function_substituted_with_none(self):
+        from types import ModuleType
+
+        from torch._inductor.runtime.compile_tasks import (
+            _DYN_KERNEL_MODULE_PREFIX,
+        )
+
+        fake_mod_name = f"{_DYN_KERNEL_MODULE_PREFIX}fake_test_kernel"
+        fake_mod = ModuleType(fake_mod_name)
+        sys.modules[fake_mod_name] = fake_mod
+        try:
+            exec("def fake_kernel(): pass", fake_mod.__dict__)
+            loaded = self._round_trip({"fn": fake_mod.fake_kernel, "value": "x"})
+            self.assertIsNone(loaded["fn"])
+            self.assertEqual(loaded["value"], "x")
+        finally:
+            del sys.modules[fake_mod_name]
+
+    def test_normal_function_preserved(self):
+        # math.sqrt is a builtin, importable on the parent.
+        import math
+
+        loaded = self._round_trip({"fn": math.sqrt, "value": 9})
+        self.assertIs(loaded["fn"], math.sqrt)
+        self.assertEqual(loaded["value"], 9)
+
+    def test_unknown_persistent_id_raises(self):
+        from torch._inductor.runtime.compile_tasks import _StreamingUnpickler
+
+        class BadPickler(pickle.Pickler):
+            def persistent_id(self, obj):
+                if isinstance(obj, list):
+                    return ("bogus_id",)
+                return None
+
+        buf = io.BytesIO()
+        BadPickler(buf, protocol=pickle.HIGHEST_PROTOCOL).dump({"data": [1, 2]})
+        buf.seek(0)
+        with self.assertRaises(pickle.UnpicklingError):
+            _StreamingUnpickler(buf).load()
+
+
+class TestStreamingTransport(TestCase):
+    """Process-wide shared AF_UNIX listener: worker connects, sends per-kernel
+    id to identify itself to the dispatcher, streams the wire protocol
+    (_Kernel / _Success / _Failure / _Done). Same-UID trust model -- id is
+    identification only, not authentication."""
+
+    @staticmethod
+    def _fake_worker(sock_path, kernel_id, messages):
+        """Mimics _stream_compile_triton: connect + send kernel id + send each
+        wire-protocol message via _streaming_send."""
+        from multiprocessing.connection import Connection
+
+        from torch._inductor.runtime.compile_tasks import _streaming_send
+
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sock_path)
+        sock.sendall(kernel_id)
+        conn = Connection(sock.detach())
+        try:
+            for m in messages:
+                _streaming_send(conn, m)
+        finally:
+            conn.close()
+
+    def test_listener_round_trip(self):
+        """Register a kernel, connect a fake worker that sends id +
+        _Kernel + 2 _Success + _Done. Parent reads them through
+        _streaming_decode and dispatches."""
+        from multiprocessing.connection import Connection
+
+        from torch._inductor.async_compile import _setup_streaming_listener
+        from torch._inductor.runtime.compile_tasks import (
+            _Done,
+            _Kernel,
+            _streaming_decode,
+            _Success,
+        )
+
+        sock_path, kernel_id, conn_future = _setup_streaming_listener("k")
+        outgoing = [
+            _Kernel("fake-kernel-payload"),
+            _Success("result-1"),
+            _Success("result-2"),
+            _Done(),
+        ]
+        t = threading.Thread(
+            target=self._fake_worker,
+            args=(sock_path, kernel_id, outgoing),
+            daemon=True,
+        )
+        t.start()
+        conn_sock = conn_future.result(timeout=10.0)
+        parent = Connection(conn_sock.detach())
+        try:
+            seen = []
+            while True:
+                msg = _streaming_decode(parent.recv_bytes())
+                seen.append(msg)
+                if isinstance(msg, _Done):
+                    break
+            self.assertIsInstance(seen[0], _Kernel)
+            self.assertEqual(seen[0].kernel, "fake-kernel-payload")
+            self.assertEqual(
+                [m.result for m in seen[1:-1] if isinstance(m, _Success)],
+                ["result-1", "result-2"],
+            )
+            self.assertIsInstance(seen[-1], _Done)
+        finally:
+            parent.close()
+        t.join(timeout=2.0)
+
+    def test_setup_streaming_listener_unique_per_kernel_state(self):
+        """Each call shares the same listener path but returns a unique id
+        and Future. Listener path is owner-only (0600)."""
+        from torch._inductor.async_compile import (
+            _setup_streaming_listener,
+            _STREAMING_KERNEL_ID_SIZE,
+        )
+
+        path1, id1, fut1 = _setup_streaming_listener("k1")
+        path2, id2, fut2 = _setup_streaming_listener("k2")
+        self.assertEqual(path1, path2)  # shared listener
+        self.assertNotEqual(id1, id2)
+        self.assertEqual(len(id1), _STREAMING_KERNEL_ID_SIZE)
+        self.assertIsNot(fut1, fut2)
+        self.assertEqual(stat.S_IMODE(os.stat(path1).st_mode), 0o600)
+
+    def test_unknown_kernel_id_dropped(self):
+        """Connecting with an id not in the registry: dispatcher silently
+        drops the connection (no kernel waiting)."""
+        from torch._inductor.async_compile import (
+            _ensure_shared_listener,
+            _STREAMING_KERNEL_ID_SIZE,
+        )
+
+        sock_path = _ensure_shared_listener()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sock_path)
+        sock.sendall(b"\x00" * _STREAMING_KERNEL_ID_SIZE)  # never registered
+        # Dispatcher closes the connection; reading should hit EOF.
+        sock.settimeout(5.0)
+        data = sock.recv(1)
+        self.assertEqual(data, b"")
+        sock.close()
+
+    def test_short_read_on_kernel_id_dropped(self):
+        """Worker connects but sends fewer than ``_STREAMING_KERNEL_ID_SIZE``
+        bytes then closes. Dispatcher drops the connection without crashing
+        and continues serving subsequent connections normally."""
+        from torch._inductor.async_compile import (
+            _ensure_shared_listener,
+            _setup_streaming_listener,
+            _STREAMING_KERNEL_ID_SIZE,
+        )
+
+        sock_path = _ensure_shared_listener()
+        # Send a half-sized id then close. The dispatcher's recv loop sees
+        # the EOF mid-read and raises OSError("short read on kernel id"),
+        # which the loop catches + closes the conn.
+        bad = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        bad.connect(sock_path)
+        bad.sendall(b"\xab" * (_STREAMING_KERNEL_ID_SIZE // 2))
+        bad.close()
+
+        # A subsequent valid registration must still dispatch end-to-end.
+        _, kernel_id, conn_future = _setup_streaming_listener("k_after_short")
+        t = threading.Thread(
+            target=self._fake_worker,
+            args=(sock_path, kernel_id, ["only-payload"]),
+            daemon=True,
+        )
+        t.start()
+        conn_sock = conn_future.result(timeout=10.0)
+        try:
+            self.assertIsNotNone(conn_sock)
+        finally:
+            conn_sock.close()
+        t.join(timeout=2.0)
+
+    def test_drop_streaming_registration_removes_id(self):
+        """``_drop_streaming_registration`` must actually pop the id from
+        the registry so the kernel-id space doesn't leak."""
+        from torch._inductor.async_compile import (
+            _drop_streaming_registration,
+            _setup_streaming_listener,
+            _SHARED_REGISTRY,
+            _STREAMING_KERNEL_ID_STRUCT,
+        )
+
+        _, kernel_id, _ = _setup_streaming_listener("k_drop")
+        (parsed_id,) = _STREAMING_KERNEL_ID_STRUCT.unpack(kernel_id)
+        self.assertIn(parsed_id, _SHARED_REGISTRY)
+        _drop_streaming_registration(kernel_id)
+        self.assertNotIn(parsed_id, _SHARED_REGISTRY)
+        # Idempotent: dropping a second time must not raise.
+        _drop_streaming_registration(kernel_id)
+
+    @staticmethod
+    def _make_fake_kernel(make_launcher_returns=None):
+        """Minimal fake satisfying the bg drain's CachingAutotuner interface.
+        ``make_launcher_returns`` is a callable ``result -> (launcher, exc)``;
+        defaults to wrapping the result string as the launcher."""
+        if make_launcher_returns is None:
+            make_launcher_returns = lambda r: (f"launcher_for_{r}", None)  # noqa: E731
+
+        class _FakeKernel:
+            def __init__(self):
+                self._last_compile_exception = None
+                self.fn = type("F", (), {"__name__": "fake_kernel"})()
+                self.triton_meta = {"device": 0}
+                self.compile_results: list = []
+                self.launchers: list = []
+                self.configs: list = []
+                self._dynamic_scale_called = False
+
+            def get_device_interface(self):
+                return MagicMock()
+
+            def _maybe_put_static_autotuner(self, key):
+                pass
+
+            def _bundle_compile_result(self, result):
+                pass
+
+            def _make_launcher(self, result):
+                return make_launcher_returns(result)
+
+            def _all_failed_fallback(self, exc):
+                pass
+
+            def _dynamic_scale_rblock(self, on_launcher=None):
+                self._dynamic_scale_called = True
+
+        return _FakeKernel()
+
+    @staticmethod
+    def _bg_drain_with_noop_device_guard(kernel, conn, handle, key):
+        """Run ``_bg_drain_kernel`` with DeviceGuard patched to a no-op so the
+        test doesn't need a real device."""
+        import contextlib
+        from unittest.mock import patch
+
+        from torch._inductor.async_compile import _bg_drain_kernel
+
+        @contextlib.contextmanager
+        def _noop_guard(*_a, **_k):
+            yield
+
+        with patch(
+            "torch._dynamo.device_interface.DeviceGuard", _noop_guard
+        ):
+            _bg_drain_kernel(kernel, conn, handle, key)
+
+    def test_garbage_payload_propagates_to_drain(self):
+        """Worker sends a valid id then non-zlib bytes. The drain's
+        ``_recv_msg`` raises ``zlib.error``; ``_bg_drain_kernel`` forwards
+        that to ``handle.drain_future`` and pushes ``_LAUNCHER_END``."""
+        from concurrent.futures import Future as _Fut
+        from multiprocessing.connection import Connection
+
+        from torch._inductor.async_compile import (
+            _LAUNCHER_END,
+            _setup_streaming_listener,
+            PipelineCachingAutotunerHandle,
+        )
+
+        sock_path, kernel_id, conn_future = _setup_streaming_listener("k_garbage")
+
+        def _bad_worker():
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(sock_path)
+            s.sendall(kernel_id)
+            payload = b"not-zlib-data"
+            s.sendall(len(payload).to_bytes(4, "big") + payload)
+            s.close()
+
+        threading.Thread(target=_bad_worker, daemon=True).start()
+        conn_sock = conn_future.result(timeout=10.0)
+        conn = Connection(conn_sock.detach())
+
+        handle = PipelineCachingAutotunerHandle(
+            launcher_q=__import__("queue").Queue(),
+            drain_future=_Fut(),
+            num_configs=1,
+            kernel_name="k_garbage",
+        )
+        self._bg_drain_with_noop_device_guard(
+            self._make_fake_kernel(), conn, handle, None
+        )
+
+        with self.assertRaises(BaseException):
+            handle.drain_future.result(timeout=2.0)
+        self.assertIs(handle.launcher_q.get(timeout=2.0), _LAUNCHER_END)
+
+    def test_eof_without_done_is_anomaly(self):
+        """Worker sends a valid kernel id then closes the socket without ever
+        sending a ``_Done``. The drain raises rather than silently treating
+        the empty stream as a successful completion."""
+        from concurrent.futures import Future as _Fut
+        from multiprocessing.connection import Connection
+
+        from torch._inductor.async_compile import (
+            _LAUNCHER_END,
+            _setup_streaming_listener,
+            PipelineCachingAutotunerHandle,
+        )
+
+        sock_path, kernel_id, conn_future = _setup_streaming_listener("k_eof")
+
+        def _silent_worker():
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(sock_path)
+            s.sendall(kernel_id)
+            s.close()  # no _Done, no anything
+
+        threading.Thread(target=_silent_worker, daemon=True).start()
+        conn_sock = conn_future.result(timeout=10.0)
+        conn = Connection(conn_sock.detach())
+
+        handle = PipelineCachingAutotunerHandle(
+            launcher_q=__import__("queue").Queue(),
+            drain_future=_Fut(),
+            num_configs=1,
+            kernel_name="k_eof",
+        )
+        self._bg_drain_with_noop_device_guard(
+            self._make_fake_kernel(), conn, handle, None
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "without sending _Done"):
+            handle.drain_future.result(timeout=2.0)
+        self.assertIs(handle.launcher_q.get(timeout=2.0), _LAUNCHER_END)
+
+    def test_failure_messages_track_last_on_kernel(self):
+        """Worker sends valid kernel id, then two ``_Failure`` messages, then
+        ``_Done``. The drain must NOT build any launchers (no _Success), must
+        set ``kernel._last_compile_exception`` to a RuntimeError carrying the
+        last failure, and must complete the drain_future successfully."""
+        from concurrent.futures import Future as _Fut
+        from multiprocessing.connection import Connection
+
+        from torch._inductor.async_compile import (
+            _LAUNCHER_END,
+            _setup_streaming_listener,
+            PipelineCachingAutotunerHandle,
+        )
+        from torch._inductor.runtime.compile_tasks import (
+            _Done,
+            _Failure,
+            _streaming_send,
+        )
+
+        sock_path, kernel_id, conn_future = _setup_streaming_listener("k_fail")
+
+        def _all_fail_worker():
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(sock_path)
+            s.sendall(kernel_id)
+            wconn = Connection(s.detach())
+            try:
+                _streaming_send(wconn, _Failure("OOM", "first", "tb1"))
+                _streaming_send(wconn, _Failure("OOM", "second", "tb2"))
+                _streaming_send(wconn, _Done())
+            finally:
+                wconn.close()
+
+        threading.Thread(target=_all_fail_worker, daemon=True).start()
+        conn_sock = conn_future.result(timeout=10.0)
+        conn = Connection(conn_sock.detach())
+
+        kernel = self._make_fake_kernel()
+        handle = PipelineCachingAutotunerHandle(
+            launcher_q=__import__("queue").Queue(),
+            drain_future=_Fut(),
+            num_configs=2,
+            kernel_name="k_fail",
+        )
+        self._bg_drain_with_noop_device_guard(kernel, conn, handle, None)
+
+        # No _Success -> nothing built.
+        self.assertEqual(kernel.launchers, [])
+        # drain_future completes cleanly (per-config _Failure is not fatal).
+        self.assertIsNone(handle.drain_future.result(timeout=2.0))
+        # Last failure stashed on the kernel for the all-failed message.
+        last = kernel._last_compile_exception
+        self.assertIsInstance(last, RuntimeError)
+        self.assertIn("OOM", str(last))
+        self.assertIn("second", str(last))
+        # bg drain no longer calls _dynamic_scale_rblock -- the plugin's
+        # pre_dispatch does, after the drain finishes.
+        self.assertFalse(kernel._dynamic_scale_called)
+        # EOF sentinel pushed.
+        self.assertIs(handle.launcher_q.get(timeout=2.0), _LAUNCHER_END)
 
 
 class TestArgumentCloneAndRestore(TestCase):
