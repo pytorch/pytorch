@@ -11,13 +11,15 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     ops,
+)
+from torch.testing._internal.common_methods_invocations import (
+    onlyCUDA,
+    op_db,
     skip,
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
@@ -123,7 +125,9 @@ def _test_export_helper(self, dtype, op):
 
 class TestExportOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps(export_failures | fake_export_failures)
+    @skipOps(
+        "TestExportOpInfo", "test_fake_export", export_failures | fake_export_failures
+    )
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
     def test_fake_export(self, device, dtype, op):
         _test_export_helper(self, dtype, op)

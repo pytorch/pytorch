@@ -18,7 +18,7 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
                             const constant uint3& qkv_seq_strides [[buffer(7)]],
                             const constant float& scale [[buffer(8)]],
                             const device MaskType* mask [[buffer(9)]],
-                            const constant uint4& mask_strides [[buffer(10)]],
+                            const constant uint3& mask_strides [[buffer(10)]],
                             const constant uint4& qkv_batch_strides_heads [[buffer(11)]],
                             uint3 tid [[threadgroup_position_in_grid]],
                             uint3 tpg [[threadgroups_per_grid]],
@@ -43,7 +43,6 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
   const uint mask_kv_seq_stride = mask_strides.x;
   const uint mask_q_seq_stride = mask_strides.y;
   const uint mask_head_stride = mask_strides.z;
-  const uint mask_batch_stride = mask_strides.w;
   uint inner_k_stride = BN * int(k_seq_stride);
   uint inner_v_stride = BN * int(v_seq_stride);
 
@@ -71,8 +70,7 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
   values +=
       batch_idx * v_batch_stride + kv_head_idx * v_head_stride + simd_gid * v_seq_stride + simd_lid * v_per_thread;
   if IF_CONSTEXPR (HAS_MASK) {
-    mask += batch_idx * mask_batch_stride + head_idx * mask_head_stride + simd_gid * mask_kv_seq_stride +
-        q_seq_idx * mask_q_seq_stride;
+    mask += bh_idx * mask_head_stride + simd_gid * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
   }
 
   out += o_offset * V + simd_gid * v_per_thread;
@@ -185,7 +183,7 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
                                     const constant uint3& qkv_seq_strides [[buffer(9)]],
                                     const constant float& scale [[buffer(10)]],
                                     const device MaskType* mask [[buffer(11)]],
-                                    const constant uint4& mask_strides [[buffer(12)]],
+                                    const constant uint3& mask_strides [[buffer(12)]],
                                     const constant uint4& qkv_batch_strides_heads [[buffer(13)]],
                                     uint3 tid [[threadgroup_position_in_grid]],
                                     uint3 tpg [[threadgroups_per_grid]],
@@ -210,7 +208,6 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
   const int mask_kv_seq_stride = mask_strides.x;
   const int mask_q_seq_stride = mask_strides.y;
   const int mask_head_stride = mask_strides.z;
-  const uint mask_batch_stride = mask_strides.w;
   int inner_k_stride = BN * int(k_seq_stride);
   int inner_v_stride = BN * int(v_seq_stride);
   constexpr int blocks = 32;
@@ -241,8 +238,8 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
       simd_lid * v_per_thread;
   out += o_offset * blocks * V + block_idx * V + simd_lid * v_per_thread;
   if IF_CONSTEXPR (HAS_MASK) {
-    mask += batch_idx * mask_batch_stride + head_idx * mask_head_stride +
-        (block_idx * BN + simd_gid) * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
+    mask +=
+        bh_idx * mask_head_stride + (block_idx * BN + simd_gid) * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
   }
   sums += o_offset * blocks + block_idx;
   maxs += o_offset * blocks + block_idx;
@@ -416,7 +413,7 @@ template <typename T, int D>
       const constant uint3& qkv_seq_strides [[buffer(7)]],                                              \
       const constant float& scale [[buffer(8)]],                                                        \
       const device MASK_TYPE* mask [[buffer(9)]],                                                       \
-      const constant uint4& mask_strides [[buffer(10)]],                                                \
+      const constant uint3& mask_strides [[buffer(10)]],                                                \
       const constant uint4& qkv_batch_strides_heads [[buffer(11)]],                                     \
       uint3 tid [[threadgroup_position_in_grid]],                                                       \
       uint3 tpg [[threadgroups_per_grid]],                                                              \
@@ -444,7 +441,7 @@ template <typename T, int D>
       const constant uint3& qkv_seq_strides [[buffer(9)]],                                                      \
       const constant float& scale [[buffer(10)]],                                                               \
       const device MASK_TYPE* mask [[buffer(11)]],                                                              \
-      const constant uint4& mask_strides [[buffer(12)]],                                                        \
+      const constant uint3& mask_strides [[buffer(12)]],                                                        \
       const constant uint4& qkv_batch_strides_heads [[buffer(13)]],                                             \
       uint3 tid [[threadgroup_position_in_grid]],                                                               \
       uint3 tpg [[threadgroups_per_grid]],                                                                      \

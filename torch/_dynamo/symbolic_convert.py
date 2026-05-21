@@ -105,12 +105,7 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import (
-    CodeOptions,
-    GraphCompileReason,
-    OutputGraph,
-    StackLocalsMetadata,
-)
+from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
 from .polyfills import (
     impl_IS_MAPPING,
     impl_MATCH_CLASS,
@@ -989,9 +984,8 @@ def _reconstruct_block_stack(
         cur_tx = cur_tx.parent
     for tx in reversed(all_txes):
         for b in tx.block_stack:
-            # Don't exit any modes we have entered --
-            # output bytecode will push/pop the tf mode stack,
-            # so we only need a try/except to pop on exception.
+            # Don't exit any modes we have entered,
+            # output bytecode will mutate the tf mode stack accordingly
             if isinstance(b.with_context, TorchFunctionModeVariable):
                 cg.extend_output(
                     b.resume_fn().try_except_torch_function_mode(
@@ -1372,10 +1366,10 @@ class InstructionTranslatorBase(
             cur_tx = cur_tx.parent
         return False
 
-    def cellvars(self) -> tuple[str, ...]:
+    def cellvars(self) -> list[str]:
         return self.code_options["co_cellvars"]
 
-    def freevars(self) -> tuple[str, ...]:
+    def freevars(self) -> list[str]:
         return self.code_options["co_freevars"]
 
     def new_pycode_varname(self, prefix: str) -> str:
@@ -1391,7 +1385,7 @@ class InstructionTranslatorBase(
         """Return the most recently generated pycode varname for the given prefix."""
         return self._pycode_last_varname[prefix]
 
-    def cell_and_freevars(self) -> tuple[str, ...]:
+    def cell_and_freevars(self) -> list[str]:
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
@@ -4313,8 +4307,6 @@ class InstructionTranslatorBase(
         pass
 
     def KW_NAMES(self, inst: Instruction) -> None:
-        if inst.arg is None:
-            raise AssertionError("expected inst.arg is not None to be true")
         kw_names = self.code_options["co_consts"][inst.arg]
         if not isinstance(kw_names, tuple):
             raise AssertionError("expected isinstance(kw_names, tuple) to be true")
@@ -4887,7 +4879,7 @@ class InstructionTranslatorBase(
 
     def log_graph_break(
         self,
-        code_options: CodeOptions,
+        code_options: dict[str, Any],
         reason: str,
         exc: Unsupported | UserError | StepUnsupported,
     ) -> None:
@@ -5020,7 +5012,7 @@ class InstructionTranslatorBase(
         f_locals: dict[str, Any],
         f_globals: dict[str, Any],
         f_builtins: dict[str, Any],
-        code_options: CodeOptions,
+        code_options: dict[str, Any],
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
@@ -5084,16 +5076,14 @@ class InstructionTranslatorBase(
         )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
-        self.code_options: CodeOptions = code_options
+        self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code,
-                closure=closure,
-                code_options=code_options,
+                code=f_code, closure=closure, code_options=code_options
             )
         else:
             self.exec_recorder = None
@@ -5179,7 +5169,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_builtins: dict[str, Any],
         closure: tuple[Any, ...] | None,
         torch_function_mode_stack: Any,
-        code_options: CodeOptions,
+        code_options: dict[str, Any],
         compiler_fn: Any,
         one_graph: bool,
         export: bool,
@@ -5885,9 +5875,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions = cleaned_instructions(code)
             propagate_line_nums(instructions)
             indexof = get_indexof(instructions)
-            code_options = cast(
-                CodeOptions, {k: getattr(code, k) for k in get_code_keys()}
-            )
+            code_options = {k: getattr(code, k) for k in get_code_keys()}
             if tracing_ctx:
                 tracing_ctx.inlined_code_cache[code] = InlinedCodeCache(
                     instructions=instructions,

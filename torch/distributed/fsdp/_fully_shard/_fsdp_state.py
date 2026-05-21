@@ -474,9 +474,6 @@ class FSDPState(_State):
             if rs_state.event is not None:
                 current_stream.wait_event(rs_state.event)
         self._comm_ctx.reduce_scatter_states.clear()
-        for event in self._comm_ctx._last_post_reduce_events.values():
-            current_stream.wait_event(event)
-        self._comm_ctx._last_post_reduce_events.clear()
         self._comm_ctx.post_forward_order.clear()
         for state in self._state_ctx.all_states:
             state._modules_to_run_forward.clear()

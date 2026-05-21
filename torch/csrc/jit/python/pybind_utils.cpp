@@ -750,7 +750,7 @@ py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().starts_with("__torch__.torch.classes")) {
+    if (obj->name().find("__torch__.torch.classes") == 0) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));

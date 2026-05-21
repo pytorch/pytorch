@@ -478,7 +478,6 @@
   - test/inductor_skips/**
   approved_by:
   - guilhermeleobas
-  - rtimpe
   mandatory_checks_name:
   - EasyCLA
   - Lint

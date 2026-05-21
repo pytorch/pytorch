@@ -502,7 +502,7 @@ void ValueCache::trimPrefixes() {
   for (auto& it : std::get<CallType::PyCall>(state_)) {
     std::string filename = it.second.filename_.str();
     for (const auto& p : prefixes) {
-      if (filename.starts_with(p)) {
+      if (filename.compare(0, p.size(), p) == 0) {
         filename.erase(0, p.size());
         it.second.filename_ = at::StringView(filename);
         break;
@@ -934,7 +934,8 @@ static void unregisterMonitoringCallback() {
   if (strcmp(str, "PyTorch Profiler") != 0) {
     return;
   }
-  auto none = THPObjectPtr(Py_NewRef(Py_None));
+  auto none = THPObjectPtr(Py_None);
+  Py_INCREF(Py_None);
   auto result = THPObjectPtr(PyObject_CallMethod(
       monitoring,
       "register_callback",

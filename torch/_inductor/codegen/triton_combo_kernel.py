@@ -498,7 +498,9 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        kwargs: dict[str, Any] = dict(
+        return triton_kernel_cls(
+            tiling,
+            features=features,
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
@@ -506,9 +508,6 @@ class ComboKernel(Kernel):
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
         )
-        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
-
-        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int

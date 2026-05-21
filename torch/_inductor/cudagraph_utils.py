@@ -288,33 +288,10 @@ def check_multiple_devices_or_any_cpu_nodes(
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
-def check_caching_allocator_for_cudagraphs() -> str | None:
-    """Skip cudagraphs when the CUDA/HIP caching allocator is disabled
-    (via ``torch.cuda.caching_allocator_enable(False)`` or the env-var
-    bypass ``PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING``). Cudagraph capture
-    pools allocations through the caching allocator; with it bypassed,
-    capture appears to succeed but pool tracking diverges (see
-    check_memory_pool in cudagraph_trees.py), surfacing as 'storage data
-    ptrs not allocated in pool ...' at replay time."""
-    if (
-        torch.cuda.is_available()
-        # pyrefly: ignore [missing-attribute]
-        and not torch._C._cuda_cudaCachingAllocator_is_enabled()
-    ):
-        return format_default_skip_message(
-            "cudagraph capture requires the caching allocator; "
-            "current allocator is uncached"
-        )
-    return None
-
-
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
-    )
+    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:

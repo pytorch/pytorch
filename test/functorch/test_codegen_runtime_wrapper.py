@@ -48,13 +48,11 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn("orig_inputs = {}", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
-        self.assertNotIn("_is_view_replay_enabled", source)
-        self.assertNotIn("_set_view_replay_enabled", source)
 
     def test_training_simple(self):
         """
         Simple training path: no mutations. Generated code should use
-        the training path (enable_grad + view replay tracking).
+        the training path (enable_grad + force_view_tracking).
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -71,8 +69,7 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
-        self.assertIn("if not prev_view_replay_enabled:", source)
+        self.assertIn("_force_view_tracking_", source)
         self.assertIn("torch.enable_grad()", source)
 
     def test_training_with_detach_indices(self):
@@ -99,7 +96,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn(".detach()", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_force_view_tracking_", source)
 
     def test_inference_with_mutation(self):
         """
@@ -308,7 +305,7 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_training_disable_amp(self):
         """
         Training path with autocast active at compile time. Generated code
-        should use _DisableAutocast_ alongside view replay tracking and
+        should use _DisableAutocast_ alongside force_view_tracking and
         enable_grad.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
@@ -326,7 +323,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_DisableAutocast_", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_force_view_tracking_", source)
 
     def test_dynamic_dims(self):
         """

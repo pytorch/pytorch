@@ -529,9 +529,6 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: int | None = None
 
-    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
-    graphsafe_rng_device: torch.device | None = None
-
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
     # the storage of the tensor that will be copied back into the original input
@@ -1118,7 +1115,7 @@ class CacheableAOTConfig:
             raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-@dataclass(frozen=True)
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1231,8 +1228,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration. Stage-local compiler choices are threaded
-    # explicitly rather than mutating this object in place.
+    # Top-level configuration
+    # This is morally immutable but sometimes we are naughty and mutate it.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically

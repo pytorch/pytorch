@@ -2984,12 +2984,10 @@ class TestSpecial(__TestCase):
         # bpo-35717: sys._getframe(2).f_globals['__name__'] fails with KeyError
         # when using compile and exec because f_globals is empty
         code = "from enum import Enum; Enum('Animal', 'ANT BEE CAT DOG')"
-        with torch._dynamo.error_on_graph_break(False):
-            code = compile(code, "<string>", "exec")
+        code = compile(code, "<string>", "exec")
         global_ns = {}
         local_ls = {}
-        with torch._dynamo.error_on_graph_break(False):
-            exec(code, global_ns, local_ls)
+        exec(code, global_ns, local_ls)
 
     def test_strenum(self):
         class GoodStrEnum(StrEnum):
