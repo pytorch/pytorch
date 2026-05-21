@@ -3858,18 +3858,14 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
 
     # --- Graph break path ---
 
-    def test_non_constant_args_graph_break(self):
-        # A tensor isn't a Python constant for Dynamo, so it triggers the
-        # NotImplementedError → unimplemented() path at the top of
-        # generic_issubclass.  Run outside make_dynamo_test so the
-        # exception escapes the compiled region.
+    def test_invalid_args_graph_break(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return issubclass(t, int)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "issubclass.*non-constant",
+            "issubclass.*unsupported",
         ):
             fn(torch.randn(3))
 

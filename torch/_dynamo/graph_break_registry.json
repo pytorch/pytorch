@@ -2668,15 +2668,6 @@
   "GB0195": [
     {
       "Gb_type": "issubclass() with non-constant arguments",
-      "Context": "issubclass({derived}, {cls})",
-      "Explanation": "issubclass() with non-constant arguments not supported.",
-      "Hints": [
-        "Make sure your arguments are types.",
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    },
-    {
-      "Gb_type": "issubclass() with non-constant arguments",
       "Context": "issubclass({left_ty}, {right_ty})",
       "Explanation": "issubclass() with non-constant arguments not supported.",
       "Hints": [
@@ -2780,6 +2771,17 @@
       "Context": "call_method: {self} {name} {args} {kwargs}",
       "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
       "Hints": []
+    }
+  ],
+  "GB4393": [
+    {
+      "Gb_type": "issubclass() with unsupported arguments",
+      "Context": "issubclass({derived}, {cls})",
+      "Explanation": "Arguments to issubclass() must be backed by python values.",
+      "Hints": [
+        "Make sure your arguments are types.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
     }
   ],
   "GB0203": [
