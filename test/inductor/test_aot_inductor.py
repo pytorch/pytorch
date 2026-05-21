@@ -6080,12 +6080,11 @@ class AOTInductorTestsTemplate:
             )
             shim_fn_codes = f'RAIIAtenRecordFunctionHandle .*\\("{kernel_calls}"'
             if enable_kernel_profile:
-                file_check = FileCheck().check_regex(shim_fn_codes)
                 if enable_kernel_context_guard:
-                    file_check.check("KernelContextGuard")
+                    FileCheck().check("KernelContextGuard").run(code)
                 else:
-                    file_check.check_not("KernelContextGuard")
-                file_check.run(code)
+                    FileCheck().check_not("KernelContextGuard").run(code)
+                FileCheck().check_regex(shim_fn_codes).run(code)
             else:
                 FileCheck().check_not("RAIIAtenRecordFunctionHandle").check_not(
                     "KernelContextGuard"
