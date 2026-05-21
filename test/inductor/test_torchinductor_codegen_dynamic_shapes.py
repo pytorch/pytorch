@@ -163,8 +163,6 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
-    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice_scatter_dtype_consistency_dynamic_shapes": TestFailure(
         (
