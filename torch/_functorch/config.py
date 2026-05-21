@@ -333,8 +333,9 @@ backward_pass_autocast = "same_as_forward"
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
-# Controls the default graph output format used by draw_graph
-# Supported formats are defined here https://graphviz.org/docs/outputs/
+# Controls the default graph output format used by draw_graph.
+# Most supported formats are defined here https://graphviz.org/docs/outputs/.
+# The "dot" and "raw" formats write raw DOT text without invoking Graphviz.
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
