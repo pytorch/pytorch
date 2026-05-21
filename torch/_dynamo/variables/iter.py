@@ -31,6 +31,7 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
+from ..utils import unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
@@ -60,11 +61,6 @@ class ItertoolsVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
-
-    def richcompare_impl(self, tx, other, op):
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
@@ -97,7 +93,7 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [arg.force_unpack_var_sequence(tx) for arg in args]
+            seqs = [unpack_iterable(tx, arg) for arg in args]
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
@@ -110,10 +106,9 @@ class ItertoolsVariable(VariableTracker):
             self.value is itertools.combinations
             and not kwargs
             and len(args) == 2
-            and args[0].has_unpack_var_sequence(tx)
             and args[1].is_python_constant()
         ):
-            iterable = args[0].unpack_var_sequence(tx)
+            iterable = unpack_iterable(tx, args[0])
             r = args[1].as_python_constant()
 
             items = []
@@ -152,9 +147,7 @@ class ItertoolsVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                seq = args[0].unpack_var_sequence(tx)
-            else:
+            if len(args) != 1:
                 unimplemented(
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
@@ -167,6 +160,7 @@ class ItertoolsVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
+            seq = unpack_iterable(tx, args[0])
 
             if "key" in kwargs:
 
@@ -242,9 +236,7 @@ class ItertoolsVariable(VariableTracker):
                 r = None
             items = [
                 variables.TupleVariable(list(item))
-                for item in itertools.permutations(
-                    args[0].force_unpack_var_sequence(tx), r
-                )
+                for item in itertools.permutations(unpack_iterable(tx, args[0]), r)
             ]
             return variables.ListIteratorVariable(
                 items,  # type: ignore[arg-type]
@@ -257,11 +249,6 @@ class ItertoolsVariable(VariableTracker):
 class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-
-    def richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         unimplemented(
