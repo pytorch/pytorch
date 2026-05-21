@@ -40,21 +40,14 @@ inline bool bitonic_lt(T vi, IdxT ii, T vp, IdxT ip, bool /*i_am_low*/, bool des
 }
 
 template <bool STABLE, typename T, typename IdxT, ::metal::enable_if_t<!STABLE, bool> = true>
-inline bool bitonic_lt(T vi, IdxT ii, T vp, IdxT ip, bool i_am_low, bool desc) {
-  // padding slots in sort_block carry the sentinel index. When real values
-  // tie with the dtype extremum used for padding init like NaN, INT_MAX or True for bool.
-  // push padding to the "later" position so its out of range index doesn't
-  // leak into the output
+inline bool bitonic_lt(T vi, IdxT ii, T vp, IdxT ip, bool /*i_am_low*/, bool desc) {
+  // Tie-break by index: padding's sentinel ~0 (the largest index) sorts last,
+  // so its out-of-range index never leaks into the output.
   if (sort_compare(vi, vp, desc))
     return true;
   if (sort_compare(vp, vi, desc))
     return false;
-  constexpr IdxT sentinel = ~IdxT(0);
-  if (ii != sentinel && ip == sentinel)
-    return true;
-  if (ii == sentinel && ip != sentinel)
-    return false;
-  return i_am_low;
+  return ii < ip;
 }
 
 // Padding value for out-of-range slots. Chosen to sort to the end of the
