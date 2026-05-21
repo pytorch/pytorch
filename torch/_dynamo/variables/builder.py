@@ -4486,10 +4486,6 @@ class SourcelessBuilder:
             # This is always valid to call, and useful for recursive calls.
             return value
         elif (
-            tracked_vt := tx.output.side_effects.id_to_variable.get(id(value))
-        ) is not None:
-            return tracked_vt
-        elif (
             is_opaque_value_type(type(value))
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
