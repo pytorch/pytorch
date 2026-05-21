@@ -368,6 +368,18 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
+    def test_expand_floor_div_applied_symbolic_factor(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = s * x + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr, (x, y))
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(3 * s * x + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
@@ -388,6 +400,24 @@ class TestIndexingSimplification(InductorTestCase):
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_int8_unpack_dynamic_shape(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            first_elements = x >> 4
+            second_elements = x & 15
+            unpacked = torch.stack([first_elements, second_elements], dim=-1).view(
+                *x.size()[:-1], -1
+            )
+            return unpacked * 2
+
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+
+        triton_code = run_and_get_triton_code(f, x)
+        # Dynamic shape coefficients should still be coalesced through the
+        # pointwise-cat view instead of loading from s*x1 + x0//2.
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
