@@ -178,7 +178,7 @@ def reset() -> None:
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
 
-        if torch.cuda.is_available():
+        if torch.cuda.is_initialized():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
             reset_cudagraph_trees()
