@@ -2799,7 +2799,11 @@ class TensorSubclassVariable(UserDefinedClassVariable):
                 # Simulate `torch.Tensor.__new__` as shallow-copying the input
                 # tensor data with a new type. TODO polyfill?
                 var = TensorWithTFOverrideVariable.from_tensor_var(
-                    tx, data, self.value, self.source
+                    tx,
+                    data,
+                    self.value,
+                    self.source,
+                    inherit_tensor_var_attrs=False,
                 )
             else:
                 unimplemented(
@@ -2819,17 +2823,18 @@ class TensorSubclassVariable(UserDefinedClassVariable):
             )
         if var is None:
             raise AssertionError("__new__ must return a non-None variable")
-        # Let Dynamo trace through custom `__init__`
-        init_func = self.value.__init__
-        # TODO builder should be able to handle `torch.Tensor.__init__`,
-        # which is `object.__init__`, so that we can remove this check.
-        if init_func is not torch.Tensor.__init__:
-            VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
 
         # See NOTE [Side effect tracking for newly constructed tensor]
         tx.output.side_effects._track_obj(
             object(), var, mutation_type_cls=AttributeMutationNew
         )
+
+        # Let Dynamo trace through custom `__init__`
+        init_func = self.value.__init__
+        # TODO builder should be able to handle `torch.Tensor.__init__`,
+        # which is `object.__init__`, so that we can remove this check.
+        if init_func is not torch.Tensor.__init__:
+            VariableTracker.build(tx, init_func).call_function(tx, [var, *args], kwargs)
         return var
 
     def as_python_constant(self) -> type:
