@@ -649,24 +649,51 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
-            # Either `b` or the kwargs is omittable, but not both.
+            # Either `b` or the kwargs is omittable.
             self.install_dict_keys_match_guard()
+            if len(args) > 1:
+                raise_args_mismatch(tx, name, "at most 1 args", f"{len(args)} args")
             has_arg = len(args) == 1
             has_kwargs = len(kwargs) > 0
-            if has_arg or has_kwargs:
-                tx.output.side_effects.mutation(self)
+            if has_arg or has_kwargs or not args:
+                if has_arg or has_kwargs:
+                    tx.output.side_effects.mutation(self)
                 if has_arg:
-                    dict_vt: VariableTracker
+                    from .object_protocol import generic_getiter, vt_getitem
+
                     if isinstance(args[0], ConstDictVariable):
                         # NB - Guard on all the keys of the other dict to ensure
                         # correctness.
                         args[0].install_dict_keys_match_guard()
-                        dict_vt = args[0]
-                    else:
-                        dict_vt = DictBuiltinVariable.call_custom_dict(
-                            tx, dict, args[0]
+                        self.items.update(args[0].items)
+                    elif (
+                        isinstance(
+                            args[0],
+                            (variables.UserDefinedObjectVariable, MappingProxyVariable),
                         )
-                    self.items.update(dict_vt.items)  # type: ignore[attr-defined]
+                        and args[0].call_obj_hasattr(tx, "keys").as_python_constant()
+                    ):
+                        keys = args[0].call_method(tx, "keys", [], {})
+                        iterator = generic_getiter(tx, keys)
+                        for key in iterator.force_unpack_var_sequence(tx):
+                            self.items[Hashable(key)] = vt_getitem(tx, args[0], key)
+                    else:
+                        iterator = generic_getiter(tx, args[0])
+                        for idx, item in enumerate(
+                            iterator.force_unpack_var_sequence(tx)
+                        ):
+                            item_iterator = generic_getiter(tx, item)
+                            pair = item_iterator.force_unpack_var_sequence(tx)
+                            if len(pair) != 2:
+                                raise_observed_exception(
+                                    ValueError,
+                                    tx,
+                                    args=[
+                                        "dictionary update sequence element "
+                                        f"#{idx} has length {len(pair)}; 2 is required"
+                                    ],
+                                )
+                            self.items[Hashable(pair[0])] = pair[1]
                 if has_kwargs:
                     # Handle kwargs
                     kwargs_hashable = {

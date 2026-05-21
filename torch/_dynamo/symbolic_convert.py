@@ -3718,7 +3718,11 @@ class InstructionTranslatorBase(
                 hints=[],
             )
         items = self.popn(inst.argval)
-        new_set = SetVariable(items, mutation_type=ValueMutationNew())
+        new_set = SetVariable(
+            items,
+            mutation_type=ValueMutationNew(),
+            use_python_constant_iteration_order=True,
+        )
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst: Instruction, cls: type = ListVariable) -> None:
