@@ -7,13 +7,13 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/mps/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
@@ -529,21 +529,6 @@ inline PrefillBlockShape prefill_block_shape_for_head_dim(int64_t head_dim) {
   }
 }
 
-inline bool prefill_attention_supports_head_dim(int64_t head_dim) {
-  switch (head_dim) {
-    case 32:
-    case 64:
-    case 72:
-    case 80:
-    case 96:
-    case 128:
-    case 256:
-      return true;
-    default:
-      return false;
-  }
-}
-
 } // namespace
 
 static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
@@ -766,7 +751,7 @@ static std::tuple<Tensor, Tensor> sdpa_fused_dispatch_mps(const Tensor& query,
   bool prefill_mask_compatible =
       !mask_.has_value() || (mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype());
   bool prefill_head_dim_supported =
-      (query_head_dim == value_head_dim) && prefill_attention_supports_head_dim(query_head_dim);
+      (query_head_dim == value_head_dim) && mps::prefill_attention_supports_head_dim(query_head_dim);
   // For very short Q (qL <= 8) the BQ=16/32 prefill tile is mostly empty and
   // the existing MPSGraph fallback gives similar throughput with tighter
   // numerical accuracy at small head counts. Skip prefill there so we don't
@@ -812,179 +797,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   return sdpa_fused_dispatch_mps(query, key_, value_, attn_mask, dropout_p, is_causal, dropout_mask, scale, enable_gqa);
 }
 
-namespace {
-
-constexpr std::array<at::ScalarType, 3> mps_supported_dtypes{at::kFloat, at::kHalf, at::kBFloat16};
-
-inline bool mps_check_head_dim(const sdp::sdp_params& params, bool debug) {
-  auto qd = params.query.sym_size(-1).maybe_as_int();
-  auto vd = params.value.sym_size(-1).maybe_as_int();
-  if (!qd.has_value() || !vd.has_value() || *qd != *vd || !prefill_attention_supports_head_dim(*qd)) {
-    if (debug) {
-      TORCH_WARN(
-          "MPS SDPA: head_dim must match between Q and V and be one of "
-          "{32, 64, 72, 80, 96, 128, 256}.");
-    }
-    return false;
-  }
-  return true;
-}
-
-inline bool mps_check_min_rank(const sdp::sdp_params& params, bool debug) {
-  // MPS lifts 3D inputs to 4D via ensure_4d, but the shared shape/head helpers
-  // index sym_size(-3) so we still need rank >= 3.
-  if (params.query.dim() < 3 || params.key.dim() < 3 || params.value.dim() < 3) {
-    if (debug) {
-      TORCH_WARN("MPS SDPA requires query, key, value to be at least 3-dimensional.");
-    }
-    return false;
-  }
-  return true;
-}
-
-bool can_use_flash_attention_mps(const sdp::sdp_params& params, bool debug) {
-  if (sdp::input_requires_grad(params)) {
-    if (debug) {
-      TORCH_WARN("Flash SDPA on MPS is forward-only; falling back when inputs require grad.");
-    }
-    return false;
-  }
-  constexpr auto constraints = std::array<bool (*)(const sdp::sdp_params&, bool), 7>{
-      sdp::check_runtime_disabled_flash,
-      sdp::check_nested_tensor,
-      sdp::check_for_attn_mask,
-      sdp::check_for_dropout,
-      mps_check_min_rank,
-      sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
-  };
-  for (const auto& c : constraints) {
-    if (!c(params, debug)) {
-      return false;
-    }
-  }
-  if (!sdp::check_tensor_dtype(params, mps_supported_dtypes, debug)) {
-    return false;
-  }
-  if (!sdp::check_batch_size_and_num_heads_dense<true /*supports_gqa*/>(params, debug)) {
-    return false;
-  }
-  return mps_check_head_dim(params, debug);
-}
-
-bool can_use_mem_efficient_attention_mps(const sdp::sdp_params& params, bool debug) {
-  if (sdp::input_requires_grad(params)) {
-    if (debug) {
-      TORCH_WARN("Efficient SDPA on MPS is forward-only; falling back when inputs require grad.");
-    }
-    return false;
-  }
-  constexpr auto constraints = std::array<bool (*)(const sdp::sdp_params&, bool), 6>{
-      sdp::check_runtime_disabled_mem_efficient,
-      sdp::check_nested_tensor,
-      sdp::check_for_dropout,
-      mps_check_min_rank,
-      sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
-  };
-  for (const auto& c : constraints) {
-    if (!c(params, debug)) {
-      return false;
-    }
-  }
-  if (!sdp::check_tensor_dtype(params, mps_supported_dtypes, debug)) {
-    return false;
-  }
-  if (!sdp::check_batch_size_and_num_heads_dense<true /*supports_gqa*/>(params, debug)) {
-    return false;
-  }
-  if (!mps_check_head_dim(params, debug)) {
-    return false;
-  }
-  if (params.attn_mask.has_value()) {
-    auto mask_dtype = params.attn_mask.value().dtype();
-    if (mask_dtype != at::kBool && mask_dtype != params.query.dtype()) {
-      if (debug) {
-        TORCH_WARN("Efficient SDPA on MPS: attn_mask dtype must be bool or match query dtype.");
-      }
-      return false;
-    }
-    // Vector kernels (qL <= 8) don't support is_causal + mask; only prefill does.
-    auto qL_sym = params.query.sym_size(-2).maybe_as_int();
-    if (params.is_causal && qL_sym.has_value() && *qL_sym <= 8) {
-      if (debug) {
-        TORCH_WARN("Efficient SDPA on MPS: vector kernels do not support is_causal + mask for short Q.");
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
-sdp::SDPBackend select_sdp_backend_mps(const sdp::sdp_params& params) {
-  auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
-    return sdp::SDPBackend::error;
-  }
-  for (auto backend : ctx.sDPPriorityOrder()) {
-    switch (backend) {
-      case sdp::SDPBackend::flash_attention:
-        if (can_use_flash_attention_mps(params, /*debug=*/false)) {
-          return sdp::SDPBackend::flash_attention;
-        }
-        break;
-      case sdp::SDPBackend::efficient_attention:
-        if (can_use_mem_efficient_attention_mps(params, /*debug=*/false)) {
-          return sdp::SDPBackend::efficient_attention;
-        }
-        break;
-      case sdp::SDPBackend::math:
-        if (ctx.userEnabledMathSDP()) {
-          return sdp::SDPBackend::math;
-        }
-        break;
-      case sdp::SDPBackend::cudnn_attention:
-      case sdp::SDPBackend::overrideable:
-        break;
-      default:
-        TORCH_CHECK(false, "Invalid backend");
-    }
-  }
-  // Re-run gates in debug to print why each was rejected. Skip backends the
-  // user explicitly disabled (no point telling them their own setting).
-  if (ctx.userEnabledMemEfficientSDP()) {
-    TORCH_WARN("Memory-efficient SDPA on MPS not used because:");
-    can_use_mem_efficient_attention_mps(params, /*debug=*/true);
-  }
-  if (ctx.userEnabledFlashSDP()) {
-    TORCH_WARN("Flash SDPA on MPS not used because:");
-    can_use_flash_attention_mps(params, /*debug=*/true);
-  }
-  return sdp::SDPBackend::error;
-}
-
-} // namespace
-
-int64_t _fused_sdp_choice_mps(const Tensor& query_,
-                              const Tensor& key,
-                              const Tensor& value,
-                              const std::optional<Tensor>& attn_mask_,
-                              double dropout_p,
-                              bool is_causal,
-                              std::optional<double> scale,
-                              bool enable_gqa) {
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
-  auto backend = select_sdp_backend_mps(kernel_params);
-  if (backend == sdp::SDPBackend::error) {
-    TORCH_CHECK(false,
-                "No viable backend for scaled_dot_product_attention was found. ",
-                "This is likely due to turning off the flash_attention, efficient_attention, and math kernels.");
-  }
-  return static_cast<int64_t>(backend);
-}
-
-REGISTER_MPS_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
-
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor>
 _scaled_dot_product_flash_attention_mps(const Tensor& query,
                                         const Tensor& key,
@@ -1010,8 +822,8 @@ _scaled_dot_product_flash_attention_mps(const Tensor& query,
                                                     scale,
                                                     /*enable_gqa=*/false));
 
-  const c10::SymInt max_q = query.sym_size(-2);
-  const c10::SymInt max_k = key.sym_size(-2);
+  c10::SymInt max_q = query.sym_size(-2);
+  c10::SymInt max_k = key.sym_size(-2);
   // Dropout is unsupported and backward is gated off, so RNG-state outputs
   // are unused scalar placeholders required only to satisfy the op schema.
   auto empty_long = at::empty({}, query.options().dtype(at::kLong));
@@ -1019,8 +831,8 @@ _scaled_dot_product_flash_attention_mps(const Tensor& query,
                          /*logsumexp=*/Tensor(),
                          /*cum_seq_q=*/Tensor(),
                          /*cum_seq_k=*/Tensor(),
-                         max_q,
-                         max_k,
+                         std::move(max_q),
+                         std::move(max_k),
                          /*rng_state=*/empty_long,
                          /*unused=*/empty_long,
                          /*debug_attn_mask=*/Tensor());

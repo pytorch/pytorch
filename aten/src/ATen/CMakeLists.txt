@@ -191,6 +191,7 @@ file(GLOB native_transformers_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cu
 file(GLOB native_transformers_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/*.hip")
 file(GLOB native_transformers_hip_cpp CONFIGURE_DEPENDS "native/transformers/hip/*.cpp")
 file(GLOB native_transformers_xpu_cpp CONFIGURE_DEPENDS "native/transformers/xpu/*.cpp")
+file(GLOB native_transformers_mps_cpp CONFIGURE_DEPENDS "native/transformers/mps/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp CONFIGURE_DEPENDS "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp CONFIGURE_DEPENDS "native/utils/*.cpp")
 file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
@@ -916,7 +917,7 @@ endif()
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
-    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm} ${native_transformers_mps_cpp})
 
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
