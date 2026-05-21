@@ -403,11 +403,11 @@ def wrap_compiler_debug(
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)  # type: ignore[operator]
             else:
                 try:
                     # Call the compiled function with real inputs
-                    out = inner_compiled_fn(real_inputs)
+                    out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
                     # sync cuda kernels to ensure IMA detection
                     for arg in example_inputs:
                         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -1028,8 +1028,8 @@ def inductor_accuracy_fails(
 
     return backend_aot_accuracy_fails(
         fx_g,
-        args,
-        _compile_with_symbolic_args,
+        args,  # type: ignore[arg-type]
+        _compile_with_symbolic_args,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -1041,6 +1041,95 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           REPRO MAIN
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+def _build_symbolic_wrapper(
+    mod: nn.Module,
+    args: list[Any],
+    symint_exprs: dict[int, str],
+) -> tuple[nn.Module, list[Any]] | None:
+    """Build a wrapper module that preserves symbolic relationships.
+
+    Returns (wrapper_module, wrapper_args) where wrapper_args has carrier
+    tensors in place of free-symbol symints, and the wrapper's forward()
+    extracts SymInts from carrier.size(0), computes derived expressions,
+    and delegates to the inner module.
+
+    Returns None if the expressions don't contain free/derived structure
+    (nothing to do).
+    """
+    import re
+
+    free_sym_re = re.compile(r"^s\d+$")
+    free_positions: dict[int, str] = {}
+    derived_positions: dict[int, str] = {}
+
+    for idx, expr_str in symint_exprs.items():
+        if free_sym_re.fullmatch(expr_str):
+            free_positions[idx] = expr_str
+        else:
+            derived_positions[idx] = expr_str
+
+    if not free_positions:
+        return None
+
+    # Order: carrier tensors first, then all non-symint args in original order
+    free_order = sorted(free_positions.keys())
+    free_sym_names = [free_positions[i] for i in free_order]
+
+    # Precompile derived expressions
+    derived_compiled = {
+        idx: compile(expr_str, f"<derived arg {idx}>", "eval")
+        for idx, expr_str in derived_positions.items()
+    }
+
+    n_args = len(args)
+
+    class _SymIntWrapper(nn.Module):
+        def __init__(self, inner: nn.Module) -> None:
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, *flat_args: Any) -> Any:
+            carriers = flat_args[: len(free_order)]
+            other = flat_args[len(free_order) :]
+
+            syms: dict[str, Any] = {}
+            for i, sym_name in enumerate(free_sym_names):
+                syms[sym_name] = carriers[i].size(0)
+
+            for idx, code in sorted(derived_compiled.items()):
+                derived_positions[idx]  # keep reference
+                syms[f"_derived_{idx}"] = eval(code, {"__builtins__": {}}, syms)
+
+            other_iter = iter(other)
+            rebuilt = []
+            for i in range(n_args):
+                if i in free_positions:
+                    rebuilt.append(syms[free_positions[i]])
+                elif i in derived_positions:
+                    rebuilt.append(syms[f"_derived_{i}"])
+                else:
+                    rebuilt.append(next(other_iter))
+
+            return self.inner(*rebuilt)
+
+    # Build wrapper args: carriers + non-symint args
+    wrapper_args: list[Any] = []
+    for i in free_order:
+        hint = int(args[i]) if not isinstance(args[i], int) else args[i]
+        device = "cpu"
+        for a in args:
+            if isinstance(a, torch.Tensor) and a.is_cuda:
+                device = a.device
+                break
+        wrapper_args.append(torch.empty(hint, dtype=torch.int8, device=device))
+
+    for i, arg in enumerate(args):
+        if i not in free_positions and i not in derived_positions:
+            wrapper_args.append(arg)
+
+    return _SymIntWrapper(mod), wrapper_args
 
 
 def repro_common(
@@ -1082,6 +1171,11 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
+    # NOTE: symint_exprs (from reader.symint(val, expr=...)) are preserved
+    # in the repro script for documentation. A future improvement could use
+    # _build_symbolic_wrapper to reconstruct algebraic relationships between
+    # free and derived symints, but the arg reordering is fragile across
+    # different graph structures so we skip it for now.
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     # pyrefly: ignore [bad-assignment]
@@ -1202,7 +1296,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)
+        pbar.update(1)  # type: ignore[has-type]
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
@@ -1216,7 +1310,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     ):
         if isinstance(compiled, str):
             raise AssertionError("compile_fx_inner should not return a string")
-        compiled(new_args)
+        compiled(new_args)  # type: ignore[arg-type]
         if new_args:
             raise AssertionError("new_args should be empty after compiled() call")
 
@@ -1243,7 +1337,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
             intermediate_hook(check_hook),
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
-            compiled(new_args)
+            compiled(new_args)  # type: ignore[arg-type]
             if new_args:
                 raise AssertionError("new_args should be empty after compiled() call")
 
@@ -1263,7 +1357,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         if new_args:
@@ -1285,7 +1379,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             if new_args:

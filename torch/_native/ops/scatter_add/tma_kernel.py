@@ -59,10 +59,7 @@ Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
     cp.reduce.async.bulk gmem operand)
 """
 
-import math
-
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
-
 import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
@@ -80,6 +77,14 @@ _MAX_CHUNK_BYTES = 512
 _WARPS_PER_CTA = 8
 _THREADS_PER_CTA = _WARPS_PER_CTA * 32
 _NUM_STAGES = 2
+# cp.async.bulk requires 128B-aligned smem destinations.
+_SMEM_ALIGN_BYTES = 128
+
+
+def _round_up(x: int, m: int) -> int:
+    return (x + m - 1) // m * m
+
+
 # When num_chunks == 1 (small-N: row_bytes <= 512), each pipeline stage
 # holds _ROWS_PER_STAGE_SMALL_N rows loaded with one 2D TMA descriptor
 # (cta_tiler=(K, N)) for better TMA utilization on small payloads.
@@ -169,6 +174,19 @@ def _make_kernel(
     small_n = num_chunks == 1
     K = _ROWS_PER_STAGE_SMALL_N if small_n else 1
 
+    # 2-stage pipeline buffer is laid out column-major; stage i starts
+    # at offset i * stage_stride_elems * elem_bytes, so the stride must
+    # round chunk_bytes up to a multiple of _SMEM_ALIGN_BYTES. Otherwise
+    # stage 1 is misaligned and the kernel faults the first time a CTA
+    # writes it. Bites both chunk_bytes < 128 (small D) and chunk_bytes
+    # not a multiple of 128 (e.g. fp32 N=36 -> 144 B).
+    stage_stride_elems = _round_up(chunk_elems, _SMEM_ALIGN_BYTES // elem_bytes)
+    # Same padding for the small-N tile-stage stride: TMA destination is
+    # the next stage's K*N tile, so its base must be 128B-aligned. Bites
+    # any K*N*elem_bytes that isn't a 128-multiple (e.g. fp32 N=4 -> 64 B,
+    # bf16 N=8 -> 64 B, fp32 N=12 -> 192 B).
+    tile_stage_stride_elems = _round_up(K * N, _SMEM_ALIGN_BYTES // elem_bytes)
+
     # Split chunk_elems into a 32-aligned bulk + a < 32 tail. fp32
     # row_bytes >= 16 allows chunk_elems == 4; bf16/fp16 allows
     # chunk_elems == 8; neither dtype's chunk_elems is required to be
@@ -255,22 +273,29 @@ def _make_kernel(
             out_rs = out_row_stride
 
         smem = cutlass.utils.SmemAllocator()
-        # Per-warp smem: (K, N, _NUM_STAGES) row-major (stride N, 1,
-        # K*N). Stride between warps is K*N*_NUM_STAGES.
+        # Per-warp smem: (K, N, _NUM_STAGES) row-major within a stage
+        # (stride N, 1), then padded to 128B between stages (and between
+        # warps) so each TMA destination starts on a 128B boundary as
+        # cp.async.bulk requires.
         sBuf_all = smem.allocate_tensor(
             dtype,
             cute.make_layout(
                 (K, N, _NUM_STAGES, _WARPS_PER_CTA),
-                stride=(N, 1, K * N, K * N * _NUM_STAGES),
+                stride=(
+                    N,
+                    1,
+                    tile_stage_stride_elems,
+                    tile_stage_stride_elems * _NUM_STAGES,
+                ),
             ),
-            128,
+            _SMEM_ALIGN_BYTES,
         )
         mbar_per_warp = PerWarpTmaPipeline.barrier_storage_size(_NUM_STAGES)
         mbar_all = smem.allocate_array(
             cutlass.Uint64, num_elems=mbar_per_warp * _WARPS_PER_CTA
         )
 
-        my_buf_off = warp_id * Int32(K * N * _NUM_STAGES)
+        my_buf_off = warp_id * Int32(tile_stage_stride_elems * _NUM_STAGES)
         my_mbar_off = warp_id * Int32(mbar_per_warp)
         my_buf_ptr = sBuf_all.iterator + my_buf_off
         my_mbar_ptr = mbar_all + my_mbar_off
@@ -286,10 +311,10 @@ def _make_kernel(
         cute.arch.sync_threads()
 
         # Per-warp TMA partition. Smem view: (K, N, _NUM_STAGES)
-        # row-major slice of the per-warp slab.
+        # row-major within a stage, padded between stages.
         my_sBuf = cute.make_tensor(
             my_buf_ptr,
-            cute.make_layout((K, N, _NUM_STAGES), stride=(N, 1, K * N)),
+            cute.make_layout((K, N, _NUM_STAGES), stride=(N, 1, tile_stage_stride_elems)),
         )
         # gmem (M, N) tiled by (K, N) -> shape (K, N, num_K_tiles, 1).
         tiled_gmem = cute.local_tile(tma_tensor_src, (K, N), (None, None))
@@ -329,7 +354,7 @@ def _make_kernel(
 
             if pair_count > Int32(0):
                 pipe.consumer_wait(cons_state)
-                stage_off = cons_state.index * Int32(K * N)
+                stage_off = cons_state.index * Int32(tile_stage_stride_elems)
 
                 if const_expr(scale):
                     # Scale all K*N smem slots cooperatively. The
@@ -376,7 +401,7 @@ def _make_kernel(
         # Epilogue: drain final tile.
         if pair_count > Int32(0):
             pipe.consumer_wait(cons_state)
-            stage_off = cons_state.index * Int32(K * N)
+            stage_off = cons_state.index * Int32(tile_stage_stride_elems)
 
             if const_expr(scale):
                 for k in cutlass.range_constexpr(K):
@@ -449,8 +474,11 @@ def _make_kernel(
         # _WARPS_PER_CTA * _NUM_STAGES tiles.
         sBuf_all = smem.allocate_tensor(
             dtype,
-            cute.make_layout((chunk_elems, _NUM_STAGES * _WARPS_PER_CTA)),
-            128,
+            cute.make_layout(
+                (chunk_elems, _NUM_STAGES * _WARPS_PER_CTA),
+                stride=(1, stage_stride_elems),
+            ),
+            _SMEM_ALIGN_BYTES,
         )
         # Per-warp barrier slice: full + empty mbarriers per stage.
         mbar_per_warp = PerWarpTmaPipeline.barrier_storage_size(_NUM_STAGES)
@@ -458,7 +486,10 @@ def _make_kernel(
             cutlass.Uint64, num_elems=mbar_per_warp * _WARPS_PER_CTA
         )
 
-        my_buf_off = warp_id * Int32(_NUM_STAGES * chunk_elems)
+        # Padded stage stride keeps every stage 128B-aligned for cp.async.bulk;
+        # propagate it into the per-warp offset / view so warp w lands on its
+        # own 2-tile slice rather than overlapping the next warp's.
+        my_buf_off = warp_id * Int32(_NUM_STAGES * stage_stride_elems)
         my_mbar_off = warp_id * Int32(mbar_per_warp)
         my_buf_ptr = sBuf_all.iterator + my_buf_off
         my_mbar_ptr = mbar_all + my_mbar_off
@@ -480,7 +511,7 @@ def _make_kernel(
         # slice as a (chunk_elems, _NUM_STAGES) tensor.
         my_sBuf = cute.make_tensor(
             my_buf_ptr,
-            cute.make_layout((chunk_elems, _NUM_STAGES)),
+            cute.make_layout((chunk_elems, _NUM_STAGES), stride=(1, stage_stride_elems)),
         )
         tiled_gmem = cute.local_tile(tma_tensor_src, (1, chunk_elems), (None, None))
         tma_smem, tma_gmem = cpasync.tma_partition(
@@ -552,7 +583,7 @@ def _make_kernel(
 
                 if pair_count > Int32(0):
                     pipe.consumer_wait(cons_state)
-                    cbuf_ptr = my_buf_ptr + cons_state.index * Int32(chunk_elems)
+                    cbuf_ptr = my_sBuf[None, cons_state.index].iterator
                     if const_expr(scale):
                         # Warp-cooperative scale: each lane scales a
                         # strided subset of the chunk's smem slots,
@@ -596,8 +627,7 @@ def _make_kernel(
         # Epilogue: drain the last outstanding TMA load + bulk-reduce.
         if pair_count > Int32(0):
             pipe.consumer_wait(cons_state)
-
-            cbuf_ptr = my_buf_ptr + cons_state.index * Int32(chunk_elems)
+            cbuf_ptr = my_sBuf[None, cons_state.index].iterator
             if const_expr(scale):
                 _scale_smem(cbuf_ptr, alpha, dtype, lane_id)
                 cute.arch.fence_view_async_shared()
@@ -685,7 +715,7 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     Rounded down to a multiple of ``16 / elem_bytes`` so the final
     partial chunk (if any) still satisfies the 16-byte reduce
     alignment."""
-    elem_bytes = torch.tensor([], dtype=torch_dtype).element_size()
+    elem_bytes = torch_dtype.itemsize
     row_bytes = N * elem_bytes
     chunk_bytes = min(row_bytes, _MAX_CHUNK_BYTES)
     # Ensure chunk_bytes itself is 16-aligned (true for 512, true for
@@ -740,11 +770,10 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
 def min_d_divisor_for(dtype: torch.dtype) -> int:
     """Smallest value D must be divisible by so ``cp.reduce.async.bulk``
     gmem operands stay 16-byte aligned: ``D * sizeof(dtype) % 16 == 0``,
-    i.e. ``D % (16 / gcd(16, sizeof(dtype))) == 0``. fp32: %4,
-    bf16/fp16: %8.
+    i.e. ``D % (16 / sizeof(dtype)) == 0``. fp32: %4, bf16/fp16: %8.
+    Supported dtypes' itemsize divides 16, so plain // suffices.
     """
-    esize = torch.tensor([], dtype=dtype).element_size()
-    return 16 // math.gcd(16, esize)
+    return 16 // dtype.itemsize
 
 
 def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
@@ -757,8 +786,7 @@ def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
     16-aligned). Rows that aren't multiples of ``chunk_elems`` are
     handled via the TMA descriptor's OOB-clamp-to-zero behavior.
     """
-    esize = torch.tensor([], dtype=dtype).element_size()
-    return (N * esize) % 16 == 0
+    return (N * dtype.itemsize) % 16 == 0
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:

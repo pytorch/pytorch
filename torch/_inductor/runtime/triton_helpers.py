@@ -247,6 +247,23 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 
 @triton.jit
+def online_softmax_combine_with_sum(
+    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+):
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -262,7 +279,9 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
-    delta = mean_2 - mean_1
+    # Guard against inf - inf = NaN when both means are infinite and equal.
+    # This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
+    delta = tl.where(mean_1 == mean_2, 0.0, mean_2 - mean_1)
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
@@ -798,7 +817,7 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
             kwargs["_builder"] = _semantic
             return f(*args, **kwargs)
     else:
-        wrapper = f
+        wrapper = f  # type: ignore[assignment]
 
     wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
     return wrapper
