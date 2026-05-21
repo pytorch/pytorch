@@ -108,6 +108,18 @@ class Device {
   }
 
   /**
+   * @brief Checks if two devices are not equal.
+   *
+   * @param other The device to compare with.
+   * @return true if type or index differ, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
+  bool operator!=(const Device& other) const noexcept {
+    return !(*this == other);
+  }
+
+  /**
    * @brief Sets the device index.
    *
    * @param index The new device index.
