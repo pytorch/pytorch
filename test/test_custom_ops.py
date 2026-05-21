@@ -2253,11 +2253,13 @@ Dynamic shape operator
         if not torch.allclose(y, x.sin()):
             raise AssertionError("expected y to equal x.sin()")
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_impl_device_cpu(self):
         self._test_impl_device("foo1", "default", "cpu")
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
         self._test_impl_device("foo4", "default", device_type)
