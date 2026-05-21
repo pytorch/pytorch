@@ -920,14 +920,6 @@ def flex_attention_backward(*args, **kwargs):
     original_kernel_options = kernel_options.copy()
 
     for conf in configs:
-        if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
-        ):
-            continue
-
         # Performance tuning
         # Triton heuristics
         cur_kernel_options = original_kernel_options.copy()
@@ -961,6 +953,14 @@ def flex_attention_backward(*args, **kwargs):
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if (
+            SPARSE_KV_BLOCK_SIZE % cur_kernel_options["BLOCK_N1"] != 0
+            or SPARSE_Q_BLOCK_SIZE % cur_kernel_options["BLOCK_M1"] != 0
+            or SPARSE_KV_BLOCK_SIZE % cur_kernel_options["BLOCK_N2"] != 0
+            or SPARSE_Q_BLOCK_SIZE % cur_kernel_options["BLOCK_M2"] != 0
+        ):
+            continue
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:

@@ -2633,6 +2633,59 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(flex_output.dtype, torch.float16)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @skip_on_rocm
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "bf16 requires SM >= 80")
+    def test_backward_autocast_bfloat16_respects_kernel_options(self, device):
+        B, H, N, C = 1, 2, 64, 16
+        block_size = 32
+
+        def mask_mod(b, h, q, kv):
+            return q > kv
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=N,
+            KV_LEN=N,
+            device=device,
+            BLOCK_SIZE=block_size,
+        )
+        kernel_options = {
+            "BLOCK_M": block_size,
+            "BLOCK_M1": block_size,
+            "BLOCK_M2": block_size,
+            "BLOCK_N": block_size,
+            "BLOCK_N1": block_size,
+            "BLOCK_N2": block_size,
+        }
+        linear = nn.Linear(C, 3 * C, device=device)
+        x = torch.randn(B, H, N, C, device=device, dtype=torch.float32)
+        x.requires_grad_()
+
+        @torch.compile
+        def forward(x, block_mask):
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                q, k, v = torch.chunk(linear(x), chunks=3, dim=-1)
+                q = torch.exp(q)
+                k = torch.exp(k)
+                return flex_attention(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    kernel_options=kernel_options,
+                ).mean()
+
+        loss = forward(x, block_mask)
+        self.assertEqual(loss.dtype, torch.bfloat16)
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(torch.isfinite(x.grad).all())
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
