@@ -4837,8 +4837,8 @@ class TestCase(expecttest.TestCase):
           fn (callable): Function to check for a nondeterministic alert
 
           caller_name (str): Name of the operation that produces the
-              nondeterministic alert. This name is expected to appear at the
-              beginning of the error/warning message.
+              nondeterministic alert. This name is expected to appear in
+              the error/warning message.
 
           should_alert (bool, optional): If True, then the check will only pass
               if calling `fn` produces a nondeterministic error/warning with the
@@ -4846,7 +4846,7 @@ class TestCase(expecttest.TestCase):
               calling `fn` does not produce an error. Default: `True`.
         '''
 
-        alert_message = '^' + caller_name + ' does not have a deterministic implementation, but you set'
+        alert_message = caller_name + ' does not have a deterministic implementation, but you set'
 
         # Check that errors are thrown correctly
         with DeterministicGuard(True):
