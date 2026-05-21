@@ -552,6 +552,9 @@ class RecordedEvent(NamedTuple):
     args: list[object]
     kwargs: dict[str, object]
 
+    def __repr__(self) -> str:
+        return repr((self.name, self.args, self.kwargs))
+
 
 RecordedEventsType = list[RecordedEvent]
 
