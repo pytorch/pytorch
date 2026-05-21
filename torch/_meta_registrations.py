@@ -5871,7 +5871,9 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     min = -dim_post_expr
     max = dim_post_expr - 1
     if dim < min or dim > max:
-        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [{min}, {max}], but got {dim})"
+        )
     if dim < 0:
         dim += dim_post_expr
     return dim
