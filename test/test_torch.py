@@ -830,6 +830,7 @@ class TestTorchDeviceType(TestCase):
         s = ".+Triggered internally at.+RangeFactories.+"
         # nvfuser deprecation warning filter
         warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
+        warnings.filterwarnings("ignore", "`torch.jit.script`", DeprecationWarning)
 
         def cpp_warn_fn():
             out = torch.empty((5,))
