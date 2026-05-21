@@ -1557,6 +1557,14 @@ for t in threads:
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
+    def test_select_out_of_bounds(self):
+        with FakeTensorMode():
+            x = torch.randn(3, 4)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=10)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=-10)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
