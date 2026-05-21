@@ -15,8 +15,9 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #endif
 
 namespace ao::sparse {
@@ -51,8 +52,9 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   float x_max = 0;
   // Otherwise...
   if (input.numel() > 0) {
-    x_min = input.min().item<float>();
-    x_max = input.max().item<float>();
+    auto [x_min_t, x_max_t] = at::aminmax(input);
+    x_min = x_min_t.item<float>();
+    x_max = x_max_t.item<float>();
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
