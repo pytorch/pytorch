@@ -17,13 +17,7 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import (
-    common_constant_types,
-    istype,
-    np,
-    raise_args_mismatch,
-    unpack_iterable,
-)
+from ..utils import common_constant_types, istype, np, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
 
 
@@ -280,7 +274,7 @@ class ConstantVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            arg_unpacked = unpack_iterable(tx, args[0])
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
                 return ConstantVariable.create(self.value.join(arg_const))
