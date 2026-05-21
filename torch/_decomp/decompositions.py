@@ -5302,12 +5302,12 @@ def _reflection_or_replication_pad(
     # produce non-standard strides — so suggest_memory_format(result) may
     # not reflect the desired output format.
     #
-    # CPU vs CUDA eager behavior differs:
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
     #   CPU:  allocates output via at::empty_like with suggest_memory_format,
     #         preserving the input's format (e.g. channels_last).
-    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
     #         always producing contiguous output regardless of input format.
-    if a.device.type in ("cuda", "mps"):
+    if a.device.type in ("cuda", "mps", "xpu"):
         memory_format = torch.contiguous_format
     else:
         memory_format = utils.suggest_memory_format(a)
