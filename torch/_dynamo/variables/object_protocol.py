@@ -838,17 +838,17 @@ def generic_issubclass(
 
     This only attempts to replicate object_issubclass, otherwise we delegate to cpython
     """
-    try:
-        derived_py = derived.as_python_constant()
-        cls_py = cls.as_python_constant()
-    except NotImplementedError:
+    derived_py = derived.get_real_python_backed_value()
+    cls_py = cls.get_real_python_backed_value()
+    if derived_py is NO_SUCH_SUBOBJ or cls_py is NO_SUCH_SUBOBJ:
         unimplemented(
-            gb_type="issubclass() with non-constant arguments",
+            gb_type="issubclass() with unsupported arguments",
             context=f"issubclass({derived}, {cls})",
-            explanation="issubclass() with non-constant arguments not supported.",
+            explanation="Arguments to issubclass() must be backed by python values.",
             hints=[
                 "Make sure your arguments are types.",
                 *graph_break_hints.USER_ERROR,
+                *graph_break_hints.SUPPORTABLE,
             ],
         )
     cls_type = maybe_get_python_type(cls)
@@ -856,7 +856,12 @@ def generic_issubclass(
     # Step 1: PyType_CheckExact fast path — abstract.c L2772
     if cls_type is type:
         try:
-            return ConstantVariable.create(issubclass(derived_py, cls_py))
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,  # pyrefly: ignore [invalid-argument]
+                )
+            )
         except TypeError as e:
             raise_observed_exception(TypeError, tx, args=list(e.args))
 
@@ -889,7 +894,12 @@ def generic_issubclass(
         type(cls_py), _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES
     ):
         try:
-            return ConstantVariable.create(issubclass(derived_py, cls_py))
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,
+                )
+            )
         except TypeError as e:
             raise_observed_exception(TypeError, tx, args=list(e.args))
 

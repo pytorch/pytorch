@@ -1199,7 +1199,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-        return NO_SUCH_SUBOBJ
+
+        try:
+            return self.as_python_constant()
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
 
     def is_python_equal(self, other: object) -> bool:
         """
