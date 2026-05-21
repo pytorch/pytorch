@@ -57,7 +57,6 @@ def _json_escape(s: str) -> str:
     return json.dumps(s)
 
 
-
 def _write_metadata_event(
     f: IO[str], name: str, ts: str, pid, tid, arg_key: str, arg_value: str
 ):
