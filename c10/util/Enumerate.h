@@ -117,6 +117,12 @@ class Enumerator {
     return it_ == rhs.it_;
   }
 
+  template <typename OtherIterator>
+  C10_ALWAYS_INLINE constexpr bool operator!=(
+      const Enumerator<OtherIterator>& rhs) const {
+    return !(it_ == rhs.it_);
+  }
+
  private:
   template <typename OtherIterator>
   friend class Enumerator;

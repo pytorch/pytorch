@@ -19,6 +19,10 @@ enum class EmbeddingBagMode {
   return op1 == static_cast<int64_t>(op2);
 }
 
+[[maybe_unused]] static bool operator!=(int64_t op1, EmbeddingBagMode op2) {
+  return !(op1 == op2);
+}
+
 void check_arguments(
     const Tensor& weight,
     const Tensor& indices,

@@ -201,6 +201,10 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
          module_instance().value() == rhs.module_instance().value()) &&
         callee() == rhs.callee() && source_range() == rhs.source_range();
   }
+
+  bool operator!=(const InlinedCallStack& rhs) const {
+    return !(*this == rhs);
+  }
 };
 
 // {source range, node name, InlinedCallStack}

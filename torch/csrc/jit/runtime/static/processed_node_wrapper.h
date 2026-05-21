@@ -54,6 +54,12 @@ class ProcessedNodeWrapperBase {
       return lhs.idx_ == rhs.idx_;
     }
 
+    friend bool operator!=(
+        ProcessedNodeWrapperBaseIter lhs,
+        ProcessedNodeWrapperBaseIter rhs) {
+      return !(lhs == rhs);
+    }
+
    private:
     const DerivedWrapper* container_ = nullptr;
     size_t idx_ = 0;

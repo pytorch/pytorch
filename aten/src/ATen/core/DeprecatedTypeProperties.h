@@ -58,6 +58,10 @@ class TORCH_API DeprecatedTypeProperties {
     return backend_ == other.backend() && scalar_type_ == other.scalarType();
   }
 
+  bool operator!=(const DeprecatedTypeProperties& other) const {
+    return !(*this == other);
+  }
+
   std::string toString() const {
     std::string base_str;
     if (backend_ == Backend::Undefined || scalar_type_ == ScalarType::Undefined) {

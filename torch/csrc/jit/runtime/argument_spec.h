@@ -138,6 +138,9 @@ struct ArgumentSpec {
                spec.tensor_args.data(),
                tensor_args.size() * sizeof(ArgumentInfo)) == 0;
   }
+  bool operator!=(const ArgumentSpec& spec) const {
+    return !(*this == spec);
+  }
   size_t numTensors() const {
     return tensor_args.size();
   }
@@ -296,6 +299,9 @@ struct CompleteArgumentSpec {
   // there are no size/stride indirections
   bool operator==(const CompleteArgumentSpec& spec) const {
     return ninputs == spec.ninputs && data == spec.data;
+  }
+  bool operator!=(const CompleteArgumentSpec& spec) const {
+    return !(*this == spec);
   }
   friend struct CompleteArgumentInfo;
   CompleteArgumentInfo at(size_t i) const;

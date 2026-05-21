@@ -101,6 +101,10 @@ struct QualifiedName {
     return this->qualifiedName_ == other.qualifiedName_;
   }
 
+  bool operator!=(const QualifiedName& other) const {
+    return !(*this == other);
+  }
+
  private:
   static constexpr char delimiter_ = '.';
 

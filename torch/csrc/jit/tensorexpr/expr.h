@@ -373,6 +373,9 @@ class TORCH_API BufHandle : public ExprHandle {
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }
+  bool operator!=(const BufHandle& other) const {
+    return !(*this == other);
+  }
 
   const std::string& name_hint() const {
     return this->node()->name_hint();
@@ -422,6 +425,9 @@ class TORCH_API VarHandle : public ExprHandle {
   }
   bool operator==(const VarHandle& other) const {
     return this->node() == other.node();
+  }
+  bool operator!=(const VarHandle& other) const {
+    return !(*this == other);
   }
 
   const std::string& name_hint() const {

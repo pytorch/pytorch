@@ -60,4 +60,8 @@ class TORCH_API CppSignature final {
   std::type_index signature_;
 };
 
+inline bool operator!=(const CppSignature& lhs, const CppSignature& rhs) {
+  return !(lhs == rhs);
+}
+
 } // namespace c10::impl

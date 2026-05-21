@@ -476,6 +476,10 @@ class IListRefIterator {
     });
   }
 
+  bool operator!=(const IListRefIterator& rhs) const {
+    return !(*this == rhs);
+  }
+
  private:
   union Payload {
     boxed_iterator_type boxed_iterator;

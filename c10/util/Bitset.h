@@ -111,4 +111,8 @@ struct bitset final {
   bitset_type bitset_{0};
 };
 
+inline bool operator!=(bitset lhs, bitset rhs) noexcept {
+  return !(lhs == rhs);
+}
+
 } // namespace c10::utils

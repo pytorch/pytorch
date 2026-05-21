@@ -29,6 +29,7 @@ struct TORCH_API GloballyUniqueId final {
   ~GloballyUniqueId() = default;
 
   bool operator==(const GloballyUniqueId& other) const;
+  bool operator!=(const GloballyUniqueId& other) const;
 
   at::IValue toIValue() const;
   static GloballyUniqueId fromIValue(const at::IValue& /*ivalue*/);

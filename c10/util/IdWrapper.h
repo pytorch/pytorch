@@ -52,6 +52,15 @@ class IdWrapper {
     return lhs.id_ == rhs.id_;
   }
 
+  // TODO Making operator!= noexcept if operator== is noexcept doesn't work with
+  // GCC 4.8.
+  //      Fix this once we don't need GCC 4.8 anymore.
+  friend constexpr bool operator!=(
+      const concrete_type& lhs,
+      const concrete_type& rhs) noexcept {
+    return !(lhs == rhs);
+  }
+
   underlying_type id_;
 };
 

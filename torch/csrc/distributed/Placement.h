@@ -50,6 +50,10 @@ class Shard : public Placement {
   bool operator==(const Shard& rhs) const {
     return dim == rhs.dim;
   }
+
+  bool operator!=(const Shard& rhs) const {
+    return !operator==(rhs);
+  }
 };
 
 class StridedShard : public Placement {
@@ -62,6 +66,10 @@ class StridedShard : public Placement {
   bool operator==(const StridedShard& rhs) const {
     return dim == rhs.dim && split_factor == rhs.split_factor;
   }
+
+  bool operator!=(const StridedShard& rhs) const {
+    return !operator==(rhs);
+  }
 };
 
 class Replicate : public Placement {
@@ -72,6 +80,10 @@ class Replicate : public Placement {
 
   bool operator==(const Replicate& rhs) const {
     return true;
+  }
+
+  bool operator!=(const Replicate& rhs) const {
+    return false;
   }
 };
 
@@ -93,6 +105,10 @@ class Partial : public Placement {
 
   bool operator==(const Partial& rhs) const {
     return reduce_op == rhs.reduce_op;
+  }
+
+  bool operator!=(const Partial& rhs) const {
+    return !operator==(rhs);
   }
 };
 

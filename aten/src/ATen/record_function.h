@@ -79,6 +79,10 @@ struct TORCH_API StringView {
     return strcmp(lhs.str(), rhs.str()) == 0;
   }
 
+  friend bool operator!=(const StringView& lhs, const StringView& rhs) {
+    return !(lhs == rhs);
+  }
+
  private:
   std::shared_ptr<std::string> owned_str_ptr_;
   const char* str_ptr_;

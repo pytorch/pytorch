@@ -86,6 +86,10 @@ inline std::string toString(const TypePtr& typePtr) {
   return toString(*typePtr);
 }
 
+inline bool operator!=(const Type& lhs, const Type& rhs) {
+  return !(lhs == rhs);
+}
+
 // common base for all types that have a single sub element
 // e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
@@ -466,6 +470,10 @@ struct TORCH_API SymbolicShape {
 
   friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
     return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
   }
 
   private:

@@ -41,4 +41,8 @@ inline bool operator==(const Dimname& lhs, const Dimname& rhs) {
   return lhs.symbol() == rhs.symbol();
 }
 
+inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {
+  return !(lhs == rhs);
+}
+
 } // namespace at

@@ -281,6 +281,7 @@ struct TORCH_API IValue final {
    * is the same as `equals()` except for Tensor types.
    */
   TORCH_API friend bool operator==(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool operator!=(const IValue& lhs, const IValue& rhs);
 
   /**
    * Identity comparison. Checks if `this` is the same object as `rhs`. The

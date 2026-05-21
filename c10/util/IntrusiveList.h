@@ -92,6 +92,11 @@ class ListIterator {
     return ptr_ == other.ptr_;
   }
 
+  template <typename Q>
+  bool operator!=(const ListIterator<Q, T>& other) const {
+    return !(*this == other);
+  }
+
   auto& operator*() const {
     return static_cast<reference>(*ptr_);
   }

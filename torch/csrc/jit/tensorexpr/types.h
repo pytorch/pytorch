@@ -53,6 +53,9 @@ class TORCH_API Dtype {
   bool operator==(const Dtype& other) const {
     return scalar_type_ == other.scalar_type_ && lanes_ == other.lanes_;
   }
+  bool operator!=(const Dtype& other) const {
+    return !(*this == other);
+  }
   int byte_size() const;
   std::string ToCppString() const;
 

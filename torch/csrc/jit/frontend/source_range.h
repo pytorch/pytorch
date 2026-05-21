@@ -117,6 +117,9 @@ struct TORCH_API StringCordView {
       return (str_ == rhs.str_) && (line_ == rhs.line_) && (pos_ == rhs.pos_);
     }
 
+    bool operator!=(const IteratorImpl& rhs) const {
+      return !((*this) == rhs);
+    }
     bool has_next() const {
       return size_ > 0 && (line_ < str_->pieces_.size());
     }
@@ -213,6 +216,10 @@ struct TORCH_API StringCordView {
       return repr_ == rhs.repr_;
     }
 
+    bool operator!=(const Iterator& rhs) const {
+      return repr_ != rhs.repr_;
+    }
+
     bool has_next() const {
       if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
         return pit->has_next();
@@ -269,6 +276,10 @@ struct TORCH_API StringCordView {
 
       bool operator==(const FastRepr& rhs) const {
         return it == rhs.it && str == rhs.str;
+      }
+
+      bool operator!=(const FastRepr& rhs) const {
+        return !operator==(rhs);
       }
     };
     using repr_type = std::variant<FastRepr, IteratorImpl>;
@@ -510,6 +521,10 @@ struct TORCH_API SourceRange {
   bool operator==(const SourceRange& rhs) const {
     return start() == rhs.start() && end() == rhs.end() &&
         source() == rhs.source();
+  }
+
+  bool operator!=(const SourceRange& rhs) const {
+    return !(*this == rhs);
   }
 
   std::optional<SourceRange> findSourceRangeThatGenerated() const {

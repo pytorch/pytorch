@@ -320,6 +320,11 @@ bool operator==(const List<T>& lhs, const List<T>& rhs) {
 }
 
 template<class T>
+bool operator!=(const List<T>& lhs, const List<T>& rhs) {
+  return !(lhs == rhs);
+}
+
+template<class T>
 bool List<T>::is(const List<T>& rhs) const {
   return this->impl_ == rhs.impl_;
 }

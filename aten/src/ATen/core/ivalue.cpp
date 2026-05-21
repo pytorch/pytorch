@@ -279,6 +279,10 @@ bool IValue::overlaps(const IValue& rhs) const {
   return false;
 }
 
+bool operator!=(const IValue& lhs, const IValue& rhs) {
+  return !(lhs == rhs);
+}
+
 bool operator==(const IValue& lhs, const IValue& rhs) {
   IValue eq = lhs.equals(rhs);
   if (eq.isBool()) {

@@ -64,6 +64,10 @@ struct integer_iterator {
     return false; // Horrible hack
   }
 
+  constexpr bool operator!=(const integer_iterator& other) const {
+    return !(*this == other);
+  }
+
  protected:
   I value;
 };

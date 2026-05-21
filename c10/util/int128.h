@@ -150,6 +150,9 @@ inline bool operator==(const uint128& lhs, const uint128& rhs) {
       Uint128Low64(lhs) == Uint128Low64(rhs) &&
       Uint128High64(lhs) == Uint128High64(rhs));
 }
+inline bool operator!=(const uint128& lhs, const uint128& rhs) {
+  return !(lhs == rhs);
+}
 
 inline UINT128_CONSTEXPR uint128::uint128() : lo_(0), hi_(0) {}
 inline UINT128_CONSTEXPR uint128::uint128(uint64_t top, uint64_t bottom)
