@@ -605,9 +605,9 @@ class TestDynamoDecompositionsNumerics(TestCase):
     def test_addcmul__backward(self, device):
         """Compiled addcmul_ backward matches eager backward."""
 
-        def fn(x, tensor1, tensor2, value):
+        def fn(x, tensor1, tensor2):
             y = x.clone()
-            y.addcmul_(tensor1, tensor2, value=value)
+            y.addcmul_(tensor1, tensor2, value=0.5)
             return y.sum()
 
         def make_inputs():
@@ -618,14 +618,44 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x, tensor1, tensor2
 
         x1, t1e, t2e = make_inputs()
-        expected = fn(x1, t1e, t2e, 0.5).backward()
+        fn(x1, t1e, t2e).backward()
         expected_grads = (x1.grad, t1e.grad, t2e.grad)
 
         for backend in ["aot_eager", "eager", "inductor"]:
             torch._dynamo.reset()
             x2, t1a, t2a = make_inputs()
-            actual = torch.compile(fn, backend=backend, fullgraph=True)(
-                x2, t1a, t2a, 0.5
+            torch.compile(fn, backend=backend, fullgraph=True)(x2, t1a, t2a).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul__tensor_value_backward(self, device):
+        """Compiled addcmul_ backward with tensor value matches eager backward."""
+
+        def fn(x, tensor1, tensor2, value):
+            y = x.clone()
+            y.addcmul_(tensor1, tensor2, value=value)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True)
+            value = torch.tensor(0.5, device=device)
+            return x, tensor1, tensor2, value
+
+        x1, t1e, t2e, v1 = make_inputs()
+        fn(x1, t1e, t2e, v1).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a, v2 = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x2, t1a, t2a, v2
             ).backward()
             actual_grads = (x2.grad, t1a.grad, t2a.grad)
             for exp, act in zip(expected_grads, actual_grads):
@@ -653,9 +683,9 @@ class TestDynamoDecompositionsNumerics(TestCase):
     def test_addcdiv__backward(self, device):
         """Compiled addcdiv_ backward matches eager backward."""
 
-        def fn(x, tensor1, tensor2, value):
+        def fn(x, tensor1, tensor2):
             y = x.clone()
-            y.addcdiv_(tensor1, tensor2, value=value)
+            y.addcdiv_(tensor1, tensor2, value=0.5)
             return y.sum()
 
         def make_inputs():
@@ -666,14 +696,44 @@ class TestDynamoDecompositionsNumerics(TestCase):
             return x, tensor1, tensor2
 
         x1, t1e, t2e = make_inputs()
-        expected = fn(x1, t1e, t2e, 0.5).backward()
+        fn(x1, t1e, t2e).backward()
         expected_grads = (x1.grad, t1e.grad, t2e.grad)
 
         for backend in ["aot_eager", "eager", "inductor"]:
             torch._dynamo.reset()
             x2, t1a, t2a = make_inputs()
-            actual = torch.compile(fn, backend=backend, fullgraph=True)(
-                x2, t1a, t2a, 0.5
+            torch.compile(fn, backend=backend, fullgraph=True)(x2, t1a, t2a).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv__tensor_value_backward(self, device):
+        """Compiled addcdiv_ backward with tensor value matches eager backward."""
+
+        def fn(x, tensor1, tensor2, value):
+            y = x.clone()
+            y.addcdiv_(tensor1, tensor2, value=value)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True) + 0.1
+            value = torch.tensor(0.5, device=device)
+            return x, tensor1, tensor2, value
+
+        x1, t1e, t2e, v1 = make_inputs()
+        fn(x1, t1e, t2e, v1).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a, v2 = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x2, t1a, t2a, v2
             ).backward()
             actual_grads = (x2.grad, t1a.grad, t2a.grad)
             for exp, act in zip(expected_grads, actual_grads):
