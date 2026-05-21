@@ -21,7 +21,6 @@ import zipfile
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,6 +42,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_utils import (
@@ -5020,6 +5020,7 @@ class TestSerializationDeviceType(TestCase):
                     torch.save(ft, f)
 
     @onlyAccelerator
+    @skipMPS("pin memory allocator is not registered on MPS")
     def test_use_pinned_memory_for_d2h(self, device):
         def patched_write_record(self, filename, data, nbytes):
             if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
