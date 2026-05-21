@@ -1253,6 +1253,12 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
         def test_topk_skips_cudagraph_on_hip(self):
             # rocm workaround: topk kernels fault under cudagraph trees
             # on the 2nd replay of a recorded graph.
@@ -2337,6 +2343,46 @@ if HAS_CUDA_AND_TRITON:
                 out2 + out2
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+
+        def test_error_on_dealloc_use_after_recording_and_execution(self):
+            def run(loop_count):
+                torch._dynamo.reset()
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
+                for _ in range(loop_count):
+                    x = cfn2(torch.randn(5, device="cuda"))
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    y = cfn(x)
+                    _ = y.cpu()
+
+                del x
+
+            for loop_count in (2, 3):
+                run(loop_count)
+
+        def test_error_on_dealloc_use_after_cached_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            stale = None
+            for _ in range(3):
+                stale = foo(torch.rand([4], device="cuda"))
+
+            self.assertIsNotNone(stale)
+            node = self.curr_node()
+            self.assertIs(stale, node.cached_tensor_outputs[0])
+
+            new = foo(torch.rand([4], device="cuda"))
+            self.assertIsNot(stale, new)
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+            _ = new.cpu()
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale + 1
+
+            del stale, new
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
