@@ -1480,12 +1480,6 @@ class BuiltinVariable(BaseBuiltinVariable):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
-            if fn in _OPERATOR_TO_DUNDER and len(args) == 2:
-                from .object_protocol import generic_richcompare
-
-                return generic_richcompare(
-                    tx, args[0], args[1], _OPERATOR_TO_DUNDER[fn]
-                )
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
