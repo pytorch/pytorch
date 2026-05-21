@@ -473,6 +473,22 @@ class ComboKernel(Kernel):
         # SIMDScheduling.generate_combo_kernel_code BEFORE process_kernel so the
         # seed signature matches the combo subkernel's (incl. in_out_ptr0).
         self.standalone_autotune_seed_kernels: list[tuple[str, Any, Any]] = []
+        # {slot_idx: Config} for subkernels whose heuristic produced a single
+        # config at codegen time.  These skip define_kernel / async_compile
+        # entirely and are baked into combo_grid_meta["prepicked_seed_configs"].
+        self.prepicked_seed_configs: dict[int, Any] = {}
+
+    def dominant_sub_kernel_category(self) -> str:
+        counts: dict[str, int] = {}
+        for sk in self.sub_kernels:
+            if sk.persistent_reduction:
+                cat = "persistent_reduction"
+            elif sk.inside_reduction:
+                cat = "reduction"
+            else:
+                cat = "pointwise"
+            counts[cat] = counts.get(cat, 0) + 1
+        return max(counts, key=counts.__getitem__) if counts else "unknown"
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -1224,9 +1240,13 @@ class ComboKernel(Kernel):
                     seed_specs_str = f"({', '.join(seed_specs)})"
                 # Emit into runtime call path (Python wrapper only).
                 # C++ wrappers can't call Python seed-bench functions.
+                # Guard so iterations 2+ skip tuple construction entirely.
+                # Use all() check to handle partial prepick (some slots
+                # pre-filled, others None needing runtime tuning).
                 if not V.graph.cpp_wrapper:
+                    wrapper.writeline(f"if combo_seeds_need_tuning({name}):")
                     wrapper.writeline(
-                        f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+                        f"    start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
                     )
 
         wrapper.generate_kernel_call(
@@ -1316,5 +1336,15 @@ class ComboKernel(Kernel):
                         meta[numel_name] = None
                     else:
                         meta[numel_name] = int(V.graph.sizevars.simplify(tree.numel))
+
+        if self.prepicked_seed_configs:
+            meta["prepicked_seed_configs"] = {
+                idx: {
+                    "kwargs": dict(cfg.kwargs),
+                    "num_warps": cfg.num_warps,
+                    "num_stages": cfg.num_stages,
+                }
+                for idx, cfg in self.prepicked_seed_configs.items()
+            }
 
         return meta

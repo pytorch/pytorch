@@ -2592,14 +2592,19 @@ class SIMDScheduling(BaseScheduling):
                     # a non-inplace signature that diverges from the combo
                     # subkernel's (bench skips cloning -> NaN under AMP on T5).
                     if gen_seeds:
+                        slot_idx = len(node_info_group) - 1
                         seed_src_code, seed_kernel = (
                             self.generate_kernel_code_and_kernel_from_node_info(
                                 node_info
                             )
                         )
-                        kernel.standalone_autotune_seed_kernels.append(
-                            (seed_src_code, seed_kernel, node_info.node_schedule)
-                        )
+                        prepicked = self._try_prepick_seed_config(seed_kernel)
+                        if prepicked is not None:
+                            kernel.prepicked_seed_configs[slot_idx] = prepicked
+                        else:
+                            kernel.standalone_autotune_seed_kernels.append(
+                                (seed_src_code, seed_kernel, node_info.node_schedule)
+                            )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
                         node_info.node_schedule,
@@ -2639,11 +2644,13 @@ class SIMDScheduling(BaseScheduling):
                 assert len(kernel.sub_kernels) > 1
                 assert len(node_group) == len(node_info_group)
                 if per_subkernel_blocks:
-                    # Seeds were codegened in generate_combo_kernel_code; here
-                    # we just define + pack args.
-                    assert len(kernel.standalone_autotune_seed_kernels) == len(
-                        node_info_group
-                    )
+                    # Seeds were codegened in generate_combo_kernel_code.
+                    # Single-config seeds were prepicked; only multi-config
+                    # seeds remain in standalone_autotune_seed_kernels and
+                    # need define_kernel + async_compile.
+                    assert len(kernel.standalone_autotune_seed_kernels) + len(
+                        kernel.prepicked_seed_configs
+                    ) == len(node_info_group)
                     seed_infos = []
                     for (
                         seed_src_code,
@@ -3481,6 +3488,72 @@ class SIMDScheduling(BaseScheduling):
             self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
             src_code = kernel.codegen_kernel()
         return src_code, kernel
+
+    @staticmethod
+    def _try_prepick_seed_config(seed_kernel):
+        """Return the single Config if the seed's heuristic produces exactly one,
+        else None.  When non-None the caller can skip define_kernel /
+        async_compile for this seed entirely."""
+        from torch._inductor.runtime.runtime_utils import next_power_of_2
+        from torch._inductor.runtime.triton_heuristics import (
+            persistent_reduction,
+            pointwise,
+            reduction,
+        )
+
+        size_hints = {
+            prefix: next_power_of_2(V.graph.sizevars.optimization_hint(numel))
+            for prefix, numel in seed_kernel.numels.items()
+            if not prefix_is_reduction(prefix) or seed_kernel.inside_reduction
+        }
+
+        inductor_meta = {
+            **seed_kernel.inductor_meta_common(),
+            **seed_kernel.inductor_meta_per_kernel(),
+        }
+
+        if seed_kernel.persistent_reduction:
+            configs = persistent_reduction(
+                size_hints,
+                reduction_hint=seed_kernel.features.get_reduction_hint(
+                    seed_kernel.tiling_scores
+                ),
+                triton_meta=seed_kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        elif seed_kernel.inside_reduction:
+            configs = reduction(
+                size_hints,
+                reduction_hint=seed_kernel.features.get_reduction_hint(
+                    seed_kernel.tiling_scores
+                ),
+                triton_meta=seed_kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        else:
+            tile_hint = None
+            if len(size_hints) == 2:
+                from torch._inductor.codegen.triton_utils import non_constexpr_signature
+                from torch._inductor.runtime.hints import TileHint
+
+                _, _, signature, _ = seed_kernel.args.python_argdefs()
+                if len(non_constexpr_signature(signature)) == 4:
+                    tile_hint = TileHint.SQUARE
+                else:
+                    tile_hint = TileHint.DEFAULT
+            configs = pointwise(
+                size_hints,
+                triton_meta=seed_kernel.triton_meta,
+                tile_hint=tile_hint,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+
+        if len(configs) == 1:
+            return configs[0]
+        return None
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError

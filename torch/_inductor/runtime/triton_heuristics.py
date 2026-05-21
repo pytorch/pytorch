@@ -449,6 +449,12 @@ def _has_combo_standalone_autotune_seed_config(combo_kernel) -> bool:
     return False
 
 
+def combo_seeds_need_tuning(combo_kernel) -> bool:
+    """True when combo seed configs still need runtime autotuning."""
+    configs = getattr(combo_kernel, "combo_standalone_autotune_seed_configs", None)
+    return configs is None or not all(c is not None for c in configs)
+
+
 def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
     """Bench each standalone seed kernel and store winning configs.
 
@@ -456,16 +462,16 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
     This function just benches them serially on the calling thread (GPU work)
     and stores the results for _apply_combo_standalone_autotune_seed to stitch.
 
-    Failures propagate. Each seed is a regular Triton kernel and follows
-    standard non-combo semantics: an unrecoverable bench/compile error means
-    the user's program halts with the underlying exception, same as any
-    other CachingAutotuner failure.
+    Slots that were prepicked at codegen time (single-config heuristic) are
+    already filled in combo_standalone_autotune_seed_configs; this function
+    only benches the remaining multi-config slots.
     """
     if not isinstance(combo_kernel, CachingAutotuner):
         return
     if not combo_kernel.inductor_meta.get("combo_grid_meta"):
         return
-    if combo_kernel.combo_standalone_autotune_seed_configs is not None:
+    existing = combo_kernel.combo_standalone_autotune_seed_configs
+    if not combo_seeds_need_tuning(combo_kernel):
         return
     if _has_combo_standalone_autotune_seed_config(combo_kernel):
         return
@@ -493,7 +499,19 @@ def start_combo_kernel_standalone_autotune(combo_kernel, seed_specs) -> None:
             seed_kernel.launchers[0].config,
         )
 
-    combo_kernel.combo_standalone_autotune_seed_configs = seed_configs
+    if existing is not None:
+        # Merge runtime-tuned configs into prepicked slots.
+        # existing has None at slots that needed runtime tuning.
+        none_count = sum(1 for c in existing if c is None)
+        assert none_count == len(seed_configs), (
+            f"Expected {none_count} runtime-tuned seeds to fill None slots, "
+            f"got {len(seed_configs)}"
+        )
+        runtime_iter = iter(seed_configs)
+        merged = [c if c is not None else next(runtime_iter) for c in existing]
+        combo_kernel.combo_standalone_autotune_seed_configs = merged
+    else:
+        combo_kernel.combo_standalone_autotune_seed_configs = seed_configs
 
 
 class CachingAutotuner(KernelInterface):
@@ -641,8 +659,30 @@ class CachingAutotuner(KernelInterface):
         # binary that would never run.
         self.defer_combo_precompile: bool = False
 
+        self._load_prepicked_combo_seed_configs()
+
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
+
+    def _load_prepicked_combo_seed_configs(self) -> None:
+        combo_meta = self.inductor_meta.get("combo_grid_meta")
+        if not combo_meta:
+            return
+        prepicked = combo_meta.get("prepicked_seed_configs")
+        if not prepicked:
+            return
+        num_kernels = combo_meta.get("num_kernels", 0)
+        if num_kernels == 0:
+            return
+        seeds = [None] * num_kernels
+        for idx, cfg_dict in prepicked.items():
+            seeds[idx] = triton.Config(
+                cfg_dict["kwargs"],
+                num_warps=cfg_dict["num_warps"],
+                num_stages=cfg_dict["num_stages"],
+            )
+        if any(s is not None for s in seeds):
+            self.combo_standalone_autotune_seed_configs = seeds
 
     def is_statically_launchable(self):
         """
@@ -745,13 +785,12 @@ class CachingAutotuner(KernelInterface):
         # binary (instead of a throwaway placeholder followed by a
         # recompile in the apply phase).
         if self.defer_combo_precompile and self.configs is not None:
-            seed_configs = self.combo_standalone_autotune_seed_configs
-            if seed_configs is not None:
+            if not combo_seeds_need_tuning(self):
                 combo_grid_meta = self.inductor_meta.get("combo_grid_meta", {})
                 signature_keys = OrderedSet(self.triton_meta["signature"])
                 log.debug(
                     "Combo standalone autotune seed: applying %d standalone configs to %s",
-                    len(seed_configs),
+                    len(self.combo_standalone_autotune_seed_configs),
                     self.fn.__name__,
                 )
                 stitched, changed = self._stitched_seed_config(
@@ -1105,6 +1144,7 @@ class CachingAutotuner(KernelInterface):
         self.__dict__.update(state)
         self.lock = threading.Lock()
         self._plugins = get_caching_autotuner_plugins(self)
+        self._load_prepicked_combo_seed_configs()
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
@@ -1738,8 +1778,37 @@ class CachingAutotuner(KernelInterface):
             )
             applied_seed = applied_seed or seeded_kwargs != before
 
-        warp_stage_votes = [(cfg.num_warps, cfg.num_stages) for cfg in seed_configs]
-        chosen_warps, chosen_stages = Counter(warp_stage_votes).most_common(1)[0][0]
+        # num_warps: pick max among the top-50% subkernels by per-program
+        # tile elements.  Heavy subkernels drive occupancy/IPC; tiny-tile
+        # outliers should not drag the warp count down.
+        def _per_program_tile_elems(idx: int) -> int:
+            te = 1
+            for k, v in seeded_kwargs.items():
+                if k.endswith(f"_{idx}") and "BLOCK" in k:
+                    te *= int(v)
+            kind = combo_grid_meta.get(f"heuristic_{idx}", "pointwise")
+            if kind == "persistent_reduction":
+                sh = combo_grid_meta.get(f"size_hints_{idx}", {})
+                for prefix, val in sh.items():
+                    if prefix.startswith("r"):
+                        te *= int(val)
+            return te
+
+        sub_tiles = sorted(
+            (
+                (_per_program_tile_elems(idx), cfg.num_warps)
+                for idx, cfg in enumerate(seed_configs)
+            ),
+            key=lambda t: t[0],
+            reverse=True,
+        )
+        top_k = max(1, len(sub_tiles) // 2)
+        chosen_warps = max(w for _, w in sub_tiles[:top_k])
+
+        # num_stages: majority vote (pipeline depth, no occupancy pressure)
+        chosen_stages = Counter(cfg.num_stages for cfg in seed_configs).most_common(1)[
+            0
+        ][0]
 
         # Shared backend kwargs (e.g. HIP waves_per_eu): vote across seeds.
         # Skip block-like keys (XBLOCK/YBLOCK/ZBLOCK/R*BLOCK) -- they are
