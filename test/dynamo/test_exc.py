@@ -6,6 +6,7 @@ import pickle
 import re
 import sys
 import tempfile
+import traceback
 import unittest
 from typing import cast
 
@@ -16,6 +17,7 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
     BackendCompilerFailed,
+    InternalTorchDynamoError,
     InvalidBackend,
     ResetRequired,
     ShortenTraceback,
@@ -238,6 +240,67 @@ from user code:
    File "test_exc.py", line N, in fn001
     comptime(f)""",
         )
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_exception_chaining_preserved(self):
+        def fn001(x):
+            def f(ctx):
+                try:
+                    config = {}
+                    _ = config["missing_key"]
+                except KeyError as e:
+                    raise RuntimeError("failed to load config") from e
+
+            comptime(f)
+
+        with self.assertRaises(InternalTorchDynamoError) as cm:
+            torch.compile(fn001, backend="eager")(torch.randn(1))
+
+        e = cm.exception
+        self.assertIsNotNone(e.__cause__)
+        self.assertIsInstance(e.__cause__, RuntimeError)
+        self.assertIn("failed to load config", str(e.__cause__))
+        self.assertIsNotNone(e.__cause__.__cause__)
+        self.assertIsInstance(e.__cause__.__cause__, KeyError)
+        self.assertIn("missing_key", str(e.__cause__.__cause__))
+
+    @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
+    @make_logging_test()
+    @unittest.skipIf(IS_FBCODE, "stack trace slightly different in fbcode")
+    def test_chain_false_consistent_with_exc_info(self, records):
+        def fn001(x):
+            def f(ctx):
+                try:
+                    {}["missing_key"]
+                except KeyError as e:
+                    raise RuntimeError("failed to load config") from e
+
+            comptime(f)
+
+        torch.compile(fn001, backend="eager")(torch.randn(1))
+
+        record = self.getRecord(records, "WON'T CONVERT")
+        self.assertNotIn("missing_key", record.getMessage())
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+WON'T CONVERT fn001 test_exc.py line N
+========== TorchDynamo Stack Trace ==========
+Traceback (most recent call last):
+  File "test_exc.py", line N, in f
+    raise RuntimeError("failed to load config") from e
+torch._dynamo.exc.InternalTorchDynamoError: RuntimeError: failed to load config
+
+from user code:
+   File "test_exc.py", line N, in fn001
+    comptime(f)
+
+""",
+        )
+        self.assertIsNotNone(record.exc_info)
+        rendered = "".join(traceback.format_exception(*record.exc_info))
+        self.assertIn("missing_key", rendered)
+        self.assertIn("InternalTorchDynamoError", rendered)
 
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
     @make_logging_test(graph_breaks=True)
