@@ -226,12 +226,6 @@ test_failures = {
     "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
-    "test_searchsorted_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
-        ("cpu",)
-    ),
-    "test_bucketize_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
-        ("cpu",)
-    ),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

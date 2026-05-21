@@ -789,7 +789,6 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def setUp(self):
         super().setUp()
-        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         self._test_stack = contextlib.ExitStack()
         self._test_stack.enter_context(
@@ -807,7 +806,6 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def tearDown(self):
         self._test_stack.close()
-        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         super().tearDown()
 

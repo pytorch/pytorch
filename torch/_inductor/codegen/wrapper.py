@@ -682,6 +682,10 @@ class ExternKernelMultiOutLine(WrapperLine):
 
         code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
 
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self.wrapper)
+
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -1220,11 +1224,10 @@ class AssertSizeStrideLine(WrapperLine):
     name: str
     size: str
     stride: str
-    op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name
+        self.wrapper.write_assert_size_stride(
+            self.name, self.size, self.stride, "input"
         )
 
     @staticmethod
@@ -1695,28 +1698,12 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.write_assert_size_stride(name, size, stride, "input")
+                self.writeline(AssertSizeStrideLine(self, name, size, stride))
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
-
-    def _codegen_assert_size_stride(
-        self,
-        code: IndentedBuffer,
-        name: str,
-        size: str,
-        stride: str,
-        op_name: str,
-    ) -> None:
-        """Emit one assert_size_stride line to `code` (replay-phase target).
-
-        Subclasses override to change the emitted form (e.g., C++ assert with
-        an AOTI runtime env guard).
-        """
-        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1918,9 +1905,6 @@ class PythonWrapperCodegen(CodeGen):
         for out_node in node.out_variant_output_nodes:
             self.codegen_allocation(out_node)
         self.writeline(ExternKernelMultiOutLine(self, node))
-        for out_node in node.out_variant_output_nodes:
-            if isinstance(out_node.layout, ir.Layout):
-                out_node.codegen_size_asserts(self)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

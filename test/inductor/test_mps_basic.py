@@ -124,25 +124,6 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.rand(10), torch.ones(10)))
 
-    def test_batchnorm_train_running_stats(self):
-        # Regression test: missing closing threadgroup_barrier in
-        # threadgroup_welford_{reduce,combine}
-        torch.manual_seed(0)
-        xs = [torch.randn(16, 8, 4, 4) for _ in range(10)]
-
-        def run(device, compile_):
-            torch.manual_seed(0)
-            bn = torch.nn.BatchNorm2d(8).to(device).train()
-            f = torch.compile(bn) if compile_ else bn
-            for x in xs:
-                f(x.to(device))
-            return bn.running_mean.cpu(), bn.running_var.cpu()
-
-        m_ref, v_ref = run("cpu", False)
-        m_mps, v_mps = run("mps", True)
-        self.assertEqual(m_mps, m_ref)
-        self.assertEqual(v_mps, v_ref)
-
     def test_compile_numpy_scalar(self):
         def fn(x, y):
             return x / y

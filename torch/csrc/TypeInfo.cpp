@@ -110,7 +110,7 @@ static PyObject* THPDTypeInfo_compare(
         Py_RETURN_FALSE;
       }
   }
-  Py_RETURN_NOTIMPLEMENTED;
+  return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {

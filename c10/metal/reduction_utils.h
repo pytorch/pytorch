@@ -304,7 +304,6 @@ float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
     m += delta / (idx + 1);
     m2 += delta * (data[idx] - m);
   }
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return float3(m, m2, size);
 }
 
@@ -327,7 +326,6 @@ float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
   for (unsigned idx = 1; idx < size; ++idx) {
     rc = welford_combine(rc, data[idx]);
   }
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return rc;
 }
 

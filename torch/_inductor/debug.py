@@ -578,7 +578,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # don't try to use stable hash torchinductor compilation if saving real tensors
+            # dont try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors
@@ -873,14 +873,6 @@ def record_and_log_graph_execution_order() -> Iterator[None]:
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
     device: torch.device
-
-
-@dataclasses.dataclass
-class SymExprMetadataHolder:
-    pytype: str
-    expr: Any
-    hint: int | float | bool | None
-    symbol_hints: dict[str, int | float | bool]
 
 
 save_args_cnt = itertools.count()
@@ -1214,62 +1206,15 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     if not os.path.exists(folder):
         os.mkdir(folder)
 
-    def python_value(value: Any) -> int | float | bool | None:
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value
-        # SymPy numbers expose is_integer as a tri-state property.
-        if getattr(value, "is_integer", None) is False:
-            return float(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return float(value)
-
-    def handle_sym_expr(x: Any, pytype: str) -> SymExprMetadataHolder:
-        node = x.node
-        shape_env = node.shape_env
-        symbol_hints: dict[str, int | float | bool] = {}
-        if shape_env is not None:
-            for symbol in node.expr.free_symbols:
-                hint = shape_env.backed_var_to_val.get(symbol)
-                if hint is not None:
-                    python_hint = python_value(hint)
-                    if python_hint is not None:
-                        symbol_hints[str(symbol)] = python_hint
-        return SymExprMetadataHolder(
-            pytype,
-            node.expr,
-            python_value(node.hint),
-            symbol_hints,
-        )
-
     def handle_tensor(x: Any) -> Any:
         """
-        Pickle FakeTensor/SymInt will result in errors like:
+        Pickle FakeTensor will result in error:
         AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
 
-        Convert tensors and symbolic values to metadata. This may also make
-        pickle faster.
+        Convert all Tensor to metadata. This may also makes pickle faster.
         """
-        if isinstance(x, GraphModule):
-            gm = copy.deepcopy(x)
-            for node in gm.graph.nodes:
-                node.meta = tree_map(handle_tensor, node.meta)
-            return gm
         if isinstance(x, torch.Tensor):
-            return TensorMetadataHolder(
-                tree_map(handle_tensor, _extract_tensor_metadata(x)), x.device
-            )
-        elif isinstance(x, torch.SymInt):
-            return handle_sym_expr(x, "int")
-        elif isinstance(x, torch.SymFloat):
-            return handle_sym_expr(x, "float")
-        elif isinstance(x, torch.SymBool):
-            return handle_sym_expr(x, "bool")
+            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
         else:
             return x
 
@@ -1297,76 +1242,23 @@ load_args_and_run_compile_fx_inner({path!r})
 
 
 def load_args_and_run_compile_fx_inner(path: str) -> Any:
-    from torch._dynamo.source import ConstantSource
     from torch._inductor.compile_fx import compile_fx_inner
-    from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
     with open(path, "rb") as f:
         args, kwargs = pickle.load(f)
 
-    shape_env = ShapeEnv()
-    symbol_cache: dict[str, Any] = {}
-
-    def restore_sym_expr(x: SymExprMetadataHolder) -> Any:
-        expr = x.expr
-        if isinstance(expr, str):
-            import sympy
-
-            import torch.utils._sympy.functions as sympy_functions
-
-            expr = sympy.sympify(expr, locals=sympy_functions.__dict__)
-        replacements = {}
-        for symbol in expr.free_symbols:
-            symbol_name = str(symbol)
-            if symbol_name not in symbol_cache:
-                hint = x.symbol_hints.get(symbol_name)
-                if hint is None:
-                    if x.hint is not None and expr == symbol:
-                        hint = x.hint
-                    else:
-                        symbol_cache[symbol_name] = shape_env.create_unbacked_symint(
-                            ConstantSource(symbol_name)
-                        ).node.expr
-                        replacements[symbol] = symbol_cache[symbol_name]
-                        continue
-                symbol_cache[symbol_name] = shape_env.create_symbol(
-                    hint,
-                    ConstantSource(symbol_name),
-                    dynamic_dim=DimDynamic.DYNAMIC,
-                    do_not_specialize_zero_one=True,
-                )
-            replacements[symbol] = symbol_cache[symbol_name]
-        expr = expr.xreplace(replacements)
-        if x.pytype == "int":
-            return shape_env.create_symintnode(expr, hint=x.hint)
-        elif x.pytype == "float":
-            return shape_env.create_symfloatnode(expr, hint=x.hint)
-        elif x.pytype == "bool":
-            return shape_env.create_symboolnode(expr)
-        else:
-            raise AssertionError(f"Unexpected symbolic expression type: {x.pytype}")
-
     def handle_tensor(x: Any) -> Any:
-        if isinstance(x, GraphModule):
-            for node in x.graph.nodes:
-                node.meta = tree_map(handle_tensor, node.meta)
-            return x
-        elif isinstance(x, TensorMetadataHolder):
-            tensor_metadata = tree_map(handle_tensor, x.tensor_metadata)
+        if isinstance(x, TensorMetadataHolder):
             return torch._dynamo.testing.rand_strided(
-                tensor_metadata.shape,
-                tensor_metadata.stride,
-                tensor_metadata.dtype,
+                x.tensor_metadata.shape,
+                x.tensor_metadata.stride,
+                x.tensor_metadata.dtype,
                 x.device,
             )
-        elif isinstance(x, SymExprMetadataHolder):
-            return restore_sym_expr(x)
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True, shape_env=shape_env
-    )
+    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

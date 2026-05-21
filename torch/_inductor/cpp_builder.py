@@ -989,36 +989,6 @@ def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
     return "march=native"
 
 
-def _get_cpu_arch_cflags(cpp_compiler: str) -> list[str]:
-    if config.is_fbcode():
-        return []
-
-    march = config.cpp.march
-    if march == "":
-        return []
-
-    # -march=native is not recognized on Apple Silicon, so the default macOS
-    # behavior is no architecture flag unless the user explicitly configures one.
-    if sys.platform == "darwin" and march is None:
-        return []
-
-    machine = platform.machine()
-    if march is None:
-        if machine == "ppc64le":
-            return ["mcpu=native"]
-        if machine == "riscv64":
-            return ["march=rv64gc"]
-        if machine == "riscv32":
-            return ["march=rv32gc"]
-        if machine in ("aarch64", "arm64"):
-            return [_get_linux_aarch64_arch_flag(cpp_compiler)]
-        return ["march=native"]
-
-    if machine == "ppc64le":
-        return [f"mcpu={march}"]
-    return [f"march={march}"]
-
-
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
 ) -> tuple[list[str], list[str]]:
@@ -1065,10 +1035,23 @@ def _get_optimization_cflags(
     if _IS_WINDOWS:
         pass
     else:
-        # on macos, unknown argument: '-fno-tree-loop-vectorize'
-        if sys.platform != "darwin" and _is_gcc(cpp_compiler):
-            cflags.append("fno-tree-loop-vectorize")
-        cflags += _get_cpu_arch_cflags(cpp_compiler)
+        if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if _is_gcc(cpp_compiler):
+                cflags.append("fno-tree-loop-vectorize")
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
+            if not config.is_fbcode():
+                if platform.machine() == "ppc64le":
+                    cflags.append("mcpu=native")
+                elif platform.machine() == "riscv64":
+                    cflags.append("march=rv64gc")
+                elif platform.machine() == "riscv32":
+                    cflags.append("march=rv32gc")
+                elif platform.machine() in ("aarch64", "arm64"):
+                    cflags.append(_get_linux_aarch64_arch_flag(cpp_compiler))
+                else:
+                    cflags.append("march=native")
 
         if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
             cflags.append("flto=thin")

@@ -63,7 +63,7 @@ class AotAutograd:
         if callable(self.kwargs.get("decompositions")):
             self.kwargs["decompositions"] = self.kwargs["decompositions"]()
 
-        # NB: don't delete counter increment
+        # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 
