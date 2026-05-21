@@ -338,6 +338,22 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             d = dict.fromkeys(map(HashCountingInt, range(4)))
             after_dict = sum(elem.hash_count for elem in d)
+            mutable = set(d)
+            after_set = sum(elem.hash_count for elem in d)
+            mutable.difference(())
+            after_set_difference_empty_tuple = sum(elem.hash_count for elem in d)
+            mutable.union(())
+            after_set_union_empty_tuple = sum(elem.hash_count for elem in d)
+            mutable.symmetric_difference(())
+            after_set_symmetric_difference_empty_tuple = sum(
+                elem.hash_count for elem in d
+            )
+            mutable.difference(d)
+            after_set_difference = sum(elem.hash_count for elem in d)
+            mutable.symmetric_difference(d)
+            after_set_symmetric_difference = sum(elem.hash_count for elem in d)
+            mutable.symmetric_difference_update(d)
+            after_set_symmetric_difference_update = sum(elem.hash_count for elem in d)
             s = frozenset(d)
             after_frozenset = sum(elem.hash_count for elem in d)
             s.difference(d)
@@ -358,14 +374,32 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
             after_keys_fromkeys = sum(elem.hash_count for elem in d)
             frozenset(keys).difference(keys)
             after_keys_difference = sum(elem.hash_count for elem in d)
+            set(keys).symmetric_difference(keys)
+            after_keys_symmetric_difference = sum(elem.hash_count for elem in d)
             SetSubclass(d)
             after_set_subclass = sum(elem.hash_count for elem in d)
+            set_subclass = SetSubclass(d)
+            set_subclass.difference(d)
+            after_set_subclass_difference = sum(elem.hash_count for elem in d)
+            set_subclass.symmetric_difference(d)
+            after_set_subclass_symmetric_difference = sum(elem.hash_count for elem in d)
+            set_subclass.symmetric_difference_update(d)
+            after_set_subclass_symmetric_difference_update = sum(
+                elem.hash_count for elem in d
+            )
             subclass_frozenset = FrozenSetSubclass(d)
             after_frozenset_subclass = sum(elem.hash_count for elem in d)
             subclass_frozenset.difference(d)
             after_frozenset_subclass_difference = sum(elem.hash_count for elem in d)
             return (
                 after_dict,
+                after_set,
+                after_set_difference_empty_tuple,
+                after_set_union_empty_tuple,
+                after_set_symmetric_difference_empty_tuple,
+                after_set_difference,
+                after_set_symmetric_difference,
+                after_set_symmetric_difference_update,
                 after_frozenset,
                 after_difference,
                 after_hasattr,
@@ -375,13 +409,17 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
                 after_keys_frozenset,
                 after_keys_fromkeys,
                 after_keys_difference,
+                after_keys_symmetric_difference,
                 after_set_subclass,
+                after_set_subclass_difference,
+                after_set_subclass_symmetric_difference,
+                after_set_subclass_symmetric_difference_update,
                 after_frozenset_subclass,
                 after_frozenset_subclass_difference,
             )
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, (4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4))
+        self.assertEqual(result, (4,) * 24)
 
     def test_hash_object_descriptor_uses_identity_hash(self):
         value = 1
