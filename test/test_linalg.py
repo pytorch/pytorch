@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     with_ieee_matmul_precision, MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -782,12 +782,15 @@ class TestLinalg(TestCase):
             cholesky_test_helper(3, batchsize, upper)
 
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipIfRocmArch(MI300_ARCH)
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @tf32_on_and_off(0.01)
-    @reduced_f32_on_and_off(0.01)
+    # Cholesky factorization itself runs in FP32 (no TF32 path). The
+    # assertion `||A - C @ C.T|| < tol` is a factorization-correctness check;
+    # enabling TF32 (or CPU mkldnn reduced-f32) on the reconstruct mm injects
+    # condition-amplified noise unrelated to what's being verified.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @with_ieee_matmul_precision
     def test_old_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -5932,7 +5935,6 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
         try:
@@ -5993,7 +5995,6 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
@@ -7803,11 +7804,16 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
-    @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
-    @tf32_on_and_off(0.005)
-    @reduced_f32_on_and_off(0.005)
+    # K=8 random GEMM under E8M10 rounding has a worst-case bound of
+    # ~sqrt(8) * 2^-10 * |A|_inf ~= 8e-3 for randn operands. NVIDIA TF32
+    # (round-to-nearest) stays well under the prior 0.005 tolerance in
+    # practice; CDNA3 XF32 uses round-down accumulation that saturates the
+    # bound, so relax only on ROCm to preserve CUDA rigor.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @reduced_f32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -9744,9 +9750,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.001)
-    @reduced_f32_on_and_off(0.001)
+    # Random batched matmul under E8M10 rounding has a worst-case bound of
+    # ~sqrt(K) * 2^-10 * |A|_inf ~= 8e-3 for randn operands at K=8. NVIDIA
+    # TF32 (round-to-nearest) stays well under the prior 0.001 tolerance in
+    # practice; CDNA3 XF32 uses round-down accumulation that saturates the
+    # bound, so relax only on ROCm to preserve CUDA rigor.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.001)
+    @reduced_f32_on_and_off(0.02 if TEST_WITH_ROCM else 0.001)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
@@ -10080,8 +10091,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
                          fn(torch.slogdet, (0, 0)))
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.005)
+    # Random K=20 case reduces to (6, 20) @ (20, 42) GEMM. Measured:
+    # ideal NV-TF32 5.2e-3 (marginally over old 0.005 — latent flake risk on
+    # CUDA); ideal AMD-XF32 1.0e-2; MI300 TF32 1.3e-2. Bumped to 0.01 as a
+    # vendor-agnostic floor and 0.02 on ROCm for the AMD XF32 envelope.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.01)
     @reduced_f32_on_and_off(0.07, 0.005)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
