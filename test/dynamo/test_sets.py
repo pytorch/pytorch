@@ -808,6 +808,28 @@ class SetTests(_SetBase, _BaseSetTests):
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
+    @make_dynamo_test
+    def test_discard_unhashable_key(self):
+        s = set("abc")
+        self.assertRaises(TypeError, s.discard, [])
+
+    @make_dynamo_test
+    def test_discard_set_key_matches_frozenset(self):
+        s = {frozenset("abc")}
+        s.discard(set("abc"))
+        self.assertEqual(s, set())
+
+    @make_dynamo_test
+    def test_remove_unhashable_key(self):
+        s = set("abc")
+        self.assertRaises(TypeError, s.remove, [])
+
+    @make_dynamo_test
+    def test_remove_set_key_matches_frozenset(self):
+        s = {frozenset("abc")}
+        s.remove(set("abc"))
+        self.assertEqual(s, set())
+
 
 class UserDefinedSetTests(_SetBase, _BaseSetTests):
     class CustomSet(set):
