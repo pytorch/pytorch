@@ -929,12 +929,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
+        elif name == "fromkeys" and (
             self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
+            or issubclass(self.value, dict)
         ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -4033,6 +4033,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            name == "fromkeys"
+            and self._maybe_get_baseclass_method(name) in self._base_methods
+        ):
+            cls_vt = VariableTracker.build(tx, self.python_type(), self.cls_source)
+            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, cls_vt, *args, **kwargs
+            )
+
         # Dict subclasses can override __missing__ to provide fallback
         # behavior instead of raising a KeyError. This is used, for example,
         # by collections.Counter.
