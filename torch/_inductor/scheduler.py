@@ -3046,12 +3046,101 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         self.formal_reads = self.node.formal_accesses.read_writes.reads
         self.formal_writes = self.node.formal_accesses.read_writes.writes
 
-        # TODO(JJVRAW)
         numel = math.prod(node.mutable_args[0].shape)
         rnumel = 1
         device = node.get_device_or_error()
         # pyrefly: ignore [bad-assignment]
         self.group = (device, (numel, rnumel))
+
+    def can_fuse_with(self, node2: BaseSchedulerNode) -> bool:
+        why = WhyNoFuse(self, node2)
+        if not self.only_tt_stores:
+            why("user Triton fusion only supports `tl.store`")
+            return False
+
+        if len(self.node.mutable_args) != 1 or len(self.formal_writes) != 1:
+            why("user's Triton kernel has multiple stores")
+            return False
+
+        formal_writes = list(self.formal_writes)
+        if formal_writes[0].access_count != 1:
+            why("user's Triton kernel writes to output more than once")
+            return False
+
+        # Only fuse if the mutated arg is originally an "empty" tensor.
+        # This is because we don't know exactly which element of that tensor is being written to.
+        # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to
+        # that subset. In these edge cases, our fusion is only correct if the original tensor is empty,
+        # where the semantics is that content values are UB, and we can rely on the fact that
+        # `epilogue(UB) == UB`.
+        def _is_empty_tensor(arg) -> bool:
+            if not isinstance(arg, ir.TensorBox):
+                return False
+            if not isinstance(arg.data, ir.StorageBox):
+                return False
+            if not isinstance(arg.data.data, ir.ComputedBuffer):
+                return False
+            if not all(r == 0 for r in arg.data.data.data.ranges):
+                return False
+            return True
+
+        mutable_arg = self.node.mutable_args[0]
+        if not _is_empty_tensor(mutable_arg):
+            why("user's Triton kernel output is not an empty tensor")
+            return False
+
+        formal_arg_name = formal_writes[0].name
+        if any(dep.name == formal_arg_name for dep in self.formal_reads):
+            why("user's Triton kernel reads from its output buffer")
+            return False
+
+        if not isinstance(node2, SchedulerNode):
+            why("epilogue of user's Triton kernel is not a SchedulerNode")
+            return False
+
+        if not isinstance(node2.node, ComputedBuffer) or not isinstance(
+            node2.node.data, ir.Pointwise
+        ):
+            why("epilogue of user's Triton kernel is not Pointwise")
+            return False
+
+        written_buffer_name = self.node.mutation_outputs[0].name
+
+        # The epilogue can only read from the output buffer.
+        # Any other tensor/s would require additional load expressions.
+        if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+            why(
+                "epilogue of user's Triton kernel reads from buffers other than the mutated output"
+            )
+            return False
+
+        # the epilogue depends on expressions which may not available in the user's Triton kernel
+        # (e.g. indexing exprs used not in a load)
+        node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+        for symbol in node2_inner_fn_free_symbols:
+            usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+            if any(usage != "load" for usage in usages):
+                why(
+                    "epilogue requires expressions not available in user's Triton kernel"
+                )
+                return False
+
+        def _is_other_node_that_references_mutation_buffer(
+            other_node: BaseSchedulerNode,
+        ):
+            return (
+                (other_node is not self)
+                and (other_node is not node2)
+                and written_buffer_name in other_node.used_buffer_names()
+            )
+
+        if any(
+            _is_other_node_that_references_mutation_buffer(node)
+            for node in self.scheduler.nodes
+        ):
+            return False
+
+        return self.scheduler.can_fuse_vertical(self, node2)
 
 
 class FusedUserTritonSchedulerNode(FusedSchedulerNode):
@@ -3094,6 +3183,8 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
 
         ir_node = self.kernel_node.node
         numel = math.prod(ir_node.mutable_args[0].shape)
+
+        # Epilogue fusion is gated on pointwise operations, thus 1D tiling, with no reduction.
         tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
         kernel_features = SIMDKernelFeatures([self.fused_epilogue], numel)
 
@@ -4133,7 +4224,7 @@ class Scheduler:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
         if any(isinstance(node, FusedUserTritonSchedulerNode) for node in self.nodes):
-            # if a user triton kernel has been epilogue-fused,
+            # if a user's Triton kernel has been epilogue-fused,
             # there is likely an opportunity to prune an NopKernel
             # (which is originally used to generate the buffer which the triton kernel writes to)
             self.dead_node_elimination()
@@ -7407,87 +7498,7 @@ class Scheduler:
             return False
 
         if isinstance(node1, UserTritonSchedulerNode):
-            if not node1.only_tt_stores:
-                why("user Triton fusion only supports `tl.store`")
-                return False
-
-            if len(node1.node.mutable_args) != 1 or len(node1.formal_writes) != 1:
-                why("node1's triton kernel has multiple stores")
-                return False
-
-            formal_writes = list(node1.formal_writes)
-            if formal_writes[0].access_count != 1:
-                why("node1's triton kernel writes to output more than once")
-                return False
-
-            # Only fuse if the mutated arg is originally an "empty" tensor.
-            # This is because we don't know exactly which element of that tensor is being written to.
-            # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to
-            # that subset. In these edge cases, our fusion is only correct if the original tensor is empty,
-            # where the semantics is that content values are UB, and we can rely on the fact that
-            # `epilogue(UB) == UB`.
-            def _is_empty_tensor(arg) -> bool:
-                if not isinstance(arg, ir.TensorBox):
-                    return False
-                if not isinstance(arg.data, ir.StorageBox):
-                    return False
-                if not isinstance(arg.data.data, ir.ComputedBuffer):
-                    return False
-                if not all(r == 0 for r in arg.data.data.data.ranges):
-                    return False
-                return True
-
-            mutable_arg = node1.node.mutable_args[0]
-            if not _is_empty_tensor(mutable_arg):
-                why("node1's triton kernel output is not an empty tensor")
-                return False
-
-            formal_arg_name = formal_writes[0].name
-            if any(dep.name == formal_arg_name for dep in node1.formal_reads):
-                why("node1's triton kernel reads from its output buffer")
-                return False
-
-            if not isinstance(node2, SchedulerNode):
-                why("node1 is extern but node2 is not SchedulerNode")
-                return False
-
-            if not isinstance(node2.node, ComputedBuffer) or not isinstance(
-                node2.node.data, ir.Pointwise
-            ):
-                why("node1 is extern but node2.node.data is not Pointwise")
-                return False
-
-            written_buffer_name = node1.node.mutation_outputs[0].name
-
-            # The epilogue can only read from the output buffer.
-            # Any other tensor/s would require additional load expressions.
-            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("node2 reads from buffers other than the mutated output")
-                return False
-
-            # the epilogue depends on expressions which may not available in the user triton kernel
-            # (e.g. indexing exprs used not in a load)
-            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
-            for symbol in node2_inner_fn_free_symbols:
-                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
-                if any(usage != "load" for usage in usages):
-                    why("node2 requires expressions not available in node1")
-                    return False
-
-            def _is_other_node_that_references_mutation_buffer(
-                other_node: BaseSchedulerNode,
-            ):
-                return (
-                    (other_node is not node1)
-                    and (other_node is not node2)
-                    and written_buffer_name in other_node.used_buffer_names()
-                )
-
-            if any(
-                _is_other_node_that_references_mutation_buffer(node)
-                for node in self.nodes
-            ):
-                return False
+            return node1.can_fuse_with(node2)
 
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
