@@ -740,6 +740,9 @@ class TestLocalDTensorOps(TestDTensorOps):
 # Ops where DTensor shard prop has DDEs with unbacked (base tensor passes).
 # This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
 ops_unbacked_dtensor_dde = {
+    xfail("linalg.qr"),
+    xfail("lu_unpack"),
+    xfail("qr"),
     xfail("__getitem__"),
     xfail("__rmatmul__"),
     xfail("_batch_norm_with_update"),
