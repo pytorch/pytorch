@@ -17,7 +17,11 @@ from torch._inductor.sizevars import (
     stride_at_vec_range,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    run_and_get_triton_code,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -193,7 +197,10 @@ class TestIndexingSimplification(InductorTestCase):
         # Nested modular indexing is correctly simplified
         var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
-        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(121 * i1 + i2, 1, 28),
+        )
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {i2: 784}
@@ -340,12 +347,79 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_nested_modular_indexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0, i1 = sympy.symbols("i0 i1", integer=True)
+        expr = ModularIndexing(ModularIndexing(121 * i0 + i1, 1, 784), 1, 28)
+
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, {i0: 13, i1: 121}),
+            ModularIndexing(121 * i0 + i1, 1, 28),
+        )
+
     def test_modular_indexing_positive(self):
         x = sympy.Symbol("x", integer=True, positive=True)
         expr = ModularIndexing(x, 1, 1024) - 1
         expr2 = abs(expr)
 
         self.assertNotEqual(expr2, expr)
+
+    def test_mod_less_than_modulus(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+        z = sympy.Symbol("z", integer=True, positive=True)
+
+        self.assertTrue(sizevars.statically_known_true(sympy.Lt(Mod(x, y), y)))
+        self.assertTrue(
+            sizevars.statically_known_true(sympy.Lt(ModularIndexing(x, z, y), y))
+        )
+
+        unknown = sympy.Symbol("unknown", integer=True)
+        self.assertFalse(sizevars.statically_known_true(sympy.Lt(Mod(unknown, y), y)))
+        self.assertFalse(
+            sizevars.statically_known_true(sympy.Lt(ModularIndexing(unknown, z, y), y))
+        )
+
+    def test_mod_simplification_with_ranges(self):
+        sizevars = SizeVarAllocator()
+        i0, i1 = sympy.symbols("i0 i1", integer=True)
+        var_ranges = {i0: 4, i1: 5}
+
+        self.assertEqual(
+            sizevars.simplify_with_ranges(4 * FloorDiv(i0, 4) + Mod(i0, 4), {i0: 16}),
+            i0,
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(Mod(i0 + 4 * i1, 4), var_ranges),
+            i0,
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                4 * FloorDiv(i0 + 4 * i1, 4) + Mod(i0 + 4 * i1, 4),
+                var_ranges,
+            ),
+            i0 + 4 * i1,
+        )
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_mod_floordiv_shape_expr_simplifies_e2e(self):
+        def f(x):
+            n = x.shape[0]
+            return x + (4 * (n // 4) + n % 4)
+
+        x = torch.randn(13, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        with fresh_inductor_cache():
+            actual, source_codes = run_and_get_code(
+                torch.compile(f, fullgraph=True, dynamic=True), x
+            )
+
+        self.assertEqual(actual, f(x))
+        code = "\n".join(source_codes)
+        self.assertNotIn("// 4", code)
+        self.assertNotIn("% 4", code)
 
     def test_expand_floor_div_skipped(self):
         sizevars = SizeVarAllocator()
@@ -368,6 +442,19 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
+    def test_expand_floor_div_symbolic_coefficient(self):
+        sizevars = SizeVarAllocator()
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = 2 * s * x + FloorDiv(y, 3)
+        self.assertFalse(sizevars.expand_floor_div(expr))
+
+        actual, denominator = sizevars.expand_floor_div(expr, (x, y))
+        expected = FloorDiv(6 * s * x + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
@@ -388,6 +475,68 @@ class TestIndexingSimplification(InductorTestCase):
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_expand_floor_div_symbolic_coefficient_e2e(self):
+        orig_expand_floor_div = SizeVarAllocator.expand_floor_div
+        records = []
+
+        def recording_expand_floor_div(sizevars, index, index_vars=None):
+            result = orig_expand_floor_div(sizevars, index, index_vars)
+            if index_vars is not None and result:
+                new_index, denominator = result
+                records.append((sizevars, index, index_vars, new_index, denominator))
+            return result
+
+        def has_symbolic_factor(index, index_vars):
+            index_var_set = set(index_vars)
+            terms = index.args if isinstance(index, sympy.Add) else (index,)
+            for term in terms:
+                if not isinstance(term, sympy.Mul):
+                    continue
+                term_index_vars = [
+                    arg
+                    for arg in term.args
+                    if isinstance(arg, sympy.Symbol) and arg in index_var_set
+                ]
+                if len(term_index_vars) != 1:
+                    continue
+                factor = sympy.cancel(term / term_index_vars[0])
+                if factor.free_symbols - index_var_set:
+                    return True
+            return False
+
+        def f(x):
+            n = x.size(0) // 2
+            m = x.size(1)
+            y = torch.as_strided(x, (n, m), (2 * m, 1))
+            z = y.unsqueeze(2).expand(n, m, 3).reshape(n, m * 3)
+            return z.t().contiguous() + 1
+
+        x = torch.randn((34, 31), device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+
+        SizeVarAllocator.expand_floor_div = recording_expand_floor_div
+        try:
+            with fresh_inductor_cache():
+                actual, _source_codes = run_and_get_code(
+                    torch.compile(f, fullgraph=True, dynamic=True), x
+                )
+        finally:
+            SizeVarAllocator.expand_floor_div = orig_expand_floor_div
+
+        self.assertEqual(actual, f(x))
+        self.assertTrue(
+            any(
+                index.has(FloorDiv)
+                and has_symbolic_factor(index, index_vars)
+                and denominator == 3
+                and not new_index.has(FloorDiv)
+                and not orig_expand_floor_div(sizevars, index)
+                for sizevars, index, index_vars, new_index, denominator in records
+            )
+        )
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
@@ -654,10 +803,15 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 class TestEvaluateMinMax(InductorTestCase):
     def test_evaluate_min_multiple(self):
-        """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
-        UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
+        """min(u0, k*u0) is only valid when u0 is known non-negative."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        with self.assertRaisesRegex(TypeError, "evaluate_min"):
+            sizevars.evaluate_min(u0, 10 * u0)
+        with self.assertRaisesRegex(TypeError, "evaluate_min"):
+            sizevars.evaluate_min(10 * u0, u0)
+
+        sizevars.check(sympy.Ge(u0, 0))
         self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
         self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
         self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
@@ -669,12 +823,12 @@ class TestEvaluateMinMax(InductorTestCase):
         self.assertEqual(sizevars.evaluate_min(-5, 3), -5)
 
     def test_evaluate_min_product_gcd(self):
-        """evaluate_min(u0, u0*u1) resolves via GCD fallback: gcd(u0, u0*u1)=u0.
-        UNSOUND: when u1=0 the true min is 0, not u0; when u0<0 ordering inverts."""
+        """evaluate_min(u0, u0*u1) needs sign and non-zero factor proof."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
         u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+        with self.assertRaisesRegex(TypeError, "evaluate_min"):
+            sizevars.evaluate_min(u0, u0 * u1)
 
     def test_evaluate_min_product_with_both_gt_gcd(self):
         """evaluate_min(u0, u0*u1) with u0>0, u1>0 resolves via GCD.
