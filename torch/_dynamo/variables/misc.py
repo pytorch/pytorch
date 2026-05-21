@@ -529,6 +529,13 @@ class TracebackVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -536,10 +543,7 @@ class TracebackVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            # Two traceback variables are only equal if they are the same object
-            return VariableTracker.build(tx, self is args[0])
-        elif name == "__setattr__":
+        if name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
 
@@ -611,6 +615,13 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
@@ -1175,6 +1186,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         needs_input_grad: tuple[bool, ...] | None = None,
         non_differentiable: Any | None = None,
+        dirty_tensors: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1182,6 +1194,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
+        self.dirty_tensors = dirty_tensors
 
     @staticmethod
     def create(
@@ -1233,6 +1246,19 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
+        elif name == "mark_dirty":
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            if getattr(self, "proxy", None) is None:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function context `mark_dirty`",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo only supports tracing ctx.mark_dirty "
+                    "inside autograd.Function.apply.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self.dirty_tensors = args
+            return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
             unimplemented(
@@ -1240,8 +1266,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 context=f"call_method {self} {name}",
                 explanation="Dynamo does not support calling the method "
                 f"`{name}` on `autograd.Function` context objects. Supported "
-                "methods are `__setattr__`, `save_for_backward` and "
-                "`mark_non_differentiable`.",
+                "methods are `__setattr__`, `save_for_backward`, "
+                "`mark_dirty` and `mark_non_differentiable`.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self.saved_tensors is None:
@@ -1276,10 +1302,14 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in ["save_for_backward", "mark_non_differentiable"]:
+        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
+        if name == "dirty_tensors":
+            if self.dirty_tensors is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
         if name == "needs_input_grad":
@@ -1443,6 +1473,29 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import generic_richcompare
+
+        try:
+            resolved = self.obj.var_getattr(tx, self.name)
+        except NotImplementedError:
+            resolved = None
+        if resolved is None or isinstance(resolved, GetAttrVariable):
+            if self.obj.is_python_constant():
+                val = getattr(self.obj.as_python_constant(), self.name)
+                resolved = VariableTracker.build(tx, val)
+            else:
+                unimplemented(
+                    gb_type="Unresolved GetAttrVariable comparison",
+                    context=f"richcompare_impl {self} {op}",
+                    explanation=f"Cannot compare {self} because the attribute "
+                    f"could not be resolved to a concrete value.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        return generic_richcompare(tx, resolved, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1510,6 +1563,13 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
 
 class TypingVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -1532,6 +1592,18 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        if op in ("__eq__", "__ne__"):
+            if istype(other, TypingVariable):
+                result = self.value == other.value
+                if op == "__ne__":
+                    result = not result
+                return ConstantVariable.create(result)
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(NotImplemented)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1539,10 +1611,6 @@ class TypingVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            if len(args) == 1 and not kwargs:
-                result = istype(args[0], TypingVariable) and self.value == args[0].value
-                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
@@ -2149,6 +2217,13 @@ class ConstantLikeVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2468,6 +2543,13 @@ class WeakRefVariable(VariableTracker):
         from .object_protocol import generic_hash_impl
 
         return generic_hash_impl(tx, self.referent_vt)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):

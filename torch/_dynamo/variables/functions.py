@@ -395,6 +395,11 @@ class BaseUserFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.dict_vt: DunderDictVariable | None = dict_vt
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def get_source(self) -> Source | None:
         return self.source
 
@@ -2170,6 +2175,11 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2540,9 +2550,30 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
+        # Inner torch.compile wrapper: disable nested graph breaks to
+        # preserve the inner compile's semantics (e.g. fullgraph=True).
+        # Graph breaks inside the inner function should raise Unsupported
+        # so they're handled by the outer frame, not as nested breaks.
+        # Skip this for recursive calls to the same compiled function
+        # (the wrapper's original callable matches the root frame's code).
+        is_inner_torch_compile = (
+            self.attr_to_trace == "_torchdynamo_inline"
+            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and getattr(
+                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                "__code__",
+                None,
+            )
+            is not tx.output.root_tx.f_code
+        )
+        polyfill = (
+            polyfills.getattr_and_trace_no_nested_graph_breaks
+            if is_inner_torch_compile
+            else polyfills.getattr_and_trace
+        )
         return VariableTracker.build(
             tx,
-            polyfills.getattr_and_trace,  # type: ignore[arg-type]
+            polyfill,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
@@ -2841,6 +2872,11 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return functools.partial
 
@@ -2884,7 +2920,7 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "func":
             return self.func
         if name == "args":
-            return variables.ListVariable(self.args, source=source)
+            return variables.TupleVariable(self.args, source=source)
         if name == "keywords":
             items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
@@ -3916,6 +3952,13 @@ class MethodWrapperVariable(VariableTracker):
         except NotImplementedError:
             return super().hash_impl(tx)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
             return False
@@ -4361,6 +4404,13 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def tp_descr_get_impl(
         self,
