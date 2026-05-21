@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import (
@@ -13,6 +14,7 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
+    repro_run,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -133,6 +135,24 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         save_graph_repro(buf, gm, args, "inductor_accuracy")
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
+
+    def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
+        class Repro(torch.nn.Module):
+            def forward(self, arg0, arg1, arg2):
+                vals = torch.ops.aten._foreach_add.Scalar([arg0, arg1, arg2], 1)
+                torch.ops.aten.copy_.default(arg0, vals[0])
+                torch.ops.aten.copy_.default(arg1, vals[1])
+                torch.ops.aten.copy_.default(arg2, vals[2])
+                return ()
+
+        def load_args(reader):
+            reader.args = [torch.rand((), dtype=torch.float32) for _ in range(3)]
+
+        load_args._version = 0
+        options = SimpleNamespace(
+            accuracy="accuracy", save_dir=None, tracing_mode="real"
+        )
+        repro_run(options, Repro(), load_args)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_dump_generator(self):
