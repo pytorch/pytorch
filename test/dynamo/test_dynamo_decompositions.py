@@ -68,17 +68,24 @@ class GraphModule(torch.nn.Module):
         cases = (
             (
                 torch.randn(8),
+                1.0,
+                torch.randn(8),
+                torch.tensor(0.5),
+                "Unsupported addcmul_ decomposition",
+            ),
+            (
                 torch.randn(8),
                 torch.randn(8),
                 torch.randn(8),
-                "TypeError when making fake tensor call",
+                torch.randn(8),
+                "Unsupported addcmul_ decomposition",
             ),
             (
                 torch.randn(8),
                 torch.randn(8),
                 torch.randn(8),
                 torch.tensor(0.5, requires_grad=True),
-                "TypeError when making fake tensor call",
+                "Unsupported addcmul_ decomposition",
             ),
             (
                 torch.randn(8),

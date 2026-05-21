@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from unittest.mock import patch
 
+from torch._inductor.codegen.common import _pytorch_cpu_vec_intrinsics_contract_addcmul
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.codegen.halide import HalideOverrides
 from torch._inductor.codegen.mps import MetalOverrides
@@ -31,6 +33,26 @@ class TestOpCompleteness(TestCase):
 
     def test_cpp_vec_overrides(self):
         self.verify_ops_handler_completeness(CppVecOverrides)
+
+    def test_cpp_vec_addcmul_aten_codegen(self):
+        _pytorch_cpu_vec_intrinsics_contract_addcmul.cache_clear()
+        with patch(
+            "torch.__config__.show", return_value="PyTorch built with:\n  - GCC"
+        ):
+            self.assertEqual(
+                CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2"),
+                "fmadd(value_times_t1, t2, self)",
+            )
+
+        _pytorch_cpu_vec_intrinsics_contract_addcmul.cache_clear()
+        with patch(
+            "torch.__config__.show", return_value="PyTorch built with:\n  - Clang"
+        ):
+            code = CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2")
+            self.assertIn('asm volatile("" : "+m"(product));', code)
+            self.assertIn("return self + product;", code)
+            self.assertNotIn("fmadd", code)
+        _pytorch_cpu_vec_intrinsics_contract_addcmul.cache_clear()
 
     def test_halide_overrides(self):
         self.verify_ops_handler_completeness(HalideOverrides)

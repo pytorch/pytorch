@@ -57,13 +57,9 @@ def _addcmul_setup_context(ctx, inputs, output) -> None:
     ctx.tensor1_dtype = tensor1.dtype
     ctx.tensor2_shape = tensor2.shape
     ctx.tensor2_dtype = tensor2.dtype
-    ctx.value_shape = value.shape if isinstance(value, Tensor) else None
-    ctx.value_dtype = value.dtype if isinstance(value, Tensor) else None
-    ctx.value = None if isinstance(value, Tensor) else value
-    tensors_to_save = (
-        (tensor1, tensor2, value) if isinstance(value, Tensor) else (tensor1, tensor2)
-    )
-    ctx.save_for_backward(*tensors_to_save)
+    ctx.value_shape = value.shape
+    ctx.value_dtype = value.dtype
+    ctx.save_for_backward(tensor1, tensor2, value)
 
 
 def _handle_r_to_c(dtype: torch.dtype, grad: Tensor) -> Tensor:
@@ -73,16 +69,8 @@ def _handle_r_to_c(dtype: torch.dtype, grad: Tensor) -> Tensor:
 
 
 def _addcmul_backward(ctx, grad):
-    saved_tensors = ctx.saved_tensors
-    if ctx.value is None:
-        tensor1, tensor2, value = saved_tensors
-    else:
-        tensor1, tensor2 = saved_tensors
-        value = ctx.value
-
-    value_conj = value.conj() if isinstance(value, Tensor) else value
-    if isinstance(value_conj, complex):
-        value_conj = value_conj.conjugate()
+    tensor1, tensor2, value = ctx.saved_tensors
+    value_conj = value.conj()
 
     grad_self = (
         _handle_r_to_c(ctx.self_dtype, grad.sum_to_size(ctx.self_shape))

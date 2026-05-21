@@ -1241,6 +1241,21 @@ def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
     return "PyTorch built with:\n  - GCC" in torch.__config__.show()
 
 
+def _addcmul_no_fma(self_value: str, value_times_tensor1: str, tensor2: str) -> str:
+    return (
+        "([&] {\n"
+        f"auto product = {OpOverrides.paren(value_times_tensor1)} * "
+        f"{OpOverrides.paren(tensor2)};\n"
+        "#if defined(__GNUC__) || defined(__clang__)\n"
+        'asm volatile("" : "+m"(product));\n'
+        "#else\n"
+        "(void)*reinterpret_cast<const volatile char*>(&product);\n"
+        "#endif\n"
+        f"return {OpOverrides.paren(self_value)} + product;\n"
+        "}())"
+    )
+
+
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
 pointwise_overrides_data: dict[str, OverridesData] = dict(
@@ -1306,8 +1321,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         cppvec=lambda self_value, value_times_tensor1, tensor2: (
             f"fmadd({value_times_tensor1}, {tensor2}, {self_value})"
             if _pytorch_cpu_vec_intrinsics_contract_addcmul()
-            else f"{OpOverrides.paren(self_value)} + "
-            f"{OpOverrides.paren(value_times_tensor1)} * {OpOverrides.paren(tensor2)}"
+            else _addcmul_no_fma(self_value, value_times_tensor1, tensor2)
         ),
         name="addcmul_aten",
     ),
@@ -2820,9 +2834,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond
