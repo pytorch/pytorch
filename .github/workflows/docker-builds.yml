@@ -138,6 +138,13 @@ jobs:
           set -ex
           ./build.sh "${{ matrix.docker-image-name }}" -t "${DOCKER_IMAGE}"
 
+      # crane does server-side cross-registry copies via the OCI distribution
+      # API. Picked over `docker buildx imagetools create` so the mirror step
+      # doesn't depend on the remote BuildKit being healthy.
+      - name: Install crane
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
+
       - name: Mirror image to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
         env:
@@ -146,12 +153,9 @@ jobs:
         shell: bash
         run: |
           set -ex
-          # `buildx imagetools create` does a server-side cross-registry copy,
-          # so we don't need a local pull/push round-trip.
-          docker buildx imagetools create \
-            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}" \
-            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}" \
-            "${ECR_DOCKER_IMAGE}"
+          DST="${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
+          crane copy "${ECR_DOCKER_IMAGE}" "${DST}"
+          crane tag  "${DST}" "${{ matrix.docker-image-name }}"
 
       - name: Generate output
         if: contains(matrix.docker-image-name, 'rocm')
