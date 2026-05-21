@@ -390,7 +390,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
@@ -418,11 +418,11 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(len(configs), expected_count)
 
     def test_hopper_prunes_expensive_default_mm_configs(self):
-        from torch._inductor.kernel_inputs import MMKernelInputs
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAMMTemplateConfigHeuristic,
             GemmConfig,
         )
+        from torch._inductor.kernel_inputs import MMKernelInputs
 
         mm_configs = [
             GemmConfig(64, 128, 32, 5, 4, group_m=8),
@@ -514,7 +514,7 @@ class TestTritonHeuristics(TestCase):
         self.assertNotIn(convert_config_attr, heuristic.__dict__)
 
     def test_hopper_mm_pruning_is_not_applied_to_other_cuda_arches(self):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAMMTemplateConfigHeuristic,
             GemmConfig,
         )
@@ -572,7 +572,7 @@ class TestTritonHeuristics(TestCase):
             heuristic.should_scale_configs = original_should_scale_configs
 
     def test_hopper_mm_pruning_is_default_search_only(self):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAMMTemplateConfigHeuristic,
             GemmConfig,
         )
