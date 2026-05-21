@@ -1355,6 +1355,9 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   if (x.is_same(y)) {
     return false;
   }
+  if (!x.is_alias_of(y)) {
+    return true;
+  }
   if (Meta::numel(x) == 0 || Meta::numel(y) == 0) {
     return true;
   }
