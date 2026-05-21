@@ -342,16 +342,27 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
         if triton_meta.get("native_matmul"):
+            from torch._inductor.runtime.hints import native_matmul_persistent_rblock
+            from torch._inductor.runtime.triton_heuristics import (
+                _cap_native_matmul_configs,
+            )
+
+            native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
+            if native_matmul_rblock is None:
+                native_matmul_rblock = native_matmul_persistent_rblock(rnumel)
+
             if len(size_hints) == 3:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
                 ]
+                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             elif len(size_hints) == 4:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
                 ]
+                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
