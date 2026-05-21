@@ -7068,6 +7068,7 @@ class FusedUserTritonKernel(TritonKernel):
         features: SIMDKernelFeatures,
         scheduler_node: FusedUserTritonSchedulerNode,
         out_arg_name: str,
+        introduce_new_store: bool,
         block_aliases: dict[str, str] | None = None,
         pid_cache: dict[str, str] | None = None,
     ) -> None:
@@ -7085,6 +7086,7 @@ class FusedUserTritonKernel(TritonKernel):
         self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
         self.out_arg_name = out_arg_name
         self.block_aliases = block_aliases
+        self.introduce_new_store = introduce_new_store
 
         self.kernel_ast = ast.parse(self.ir_node.kernel_src)
         self.kernel_stores = identify_triton_stores_from_ast(self.kernel_ast)
@@ -7094,7 +7096,7 @@ class FusedUserTritonKernel(TritonKernel):
         ).replace("\n", "")
 
         self.new_store_cse_var: CSEVariable | None = None
-        self.new_store_index: sympy.Expr | None = None
+        self.new_store_buf = IndentedBuffer()
 
     def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
         assert len(self.ir_node.mutable_args) == 1
@@ -7124,10 +7126,12 @@ class FusedUserTritonKernel(TritonKernel):
     ) -> None:
         assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
         if name == self.scheduler_node.fused_epilogue.node.get_name():
-            self.new_store_cse_var = value
-            indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
-            self.new_store_index_str = indexing.index_str
-            self.new_store_mask_str = indexing.mask_str
+            if self.introduce_new_store:
+                indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
+                line = f"tl.store({self.out_arg_name} + ({indexing.index_str}), {value}, {indexing.mask_str})"
+                self.new_store_buf.writeline(line)
+            else:
+                self.new_store_cse_var = value
         else:
             super().store(name, index, value, mode)
 
@@ -7146,16 +7150,13 @@ class FusedUserTritonKernel(TritonKernel):
         Returns a string which is the source code of a modified version of the user kernel that includes
         the epilogue.
 
-        In general, epilogue fusion is gated on pointwise operations, there are then two paths depending on
-        whether the epilogue requires additional new index expressions:
+        Epilogue fusion is gated on pointwise operations. There are two paths:
 
-            1. The user has wrapped the kernel (using torch.library.wrap_triton), annotating the output
-               tile dimensions. This enables inductor to generate new index expressions which the epilogue
-               may require. It follows, appropriate constraints on epilogue fusion are loosened.
-            2. Without these annotations, epilogues are strictly unary pointwise operations with no additional
-               load expressions. In this path, the pointwise instructions are code-generated and, subsequently,
-               appropriately replacing the value operand of the user kernel's stroe while preserving the original
-               index expression.
+            1. The epilogue requires additional index expressions.
+               The user must have annotated tile dimensions via torch.library.wrap_triton.
+               New index/load/compute/store lines are injected into the kernel body.
+            2. The epilogue is strictly unary. Only the stored value is replaced via AST rewriting,
+               preserving the original index expression. 
         """
         with self:
             index_vars = self.split_and_set_ranges(
@@ -7168,17 +7169,10 @@ class FusedUserTritonKernel(TritonKernel):
         compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
 
         # TODO(JJVRAW): Should we gate on pid_remap as well?
-        if self.block_aliases is not None:
+        if self.introduce_new_store:
             src_lines = ast.unparse(self.kernel_ast).splitlines()
             store_line_index = self.kernel_stores.stores[0].store_node.lineno - 1
-
-            # TODO(JJVRAW): User AST rewriting for this.
-            new_store = (
-                f"{indentations}tl.store("
-                f"{self.out_arg_name} + ({self.new_store_index_str}), "
-                f"{self.new_store_cse_var.name}, "
-                f"{self.new_store_mask_str})"
-            )
+            store_lines = [indentations + l for l in self.new_store_buf.get_lines_ref()]
             numel_buf = IndentedBuffer()
             self.codegen_static_numels(numel_buf)
             numel_lines = [indentations + l for l in numel_buf.get_lines_ref()]
@@ -7190,7 +7184,6 @@ class FusedUserTritonKernel(TritonKernel):
             def_line_index = next(
                 i for i, line in enumerate(src_lines) if line.strip().startswith("def ")
             )
-
             new_src_lines = (
                 src_lines[: def_line_index + 1]
                 + self.codegen_aliases()
@@ -7200,7 +7193,7 @@ class FusedUserTritonKernel(TritonKernel):
                 + indexing_lines
                 + load_lines
                 + compute_lines
-                + [new_store]
+                + store_lines
                 + src_lines[store_line_index + 1 :]
             )
         else:
