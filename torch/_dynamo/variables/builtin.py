@@ -23,6 +23,7 @@ import ast
 import builtins
 import contextlib
 import functools
+import gc
 import inspect
 import itertools
 import logging
@@ -43,6 +44,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
+    handle_observed_exception,
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
@@ -95,12 +97,14 @@ from .dicts import (
     DictKeysVariable,
     DictViewVariable,
 )
-from .hashable import is_hashable
+from .hashable import HashableTracker
 from .lists import (
     BaseListVariable,
+    BytearrayVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
+    ReversedListIteratorVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -1674,6 +1678,56 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
+            descriptor = getattr(self.fn, name, None)
+            descriptor_owner = getattr(descriptor, "__objclass__", self.fn)
+            try:
+                receiver_type = args[0].python_type()
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
+            if not issubclass(receiver_type, descriptor_owner):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__hash__' requires a '{descriptor_owner.__name__}' "
+                    f"object but received a '{receiver_type.__name__}'",
+                )
+            if self.fn is object:
+                real_id = args[0].get_id(tx)
+                if real_id is not None:
+                    guard_type = args[0].get_id_guard_type()
+                    if args[0].source and guard_type is not None:
+                        install_guard(args[0].source.make_guard(guard_type))
+                    real_value = args[0].get_real_python_backed_value()
+                    if real_value is NO_SUCH_SUBOBJ and args[0].source:
+                        real_value = tx.output.resolve_source_value(args[0].source)
+                    if real_value is not NO_SUCH_SUBOBJ:
+                        return ConstantVariable.create(object.__hash__(real_value))
+                if args[0].source:
+                    guard_type = args[0].get_id_guard_type()
+                    if guard_type is not None:
+                        install_guard(args[0].source.make_guard(guard_type))
+                    return ConstantVariable.create(
+                        object.__hash__(tx.output.resolve_source_value(args[0].source))
+                    )
+                return FakeIdVariable(id(args[0]))
+            elif (
+                isinstance(args[0], UserDefinedObjectVariable)
+                and args[0]._base_vt is not None
+                and args[0]._base_methods is not None
+                and descriptor in args[0]._base_methods
+            ):
+                h, is_fake = args[0]._base_vt.hash_impl(tx)
+            else:
+                h, is_fake = args[0].hash_impl(tx)
+            if is_fake:
+                return FakeIdVariable(h)
+            return ConstantVariable.create(h)
+
         if name == "__len__" and len(args) == 1 and not kwargs:
             # type.__len__(instance) → len(instance)
             # e.g. list.__len__(my_list) → len(my_list)
@@ -2163,6 +2217,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
+        if kwargs:
+            raise_type_error(tx, "tuple() takes no keyword arguments")
+
+        positional_args = len(args) + (obj is not None)
+        if positional_args > 1:
+            raise_type_error(
+                tx, f"tuple expected at most 1 argument, got {positional_args}"
+            )
+
+        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            return obj
+
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
@@ -2175,9 +2241,84 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
             return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
-            return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+            result = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+            if result is not None or obj is None:
+                return result
+
+            iterator = generic_getiter(tx, obj)
+            if iterator.has_force_unpack_var_sequence(tx):
+                cls = variables.BaseListVariable.cls_for(self.fn)
+                return cls(
+                    list(iterator.force_unpack_var_sequence(tx)),
+                    mutation_type=ValueMutationNew(),
+                )
+
+            fn = self.fn
+            has_kwargs = bool(kwargs)
+            arg_types = [type(a).__name__ for a in [obj, *args]]
+            real_arg_types = [a.python_type_name() for a in [obj, *args]]
+            unimplemented(
+                gb_type="Failed to trace builtin operator",
+                context=f"builtin {fn.__name__} {arg_types} {has_kwargs}",
+                explanation=f"Dynamo does not know how to trace builtin operator `{fn.__name__}` "
+                f"with argument types {real_arg_types} (has_kwargs {has_kwargs})",
+                hints=[
+                    f"Avoid calling builtin `{fn.__name__}` with argument types {real_arg_types}. "
+                    f"Consider using an equivalent alternative function/method to `{fn.__name__}`.",
+                    "If you are attempting to call a logging function (e.g. `print`), "
+                    "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                    "Please report an issue to PyTorch.",
+                ],
+            )
 
     call_tuple = _call_tuple_list
+
+    def call_bytes(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if kwargs:
+            return None
+        if len(args) > 3:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"bytes expected at most 3 arguments, got {len(args)}"],
+            )
+        if all(arg.is_python_constant() for arg in args):
+            try:
+                result = bytes(*(arg.as_python_constant() for arg in args))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return ConstantVariable.create(result)
+        return None
+
+    def call_bytearray(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if kwargs:
+            return None
+        if len(args) > 3:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"bytearray expected at most 3 arguments, got {len(args)}"],
+            )
+        if all(arg.is_python_constant() for arg in args):
+            try:
+                result = bytearray(*(arg.as_python_constant() for arg in args))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return BytearrayVariable(
+                [ConstantVariable.create(x) for x in result],
+                mutation_type=ValueMutationNew(),
+            )
+        return None
 
     def call_callable(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2261,6 +2402,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         arg = args[0]
         if istype(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
+        elif isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                items = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                items = arg.view_items
+            return SetVariable(items, mutation_type=ValueMutationNew())
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
             return SetVariable(items, mutation_type=ValueMutationNew())
@@ -2303,6 +2452,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         if istype(arg, variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
             return arg
+        elif isinstance(arg, SetVariable):
+            return FrozensetVariable(arg.items.keys())
+        elif isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                items = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                items = arg.view_items
+            return FrozensetVariable(items)
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
             return FrozensetVariable(items)
@@ -2614,7 +2773,21 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if obj.has_unpack_var_sequence(tx):
             items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
+            try:
+                obj_type = obj.python_type()
+            except NotImplementedError:
+                obj_type = None
+            exhausted_sequence: VariableTracker
+            if obj_type is list:
+                exhausted_sequence = ListVariable([], mutation_type=ValueMutationNew())
+            else:
+                exhausted_sequence = TupleVariable([], mutation_type=ValueMutationNew())
+            return ReversedListIteratorVariable(
+                items,
+                original_sequence=obj,
+                exhausted_sequence=exhausted_sequence,
+                mutation_type=ValueMutationNew(),
+            )
         return None
 
     def call_sorted(
@@ -2670,6 +2843,72 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, real_id)
 
         return FakeIdVariable(id(arg))
+
+    def call_is_tracked(
+        self, tx: "InstructionTranslator", obj: VariableTracker
+    ) -> VariableTracker:
+        if self.fn is not gc.is_tracked:
+            return super().call_function(tx, [obj], {})
+
+        if isinstance(obj, ConstDictVariable):
+            if obj.user_cls is not dict:
+                return ConstantVariable.create(True)
+            if obj.source is not None:
+                unimplemented(
+                    gb_type="gc.is_tracked() on source-backed dict",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model pre-existing "
+                        "history-sensitive CPython dict GC tracking state."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if obj.gc_tracking_unknown:
+                unimplemented(
+                    gb_type="gc.is_tracked() on dict with unknown tracking state",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model history-sensitive CPython dict "
+                        "GC tracking state carried through dict.copy()."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if obj.was_mutated:
+                unimplemented(
+                    gb_type="gc.is_tracked() on mutated dict",
+                    context=f"gc.is_tracked({obj})",
+                    explanation=(
+                        "Dynamo does not model history-sensitive CPython "
+                        "dict GC tracking state after mutation."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            concrete = {}
+            for key, value in obj.items.items():
+                if not isinstance(key, HashableTracker):
+                    raise AssertionError(f"expected HashableTracker key, got {key}")
+                concrete_key = key.vt.get_real_python_backed_value()
+                concrete_value = value.get_real_python_backed_value()
+                if concrete_key is NO_SUCH_SUBOBJ or concrete_value is NO_SUCH_SUBOBJ:
+                    unimplemented(
+                        gb_type="gc.is_tracked() on dict with symbolic contents",
+                        context=f"gc.is_tracked({obj})",
+                        explanation=(
+                            "Dynamo only supports gc.is_tracked() on "
+                            "dictionaries with Python-backed contents."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                concrete[concrete_key] = concrete_value
+            return ConstantVariable.create(gc.is_tracked(concrete))
+
+        unimplemented(
+            gb_type="unsupported gc.is_tracked() argument",
+            context=f"gc.is_tracked({obj})",
+            explanation="Dynamo only supports gc.is_tracked() on dictionaries.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_deepcopy(
         self, tx: "InstructionTranslator", x: VariableTracker
@@ -2989,12 +3228,22 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     @staticmethod
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator",
-        user_cls: type,
+        user_cls: type | VariableTracker,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
+        if isinstance(user_cls, variables.UserDefinedClassVariable):
+            user_cls_vt = user_cls
+            user_cls = user_cls.value
+        else:
+            if not isinstance(user_cls, type):
+                raise AssertionError(f"Expected type, got {type(user_cls)}")
+            user_cls_vt = VariableTracker.build(tx, user_cls)
+
+        if not (
+            user_cls in {dict, OrderedDict, defaultdict} or issubclass(user_cls, dict)
+        ):
             unimplemented(
                 gb_type="Unsupported dict type for fromkeys()",
                 context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
@@ -3038,9 +3287,100 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         arg, value = args
 
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            restore_cells: list[tuple[types.CellType, Any, bool]] = []
+            current_qualname = getattr(tx.f_code, "co_qualname", tx.f_code.co_name)
+            user_cls_qualname = getattr(user_cls, "__qualname__", "")
+            parent_qualname, local_class_sep, _ = user_cls_qualname.rpartition(
+                ".<locals>."
+            )
+            is_current_local_class = (
+                user_cls_vt.source is None
+                and bool(local_class_sep)
+                and parent_qualname == current_qualname
+            )
+
+            def patch_closure_cells(
+                fn: types.FunctionType, allow_name_fallback: bool
+            ) -> None:
+                closure = fn.__closure__
+                if closure is None:
+                    return
+                for name, cell in zip(fn.__code__.co_freevars, closure):
+                    if cell in tx.output.side_effects:
+                        cell_vt = tx.output.side_effects[cell]
+                    elif allow_name_fallback:
+                        cell_vt = tx.symbolic_locals.get(name)
+                    else:
+                        continue
+                    if not isinstance(cell_vt, variables.CellVariable):
+                        continue
+                    try:
+                        cell_value = tx.output.side_effects.load_cell(
+                            cell_vt
+                        ).as_python_constant()
+                    except NotImplementedError:
+                        continue
+                    try:
+                        old_value = cell.cell_contents
+                        had_old_value = True
+                    except ValueError:
+                        old_value = None
+                        had_old_value = False
+                    cell.cell_contents = cell_value
+                    restore_cells.append((cell, old_value, had_old_value))
+
+            def patch_descriptor_closure(name: str) -> None:
+                descriptor = inspect.getattr_static(user_cls, name, None)
+                if isinstance(descriptor, (staticmethod, classmethod)):
+                    descriptor = descriptor.__func__
+                if isinstance(descriptor, types.FunctionType):
+                    descriptor_qualname = getattr(
+                        descriptor.__code__, "co_qualname", descriptor.__qualname__
+                    )
+                    descriptor_parent, _, _ = descriptor_qualname.rpartition(".")
+                    descriptor_local_parent, descriptor_local_sep, _ = (
+                        descriptor_qualname.rpartition(".<locals>.")
+                    )
+                    patch_closure_cells(
+                        descriptor,
+                        is_current_local_class
+                        and (
+                            descriptor_parent == user_cls_qualname
+                            or (
+                                bool(descriptor_local_sep)
+                                and descriptor_local_parent == current_qualname
+                            )
+                        ),
+                    )
+
+            try:
+                # Constructors may close over locals that Dynamo has updated
+                # symbolically but not in the real Python cell object.
+                for method_name in ("__new__", "__init__", "__setitem__"):
+                    patch_descriptor_closure(method_name)
+
+                result = user_cls_vt.call_function(tx, [], {})
+                iterator = generic_getiter(tx, arg)
+                while True:
+                    try:
+                        key = iterator.tp_iternext_impl(tx)
+                    except ObservedUserStopIteration:
+                        handle_observed_exception(tx)
+                        break
+                    result.call_method(tx, "__setitem__", [key, value], {})
+                return result
+            finally:
+                for cell, old_value, had_old_value in reversed(restore_cells):
+                    if had_old_value:
+                        cell.cell_contents = old_value
+                    else:
+                        del cell.cell_contents
+
         def _make_result(
-            items: dict[VariableTracker, VariableTracker],
+            items: dict[HashableTracker, VariableTracker],
         ) -> VariableTracker:
+            const_items = typing.cast(dict[VariableTracker, VariableTracker], items)
             if user_cls is OrderedDict:
                 from .builder import SourcelessBuilder
                 from .user_defined import OrderedDictVariable
@@ -3055,7 +3395,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                         f"Expected OrderedDictVariable, got {type(result)}"
                     )
                 result._base_vt = ConstDictVariable(
-                    items,
+                    const_items,
                     user_cls=OrderedDict,
                     mutation_type=ValueMutationNew(),
                 )
@@ -3074,31 +3414,34 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                         f"Expected DefaultDictVariable, got {type(result)}"
                     )
                 result._base_vt = ConstDictVariable(
-                    items, mutation_type=ValueMutationNew()
+                    const_items, mutation_type=ValueMutationNew()
                 )
                 return result
             else:
-                return ConstDictVariable(items, mutation_type=ValueMutationNew())
+                return ConstDictVariable(const_items, mutation_type=ValueMutationNew())
 
-        if isinstance(arg, dict):
-            arg_list = [VariableTracker.build(tx, k) for k in arg]
-            return _make_result(dict.fromkeys(arg_list, value))
-        elif arg.has_force_unpack_var_sequence(tx):
-            keys = arg.force_unpack_var_sequence(tx)
-            if all(is_hashable(v) for v in keys):
-                return _make_result(dict.fromkeys(keys, value))
-
-        unimplemented(
-            gb_type="failed to call dict.fromkeys()",
-            context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-            explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-            "arguments could not be automatically converted to a list, "
-            "or some dict key is not hashable.",
-            hints=[
-                "Manually convert the argument to a list.",
-                "Ensure all keys are hashable.",
-            ],
-        )
+        items: dict[HashableTracker, VariableTracker] = {}
+        if isinstance(arg, (ConstDictVariable, DictKeysVariable)):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                keys = arg.items.keys()
+            else:
+                arg.dv_dict.install_dict_keys_match_guard()
+                keys = arg.view_items
+            items.update(dict.fromkeys(keys, value))
+            return _make_result(items)
+        if isinstance(arg, SetVariable):
+            items.update(dict.fromkeys(arg.items.keys(), value))
+            return _make_result(items)
+        iterator = generic_getiter(tx, arg)
+        while True:
+            try:
+                key = iterator.tp_iternext_impl(tx)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+            items[HashableTracker(key)] = value
+        return _make_result(items)
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):
@@ -3635,6 +3978,11 @@ class ListBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .user_defined import UserDefinedObjectVariable
 
+        if kwargs:
+            raise_type_error(tx, "list() takes no keyword arguments")
+        if len(args) > 1:
+            raise_type_error(tx, f"list expected at most 1 argument, got {len(args)}")
+
         obj = args[0] if args else None
 
         if isinstance(
@@ -3672,6 +4020,13 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                         )
             return ListVariable(
                 list(obj.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
+
+        iterator = generic_getiter(tx, obj)
+        if iterator.has_force_unpack_var_sequence(tx):
+            return ListVariable(
+                list(iterator.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
 

@@ -25,6 +25,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import importlib
 import inspect
 import linecache
@@ -3231,6 +3232,7 @@ def _builtin_function_ids() -> dict[int, str]:
         }
     )
     rv[id(builtins.__build_class__)] = "builtins.__build_class__"
+    rv[id(gc.is_tracked)] = "gc.is_tracked"
     return rv
 
 

@@ -178,6 +178,25 @@ class ContainsRaisesTypeError:
         raise TypeError("bad operand")
 
 
+class DoNotCompare(Exception):
+    pass
+
+
+class RaisesOnEq:
+    def __eq__(self, other):
+        raise DoNotCompare
+
+
+class AlwaysEq:
+    def __eq__(self, other):
+        return True
+
+
+class NeverEq:
+    def __eq__(self, other):
+        return False
+
+
 class ContainsReturnsTruthy:
     """__contains__ returns a non-bool truthy value."""
 
@@ -298,6 +317,15 @@ class _ContainsBase:
 
 class ListContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
     thetype = list
+
+    @make_dynamo_test
+    def test_bound_contains_name_in_assert_raises(self):
+        self.assertRaises(DoNotCompare, [RaisesOnEq(), 1].__contains__, 1)
+
+    @make_dynamo_test
+    def test_contains_uses_rich_compare(self):
+        self.assertIn(1, [AlwaysEq()])
+        self.assertNotIn(AlwaysEq(), [NeverEq()])
 
 
 class TupleContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
