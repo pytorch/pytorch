@@ -3998,6 +3998,40 @@ class CommonTemplate:
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    def test_truncdiv_float_accuracy(self):
+        # Reproducer for https://github.com/pytorch/pytorch/issues/184408
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="trunc")
+
+        # Near-integer quotients: approximate division can push past the
+        # boundary, making trunc overshoot by +1.
+        a = torch.tensor([14.999999, 26.999999, 13.999999], device=self.device)
+        b = torch.tensor([3.0, 3.0, 7.0], device=self.device)
+        self.common(fn, (a, b))
+
+        # Exact integer quotients: approximate division can undershoot,
+        # making trunc return one less than the true value.
+        a = torch.tensor([148.0, 1073.0, 2112.0], device=self.device)
+        b = torch.tensor([37.0, 37.0, 33.0], device=self.device)
+        self.common(fn, (a, b))
+
+        # Negative operands / mixed signs
+        for dtype in [torch.float16, torch.float32]:
+            for a_val, b_val in [
+                (7.0, 2.0),
+                (7.0, -2.0),
+                (-7.0, 2.0),
+                (-7.0, -2.0),
+                (6.0, 3.0),
+                (0.0, 5.0),
+                (0.0, -5.0),
+                (-14.999999, 3.0),
+                (14.999999, -3.0),
+            ]:
+                a = torch.full((8,), a_val, dtype=dtype, device=self.device)
+                b = torch.full((8,), b_val, dtype=dtype, device=self.device)
+                self.common(fn, (a, b))
+
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 
