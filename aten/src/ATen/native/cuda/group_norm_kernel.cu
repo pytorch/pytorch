@@ -45,8 +45,10 @@ __global__ void RowwiseMomentsCUDAKernel(
     int64_t N,
     T eps,
     const T* X,
-    T_ACC* mean,
-    T_ACC* rstd) {
+    T* mean,
+    T* rstd,
+    T_ACC* mean_acc,
+    T_ACC* rstd_acc) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp = WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
@@ -74,8 +76,14 @@ __global__ void RowwiseMomentsCUDAKernel(
   }
   if (threadIdx.x == 0) {
     auto [m2, m1] = welford_op.project(val);
+    T_ACC rstd_val = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
     mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    rstd[i] = rstd_val;
+    // save off the accelerated-precision output, if different
+    if constexpr (!std::is_same_v<T, T_ACC>) {
+      mean_acc[i] = m1;
+      rstd_acc[i] = rstd_val;
+    }
   }
 }
 
@@ -583,12 +591,15 @@ void GroupNormKernelImplInternal(
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
 
-  const auto kAccType =
-      (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-      ? kFloat
-      : X.scalar_type();
-  Tensor mean_acc = at::empty(mean.sizes(), X.options().dtype(kAccType));
-  Tensor rstd_acc = at::empty(rstd.sizes(), X.options().dtype(kAccType));
+  const bool needMeanAcc{
+      X.scalar_type() == kHalf || X.scalar_type() == kBFloat16};
+  const auto kAccTypeOpts{
+      X.options().dtype(needMeanAcc ? kFloat : X.scalar_type())};
+
+  T* mean_data = mean.mutable_data_ptr<T>();
+  T* rstd_data = rstd.mutable_data_ptr<T>();
+  Tensor mean_acc = needMeanAcc ? at::empty(mean.sizes(), kAccTypeOpts) : mean;
+  Tensor rstd_acc = needMeanAcc ? at::empty(rstd.sizes(), kAccTypeOpts) : rstd;
   T_ACC* mean_acc_data = mean_acc.mutable_data_ptr<T_ACC>();
   T_ACC* rstd_acc_data = rstd_acc.mutable_data_ptr<T_ACC>();
 
@@ -597,7 +608,7 @@ void GroupNormKernelImplInternal(
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
   RowwiseMomentsCUDAKernel<T, T_ACC><<<N * G, num_threads, 0, cuda_stream>>>(
-      D * HxW, eps, X_data, mean_acc_data, rstd_acc_data);
+      D * HxW, eps, X_data, mean_data, rstd_data, mean_acc_data, rstd_acc_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (HxW == 1) {
@@ -616,8 +627,8 @@ void GroupNormKernelImplInternal(
       return (static_cast<T_ACC>(x) - mean) * rstd;
     });
   } else {
-    Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
-    Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
+    Tensor a = at::empty({N, C}, kAccTypeOpts);
+    Tensor b = at::empty({N, C}, kAccTypeOpts);
     const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
     const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
     T_ACC* a_data = a.mutable_data_ptr<T_ACC>();
@@ -652,10 +663,6 @@ void GroupNormKernelImplInternal(
       return a * static_cast<T_ACC>(x) + b;
     });
   }
-
-  mean.copy_(mean_acc);
-  rstd.copy_(rstd_acc);
-
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
