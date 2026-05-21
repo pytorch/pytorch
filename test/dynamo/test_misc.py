@@ -744,6 +744,22 @@ graph():
             self, inplace_on_literals, 1, expected_ops=2
         )
 
+    def test_bool_literal_iand_unspecialized_float(self):
+        @torch.compile(backend="eager")
+        def mul(a: torch.Tensor, b: torch.Tensor, c: float | int | None):
+            has_bias = c is not None
+            has_bias &= c != 0.0
+
+            if has_bias:
+                return a * b + c
+            return a * b
+
+        a = torch.randn(10)
+        b = torch.randn(10)
+
+        self.assertEqual(mul(a, b, c=0.0), a * b)
+        self.assertEqual(mul(a, b, c=0.5), a * b + 0.5)
+
     def test_unpack4(self):
         def unpack4(a, b):
             a = a[:5, :]
@@ -15955,6 +15971,34 @@ def forward(self, L_x_ : torch.Tensor):
             exec(code, scope)
             compiled = torch.compile(scope["op"], fullgraph=True)
             self.assertEqual(compiled(x), torch.tensor(0.0))
+
+    def test_str_join_with_list(self):
+        def fn():
+            return ", ".join(["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "a, b, c")
+
+    def test_str_join_with_tuple(self):
+        def fn():
+            return "-".join(("x", "y", "z"))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "x-y-z")
+
+    def test_str_join_with_generator(self):
+        def fn():
+            return ", ".join(s.upper() for s in ["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "A, B, C")
+
+    def test_str_join_with_map(self):
+        def fn():
+            return ":".join(map(str, [1, 2, 3]))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "1:2:3")
 
 
 instantiate_parametrized_tests(MiscTests)
