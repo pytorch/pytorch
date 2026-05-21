@@ -689,10 +689,13 @@ class TestScatterAddOverrideConds(TestCase):
         cls.impl = cutedsl_impl
         cutedsl_impl.register_to_dispatch()
 
-    def _conds(self, self_t, idx, src):
+    def _conds(self, self_t, idx, src, dim=0):
+        # _is_*_supported take (self, dim, index, src); they build the
+        # analysis iter internally and pattern-match its strides against
+        # the kernel's expected layout.
         return (
-            self.impl._is_tma_supported(self_t, 0, idx, src),
-            self.impl._is_vec_scatter_supported(self_t, 0, idx, src),
+            self.impl._is_tma_supported(self_t, dim, idx, src),
+            self.impl._is_vec_scatter_supported(self_t, dim, idx, src),
         )
 
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
@@ -782,10 +785,25 @@ class TestScatterAddOverrideConds(TestCase):
         self_t, idx, src, _ = _make_override_triple(100, 50, (128,), dtype=torch.float64)
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
-    def test_rejects_dim_nonzero(self):
+    def test_rejects_dim_nonzero_on_default_contig(self):
+        # Default-contiguous (M, N) tensor with dim=1 permutes to (N, M) with
+        # outer stride 1 and inner stride N -- inner is not packed, so the
+        # post-permute eligibility check still rejects.
         self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
-        self.assertFalse(self.impl._is_tma_supported(self_t, 1, idx, src))
-        self.assertFalse(self.impl._is_vec_scatter_supported(self_t, 1, idx, src))
+        self.assertEqual(self._conds(self_t, idx, src, dim=1), (False, False))
+
+    def test_accepts_dim_after_permute(self):
+        # User-facing tensors are (N, M)-shaped views of (M, N)-contiguous
+        # backing storage. After ``movedim(1, 0)`` the layout becomes
+        # (M, N)-contiguous, which is what the kernel expects.
+        M_self, M_src, N = 100, 50, 128
+        big_self = torch.zeros(M_self, N, device="cuda").transpose(0, 1)
+        big_src = torch.randn(M_src, N, device="cuda").transpose(0, 1)
+        idx_1d = torch.randint(0, M_self, (M_src,), device="cuda", dtype=torch.int64)
+        # Index broadcast pattern along the inner axis of the permuted view
+        # = N axis of the user's tensor.
+        idx = idx_1d.unsqueeze(0).expand(N, M_src)
+        self.assertEqual(self._conds(big_self, idx, big_src, dim=1), (True, True))
 
     def test_rejects_non_expanded_index(self):
         # Materialized 2D index (not a broadcast view) has nonzero stride
@@ -911,6 +929,49 @@ class TestScatterAddOverrideCorrectness(TestCase):
         got = torch.scatter_add(self_t, 0, idx, src)
         self.assertEqual(got[0], src.sum(0), atol=1e-3, rtol=1e-3)
         self.assertEqual(got[1:].abs().sum().item(), 0)
+
+    def test_matches_reference_dim1_after_permute(self):
+        # Build operands whose scatter axis (dim=1) becomes axis 0 after
+        # ``movedim``, landing on the kernel-eligible (M, N)-contiguous
+        # layout. Concretely: take a contiguous (M, N) buffer and view it
+        # as (N, M) via transpose; scatter_add along dim=1 then sees
+        # exactly the original buffer after movedim(1, 0).
+        torch.manual_seed(0)
+        M_out, M_src, N = 200, 100, 128
+        self_t = torch.zeros(M_out, N, device="cuda", dtype=torch.float32).transpose(0, 1)
+        src = torch.randn(M_src, N, device="cuda", dtype=torch.float32).transpose(0, 1)
+        idx_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64)
+        idx = idx_1d.unsqueeze(0).expand(N, M_src)
+        got = torch.scatter_add(self_t, 1, idx, src)
+        # Reference: same scatter with dim=0 on the (M, N) view, then
+        # transpose back to match self_t's layout.
+        ref = _naive_scatter_add(
+            self_t.movedim(1, 0), idx_1d, src.movedim(1, 0)
+        ).movedim(0, 1)
+        self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
+
+    def test_empty_index_is_noop(self):
+        # End-to-end: empty index/src must produce the input unchanged
+        # without any kernel-launch crash. In current TI behavior,
+        # empty 2D shapes coalesce to ndim=1 so eligibility rejects and
+        # aten handles the no-op. The numel==0 guard in _run is a
+        # belt-and-braces defense (mirrors aten's pattern) for the case
+        # where eligibility passes but the iter has no work.
+        torch.manual_seed(0)
+        self_t = torch.randn(200, 128, device="cuda", dtype=torch.float32)
+        idx = torch.empty(0, 128, device="cuda", dtype=torch.int64)
+        src = torch.empty(0, 128, device="cuda", dtype=torch.float32)
+        for variant in ("functional", "out", "inplace"):
+            ref = self_t.clone()
+            if variant == "functional":
+                got = torch.scatter_add(self_t, 0, idx, src)
+            elif variant == "out":
+                got = torch.empty_like(self_t)
+                torch.scatter_add(self_t, 0, idx, src, out=got)
+            else:
+                got = self_t.clone()
+                got.scatter_add_(0, idx, src)
+            self.assertEqual(got, ref)
 
     def test_deterministic_mode_uses_aten(self):
         # Under use_deterministic_algorithms(True), the cond rejects and
