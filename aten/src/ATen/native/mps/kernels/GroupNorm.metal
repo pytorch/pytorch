@@ -27,11 +27,11 @@ inline float load_affine_bias(constant void* ptr, uint idx) {
   return 0;
 }
 
-template <typename T, typename gamma_T, typename beta_T>
+template <typename T, typename stat_T, typename gamma_T, typename beta_T>
 kernel void group_norm(
     device T* Y [[buffer(0)]],
-    device T* mean [[buffer(1)]],
-    device T* rstd [[buffer(2)]],
+    device stat_T* mean [[buffer(1)]],
+    device stat_T* rstd [[buffer(2)]],
     constant T* X [[buffer(3)]],
     constant gamma_T* gamma [[buffer(4)]],
     constant beta_T* beta [[buffer(5)]],
@@ -102,55 +102,51 @@ kernel void group_norm(
 
   // Finally, one thread in the group writes the mean and rstd outputs.
   if (tid == 0) {
-    mean[tgid] = T(mean_val);
-    rstd[tgid] = T(rstd_val);
+    mean[tgid] = stat_T(mean_val);
+    rstd[tgid] = stat_T(rstd_val);
   }
 }
 
-#define REGISTER_GROUP_NORM(T, gamma_T, beta_T)                     \
-  template [[host_name("group_norm_" #T "_" #gamma_T "_" #beta_T)]] \
-  kernel void group_norm<T, gamma_T, beta_T>(                       \
-      device T * Y [[buffer(0)]],                                   \
-      device T * mean [[buffer(1)]],                                \
-      device T * rstd [[buffer(2)]],                                \
-      constant T * X [[buffer(3)]],                                 \
-      constant gamma_T * gamma [[buffer(4)]],                       \
-      constant beta_T * beta [[buffer(5)]],                         \
-      constant GroupNormParams & params [[buffer(6)]],              \
-      uint tg_id [[threadgroup_position_in_grid]],                  \
-      uint tid [[thread_position_in_threadgroup]],                  \
-      uint tptg [[threads_per_threadgroup]]);
+#define REGISTER_GROUP_NORM(T, stat_T, gamma_T, beta_T)                    \
+  template                                                                 \
+      [[host_name("group_norm_" #T "_" #stat_T "_" #gamma_T "_" #beta_T)]] \
+      kernel void group_norm<T, stat_T, gamma_T, beta_T>(                  \
+          device T * Y [[buffer(0)]],                                      \
+          device stat_T * mean [[buffer(1)]],                              \
+          device stat_T * rstd [[buffer(2)]],                              \
+          constant T * X [[buffer(3)]],                                    \
+          constant gamma_T * gamma [[buffer(4)]],                          \
+          constant beta_T * beta [[buffer(5)]],                            \
+          constant GroupNormParams & params [[buffer(6)]],                 \
+          uint tg_id [[threadgroup_position_in_grid]],                     \
+          uint tid [[thread_position_in_threadgroup]],                     \
+          uint tptg [[threads_per_threadgroup]]);
 
-#define REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, affine_T) \
-  REGISTER_GROUP_NORM(T, affine_T, affine_T);               \
-  REGISTER_GROUP_NORM(T, affine_T, void);                   \
-  REGISTER_GROUP_NORM(T, void, affine_T);
+#define REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, T_stat, affine_T) \
+  REGISTER_GROUP_NORM(T, T_stat, affine_T, affine_T);               \
+  REGISTER_GROUP_NORM(T, T_stat, affine_T, void);                   \
+  REGISTER_GROUP_NORM(T, T_stat, void, affine_T);
 
-#define REGISTER_GROUP_NORM_AFFINE_TYPES(T)          \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, float);  \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, half);   \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, bfloat); \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, uchar);  \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, char);   \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, short);  \
-  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, int);    \
-  REGISTER_GROUP_NORM(T, void, void);
+#define REGISTER_GROUP_NORM_AFFINE_TYPES(T, T_stat)          \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, T_stat, float);  \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, T_stat, half);   \
+  REGISTER_GROUP_NORM_AFFINE_TYPES_INNER(T, T_stat, bfloat); \
+  REGISTER_GROUP_NORM(T, T_stat, void, void);
 
-REGISTER_GROUP_NORM_AFFINE_TYPES(float);
-REGISTER_GROUP_NORM_AFFINE_TYPES(half);
-REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat);
-REGISTER_GROUP_NORM_AFFINE_TYPES(uchar);
-REGISTER_GROUP_NORM_AFFINE_TYPES(char);
-REGISTER_GROUP_NORM_AFFINE_TYPES(short);
-REGISTER_GROUP_NORM_AFFINE_TYPES(int);
+REGISTER_GROUP_NORM_AFFINE_TYPES(float, float);
+REGISTER_GROUP_NORM_AFFINE_TYPES(half, float);
+REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat, float);
 
-template <typename T, typename gamma_T>
+REGISTER_GROUP_NORM_AFFINE_TYPES(half, half);
+REGISTER_GROUP_NORM_AFFINE_TYPES(bfloat, bfloat);
+
+template <typename T, typename stat_T, typename gamma_T>
 kernel void group_norm_backward_x(
     device T* dX [[buffer(0)]],
     constant T* dY [[buffer(1)]],
     constant T* X [[buffer(2)]],
-    constant T* mean [[buffer(3)]],
-    constant T* rstd [[buffer(4)]],
+    constant stat_T* mean [[buffer(3)]],
+    constant stat_T* rstd [[buffer(4)]],
     constant gamma_T* gamma [[buffer(5)]],
     constant GroupNormBackwardXParams& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
@@ -215,46 +211,40 @@ kernel void group_norm_backward_x(
   }
 }
 
-#define REGISTER_GROUP_NORM_BACKWARD_X(T, gamma_T)                 \
-  template [[host_name("group_norm_backward_x_" #T "_" #gamma_T)]] \
-  kernel void group_norm_backward_x<T, gamma_T>(                   \
-      device T * dX [[buffer(0)]],                                 \
-      constant T * dY [[buffer(1)]],                               \
-      constant T * X [[buffer(2)]],                                \
-      constant T * mean [[buffer(3)]],                             \
-      constant T * rstd [[buffer(4)]],                             \
-      constant gamma_T * gamma [[buffer(5)]],                      \
-      constant GroupNormBackwardXParams & params [[buffer(6)]],    \
-      uint tgid [[threadgroup_position_in_grid]],                  \
-      uint tid [[thread_position_in_threadgroup]],                 \
+#define REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, gamma_T)                     \
+  template [[host_name("group_norm_backward_x_" #T "_" #stat_T "_" #gamma_T)]] \
+  kernel void group_norm_backward_x<T, stat_T, gamma_T>(                       \
+      device T * dX [[buffer(0)]],                                             \
+      constant T * dY [[buffer(1)]],                                           \
+      constant T * X [[buffer(2)]],                                            \
+      constant stat_T * mean [[buffer(3)]],                                    \
+      constant stat_T * rstd [[buffer(4)]],                                    \
+      constant gamma_T * gamma [[buffer(5)]],                                  \
+      constant GroupNormBackwardXParams & params [[buffer(6)]],                \
+      uint tgid [[threadgroup_position_in_grid]],                              \
+      uint tid [[thread_position_in_threadgroup]],                             \
       uint tptg [[threads_per_threadgroup]]);
 
-#define REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(T) \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, float);         \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, half);          \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, bfloat);        \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, uchar);         \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, char);          \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, short);         \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, int);           \
-  REGISTER_GROUP_NORM_BACKWARD_X(T, void);
+#define REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(T, stat_T) \
+  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, float);         \
+  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, half);          \
+  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, bfloat);        \
+  REGISTER_GROUP_NORM_BACKWARD_X(T, stat_T, void);
 
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(float);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(half);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(bfloat);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(uchar);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(char);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(short);
-REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(int);
+REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(float, float);
+REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(half, float);
+REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(bfloat, float);
+REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(half, half);
+REGISTER_GROUP_NORM_BACKWARD_GAMMA_TYPES(bfloat, bfloat);
 
-template <typename T, typename affine_T>
+template <typename T, typename stat_T, typename affine_T>
 kernel void group_norm_backward_affine(
     device affine_T* dgamma [[buffer(0)]],
     device affine_T* dbeta [[buffer(1)]],
     constant T* dY [[buffer(2)]],
     constant T* X [[buffer(3)]],
-    constant T* mean [[buffer(4)]],
-    constant T* rstd [[buffer(5)]],
+    constant stat_T* mean [[buffer(4)]],
+    constant stat_T* rstd [[buffer(5)]],
     constant GroupNormBackwardAffineParams& params [[buffer(6)]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
@@ -296,33 +286,28 @@ kernel void group_norm_backward_affine(
   }
 }
 
-#define REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, affine_T)                 \
-  template [[host_name("group_norm_backward_affine_" #T "_" #affine_T)]] \
-  kernel void group_norm_backward_affine<T, affine_T>(                   \
-      device affine_T * dgamma [[buffer(0)]],                            \
-      device affine_T * dbeta [[buffer(1)]],                             \
-      constant T * dY [[buffer(2)]],                                     \
-      constant T * X [[buffer(3)]],                                      \
-      constant T * mean [[buffer(4)]],                                   \
-      constant T * rstd [[buffer(5)]],                                   \
-      constant GroupNormBackwardAffineParams & params [[buffer(6)]],     \
-      uint tgid [[threadgroup_position_in_grid]],                        \
-      uint tid [[thread_position_in_threadgroup]],                       \
+#define REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, stat_T, affine_T)     \
+  template [[host_name("group_norm_backward_affine_" #T "_" #stat_T  \
+                       "_" #affine_T)]]                              \
+  kernel void group_norm_backward_affine<T, stat_T, affine_T>(       \
+      device affine_T * dgamma [[buffer(0)]],                        \
+      device affine_T * dbeta [[buffer(1)]],                         \
+      constant T * dY [[buffer(2)]],                                 \
+      constant T * X [[buffer(3)]],                                  \
+      constant stat_T * mean [[buffer(4)]],                          \
+      constant stat_T * rstd [[buffer(5)]],                          \
+      constant GroupNormBackwardAffineParams & params [[buffer(6)]], \
+      uint tgid [[threadgroup_position_in_grid]],                    \
+      uint tid [[thread_position_in_threadgroup]],                   \
       uint tptg [[threads_per_threadgroup]]);
 
-#define REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(T) \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, float);     \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, half);      \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, bfloat);    \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, uchar);     \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, char);      \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, short);     \
-  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, int);
+#define REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(T, stat_T) \
+  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, stat_T, float);     \
+  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, stat_T, half);      \
+  REGISTER_GROUP_NORM_BACKWARD_AFFINE(T, stat_T, bfloat);
 
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(float);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(half);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(bfloat);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(uchar);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(char);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(short);
-REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(int);
+REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(float, float);
+REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(half, float);
+REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(bfloat, float);
+REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(half, half);
+REGISTER_GROUP_NORM_BACKWARD_AFFINE_TYPES(bfloat, bfloat);

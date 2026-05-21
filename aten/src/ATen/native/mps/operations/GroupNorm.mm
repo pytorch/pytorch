@@ -1,7 +1,6 @@
-//  Copyright © 2022 Apple Inc.
-
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
+#include <ATen/mps/EmptyTensor.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/group_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -42,8 +41,9 @@ static void GroupNormKernelImpl(const Tensor& X,
   TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == C);
   TORCH_INTERNAL_ASSERT(X.is_contiguous());
   TORCH_INTERNAL_ASSERT(!(gamma.defined() && beta.defined()) || (gamma.scalar_type() == beta.scalar_type()));
+  TORCH_INTERNAL_ASSERT(mean.scalar_type() == rstd.scalar_type());
 
-  if (N == 0) {
+  if (X.numel() == 0) {
     return;
   }
 
@@ -75,8 +75,9 @@ static void GroupNormKernelImpl(const Tensor& X,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state =
-          lib.getPipelineStateForFunc(fmt::format("group_norm_{}_{}_{}",
+          lib.getPipelineStateForFunc(fmt::format("group_norm_{}_{}_{}_{}",
                                                   scalarToMetalTypeString(X),
+                                                  scalarToMetalTypeString(mean),
                                                   gamma.defined() ? scalarToMetalTypeString(gamma) : "void",
                                                   beta.defined() ? scalarToMetalTypeString(beta) : "void"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X});
@@ -120,8 +121,9 @@ static void group_norm_backward_x(const Tensor& dY,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state =
-          lib.getPipelineStateForFunc(fmt::format("group_norm_backward_x_{}_{}",
+          lib.getPipelineStateForFunc(fmt::format("group_norm_backward_x_{}_{}_{}",
                                                   scalarToMetalTypeString(dY),
+                                                  scalarToMetalTypeString(mean),
                                                   gamma.defined() ? scalarToMetalTypeString(gamma) : "void"));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
       [compute_encoder setComputePipelineState:pipeline_state];
@@ -161,8 +163,10 @@ static void group_norm_backward_affine(const Tensor& dY,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format(
-          "group_norm_backward_affine_{}_{}", scalarToMetalTypeString(dY), scalarToMetalTypeString(dgamma)));
+      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("group_norm_backward_affine_{}_{}_{}",
+                                                                    scalarToMetalTypeString(dY),
+                                                                    scalarToMetalTypeString(mean),
+                                                                    scalarToMetalTypeString(dgamma)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X});
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, dgamma, dbeta, dY, X, mean, rstd, params);
@@ -185,7 +189,7 @@ static void GroupNormBackwardKernelImpl(const Tensor& dY,
                                         Tensor& dX,
                                         Tensor& dgamma,
                                         Tensor& dbeta) {
-  if (N == 0) {
+  if (X.numel() == 0) {
     if (dgamma.defined()) {
       dgamma.zero_();
     }
@@ -201,8 +205,8 @@ static void GroupNormBackwardKernelImpl(const Tensor& dY,
     // If only one of either dgamma or dbeta is defined, allocate a temporary
     // for the other, so that the kernel doesn't need to switch on it.
     const Tensor& affine_ref = dgamma.defined() ? dgamma : dbeta;
-    Tensor dgamma_out = dgamma.defined() ? dgamma : at::empty({C}, affine_ref.options());
-    Tensor dbeta_out = dbeta.defined() ? dbeta : at::empty({C}, affine_ref.options());
+    Tensor dgamma_out = dgamma.defined() ? dgamma : at::detail::empty_mps({C}, affine_ref.options());
+    Tensor dbeta_out = dbeta.defined() ? dbeta : at::detail::empty_mps({C}, affine_ref.options());
     group_norm_backward_affine(dY, X, mean, rstd, dgamma_out, dbeta_out, N, C, HxW, group);
   }
 }
