@@ -170,6 +170,9 @@ def run_triton_kernel_with_autotune(
                 f"{key_name} not found in cached params for {kernel_name}"
             )
     cubin_path = cached_params[cubin_path_name]
+    assert isinstance(cubin_path, str)
+    runtime_bin_path = cached_params.get("runtime_bin_path", cubin_path)
+    assert isinstance(runtime_bin_path, str)
     mangled_name = cached_params["mangled_name"]
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
@@ -215,10 +218,12 @@ def run_triton_kernel_with_autotune(
     profile_scratch: int | None = cached_params.get("profile_scratch")
 
     log.debug(
-        "Successfully autotuned Triton kernel: cubin_path=%s, mangled_name=%s, "
+        "Successfully autotuned Triton kernel: cubin_path=%s, "
+        "runtime_bin_path=%s, mangled_name=%s, "
         "num_warps=%d, shared_mem=%d, xblocks=%s, yblocks=%s, zblocks=%s, r0blocks=%s, "
         "rsplit=%d, rsplit_size=%d, config_index=%s, global_scratch=%s, profile_scratch=%s",
         cubin_path,
+        runtime_bin_path,
         mangled_name,
         num_warps,
         shared_mem,
@@ -234,7 +239,7 @@ def run_triton_kernel_with_autotune(
     )
 
     result = TritonKernelCompileResult(
-        cubin_path=cubin_path,
+        cubin_path=runtime_bin_path,
         mangled_name=mangled_name,
         num_warps=num_warps,
         shared_mem=shared_mem,
