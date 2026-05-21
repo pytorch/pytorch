@@ -122,7 +122,10 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        if config.combo_kernel_per_subkernel_blocks:
+        if (
+            config.combo_kernel_allow_mixed_pointwise_reduction
+            and config.combo_kernel_per_subkernel_blocks
+        ):
             # Per-subkernel blocks give each sub-kernel its own XBLOCK/R0_BLOCK,
             # so pointwise and reduction can share a combo without forcing one
             # heuristic's block geometry onto the other.
