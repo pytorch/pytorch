@@ -337,13 +337,6 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
         stream_idx = self.get_stream().user_object_index
-        # self.annotation is the dict consumed by
-        # torch.fx.traceback.annotate at enter() time; it carries the
-        # "stream" -> stream-user-object-index pair that inductor reads
-        # off node.meta["custom"] for stream-affinity scheduling.
-        # Stored on a dedicated attribute so target_values (the
-        # positional rebuild-args tuple) does not have to do double duty.
-        self.annotation = {"stream": stream_idx}
         super().__init__(
             target_values=(),
             initial_values=None,
@@ -353,17 +346,21 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
+        strm: StreamVariable = self.get_stream()
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
-        tx.symbolic_stream_state.enter_stream(self.get_stream())
+        tx.symbolic_stream_state.enter_stream(strm)
+
         # Eagerly annotate + preserve_node_meta; this ensures the captured
         # nodes have appropriate node.meta["custom"]["stream"] annotations.
         # We inlined this part of FxTracebackAnnotateVariable because
         # FxTracebackAnnotateVariable uses self.target_values for the
         # annotation and for us target_values is a tuple of args---and it must
         # remain a tuple of args for reconstruct_type.
+        stream_idx: int = strm.user_object_index
+        annotation: dict[str, Any] = {"stream": stream_idx}
         stack = contextlib.ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.annotation))
+        stack.enter_context(torch.fx.traceback.annotate(annotation))
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
         return ConstantVariable.create(None)
