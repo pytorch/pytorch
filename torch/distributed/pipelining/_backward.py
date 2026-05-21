@@ -6,6 +6,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from torch.autograd.graph import GradientEdge, Node
 from torch.nn import Parameter
 
@@ -174,6 +175,7 @@ def _autograd_grad_for_inputs(
     return tuple(result)
 
 
+@dist.spmd_no_typecheck()
 def stage_backward_input(
     stage_outputs_or_loss: list[torch.Tensor],
     output_grads: list[torch.Tensor] | None,
@@ -257,6 +259,7 @@ def stage_backward_input(
     return dinputs, param_groups
 
 
+@dist.spmd_no_typecheck()
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: list[dict[str, Any]], retain_graph=False
 ) -> tuple[torch.Tensor | None, ...]:
@@ -311,6 +314,7 @@ def stage_backward_weight(
     return tuple(weight_grads)
 
 
+@dist.spmd_no_typecheck()
 def stage_backward(
     stage_output,
     output_grads,
