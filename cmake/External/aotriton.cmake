@@ -281,4 +281,19 @@ if(NOT __AOTRITON_INCLUDED)
   target_link_libraries(__caffe2_aotriton INTERFACE "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}")
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
   set(AOTRITON_FOUND TRUE)
+  # Install libaotriton_v2.so into the cmake install tree so it ends up in
+  # site-packages/torch/lib/ when building with scikit-build-core.
+  # aotriton's ExternalProject puts the library directly in the source tree
+  # (${PROJECT_SOURCE_DIR}/torch/lib/) without a cmake install() rule, so it
+  # is absent from the installed wheel and causes link failures in downstream
+  # cmake builds (e.g., custom op builds) that link against installed torch.
+  install(DIRECTORY "${__AOTRITON_INSTALL_DIR}/lib/"
+    DESTINATION "lib"
+    FILES_MATCHING PATTERN "libaotriton_v2*.so*"
+  )
+  # Install aotriton GPU kernel images (compressed ISA blobs) into the wheel.
+  install(DIRECTORY "${__AOTRITON_INSTALL_DIR}/lib/aotriton.images"
+    DESTINATION "lib"
+    OPTIONAL
+  )
 endif() # __AOTRITON_INCLUDED

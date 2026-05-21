@@ -105,6 +105,9 @@ class TestRemoteCache(TestCase):
             with self.assertLogs("torch._inductor.remote_cache", level="WARNING") as cm:
                 self.assertIsNone(c.get(key))
             self.assertIn("Ignoring corrupt local cache entry", cm.output[0])
+            self.assertIn("JSONDecodeError", cm.output[0])
+            self.assertIn("Extra data", cm.output[0])
+            self.assertNotIn("Traceback", cm.output[0])
 
     def test_local_autotune_cache_invalid_utf8_is_miss(
         self,
@@ -122,6 +125,9 @@ class TestRemoteCache(TestCase):
             with self.assertLogs("torch._inductor.remote_cache", level="WARNING") as cm:
                 self.assertIsNone(c.get(key))
             self.assertIn("Ignoring corrupt local cache entry", cm.output[0])
+            self.assertIn("UnicodeDecodeError", cm.output[0])
+            self.assertIn("invalid start byte", cm.output[0])
+            self.assertNotIn("Traceback", cm.output[0])
 
     def test_local_autotune_cache_put_uses_atomic_write(
         self,
