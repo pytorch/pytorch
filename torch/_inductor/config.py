@@ -531,6 +531,8 @@ incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
 
+fast_optimization_hint = os.environ.get("TORCHINDUCTOR_FAST_OPTIMIZATION_HINT") == "1"
+
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
 )

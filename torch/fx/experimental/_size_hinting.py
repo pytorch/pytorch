@@ -350,6 +350,46 @@ def _optimization_hint_base(
 
         fallback = unbacked_symint_fallback
 
+    from torch._inductor.config import fast_optimization_hint
+
+    if fast_optimization_hint:
+        result = _maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        if isinstance(expr, sympy.Expr):
+            expr = _sympy_subs(expr, precomputed_replacements)
+            expr = _sympy_subs(expr, shape_env.backed_var_to_val)
+            expr = _sympy_subs(expr, shape_env.var_to_hint_override)
+
+        result = _maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        if not isinstance(expr, sympy.Expr):
+            return fallback if fallback is not None else 0
+
+        size_dict = {}
+        for s in expr.free_symbols:
+            sym_fallback = fallback
+            vr = shape_env.var_to_range.get(s, None)
+            if vr is not None:
+                if isinstance(vr.lower, (int, sympy.Integer)):
+                    sym_fallback = max(sym_fallback, int(vr.lower))
+                if isinstance(vr.upper, (int, sympy.Integer)):
+                    sym_fallback = min(sym_fallback, int(vr.upper))
+            size_dict[s] = sym_fallback
+
+        try:
+            final_result = expr.subs(size_dict)
+        except ZeroDivisionError:
+            return fallback if fallback is not None else 0
+
+        final_result = _maybe_realize_expr(final_result, fallback)
+        if final_result is None:
+            return fallback if fallback is not None else 0
+        return final_result
+
     # to have expanded (Identity free) expr stored in original
     if isinstance(expr, sympy.Expr):
         expr = expr.expand(identity=True)
