@@ -4199,7 +4199,7 @@ def gather(x, dim, index, sparse_grad=False):
 
     def fn(idx):
         idx = list(idx)
-        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim], wrap_neg=False)
         if len(idx) == 0:
             idx = [gather_idx]
         else:
@@ -6729,10 +6729,13 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
     if (
         reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
-        and is_triton(x)
+        and supports_logical_index_argreduce
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
@@ -8002,8 +8005,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
@@ -8494,26 +8497,41 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(
-    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
-):
+def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    if len(additional_inputs) > 0:
+    num_scan_inputs = 2 * len(xs)
+    placeholders = [
+        node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    additional_placeholders = placeholders[num_scan_inputs:]
+    if len(additional_placeholders) != len(additional_inputs):
+        raise RuntimeError("Unable to generate code for associative_scan op")
+
+    # Dynamic shapes can lift symbols from the scan element metadata into the
+    # combine graph even when the combine function does not read them.
+    unsupported_inputs = []
+    for arg, placeholder in zip(additional_inputs, additional_placeholders):
+        if not isinstance(arg, (int, sympy.Basic)) or placeholder.users:
+            unsupported_inputs.append(arg)
+    if unsupported_inputs:
         raise RuntimeError(
-            "Unable to generate code for associative_scan op, because there are lifted arguments"
+            "Unable to generate code for associative_scan op, because there are "
+            "unsupported lifted arguments"
         )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+    subgraph_inputs.extend(additional_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
+            *additional_inputs,
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
