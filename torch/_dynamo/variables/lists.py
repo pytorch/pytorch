@@ -298,6 +298,8 @@ class BaseListVariable(VariableTracker):
         count: VariableTracker,
     ) -> VariableTracker:
         n = count.as_python_constant()
+        if pytuple_checkexact(self) and (n == 1 or not self.items):
+            return self
         try:
             new_items = self.items * n
         except (MemoryError, OverflowError) as e:
@@ -853,12 +855,13 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if not args[0].has_force_unpack_var_sequence(tx):
-                raise_observed_exception(
-                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
-                )
-
             (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                if not arg.has_force_unpack_var_sequence(tx):
+                    raise_observed_exception(
+                        TypeError, tx, args=[f"{type(arg)} object is not iterable"]
+                    )
+
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )

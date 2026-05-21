@@ -7,6 +7,7 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
+import sys
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
@@ -596,7 +597,7 @@ def generic_getiter(
         if not pyiter_check(res_T):
             raise_type_error(
                 tx,
-                f"{obj.python_type_name()}.__iter__() returned non-iterator {res.python_type_name()}",
+                f"iter() returned non-iterator of type '{res.python_type_name()}'",
             )
         return res
     elif pysequence_check(T):
@@ -858,6 +859,7 @@ def sequence_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_repeat_impl(tx, count)
 
 
@@ -878,7 +880,21 @@ def sequence_inplace_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_inplace_repeat_impl(tx, count)
+
+
+def validate_sequence_repeat_count(
+    tx: "InstructionTranslator",
+    count: VariableTracker,
+) -> None:
+    n = count.as_python_constant()
+    if n < -sys.maxsize - 1 or n > sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["cannot fit 'int' into an index-sized integer"],
+        )
 
 
 def generic_multiply(

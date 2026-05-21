@@ -57,6 +57,10 @@ class SetVariable(VariableTracker):
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
     _cpython_type = set
+    _nonvar_fields = {
+        "use_python_constant_iteration_order",
+        *VariableTracker._nonvar_fields,
+    }
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
@@ -66,6 +70,9 @@ class SetVariable(VariableTracker):
         items: Iterable[VariableTracker | HashableTracker],
         **kwargs: Any,
     ) -> None:
+        use_python_constant_iteration_order = kwargs.pop(
+            "use_python_constant_iteration_order", False
+        )
         # .clone() passes these arguments in kwargs but they're recreated below
         if "original_items" in kwargs:
             kwargs.pop("original_items")
@@ -73,6 +80,7 @@ class SetVariable(VariableTracker):
             kwargs.pop("should_reconstruct_all")
 
         super().__init__(**kwargs)
+        self.use_python_constant_iteration_order = use_python_constant_iteration_order
 
         # Items can be either VariableTrackers or HashableTrackers (from set ops).
         # For VariableTrackers, realize them to ensure aliasing guards are installed
@@ -155,6 +163,11 @@ class SetVariable(VariableTracker):
         return id(value) != id(other)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        if self.use_python_constant_iteration_order and all(
+            k.vt.is_python_constant() for k in self.items
+        ):
+            vt_by_value = {k.vt.as_python_constant(): k.vt for k in self.items}
+            return [vt_by_value[x] for x in self.as_python_constant()]
         return [x.vt for x in self.items]
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -182,7 +195,7 @@ class SetVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(set, name))
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
@@ -206,22 +219,6 @@ class SetVariable(VariableTracker):
                     )
                 )
             )
-
-    def _fast_set_method(
-        self,
-        tx: "InstructionTranslator",
-        fn: Any,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        try:
-            res = fn(
-                *[x.as_python_constant() for x in [self, *args]],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-        except Exception as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
-        return VariableTracker.build(tx, res)
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -249,26 +246,23 @@ class SetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from ..utils import check_constant_args
         from .builder import SourcelessBuilder
+        from .dicts import ConstDictVariable, DictItemsVariable, DictKeysVariable
 
-        if (
-            name
-            in (
-                "isdisjoint",
-                "union",
-                "intersection",
-                "difference",
-                "symmetric_difference",
-            )
-            and check_constant_args(args, kwargs)
-            and self.python_type() is set
-        ):
-            py_type = self.python_type()
-            return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
-
-        # Lazy imports to avoid circular dependencies
-        from .dicts import DictItemsVariable, DictKeysVariable
+        def tracked_items(arg: VariableTracker):
+            if isinstance(arg, ConstDictVariable):
+                arg.install_dict_keys_match_guard()
+                return list(arg.items.keys())
+            if isinstance(arg, DictKeysVariable):
+                arg.dv_dict.install_dict_keys_match_guard()
+                return list(arg.view_items)
+            if isinstance(arg, SetVariable):
+                return list(arg.items.keys())
+            if arg.has_force_unpack_var_sequence(tx):
+                return [
+                    HashableTracker(item) for item in arg.force_unpack_var_sequence(tx)
+                ]
+            return None
 
         if name == "__init__":
             temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
@@ -321,6 +315,22 @@ class SetVariable(VariableTracker):
         elif name == "intersection":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            other_items_list = []
+            for other in args:
+                other_items = tracked_items(other)
+                if other_items is None:
+                    break
+                other_items_list.append(other_items)
+            else:
+                result = self.clone(
+                    items=[],
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                )
+                for item in self.items:
+                    if all(item in other_items for other_items in other_items_list):
+                        result.items[item] = SetVariable._default_value()  # type: ignore[attr-defined]
+                return result
             return SourcelessBuilder.create(
                 tx, polyfills.set_intersection
             ).call_function(
@@ -337,6 +347,22 @@ class SetVariable(VariableTracker):
         elif name == "union":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            other_items_list = []
+            for other in args:
+                other_items = tracked_items(other)
+                if other_items is None:
+                    break
+                other_items_list.append(other_items)
+            else:
+                result = self.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                )
+                for other_items in other_items_list:
+                    for item in other_items:
+                        result.items[item] = SetVariable._default_value()  # type: ignore[attr-defined]
+                return result
             return SourcelessBuilder.create(tx, polyfills.set_union).call_function(
                 tx,
                 [self, *args],
@@ -347,6 +373,22 @@ class SetVariable(VariableTracker):
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
+            other_items_list = []
+            for other in args:
+                other_items = tracked_items(other)
+                if other_items is None:
+                    break
+                other_items_list.append(other_items)
+            else:
+                result = self.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                )
+                for other_items in other_items_list:
+                    for item in other_items:
+                        result.items.pop(item, None)  # type: ignore[attr-defined]
+                return result
             return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
                 tx,
                 [self, *args],
@@ -366,6 +408,20 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            other_items = tracked_items(args[0])
+            if other_items is not None:
+                other_items = dict.fromkeys(other_items)
+                result = self.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                )
+                for item in other_items:
+                    if item in result.items:  # type: ignore[attr-defined]
+                        result.items.pop(item)  # type: ignore[attr-defined]
+                    else:
+                        result.items[item] = SetVariable._default_value()  # type: ignore[attr-defined]
+                return result
             return SourcelessBuilder.create(
                 tx, polyfills.set_symmetric_difference
             ).call_function(
@@ -381,6 +437,17 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            other_items = tracked_items(args[0])
+            if other_items is not None:
+                other_items = dict.fromkeys(other_items)
+                tx.output.side_effects.mutation(self)
+                for item in other_items:
+                    if item in self.items:
+                        self.should_reconstruct_all = True
+                        self.items.pop(item)
+                    else:
+                        self.items[item] = SetVariable._default_value()
+                return ConstantVariable.create(None)
             return SourcelessBuilder.create(
                 tx, polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
@@ -574,7 +641,17 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        if isinstance(self_, variables.UserDefinedSetVariable):
+            result_source = self_._base_vt
+            if result_source is None:
+                raise AssertionError("_base_vt must not be None")
+        else:
+            result_source = self_
+        result = result_source.clone(
+            items=result_source.items.copy(),  # type: ignore[missing-attribute]
+            mutation_type=ValueMutationNew(),
+            source=None,
+        )
         if self_ is other_:
             return result
         result.items.update(other_.items)  # type: ignore[missing-attribute]
@@ -600,7 +677,17 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        result = self_.call_method(tx, "copy", [], {})
+        if isinstance(self_, variables.UserDefinedSetVariable):
+            result_source = self_._base_vt
+            if result_source is None:
+                raise AssertionError("_base_vt must not be None")
+        else:
+            result_source = self_
+        result = result_source.clone(
+            items=result_source.items.copy(),  # type: ignore[missing-attribute]
+            mutation_type=ValueMutationNew(),
+            source=None,
+        )
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
         return result
@@ -731,6 +818,9 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        return [x.vt for x in self.items]
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -841,8 +931,23 @@ class FrozensetVariable(SetVariable):
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
             return ConstantVariable.create(None)
+        elif name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if (
+                self.source is not None
+                and type(tx.output.resolve_source_value(self.source)) is not frozenset
+            ):
+                return FrozensetVariable(
+                    self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                )
+            return self
         elif name in (
-            "copy",
             "difference",
             "intersection",
             "symmetric_difference",
