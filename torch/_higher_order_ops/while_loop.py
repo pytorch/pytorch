@@ -224,7 +224,14 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         carried, additional = pytree.tree_unflatten(flat_args, in_spec)
         return body_fn(*carried, *additional)
 
-    if torch.compiler.is_dynamo_compiling():
+    if torch.compiler.is_dynamo_compiling() or any(
+        isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t)
+        for t in flat_inputs
+    ):
+        # When inside an active vmap, the inputs are BatchedTensors. Dynamo's input
+        # fakification path raises `NotImplementedError: Cannot access storage of
+        # BatchedTensorImpl` on these. Skip the dynamo validation step and dispatch
+        # to `while_loop_op` directly so the Vmap py_impl below picks them up.
         return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
