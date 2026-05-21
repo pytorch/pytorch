@@ -902,6 +902,19 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    def test_exp_complex_real_axis_extremes(self):
+        # Regression: exp/expm1/sinh/cosh(re + 0i) must stay real even when re
+        # is inf/nan (naive exp(a)*sin(b) gives inf*0=NaN / nan*0=NaN otherwise).
+        a = torch.tensor(
+            [complex(math.inf, 0), complex(-math.inf, 0), complex(math.nan, 0)],
+            dtype=torch.complex64, device="mps")
+        zero = torch.zeros(3, device="mps")
+        self.compare_with_numpy(torch.exp, np.exp, a)
+        # np.expm1 doesn't accept complex; verify imag stays zero on real-axis input.
+        self.assertEqual(torch.special.expm1(a).imag, zero)
+        self.assertEqual(torch.sinh(a).imag, zero)
+        self.assertEqual(torch.cosh(a).imag, zero)
+
     @xfailIf(MACOS_VERSION > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
         conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
