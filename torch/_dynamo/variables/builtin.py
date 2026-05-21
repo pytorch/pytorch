@@ -2163,6 +2163,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
+        if kwargs:
+            raise_type_error(tx, "tuple() takes no keyword arguments")
+
+        positional_args = len(args) + (obj is not None)
+        if positional_args > 1:
+            raise_type_error(
+                tx, f"tuple expected at most 1 argument, got {positional_args}"
+            )
+
+        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            return obj
+
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
@@ -2175,7 +2187,35 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
             return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
-            return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+            result = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+            if result is not None or obj is None:
+                return result
+
+            iterator = generic_getiter(tx, obj)
+            if iterator.has_force_unpack_var_sequence(tx):
+                cls = variables.BaseListVariable.cls_for(self.fn)
+                return cls(
+                    list(iterator.force_unpack_var_sequence(tx)),
+                    mutation_type=ValueMutationNew(),
+                )
+
+            fn = self.fn
+            has_kwargs = bool(kwargs)
+            arg_types = [type(a).__name__ for a in [obj, *args]]
+            real_arg_types = [a.python_type_name() for a in [obj, *args]]
+            unimplemented(
+                gb_type="Failed to trace builtin operator",
+                context=f"builtin {fn.__name__} {arg_types} {has_kwargs}",
+                explanation=f"Dynamo does not know how to trace builtin operator `{fn.__name__}` "
+                f"with argument types {real_arg_types} (has_kwargs {has_kwargs})",
+                hints=[
+                    f"Avoid calling builtin `{fn.__name__}` with argument types {real_arg_types}. "
+                    f"Consider using an equivalent alternative function/method to `{fn.__name__}`.",
+                    "If you are attempting to call a logging function (e.g. `print`), "
+                    "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                    "Please report an issue to PyTorch.",
+                ],
+            )
 
     call_tuple = _call_tuple_list
 
@@ -3635,6 +3675,11 @@ class ListBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .user_defined import UserDefinedObjectVariable
 
+        if kwargs:
+            raise_type_error(tx, "list() takes no keyword arguments")
+        if len(args) > 1:
+            raise_type_error(tx, f"list expected at most 1 argument, got {len(args)}")
+
         obj = args[0] if args else None
 
         if isinstance(
@@ -3672,6 +3717,13 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                         )
             return ListVariable(
                 list(obj.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
+
+        iterator = generic_getiter(tx, obj)
+        if iterator.has_force_unpack_var_sequence(tx):
+            return ListVariable(
+                list(iterator.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
 
