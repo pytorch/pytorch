@@ -1275,8 +1275,8 @@ class TestProfiler(TestCase):
                 with open(fname) as f:
                     return json.load(f)
 
-        if use_cuda:
-            profile_and_export(trace_only=False)
+        # Warmup: ensures dynamo compilation and CUDA init don't skew comparison
+        profile_and_export(trace_only=False)
 
         default_trace = profile_and_export(trace_only=False)
         trace_only_trace = profile_and_export(trace_only=True)
