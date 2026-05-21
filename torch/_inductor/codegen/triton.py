@@ -6990,7 +6990,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
 
 
-class FusedUserDefinedTritonKernel(TritonKernel):
+class FusedUserTritonKernel(TritonKernel):
     """
     When fusing a user-defined triton kernel with epilogues, we use this class
     to generate the modified triton kernel source.

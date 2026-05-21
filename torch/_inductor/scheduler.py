@@ -3179,7 +3179,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
         from torch._inductor.codegen.simd import SIMDScheduling
         from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
-        from torch._inductor.codegen.triton import FusedUserDefinedTritonKernel
+        from torch._inductor.codegen.triton import FusedUserTritonKernel
 
         ir_node = self.kernel_node.node
         numel = math.prod(ir_node.mutable_args[0].shape)
@@ -3188,7 +3188,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
         kernel_features = SIMDKernelFeatures([self.fused_epilogue], numel)
 
-        fused_user_kernel = FusedUserDefinedTritonKernel(tiling, kernel_features, self)
+        fused_user_kernel = FusedUserTritonKernel(tiling, kernel_features, self)
         new_kernel_src = fused_user_kernel.codegen()
 
         return self.kernel_node.node.codegen_with_epilogue_fusion(
