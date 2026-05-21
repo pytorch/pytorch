@@ -1533,6 +1533,42 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+            "unbind_stack_aten_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_select_unsqueeze_cat_out_of_bounds(self):
+        counters.clear()
+
+        def fn(x):
+            slice0 = torch.select(x, dim=1, index=0)
+            slice1 = torch.select(x, dim=1, index=1)
+            slice2 = torch.select(x, dim=1, index=2)
+            return torch.cat(
+                [
+                    torch.unsqueeze(slice0, dim=1),
+                    torch.unsqueeze(slice1, dim=1),
+                    torch.unsqueeze(slice2, dim=1),
+                ],
+                dim=1,
+            )
+
+        x = torch.randn(4, 1, 10, 16)
+
+        with self.assertRaisesRegex(IndexError, r"select\(\): index 1 out of range"):
+            fn(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"select\(\): index 1 out of range",
+        ):
+            torch.compile(fn)(x)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 0)
+        counters.clear()
+
     def test_numpy_compat_normalization(self):
         def fn(x, y):
             a = torch.stack([x, y], axis=1)

@@ -4513,6 +4513,11 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             output,
             """\
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        lt: "Sym(u0 < s77)" = _local_scalar_dense < arg1_1
+        sym_sum: "Sym(s77 + u0)" = torch.sym_sum((_local_scalar_dense, arg1_1));  arg1_1 = None
+        ge: "Sym(s77 + u0 >= 0)" = sym_sum >= 0;  sym_sum = None
+        and_: "Sym((u0 < s77) & (s77 + u0 >= 0))" = lt & ge;  lt = ge = None
+        _assert_scalar = torch.ops.aten._assert_scalar.default(and_, "Runtime assertion failed for expression (u0 < s77) & (0 <= s77 + u0) on node 'and_'");  and_ = _assert_scalar = None
         select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
         select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
         select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
