@@ -3140,6 +3140,10 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 )
                 return False
 
+        if self.node.mutable_args[0].layout != node2.node.layout:
+            why("user's Triton kernel and epilogue have different buffer layouts")
+            return False
+
         def _is_other_node_that_references_mutation_buffer(
             other_node: BaseSchedulerNode,
         ):
