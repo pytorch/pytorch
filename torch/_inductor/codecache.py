@@ -1301,6 +1301,10 @@ class FxGraphHashDetails:
         # so we add this explicitly.
         self.provenance_tracking_level = config.trace.provenance_tracking_level
 
+        # Factory ops with dtype=None are lowered using the ambient default dtype,
+        # so cached code compiled under one default dtype is not valid under another.
+        self.default_dtype = torch.get_default_dtype()
+
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
             torch.backends.cuda.matmul.fp32_precision,

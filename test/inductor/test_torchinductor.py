@@ -2998,6 +2998,30 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_flip_zero_dim(self):
+        def fn(x):
+            return (
+                x.flip(0),
+                x.flip([0]),
+                x.flip(-1),
+                x.flip([-1]),
+                torch.flip(x, [0]),
+                torch.flip(x, [-1]),
+                x.flip([]),
+            )
+
+        self.common(fn, (torch.rand(()),))
+
+    def test_flip_zero_dim_backward(self):
+        def fn(x):
+            return x.flip(0)
+
+        self.common(
+            fn,
+            (torch.randn((), requires_grad=True),),
+            check_gradient=True,
+        )
+
     def test_cumprod_backward(self):
         if self.device == "mps":
             raise unittest.SkipTest(
@@ -6685,6 +6709,37 @@ class CommonTemplate:
 
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
+
+    def test_complex_python_literal_backward(self):
+        dtypes = [
+            dtype
+            for dtype in (torch.complex64, torch.complex128)
+            if self.is_dtype_supported(dtype)
+        ]
+        if not dtypes:
+            self.skipTest("complex dtypes not supported on this device")
+
+        cases = (
+            (lambda x: x * (2.0 + 1.0j), "mul"),
+            (lambda x: x / (1.0 + 1.0j), "div"),
+        )
+
+        for dtype in dtypes:
+            for fn, name in cases:
+                with self.subTest(dtype=dtype, op=name):
+                    x = torch.randn(
+                        4, dtype=dtype, device=self.device, requires_grad=True
+                    )
+                    x_ref = x.detach().clone().requires_grad_(True)
+
+                    expected = fn(x_ref).abs().sum()
+                    expected.backward()
+
+                    actual = torch.compile(fn, backend="inductor")(x).abs().sum()
+                    actual.backward()
+
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(x.grad, x_ref.grad)
 
     def test_complex_zero_dim_scalar(self):
         # Test that 0-d complex tensors can be compiled without crashing.
