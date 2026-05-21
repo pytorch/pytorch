@@ -477,8 +477,8 @@ def forward(self, x_1, output_1):
 
             output_code = log_stream.getvalue()
 
-        FileCheck().check("del buf3").check(
-            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
+        FileCheck().check_regex(r"del buf[0-9]*").check_regex(
+            r"dual_output_kernel_with_inline_asm_0\.run\(x_1, buf[0-9]*, buf[0-9]*,"
         ).run(output_code)
 
         eager_result = f(t.clone())[0]
@@ -1288,6 +1288,82 @@ def forward(self, x_1, output_1):
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    def test_triton_kernel_mutates_strided_intermediate(self):
+        @triton.jit
+        def add_one_strided_kernel(
+            in_ptr,
+            out_ptr,
+            n_cols: tl.constexpr,
+            stride_b: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            row = tl.program_id(0)
+            offsets = tl.arange(0, BLOCK_N)
+            mask = offsets < n_cols
+            values = tl.load(in_ptr + row * stride_b + offsets, mask=mask, other=0.0)
+            tl.store(out_ptr + row * stride_b + offsets, values + 1.0, mask=mask)
+
+        def triton_update(x):
+            out = x
+            add_one_strided_kernel[(x.size(0),)](
+                x,
+                out,
+                x.size(1),
+                x.stride(0),
+                BLOCK_N=4096,
+            )
+            return out
+
+        def f(base):
+            x = (base + 1)[:, :4096]
+            return triton_update(x)
+
+        base = torch.randn(64, 8192, device=GPU_TYPE)
+        eager_out = f(base.clone())
+        compiled_out = torch.compile(f, fullgraph=True)(base.clone())
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+
+    @requires_gpu
+    def test_triton_kernel_mutates_expanded_intermediate_errors(self):
+        @triton.jit
+        def add_one_expanded_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements: tl.constexpr,
+            stride_n: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            offsets = tl.arange(0, BLOCK_N)
+            mask = offsets < n_elements
+            value = tl.load(in_ptr)
+            tl.store(out_ptr + offsets * stride_n, value + 1.0, mask=mask)
+
+        def triton_update(x):
+            out = x
+            add_one_expanded_kernel[(1,)](
+                x,
+                out,
+                x.numel(),
+                x.stride(0),
+                BLOCK_N=16,
+            )
+            return out
+
+        def f(base):
+            x = (base + 1).expand(4)
+            return triton_update(x)
+
+        base = torch.randn(1, device=GPU_TYPE)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot safely clone an internally overlapping mutated Triton kernel "
+            "argument.",
+        ):
+            torch.compile(f, fullgraph=True)(base.clone())
 
     @inductor_config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
@@ -2884,6 +2960,25 @@ def forward(self, arg0_1, arg1_1):
             BLOCK_SIZE = 32
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             kernel[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    def test_kernel_with_backslash_in_docstring(self):
+        # https://github.com/pytorch/pytorch/issues/183420
+        # Backslash escapes in the kernel source text must be doubled before
+        # the source is spliced into the generated triple-quoted wrapper,
+        # otherwise '\n' becomes a real newline in the second-stage .py file
+        # and parsing fails with SyntaxError.
+        def fn(sz):
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel_with_backslash_in_docstring[grid](x, sz, BLOCK_SIZE)
             return x
 
         actual = fn(345)

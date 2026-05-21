@@ -1586,10 +1586,10 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward.default)
+@register_decomposition(aten.native_group_norm_backward.multiple_grads)
 @pw_cast_for_opmath
-def native_group_norm_backward(
-    grad_output: Tensor,
+def native_group_norm_backward_multiple_grads(
+    grad_output: Tensor | None,
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
@@ -1599,11 +1599,17 @@ def native_group_norm_backward(
     HxW: int,
     group: int,
     output_mask: list[bool],
+    grad_mean: Tensor | None,
+    grad_rstd: Tensor | None,
 ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    utils.check_same_device(
-        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    optional_tensors_present = tuple(
+        t for t in (grad_output, gamma, grad_mean, grad_rstd) if t is not None
     )
-    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_device(
+        input, mean, rstd, *optional_tensors_present, allow_cpu_scalar_tensors=False
+    )
+    if grad_output is not None:
+        utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
@@ -1617,6 +1623,10 @@ def native_group_norm_backward(
         gamma is None or gamma.numel() == C,
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
+    if grad_mean is not None:
+        utils.check_same_shape(mean, grad_mean, allow_cpu_scalar_tensors=False)
+    if grad_rstd is not None:
+        utils.check_same_shape(rstd, grad_rstd, allow_cpu_scalar_tensors=False)
 
     cpg = C // group
     torch._check(
@@ -1625,15 +1635,22 @@ def native_group_norm_backward(
     )
 
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds: Tensor | None = None
+    db: Tensor | None = None
+    if grad_output is not None:
+        ds = torch.mul(grad_output, input).view(N, C, HxW).sum(2)
+        db = grad_output.view(N, C, HxW).sum(2)
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
     d_bias: Tensor | None = None
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
-        if gamma is not None:
+        if ds is None or db is None:
+            ds_val: Tensor | int = 0
+            db_val: Tensor | int = 0
+            c1: Tensor | int = 0
+        elif gamma is not None:
             ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
             db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
@@ -1643,41 +1660,118 @@ def native_group_norm_backward(
         else:
             ds_val = ds.reshape(N, group, cpg).sum(2)
             db_val = db.reshape(N, group, cpg).sum(2)
-            c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                torch.ones((1, group, cpg), device=rstd.device),
-            )
-        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
-        c3 = -c2 * mean - db_val * rstd * s
+            c1 = rstd.broadcast_to((N, group, cpg))
 
-        c1 = c1.unsqueeze(-1)
+        grad_mean_val = grad_mean if grad_mean is not None else 0
+        grad_rstd_val = grad_rstd if grad_rstd is not None else 0
+        c2 = (db_val * mean - ds_val - grad_rstd_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - (db_val * rstd - grad_mean_val) * s
+
+        c1 = c1.unsqueeze(-1) if isinstance(c1, torch.Tensor) else c1
         c2 = _unsqueeze_to_dim(c2, 4)
         c3 = _unsqueeze_to_dim(c3, 4)
-        d_input = (
-            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
-            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
-            + c3
-        )
+
+        if grad_output is not None:
+            d_input = (
+                grad_output.reshape(N, group, cpg, HxW) * c1
+                + input.reshape(N, group, cpg, HxW) * c2
+                + c3
+            )
+        else:
+            d_input = input.reshape(N, group, cpg, HxW) * c2 + c3
         d_input = d_input.reshape(input.shape).to(input.dtype)
-    if output_mask[1]:
+    if output_mask[1] and ds is not None and db is not None:
         d_gamma = (
             (
                 (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
                 * rstd.unsqueeze(-1)
             )
-            .sum(dim=[0])
+            .sum(0)
             .reshape(C)
         )
-    if output_mask[2]:
-        d_bias = db.sum(dim=[0])
+    if output_mask[2] and db is not None:
+        d_bias = db.sum(0)
 
-    return (d_input, d_gamma, d_bias)
+    return d_input, d_gamma, d_bias
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_group_norm_backward.multiple_grads_out)
+def native_group_norm_backward_multiple_grads_out(
+    grad_output: Tensor | None,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Tensor | None,
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: list[bool],
+    grad_mean: Tensor | None,
+    grad_rstd: Tensor | None,
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    result = native_group_norm_backward_multiple_grads(
+        grad_output,
+        input,
+        mean,
+        rstd,
+        gamma,
+        N,
+        C,
+        HxW,
+        group,
+        output_mask,
+        grad_mean,
+        grad_rstd,
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
+
+
+@register_decomposition(aten.native_group_norm_backward.default)
+@pw_cast_for_opmath
+def native_group_norm_backward(
+    grad_output: Tensor | None,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Tensor | None,
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: list[bool],
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    return native_group_norm_backward_multiple_grads(
+        grad_output,
+        input,
+        mean,
+        rstd,
+        gamma,
+        N,
+        C,
+        HxW,
+        group,
+        output_mask,
+        None,
+        None,
+    )
 
 
 # out_wrapper currently does not allow optional outputs
 @register_decomposition(aten.native_group_norm_backward.out)
 def native_group_norm_backward_out(
-    grad_output: Tensor,
+    grad_output: Tensor | None,
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
@@ -1692,16 +1786,23 @@ def native_group_norm_backward_out(
     out1: torch.Tensor,
     out2: torch.Tensor,
 ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    result = native_group_norm_backward(
-        grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
+    return native_group_norm_backward_multiple_grads_out(
+        grad_output,
+        input,
+        mean,
+        rstd,
+        gamma,
+        N,
+        C,
+        HxW,
+        group,
+        output_mask,
+        None,
+        None,
+        out0=out0,
+        out1=out1,
+        out2=out2,
     )
-    grad_input = (out0, out1, out2)
-    for i, r in enumerate(result):
-        if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
-            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
-
-    return grad_input
 
 
 def _maybe_cast(x: Tensor | None, dtype) -> Tensor | None:
@@ -5212,8 +5313,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
