@@ -17,7 +17,7 @@ dictionaries with None values.
 
 import functools
 import operator
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
@@ -700,7 +700,7 @@ class OrderedSetClassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "OrderedSetVariable":
         if len(args) > 1 or kwargs:

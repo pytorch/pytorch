@@ -31,7 +31,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -657,7 +657,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -1014,7 +1014,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
+                VariableTracker.build(tx, polyfills.accumulate_grad),
+                list(args),
+                kwargs,
             )
 
         @register(math.radians)
@@ -1027,7 +1029,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.radians), args, kwargs
+                    VariableTracker.build(tx, polyfills.radians),
+                    list(args),
+                    kwargs,
                 )
 
         if hasattr(math, "fma"):  # Python 3.13+
@@ -1619,7 +1623,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
-                    args,
+                    list(args),
                     kwargs,
                 )
             return None
@@ -1639,7 +1643,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_pow_scalar),
-                    args,
+                    list(args),
                     kwargs,
                 )
             return None
@@ -1653,7 +1657,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
-                args,
+                list(args),
                 kwargs,
             )
 
@@ -2546,7 +2550,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         def exchange_device_helper(
             tx: "InstructionTranslator",
-            args: Sequence[VariableTracker],
+            args: list[VariableTracker],
             kwargs: dict[str, VariableTracker],
             fn: Callable[[int], int | None],
         ) -> VariableTracker:
@@ -2577,7 +2581,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            return exchange_device_helper(tx, args, kwargs, torch.cuda._exchange_device)
+            return exchange_device_helper(
+                tx, list(args), kwargs, torch.cuda._exchange_device
+            )
 
         @register(torch.cuda._maybe_exchange_device)
         def handle_maybe_exchange_device(
@@ -2587,7 +2593,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             return exchange_device_helper(
-                tx, args, kwargs, torch.cuda._maybe_exchange_device
+                tx, list(args), kwargs, torch.cuda._maybe_exchange_device
             )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
@@ -2975,7 +2981,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import SymNodeVariable
@@ -3254,7 +3260,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_nonstrict_traceable_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
         from torch._dynamo.utils import _make_inlined
@@ -3469,7 +3475,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _extract_nn_module_states(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> tuple[VariableTracker, VariableTracker]:
         """
@@ -3535,7 +3541,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_leaf_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
@@ -3633,7 +3639,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_ntuple(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """inline behavior of torch.nn.modules.utils._ntuple"""
