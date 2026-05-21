@@ -1306,6 +1306,14 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
 
+const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
+    traceActivities() {
+  if (trace_) {
+    return trace_->get()->activities();
+  }
+  return nullptr;
+}
+
 } // namespace autograd::profiler
 
 namespace profiler::impl {
