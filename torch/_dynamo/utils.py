@@ -1765,13 +1765,7 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: (
-                sorted(value)
-                if isinstance(value, set)
-                else value.to_jsonable()
-                if hasattr(value, "to_jsonable")
-                else value
-            )
+            key: sorted(value) if isinstance(value, set) else value
             for key, value in d.items()
             if key not in blocklist
         }
@@ -5515,6 +5509,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
