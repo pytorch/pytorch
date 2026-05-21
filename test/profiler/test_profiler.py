@@ -1310,6 +1310,7 @@ class TestProfiler(TestCase):
             )
 
         if use_cuda:
+
             def count_by_cat(trace_data):
                 return collections.Counter(
                     ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
