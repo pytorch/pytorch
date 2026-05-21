@@ -94,22 +94,22 @@ class MetalExprPrinter(ExprPrinter_):
         return f"({x}) % ({mod})"
 
     def _print_Min(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::min only supported for 2 args")
-        # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
-        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
-        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::min({typecast_a}, {typecast_b})"
+        return self._print_min_max(expr, "min")
 
     def _print_Max(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::max only supported for 2 args")
+        return self._print_min_max(expr, "max")
+
+    def _print_min_max(self, expr: sympy.Expr, op: str) -> str:
+        if len(expr.args) < 2:
+            raise RuntimeError(f"metal::{op} requires at least 2 args")
         # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
-        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
-        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::max({typecast_a}, {typecast_b})"
+        result = self._print(expr.args[0])
+        for arg in expr.args[1:]:
+            next_arg = self._print(arg)
+            typecast_result = f"static_cast<decltype({result}+{next_arg})>({result})"
+            typecast_next = f"static_cast<decltype({result}+{next_arg})>({next_arg})"
+            result = f"metal::{op}({typecast_result}, {typecast_next})"
+        return result
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
