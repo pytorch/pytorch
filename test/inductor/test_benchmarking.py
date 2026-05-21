@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -224,6 +226,36 @@ class TestBenchmarker(TestCase):
         finally:
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
+
+    def test_gpu_benchmark_lock_uses_visible_cuda_device(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "4,7",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", return_value=1),
+            ):
+                with _bench.maybe_gpu_benchmark_lock():
+                    with _bench.maybe_gpu_benchmark_lock():
+                        pass
+
+            lock_path = os.path.join(lock_dir, "gpu_7.lock")
+            self.assertTrue(os.path.exists(lock_path))
+            with open(lock_path) as f:
+                metadata = f.read()
+            self.assertIn("gpu=7\n", metadata)
+            self.assertIn("mode=exclusive\n", metadata)
+            self.assertIn("label=inductor_benchmark\n", metadata)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
