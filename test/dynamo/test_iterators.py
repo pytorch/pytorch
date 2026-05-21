@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+import contextlib
 import enum
 import types
 import unittest
@@ -67,6 +69,31 @@ class CustomSetDefaultIter(set):
         super().__init__([10, 20, 30])
 
 
+class EmptySequenceForReduce:
+    def __len__(self):
+        return 0
+
+    def __getitem__(self, i):
+        raise StopIteration
+
+
+class MutatingBuiltinLookupKey:
+    def __init__(self, name, iterator):
+        self.name = name
+        self.iterator = iterator
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        list(self.iterator)
+        return other == self.name
+
+
+def return_zero():
+    return 0
+
+
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
 
@@ -87,6 +114,84 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         for item in lst.__iter__():
             result.append(item * 2)
         self.assertEqual(result, [2, 4, 6, 8, 10])
+
+    def test_reduce_mutating_builtins_iter(self):
+        orig = {"iter": iter, "reversed": reversed}
+
+        def run_iter(item):
+            builtins_dict = builtins.__dict__
+            it = iter(item)
+            try:
+                del builtins_dict["iter"]
+                builtins_dict[MutatingBuiltinLookupKey("iter", it)] = orig["iter"]
+                return it.__reduce__()
+            finally:
+                with contextlib.suppress(KeyError):
+                    del builtins_dict["iter"]
+                builtins_dict["iter"] = orig["iter"]
+
+        def run_callable_iter():
+            builtins_dict = builtins.__dict__
+            it = iter(return_zero, 0)
+            try:
+                del builtins_dict["iter"]
+                builtins_dict[MutatingBuiltinLookupKey("iter", it)] = orig["iter"]
+                return it.__reduce__()
+            finally:
+                with contextlib.suppress(KeyError):
+                    del builtins_dict["iter"]
+                builtins_dict["iter"] = orig["iter"]
+
+        def run_reversed():
+            builtins_dict = builtins.__dict__
+            it = orig["reversed"]([1, 2, 3])
+            try:
+                del builtins_dict["reversed"]
+                builtins_dict[MutatingBuiltinLookupKey("reversed", it)] = orig[
+                    "reversed"
+                ]
+                return it.__reduce__()
+            finally:
+                with contextlib.suppress(KeyError):
+                    del builtins_dict["reversed"]
+                builtins_dict["reversed"] = orig["reversed"]
+
+        def fn():
+            return (
+                run_iter("xyz"),
+                run_iter([1, 2, 3]),
+                run_iter(bytes(2)),
+                run_iter(bytearray(2)),
+                run_iter(EmptySequenceForReduce()),
+                run_callable_iter(),
+                run_reversed(),
+                run_iter(tuple[int]),
+            )
+
+        ref = fn()
+        res = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(ref, res)
+
+    def test_generic_alias_iterator_reduce_unexhausted(self):
+        def fn():
+            return iter(tuple[int]).__reduce__()
+
+        ref = fn()
+        res = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(ref, res)
+
+    def test_reversed_reduce_preserves_sequence_type(self):
+        def fn():
+            return (
+                reversed((1, 2, 3)).__reduce__(),
+                reversed("abc").__reduce__(),
+                reversed(b"abc").__reduce__(),
+                reversed(bytearray(b"abc")).__reduce__(),
+            )
+
+        ref = fn()
+        res = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(ref, res)
 
     @make_dynamo_test
     def test_tuple_iteration(self):
@@ -329,7 +434,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             result.append(char.upper())
         self.assertEqual("".join(result), "HELLO")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_bytes_iteration(self):
         """Test iteration over bytes"""

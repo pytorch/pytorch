@@ -14,6 +14,7 @@ class that handles its unique behaviors while integrating with Dynamo's
 variable tracking system.
 """
 
+import builtins
 import collections
 import functools
 import operator
@@ -37,7 +38,6 @@ from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
-    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -386,6 +386,89 @@ class BaseListVariable(VariableTracker):
             kwargs["mutation_type"] = ValueMutationNew()
         return type(self)(new_items, **kwargs)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """list_richcompare / tuplerichcompare.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/listobject.c#L3352
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L821
+        CPython operates on the internal C array directly, so we compare
+        VT items without going through a polyfill.
+        """
+        from .object_protocol import generic_richcompare
+        from .tensor import SymNodeVariable
+
+        if not isinstance(other, BaseListVariable):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            self_base = list if issubclass(self.python_type(), list) else tuple
+            other_base = list if issubclass(other.python_type(), list) else tuple
+            if self_base is not other_base:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+
+        left = self.items
+        right = other.items
+
+        cmp_op = cmp_name_to_op_mapping[op]
+
+        if cmp_op is operator.eq and len(left) != len(right):
+            return ConstantVariable.create(False)
+        if cmp_op is operator.ne and len(left) != len(right):
+            return ConstantVariable.create(True)
+
+        sym_eq_acc = None
+        for a, b in zip(left, right):
+            eq_result = generic_richcompare(tx, a, b, "__eq__")
+            if eq_result.is_python_constant():
+                if not eq_result.as_python_constant():
+                    if cmp_op in (operator.eq, operator.ne):
+                        return ConstantVariable.create(cmp_op is operator.ne)
+                    return generic_richcompare(tx, a, b, op)
+            elif eq_result.is_symnode_like():
+                if cmp_op not in (operator.eq, operator.ne):
+                    unimplemented(
+                        gb_type="list_richcompare_ordering_symbolic",
+                        context="lexicographic ordering with symbolic element comparison",
+                        explanation="Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if sym_eq_acc is None:
+                    sym_eq_acc = eq_result
+                else:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        operator.and_,
+                        (sym_eq_acc.as_proxy(), eq_result.as_proxy()),
+                        {},
+                    )
+                    sym_eq_acc = SymNodeVariable.create(tx, proxy, sym_num=None)
+            else:
+                unimplemented(
+                    gb_type="list_richcompare_nonconst",
+                    context=f"element comparison produced {type(eq_result).__name__}",
+                    explanation="Cannot determine list/tuple comparison at compile time when element comparison produces a non-constant result.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        if sym_eq_acc is not None:
+            if cmp_op is operator.ne:
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    operator.not_,
+                    (sym_eq_acc.as_proxy(),),
+                    {},
+                )
+                return SymNodeVariable.create(tx, proxy, sym_num=None)
+            return sym_eq_acc
+
+        return ConstantVariable.create(cmp_op(len(left), len(right)))
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -393,8 +476,6 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
         if name == "index":
             if not len(args):
                 raise_args_mismatch(
@@ -463,54 +544,6 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
                 return self
-        elif name in cmp_name_to_op_mapping:
-            if len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            left = self
-            right = args[0]
-            # TODO this type check logic mirrors the following
-            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
-            # But we should probably move it up the stack to so that we don't
-            # need to duplicate it for different VTs.
-            if not isinstance(left, BaseListVariable) or not isinstance(
-                right, BaseListVariable
-            ):
-                if name == "__eq__":
-                    return SourcelessBuilder.create(tx, operator.is_).call_function(
-                        tx, (left, right), {}
-                    )
-                elif name == "__ne__":
-                    return SourcelessBuilder.create(tx, operator.is_not).call_function(
-                        tx, (left, right), {}
-                    )
-                else:
-                    op_str = cmp_name_to_op_str_mapping[name]
-                    left_ty = left.python_type_name()
-                    right_ty = right.python_type_name()
-                    raise_observed_exception(
-                        TypeError,
-                        tx,
-                        args=[
-                            f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
-                        ],
-                    )
-
-            return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
-                tx,
-                [
-                    SourcelessBuilder.create(tx, cmp_name_to_op_mapping[name]),
-                    left,
-                    right,
-                ],
-                {},
-            )
-
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -788,6 +821,36 @@ class RangeVariable(BaseListVariable):
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """range_richcompare: eq/ne via range_equals, NotImplemented for ordering.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L472
+        """
+        from .builder import SourcelessBuilder
+
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            if other.python_type() is not range:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+
+        if isinstance(other, RangeVariable):
+            cmp = self.range_equals(other)
+        else:
+            cmp = False
+
+        if op == "__eq__":
+            return SourcelessBuilder.create(tx, cmp)
+        else:
+            return SourcelessBuilder.create(tx, not cmp)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -810,30 +873,6 @@ class RangeVariable(BaseListVariable):
                 tx,
                 args=[f"{x} is not in range"],
             )
-        elif name in cmp_name_to_op_mapping:
-            other = args[0]
-            pt = other.python_type()
-            if name not in ("__eq__", "__ne__"):
-                msg = f"{name} not supported between instances of 'range' and '{pt}'"
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[msg],
-                )
-
-            if pt is not range:
-                return VariableTracker.build(tx, NotImplemented)
-
-            if isinstance(other, RangeVariable):
-                cmp = self.range_equals(other)
-            else:
-                cmp = False
-
-            # Two ranges are equal if they produce the same sequence of values
-            if name == "__eq__":
-                return SourcelessBuilder.create(tx, cmp)
-            else:
-                return SourcelessBuilder.create(tx, not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -892,12 +931,13 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if not args[0].has_force_unpack_var_sequence(tx):
-                raise_observed_exception(
-                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
-                )
-
             (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                if not arg.has_force_unpack_var_sequence(tx):
+                    raise_observed_exception(
+                        TypeError, tx, args=[f"{type(arg)} object is not iterable"]
+                    )
+
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )
@@ -1674,6 +1714,34 @@ class TupleVariable(BaseListVariable):
         )
 
 
+class BytearrayVariable(BaseListVariable):
+    # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c#L2826
+    _cpython_type = bytearray
+
+    def python_type(self) -> type[bytearray]:
+        return bytearray
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
+    def debug_repr(self) -> str:
+        return self.debug_repr_helper("bytearray(b'", "')")
+
+    def as_python_constant(self) -> bytearray:
+        return bytearray(x.as_python_constant() for x in self.items)
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return BytearrayIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
+        )
+        codegen.foreach(self.items)
+        codegen.append_output(create_build_tuple(len(self.items)))
+        codegen.extend_output(create_call_function(1, False))
+
+
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
@@ -1998,6 +2066,24 @@ class SliceVariable(VariableTracker):
             raise_observed_exception(TypeError, tx, args=[str(e)])
         return h, False
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """slice_richcompare: delegates all 6 ops to (start, stop, step) tuple comparison.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667-L686
+        """
+        from .object_protocol import generic_richcompare
+
+        if not isinstance(other, SliceVariable):
+            return ConstantVariable.create(NotImplemented)
+        self_tuple = TupleVariable(list(self.items))
+        other_tuple = TupleVariable(list(other.items))
+        return generic_richcompare(tx, self_tuple, other_tuple, op)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
@@ -2061,6 +2147,7 @@ class ListIteratorVariable(IteratorVariable):
         "index",
         *IteratorVariable._nonvar_fields,
     }
+    reduce_builtin_name = "iter"
 
     def __init__(
         self, items: list[VariableTracker], index: int = 0, **kwargs: Any
@@ -2119,6 +2206,80 @@ class ListIteratorVariable(IteratorVariable):
     ) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
+    def reduce_builtin_var(self, tx: "InstructionTranslator") -> VariableTracker:
+        builtin_var = None
+        builtin_name = self.reduce_builtin_name
+        if builtins.__dict__ in tx.output.side_effects:
+            builtins_dict_var = tx.output.side_effects[builtins.__dict__]
+            if isinstance(builtins_dict_var, variables.ConstDictVariable):
+                lookup_key = ConstantVariable.create(builtin_name)
+                lookup_hash = hash(builtin_name)
+                for dict_key, dict_value in list(builtins_dict_var.items.items()):
+                    if dict_key.vt.is_python_equal(lookup_key):
+                        builtin_var = dict_value
+                        break
+                    if getattr(dict_key, "_hash", None) != lookup_hash:
+                        continue
+                    eq_result = dict_key.vt.call_method(tx, "__eq__", [lookup_key], {})
+                    if (
+                        eq_result.is_python_constant()
+                        and eq_result.as_python_constant()
+                    ):
+                        builtin_var = dict_value
+                        break
+        if builtin_var is not None:
+            return builtin_var
+        try:
+            return VariableTracker.build(tx, builtins.__dict__[builtin_name])
+        except (AttributeError, KeyError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        iter_var = self.reduce_builtin_var(tx)
+        if self.is_exhausted or self.index >= len(self.items):
+            return TupleVariable(
+                [
+                    iter_var,
+                    TupleVariable(
+                        [self.reduce_exhausted_arg()],
+                        mutation_type=ValueMutationNew(),
+                    ),
+                ],
+                mutation_type=ValueMutationNew(),
+            )
+        return TupleVariable(
+            [
+                iter_var,
+                TupleVariable(
+                    [self.reduce_arg()],
+                    mutation_type=ValueMutationNew(),
+                ),
+                ConstantVariable.create(self.index),
+            ],
+            mutation_type=ValueMutationNew(),
+        )
+
+    def reduce_arg(self) -> VariableTracker:
+        return ListVariable(list(self.items), mutation_type=ValueMutationNew())
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return ListVariable([], mutation_type=ValueMutationNew())
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
         codegen.add_push_null(
@@ -2137,6 +2298,157 @@ class ListIteratorVariable(IteratorVariable):
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+    def reduce_arg(self) -> VariableTracker:
+        return TupleVariable(list(self.items), mutation_type=ValueMutationNew())
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return TupleVariable([], mutation_type=ValueMutationNew())
+
+
+class StringIteratorVariable(ListIteratorVariable):
+    # PyUnicodeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L16019
+    _cpython_type = type(iter(""))
+
+    def python_type(self) -> type:
+        return type(iter(""))
+
+    def reduce_arg(self) -> VariableTracker:
+        return ConstantVariable.create(
+            "".join(item.as_python_constant() for item in self.items)
+        )
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return ConstantVariable.create("")
+
+
+class BytesIteratorVariable(TupleIteratorVariable):
+    # PyBytesIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3263
+    _cpython_type = type(iter(b""))
+
+    def python_type(self) -> type:
+        return type(iter(b""))
+
+    def reduce_arg(self) -> VariableTracker:
+        return ConstantVariable.create(
+            bytes(item.as_python_constant() for item in self.items)
+        )
+
+
+class GenericAliasIteratorVariable(TupleIteratorVariable):
+    # Py_GenericAliasIterType: https://github.com/python/cpython/blob/v3.13.0/Objects/genericaliasobject.c
+    _cpython_type = type(iter(tuple[int]))
+
+    _nonvar_fields = {
+        "generic_alias",
+        *TupleIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        generic_alias: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.generic_alias = generic_alias
+
+    def python_type(self) -> type:
+        return type(iter(tuple[int]))
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        iter_var = self.reduce_builtin_var(tx)
+        if self.is_exhausted or self.index >= len(self.items):
+            arg = self.reduce_exhausted_arg()
+        else:
+            arg = self.generic_alias
+        return TupleVariable(
+            [
+                iter_var,
+                TupleVariable([arg], mutation_type=ValueMutationNew()),
+            ],
+            mutation_type=ValueMutationNew(),
+        )
+
+
+class ReversedListIteratorVariable(ListIteratorVariable):
+    # PyListRevIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L4091
+    _cpython_type = type(reversed([]))
+    reduce_builtin_name = "reversed"
+
+    _nonvar_fields = {
+        "original_sequence",
+        "exhausted_sequence",
+        *ListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        original_sequence: VariableTracker | None = None,
+        exhausted_sequence: VariableTracker | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.original_sequence = original_sequence
+        self.exhausted_sequence = exhausted_sequence
+
+    def python_type(self) -> type:
+        return type(reversed([]))
+
+    def reduce_arg(self) -> VariableTracker:
+        if self.original_sequence is not None:
+            return self.original_sequence
+        return ListVariable(
+            list(reversed(self.items)), mutation_type=ValueMutationNew()
+        )
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        if self.exhausted_sequence is not None:
+            return self.exhausted_sequence
+        return ListVariable([], mutation_type=ValueMutationNew())
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        result = super().call_method(tx, name, args, kwargs)
+        if not isinstance(result, TupleVariable):
+            raise AssertionError("reversed iterator __reduce__ must return a tuple")
+        if len(result.items) == 3:
+            result.items[2] = ConstantVariable.create(len(self.items) - self.index - 1)
+        return result
+
+
+class BytearrayIteratorVariable(TupleIteratorVariable):
+    # PyByteArrayIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c#L2921
+    _cpython_type = type(iter(bytearray()))
+
+    def python_type(self) -> type:
+        return type(iter(bytearray()))
+
+    def reduce_arg(self) -> VariableTracker:
+        return BytearrayVariable(list(self.items), mutation_type=ValueMutationNew())
 
 
 class RangeIteratorVariable(IteratorVariable):

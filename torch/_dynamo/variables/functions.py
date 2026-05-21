@@ -396,6 +396,11 @@ class BaseUserFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.dict_vt: DunderDictVariable | None = dict_vt
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def get_source(self) -> Source | None:
         return self.source
 
@@ -2171,6 +2176,11 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2891,6 +2901,11 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return functools.partial
 
@@ -2934,7 +2949,7 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "func":
             return self.func
         if name == "args":
-            return variables.ListVariable(self.args, source=source)
+            return variables.TupleVariable(self.args, source=source)
         if name == "keywords":
             items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
@@ -3933,24 +3948,25 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        try:
-            method_wrapper = self.as_python_constant()
-        except NotImplementedError:
-            method_wrapper = None
-        if (
-            method_wrapper is not None
-            and is_tensor_base_attr_getter(method_wrapper)
-            and args
-            and isinstance(args[0], variables.TensorVariable)
-        ):
-            if not (len(args) == 1 and len(kwargs) == 0):
-                raise_type_error(
-                    tx, "tensor attribute getter takes exactly one argument"
-                )
-            # Avoid the generic descriptor path's implicit owner lookup, which
-            # would read __class__ on tensor subclasses during __torch_function__.
-            descriptor = cast(Any, method_wrapper.__self__)
-            return args[0].var_getattr(tx, descriptor.__name__)
+        if self.descriptor.__name__ == "__get__":
+            try:
+                method_wrapper = self.as_python_constant()
+            except NotImplementedError:
+                method_wrapper = None
+            if (
+                method_wrapper is not None
+                and is_tensor_base_attr_getter(method_wrapper)
+                and args
+                and isinstance(args[0], variables.TensorVariable)
+            ):
+                if not (len(args) == 1 and len(kwargs) == 0):
+                    raise_type_error(
+                        tx, "tensor attribute getter takes exactly one argument"
+                    )
+                # Avoid the generic descriptor path's implicit owner lookup, which
+                # would read __class__ on tensor subclasses during __torch_function__.
+                descriptor = cast(Any, method_wrapper.__self__)
+                return args[0].var_getattr(tx, descriptor.__name__)
 
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
@@ -3965,6 +3981,13 @@ class MethodWrapperVariable(VariableTracker):
             return hash(self.as_python_constant()), False
         except NotImplementedError:
             return super().hash_impl(tx)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
@@ -4411,6 +4434,13 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def tp_descr_get_impl(
         self,

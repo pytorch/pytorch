@@ -4736,6 +4736,29 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(normal_lookup(x), torch.tensor(3.0))
         self.assertEqual(direct_descriptor_call(x), torch.tensor(10.0))
 
+    def test_wrong_class_slot_wrapper_raises(self):
+        class A(int):
+            __eq__ = str.__eq__
+            __add__ = str.__add__
+
+        a = A()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            caught = 0
+            try:
+                caught += int(a == a)
+            except TypeError:
+                caught += 1
+            try:
+                caught += int(a + a)
+            except TypeError:
+                caught += 1
+            return x + caught
+
+        x = torch.tensor(0)
+        self.assertEqual(fn(x), torch.tensor(2))
+
     def test_member_descriptor_isinstance_on_class(self):
         class A:
             __slots__ = ("x",)
@@ -5424,11 +5447,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], zip)
 
-        # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        # If nopython, should raise Unsupported
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5466,10 +5489,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(res[1], map)
 
         # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break

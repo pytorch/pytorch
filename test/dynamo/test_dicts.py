@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 
+import copy
 import enum
+import gc
 import itertools
 import operator
 import types
@@ -9,7 +11,7 @@ import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from collections.abc import Callable
-from functools import partial
+from functools import partial, wraps
 from typing import Any, NamedTuple
 
 import torch
@@ -47,6 +49,11 @@ class FakeMapping:
         return self._value
 
 
+class CopyableNonDefaultDict:
+    def __copy__(self):
+        return "wrong"
+
+
 class DictTests(torch._dynamo.test_case.TestCase):
     def test_dict_subclass_instantiation(self):
         def fn(x):
@@ -67,6 +74,147 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_fromkeys_instance_method(self):
+        def fn():
+            d = {"z": 0}
+            result = d.fromkeys(["a", "a", "b"], 2)
+            return d, result, type(result) is dict
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_local_subclass_closure(self):
+        def fn():
+            data = [("stale", 0)]
+
+            class SeededDict(dict):
+                def __init__(self):
+                    dict.__init__(self, data)
+
+            data = {"seed": 1}
+            result = SeededDict.fromkeys(["a"])
+            return type(result) is SeededDict, dict(result)
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_external_subclass_closure_not_patched_by_name(self):
+        def make_cls():
+            data = {"outer": 1}
+
+            class SeededDict(dict):
+                def __init__(self):
+                    dict.__init__(self, data)
+
+            return SeededDict
+
+        SeededDict = make_cls()
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_nested_factory_closure_not_patched_by_name(self):
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            def make_cls():
+                data = {"outer": 1}
+
+                class SeededDict(dict):
+                    def __init__(self):
+                        dict.__init__(self, data)
+
+                return SeededDict
+
+            SeededDict = make_cls()
+            return dict(SeededDict.fromkeys(["a"])), inner(), SeededDict.__qualname__
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_external_init_not_patched_by_name(self):
+        def make_init():
+            data = {"outer": 1}
+
+            def init(self):
+                dict.__init__(self, data)
+
+            return init
+
+        external_init = make_init()
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            class SeededDict(dict):
+                __init__ = external_init
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_wrapped_init_not_patched_by_name(self):
+        def deco(fn):
+            data = {"outer": 1}
+
+            @wraps(fn)
+            def wrapper(self):
+                dict.__init__(self, data)
+
+            return wrapper
+
+        def fn():
+            data = {"local": 2}
+
+            def inner():
+                return data
+
+            class SeededDict(dict):
+                @deco
+                def __init__(self):
+                    pass
+
+            return dict(SeededDict.fromkeys(["a"])), inner()
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
+
+    def test_dict_fromkeys_same_frame_assigned_init_closure(self):
+        def fn():
+            data = [("stale", 0)]
+
+            def init(self):
+                dict.__init__(self, data)
+
+            class SeededDict(dict):
+                __init__ = init
+
+            data = {"seed": 1}
+            return dict(SeededDict.fromkeys(["a"]))
+
+        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(), opt_fn())
 
     def test_dict_contains_enum(self):
         class TensorDim(str, enum.Enum):
@@ -91,6 +239,66 @@ class DictTests(torch._dynamo.test_case.TestCase):
         mod = Foo()
         opt_f = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(mod(inp), opt_f(inp))
+
+    def test_defaultdict_ne_non_dict_returns_not_implemented(self):
+        def direct_ne():
+            return defaultdict().__ne__([])
+
+        def operator_ne():
+            return defaultdict() != []
+
+        self.assertIs(
+            torch.compile(direct_ne, backend="eager", fullgraph=True)(),
+            NotImplemented,
+        )
+        self.assertTrue(torch.compile(operator_ne, backend="eager", fullgraph=True)())
+
+    def test_defaultdict_eq_custom_key_lookup_semantics(self):
+        class Base:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class Sub(Base):
+            __hash__ = Base.__hash__
+
+            def __eq__(self, other):
+                return True
+
+        class VolatileHash:
+            def __init__(self):
+                self.fail_hash = False
+
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                if self.fail_hash:
+                    raise RuntimeError("rehash")
+                return 1
+
+        def key_comparison_uses_subtype_priority():
+            return defaultdict(int, {Sub(): 1}) == defaultdict(int, {Base(): 1})
+
+        def does_not_rehash_during_eq():
+            key = VolatileHash()
+            left = defaultdict(int, {key: 1})
+            right = defaultdict(int, {key: 1})
+            key.fail_hash = True
+            return left == right
+
+        self.assertTrue(
+            torch.compile(
+                key_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+        self.assertTrue(
+            torch.compile(does_not_rehash_during_eq, backend="eager", fullgraph=True)()
+        )
 
     def test_dict_subclass_local_with_non_dict_method(self):
         # Checks that add_1 method is inlined
@@ -872,6 +1080,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
+    def test_dict_reversed_iterator_is_consumed(self):
+        def fn():
+            d = {"a": 1, "b": 2, "foo": 0, "c": 3, "d": 4}
+            del d["foo"]
+            r = reversed(d)
+            return list(r), next(r, None)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), (list("dcba"), None))
+
     def test_dict_subclass_contains(self):
         # pattern from huggingface
         class ClassInstantier(OrderedDict):
@@ -1207,6 +1425,62 @@ class DictTests(torch._dynamo.test_case.TestCase):
             b = {"two": torch.ones(2)}
             a |= b
             return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_inplace_union_preserves_factory(self):
+        def f():
+            d = defaultdict(int, {1: 1, 2: 2})
+            d |= [(0, "zero"), (1, "one")]
+            result = d.__ior__({3: "three"})
+            return (
+                result is d,
+                d.default_factory is int,
+                type(d) is defaultdict,
+                dict(d),
+                list(d),
+                d[4],
+            )
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_defaultdict_shallow_copy_preserves_factory(self):
+        def f(x):
+            d1 = defaultdict(int, {1: x})
+            d2 = copy.copy(d1)
+            d1.default_factory = list
+            d3 = copy.copy(d1)
+            d2[2] = x + 1
+            return (
+                type(d2) is defaultdict,
+                d2.default_factory is int,
+                d2[1],
+                d2[2],
+                d1.default_factory is list,
+                2 in d1,
+                d3.default_factory is list,
+                d3[1],
+            )
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
+    def test_defaultdict_unbound_copy_rejects_unrelated_receiver(self):
+        def f():
+            try:
+                result = defaultdict.__copy__(CopyableNonDefaultDict())
+            except TypeError as e:
+                return (
+                    "TypeError",
+                    "__copy__" in str(e),
+                    "CopyableNonDefaultDict" in str(e),
+                )
+            return ("wrong", result)
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
@@ -2104,7 +2378,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2129,7 +2403,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2366,13 +2640,70 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
+    def test_copy_maintains_gc_tracking(self):
+        class A:
+            pass
+
+        key = A()
+
+        def fn():
+            result = []
+            for d in ({}, {"a": 1}, {key: "val"}):
+                d2 = d.copy()
+                result.append((gc.is_tracked(d), gc.is_tracked(d2)))
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_gc_is_tracked_mutated_dict_graph_breaks(self):
+        def fn():
+            d = {"a": []}
+            d["a"] = 1
+            return gc.is_tracked(d)
+
+        self.assertTrue(fn())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "mutated dict"):
+            opt_fn()
+
+    def test_gc_is_tracked_source_backed_history_sensitive_dict_graph_breaks(self):
+        def fn(d):
+            return gc.is_tracked(d)
+
+        d = {"a": []}
+        d["a"] = 1
+        self.assertTrue(gc.is_tracked(d))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "source-backed dict"):
+            opt_fn(d)
+
+    def test_gc_is_tracked_source_backed_history_sensitive_dict_copy_graph_breaks(
+        self,
+    ):
+        def fn(d):
+            d2 = d.copy()
+            return gc.is_tracked(d2)
+
+        d = {"a": []}
+        d["a"] = 1
+        self.assertTrue(fn(d))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "unknown tracking state"):
+            opt_fn(d)
+
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
         self.assertEqual(d, {"a": 1, "b": 1})
         p = self.thetype.fromkeys(["a", "b"], None)
         self.assertEqual(p, {"a": None, "b": None})
+        d3 = p.fromkeys(["a", "a", "c"], 3)
+        self.assertEqual(d3, {"a": 3, "c": 3})
+        self.assertIs(type(d3), self.thetype)
+        self.assertIsNot(d3, p)
 
         # Test Dict.fromkeys
         d2 = self.thetype.fromkeys(["c", "d"], 2)
@@ -2663,6 +2994,169 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertTrue(same(opt_fn(x), fn(x)))
 
+    def test_dict_eq_custom_key_lookup_semantics(self):
+        dict_type = self.thetype
+
+        class ExpectedDirection(Exception):
+            pass
+
+        class WrongDirection(Exception):
+            pass
+
+        class Rehash(Exception):
+            pass
+
+        class WrongValueNe(Exception):
+            pass
+
+        class BadCmp:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        class NonCollidingCmp(BadCmp):
+            def __hash__(self):
+                return 2
+
+        class LeftKey:
+            def __eq__(self, other):
+                raise WrongDirection
+
+            def __hash__(self):
+                return 1
+
+        class RightKey:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        class VolatileHash:
+            def __init__(self):
+                self.fail_hash = False
+
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                if self.fail_hash:
+                    raise Rehash
+                return 1
+
+        class Value:
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                raise WrongValueNe
+
+        class Base:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class Sub(Base):
+            __hash__ = Base.__hash__
+
+            def __eq__(self, other):
+                return True
+
+        def catches_hash_collision():
+            try:
+                if dict_type({BadCmp(): 1}) == dict_type({1: 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            return False
+
+        def uses_right_key_eq_for_lookup():
+            try:
+                if dict_type({LeftKey(): 1}) == dict_type({RightKey(): 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            except WrongDirection:
+                return False
+            return False
+
+        def ignores_hash_mismatch():
+            return dict_type({NonCollidingCmp(): 1}) == dict_type({1: 1})
+
+        def uses_identity_before_eq():
+            key = BadCmp()
+            return dict_type({key: 1}) == dict_type({key: 1})
+
+        def does_not_rehash_during_eq():
+            key = VolatileHash()
+            left = dict_type({key: 1})
+            right = dict_type({key: 1})
+            key.fail_hash = True
+            return left == right
+
+        def value_comparison_uses_eq():
+            return dict_type({1: Value()}) == dict_type({1: Value()})
+
+        def key_comparison_uses_subtype_priority():
+            return dict_type({Sub(): 1}) == dict_type({Base(): 1})
+
+        def value_comparison_uses_subtype_priority():
+            return dict_type({"k": Base()}) == dict_type({"k": Sub()})
+
+        self.assertTrue(
+            torch.compile(catches_hash_collision, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(
+                uses_right_key_eq_for_lookup, backend="eager", fullgraph=True
+            )()
+        )
+        self.assertFalse(
+            torch.compile(ignores_hash_mismatch, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(uses_identity_before_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(does_not_rehash_during_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(value_comparison_uses_eq, backend="eager", fullgraph=True)()
+        )
+        self.assertTrue(
+            torch.compile(
+                key_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+        self.assertTrue(
+            torch.compile(
+                value_comparison_uses_subtype_priority,
+                backend="eager",
+                fullgraph=True,
+            )()
+        )
+
+    def test_dict_ne_non_dict_returns_not_implemented(self):
+        dict_type = self.thetype
+
+        def direct_ne():
+            return dict_type().__ne__([])
+
+        def operator_ne():
+            return dict_type() != []
+
+        self.assertIs(
+            torch.compile(direct_ne, backend="eager", fullgraph=True)(),
+            NotImplemented,
+        )
+        self.assertTrue(torch.compile(operator_ne, backend="eager", fullgraph=True)())
+
     def test_user_defined_object(self):
         class A:
             def __init__(self):
@@ -2730,6 +3224,34 @@ class OrderedDictMethodsTests(DictMethodsTests):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
         self.assertFalse(a == b)
+
+    def test_cmp_eq_mapping_lookup_precedes_order_check(self):
+        class ExpectedDirection(Exception):
+            pass
+
+        class LeftKey:
+            def __eq__(self, other):
+                return False
+
+            def __hash__(self):
+                return 1
+
+        class RightKey:
+            def __eq__(self, other):
+                raise ExpectedDirection
+
+            def __hash__(self):
+                return 1
+
+        def fn():
+            try:
+                if OrderedDict({LeftKey(): 1}) == OrderedDict({RightKey(): 1}):
+                    return False
+            except ExpectedDirection:
+                return True
+            return False
+
+        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)())
 
     @make_dynamo_test
     def test_binop_or_return_type(self):
