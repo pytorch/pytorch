@@ -2703,9 +2703,7 @@ class TMACompatibilityChecker:
         # adding a constant element offset may break that alignment requirement.
         # We must verify that the resulting address remains 16-byte aligned after applying constant_offset.
         if not V.graph.sizevars.statically_known_equals(
-            ModularIndexing(
-                constant_offset_expr * element_size, 1, sympy.Integer(16)
-            ),
+            ModularIndexing(constant_offset_expr * element_size, 1, sympy.Integer(16)),
             sympy.Integer(0),
         ):
             log.debug(
