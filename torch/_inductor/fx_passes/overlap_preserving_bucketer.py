@@ -499,7 +499,7 @@ class OverlapPreservingBucketer:
             for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 candidate_bytes = self.collective_info[candidate].size_bytes
                 # proxy on memory use, if we see a too large bucket,
-                # dont look for another, later bucket
+                # don't look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     break
 
