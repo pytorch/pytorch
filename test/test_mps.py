@@ -6491,6 +6491,10 @@ class TestMPS(TestCaseMPS):
         ], device="mps")
         with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
+        # NaN on the diagonal must fail
+        A_nan = torch.eye(3, device="mps")
+        A_nan[0, 0] = float('nan')
+        self.assertEqual(torch.linalg.cholesky_ex(A_nan).info.item(), 1)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
