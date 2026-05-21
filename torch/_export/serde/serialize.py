@@ -110,6 +110,38 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 
+_SCHEMA_TYPE_TUPLES: dict[type, tuple[type, ...]] = {}
+_schema_types_initialized = False
+
+
+def _init_cpp_schema_types() -> None:
+    cpp_export = getattr(torch._C, "_export", None)
+    if cpp_export is None:
+        return
+    for py_type in vars(schema).values():
+        if (
+            isinstance(py_type, type)
+            and py_type.__module__ == schema.__name__
+            and dataclasses.is_dataclass(py_type)
+        ):
+            cpp_type = getattr(cpp_export, f"Cpp{py_type.__name__}", None)
+            if cpp_type is not None:
+                _SCHEMA_TYPE_TUPLES[py_type] = (py_type, cpp_type)
+
+
+def _schema_isinstance(obj: object, types_: type | tuple[type, ...]) -> bool:
+    global _schema_types_initialized
+    if not _schema_types_initialized:
+        _init_cpp_schema_types()
+        _schema_types_initialized = True
+    if isinstance(types_, tuple):
+        expanded: list[type] = []
+        for type_ in types_:
+            expanded.extend(_SCHEMA_TYPE_TUPLES.get(type_, (type_,)))
+        return isinstance(obj, tuple(expanded))
+    return isinstance(obj, _SCHEMA_TYPE_TUPLES.get(types_, (types_,)))
+
+
 class SerializeError(RuntimeError):
     pass
 
@@ -3095,7 +3127,7 @@ class GraphModuleDeserializer(metaclass=Final):
         elif typ_ == "as_layout":
             return _SERIALIZE_TO_TORCH_LAYOUT[inp.as_layout]
         elif typ_ == "as_graph":
-            if not isinstance(value, GraphArgument):
+            if not _schema_isinstance(value, GraphArgument):
                 raise AssertionError(
                     f"expected GraphArgument, got {type(value).__name__}"
                 )
@@ -3192,17 +3224,17 @@ class GraphModuleDeserializer(metaclass=Final):
             raise SerializeError(f"Unhandled constant argument {inp} to deserialize")
 
     def deserialize_sym_argument(self, sym_arg):
-        if isinstance(sym_arg, SymIntArgument):
+        if _schema_isinstance(sym_arg, SymIntArgument):
             if sym_arg.type == "as_int":
                 return sym_arg.as_int
             elif sym_arg.type == "as_name":
                 return self.serialized_name_to_node[sym_arg.as_name]
-        elif isinstance(sym_arg, SymFloatArgument):
+        elif _schema_isinstance(sym_arg, SymFloatArgument):
             if sym_arg.type == "as_float":
                 return sym_arg.as_float
             elif sym_arg.type == "as_name":
                 return self.serialized_name_to_node[sym_arg.as_name]
-        elif isinstance(sym_arg, SymBoolArgument):
+        elif _schema_isinstance(sym_arg, SymBoolArgument):
             if sym_arg.type == "as_bool":
                 return sym_arg.as_bool
             elif sym_arg.type == "as_name":
@@ -3229,7 +3261,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 arg = None
                 if serialized_node.outputs[0].type == "as_tensor":
                     arg = serialized_node.outputs[0].as_tensor
-                elif isinstance(
+                elif _schema_isinstance(
                     serialized_node.outputs[0].value,
                     (SymIntArgument, SymBoolArgument, SymFloatArgument),
                 ):
@@ -3253,7 +3285,7 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return
-        elif len(serialized_node.outputs) == 1 and isinstance(
+        elif len(serialized_node.outputs) == 1 and _schema_isinstance(
             serialized_node.outputs[0].value,
             (SymIntArgument, SymBoolArgument, SymFloatArgument),
         ):
@@ -3278,12 +3310,12 @@ class GraphModuleDeserializer(metaclass=Final):
         idx: int,
         deserialized_metadata: dict[str, Any],
     ):
-        if isinstance(arg, TensorArgument):
-            name = arg.name
-        elif isinstance(arg, SymIntArgument):
-            name = arg.as_name
-        elif isinstance(arg, SymFloatArgument):
-            name = arg.as_name
+        if _schema_isinstance(arg, TensorArgument):
+            name = cast(Any, arg).name
+        elif _schema_isinstance(arg, SymIntArgument):
+            name = cast(Any, arg).as_name
+        elif _schema_isinstance(arg, SymFloatArgument):
+            name = cast(Any, arg).as_name
         else:
             raise AssertionError(
                 f"generate_getitem got unknown argument type {type(arg)}"
@@ -3308,13 +3340,15 @@ class GraphModuleDeserializer(metaclass=Final):
         deserialized_metadata: dict[str, Any],
     ):
         for idx, arg in enumerate(args):
-            if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
+            if _schema_isinstance(
+                arg, (TensorArgument, SymIntArgument, SymFloatArgument)
+            ):
                 self.generate_getitem(
                     meta_val, fx_node, arg, idx, deserialized_metadata
                 )
                 continue
 
-            if not isinstance(arg, Argument):
+            if not _schema_isinstance(arg, Argument):
                 raise AssertionError(f"expected Argument, got {type(arg).__name__}")
             if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
                 self.generate_getitem(
@@ -3371,7 +3405,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 raise AssertionError(
                     f"expected list, got {type(serialized_node.outputs[0].value).__name__}"
                 )
-            if not isinstance(serialized_node.outputs[0].value[0], TensorArgument):
+            if not _schema_isinstance(
+                serialized_node.outputs[0].value[0], TensorArgument
+            ):
                 raise AssertionError(
                     f"expected TensorArgument, got {type(serialized_node.outputs[0].value[0]).__name__}"
                 )
@@ -3568,7 +3604,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
-        if not isinstance(exported_program, ExportedProgram):
+        if not _schema_isinstance(exported_program, ExportedProgram):
             raise AssertionError(
                 f"expected ExportedProgram, got {type(exported_program).__name__}"
             )

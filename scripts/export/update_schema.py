@@ -73,6 +73,13 @@ if __name__ == "__main__":
     cpp_header += "\n// clang-format on"
     cpp_header += "\n"
 
+    pybind_header = "// " + first_line
+    pybind_header += "\n// " + checksum
+    pybind_header += "\n// clang-format off"
+    pybind_header += "\n" + commit.pybind_header
+    pybind_header += "\n// clang-format on"
+    pybind_header += "\n"
+
     enum_converter_header = "// " + first_line
     enum_converter_header += "\n// clang-format off"
     enum_converter_header += "\n" + commit.enum_converter_header
@@ -93,6 +100,8 @@ if __name__ == "__main__":
             f.write(yaml_content)
         with open(os.path.join(args.prefix, commit.cpp_header_path), "w") as f:
             f.write(cpp_header)
+        with open(os.path.join(args.prefix, commit.pybind_header_path), "w") as f:
+            f.write(pybind_header)
         with open(
             os.path.join(args.prefix, commit.enum_converter_header_path), "w"
         ) as f:

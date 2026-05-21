@@ -171,6 +171,38 @@ class TestSerialize(TestCase):
         self.assertEqual(exp_out, actual_out)
         self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
 
+    def test_load_uses_cpp_schema_deserialization(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.relu(self.linear(x))
+
+        example_inputs = (torch.randn(2, 4),)
+        ep = export(M().eval(), example_inputs, strict=True)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+
+        with (
+            unittest.mock.patch(
+                "torch._export.serde.serialize._bytes_to_dataclass",
+                side_effect=AssertionError("Python schema deserialization used"),
+            ),
+            unittest.mock.patch(
+                "torch._export.serde.serialize._dict_to_dataclass",
+                side_effect=AssertionError("Python dataclass deserialization used"),
+            ),
+        ):
+            loaded_ep = load(buffer)
+
+        self.assertEqual(
+            ep.module()(*example_inputs),
+            loaded_ep.module()(*example_inputs),
+        )
+
     def test_export_example_inputs_preserved(self):
         class MyModule(torch.nn.Module):
             """A test module with that has multiple args and uses kwargs"""

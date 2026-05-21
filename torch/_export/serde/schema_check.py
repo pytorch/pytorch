@@ -43,6 +43,7 @@ def _staged_schema():
     cpp_class_defs: dict[str, str] = {}
     cpp_type_decls: list[str] = []
     cpp_json_defs: list[str] = []
+    pybind_defs: dict[str, str] = {}
     thrift_enum_defs: list[str] = []
     thrift_type_defs: dict[str, str] = {}
 
@@ -210,6 +211,13 @@ enum {name} {{
 }}
 """
         )
+        enum_values = "\n".join(
+            [f'    .value("{x.name}", {name}::{x.name})' for x in ty]
+        )
+        pybind_defs[name] = f"""
+  py::enum_<{name}>(m, "Cpp{name}")
+{enum_values};
+"""
 
     def _handle_struct(name, ty):
         fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
@@ -274,6 +282,30 @@ class {name} {{
         cpp_json_defs.append(f"inline {to_json_decl} {to_json_def}")
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
+
+        def pybind_property(field_name: str, cpp_type: str) -> str:
+            type_name = fields[field_name]["type"]
+            getter = f"s.get_{field_name}()"
+            if type_name in enum_type_names:
+                cast_expr = f"py::cast(static_cast<int64_t>({getter}))"
+            elif cpp_type == "F64":
+                cast_expr = f"py::cast({getter}.get())"
+            elif cpp_type.startswith("ForwardRef<"):
+                cast_expr = f"py::cast(*{getter})"
+            else:
+                cast_expr = f"py::cast({getter})"
+            return (
+                f'    .def_property_readonly("{field_name}", '
+                f"[](const {name}& s) -> py::object {{ return {cast_expr}; }})"
+            )
+
+        props = "\n".join(
+            pybind_property(n, f["cpp_type"]) for n, f in cpp_fields.items()
+        )
+        pybind_defs[name] = f"""
+  py::class_<{name}>(m, "Cpp{name}")
+{props};
+"""
 
         thrift_type_defs[name] = f"""
 struct {name} {{
@@ -361,6 +393,59 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 """
         cpp_type_decls.append(f"class {name};")
 
+        type_cases = "\n".join(
+            f'        case {name}::Tag::{n.upper()}: return "{n}";' for n in cpp_fields
+        )
+
+        def py_cast_expr(variant_name: str, cpp_type: str, getter: str) -> str:
+            type_name = fields[variant_name]["type"]
+            if type_name in enum_type_names:
+                return f"py::cast(static_cast<int64_t>({getter}))"
+            if cpp_type == "F64":
+                return f"py::cast({getter}.get())"
+            if cpp_type.startswith("ForwardRef<"):
+                return f"py::cast(*{getter})"
+            return f"py::cast({getter})"
+
+        def union_value_case(variant_name: str, cpp_type: str) -> str:
+            tag = f"{name}::Tag::{variant_name.upper()}"
+            getter = f"u.get_{variant_name}()"
+            return f"        case {tag}: return {py_cast_expr(variant_name, cpp_type, getter)};"
+
+        def union_variant_accessor(variant_name: str, cpp_type: str) -> str:
+            tag = f"{name}::Tag::{variant_name.upper()}"
+            getter = f"u.get_{variant_name}()"
+            return f"""
+    .def_property_readonly("{variant_name}", [](const {name}& u) -> py::object {{
+      if (u.tag() != {tag}) {{
+        throw py::attribute_error("Field {variant_name} is not set.");
+      }}
+      return {py_cast_expr(variant_name, cpp_type, getter)};
+    }})"""
+
+        value_cases = "\n".join(
+            union_value_case(n, f["cpp_type"]) for n, f in cpp_fields.items()
+        )
+        variant_accessors = "\n".join(
+            union_variant_accessor(n, f["cpp_type"]) for n, f in cpp_fields.items()
+        )
+        pybind_defs[name] = f"""
+  py::class_<{name}>(m, "Cpp{name}")
+    .def_property_readonly("type", [](const {name}& u) -> std::string {{
+      switch (u.tag()) {{
+{type_cases}
+        default: return "unknown";
+      }}
+    }})
+    .def_property_readonly("value", [](const {name}& u) -> py::object {{
+      switch (u.tag()) {{
+{value_cases}
+        default: return py::none();
+      }}
+    }})
+{variant_accessors};
+"""
+
         thrift_type_defs[name] = f"""
 union {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
@@ -376,6 +461,12 @@ union {name} {{
             continue
 
         defs[name] = value
+
+    enum_type_names = {
+        name
+        for name, value in defs.items()
+        if isinstance(value, type) and issubclass(value, IntEnum)
+    }
 
     class_ordering = {}
     for name, value in defs.items():
@@ -548,13 +639,75 @@ template <typename T> ForwardRef<T>::~ForwardRef() = default;
 }} // namespace _export
 }} // namespace torch
 """
+    sorted_pybind_class_defs = dict(
+        sorted(
+            ((k, v) for k, v in pybind_defs.items() if k in class_ordering),
+            key=lambda x: class_ordering[x[0]],
+        )
+    )
+    pybind_enum_defs = "".join(
+        v for k, v in pybind_defs.items() if k not in class_ordering
+    )
+    pybind_class_defs = "".join(sorted_pybind_class_defs.values())
+    pybind_header = f"""
+#pragma once
+
+#include <torch/csrc/utils/generated_serialization_types.h>
+#include <torch/csrc/utils/pybind.h>
+
+namespace pybind11::detail {{
+template <>
+struct type_caster<torch::_export::F64> {{
+  PYBIND11_TYPE_CASTER(torch::_export::F64, const_name("float"));
+
+  bool load(handle, bool) {{
+    return false;
+  }}
+
+  static handle cast(
+      const torch::_export::F64& src,
+      return_value_policy,
+      handle) {{
+    return PyFloat_FromDouble(src.get());
+  }}
+}};
+
+template <typename T>
+struct type_caster<torch::_export::ForwardRef<T>> {{
+  using value_conv = make_caster<T>;
+  PYBIND11_TYPE_CASTER(torch::_export::ForwardRef<T>, value_conv::name);
+
+  bool load(handle, bool) {{
+    return false;
+  }}
+
+  static handle cast(
+      const torch::_export::ForwardRef<T>& src,
+      return_value_policy policy,
+      handle parent) {{
+    return value_conv::cast(*src, policy, parent);
+  }}
+}};
+}} // namespace pybind11::detail
+
+namespace torch {{
+namespace _export {{
+
+inline void registerSerializationBindings(py::module_& m) {{
+{pybind_enum_defs}
+{pybind_class_defs}
+}}
+
+}} // namespace _export
+}} // namespace torch
+"""
     thrift_schema = f"""
 namespace py3 torch._export
 namespace cpp2 torch._export.schema
 {chr(10).join(thrift_enum_defs)}
 {chr(10).join(dict(sorted(thrift_type_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 """
-    return yaml_ret, cpp_header, thrift_schema
+    return yaml_ret, cpp_header, pybind_header, thrift_schema
 
 
 def _diff_schema(dst, src):
@@ -763,6 +916,8 @@ class _Commit:
     thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
+    pybind_header: str = ""
+    pybind_header_path: str = ""
 
 
 def update_schema():
@@ -810,7 +965,7 @@ def update_schema():
         thrift_checksum_real = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
-    src, cpp_header, thrift_schema = _staged_schema()
+    src, cpp_header, pybind_header, thrift_schema = _staged_schema()
     enum_converter_header = _generate_enum_converters()
     additions, subtractions = _diff_schema(dst, src)
     # pyrefly: ignore [missing-attribute]
@@ -845,6 +1000,9 @@ def update_schema():
         thrift_checksum_next=_hash_content(thrift_schema),
         thrift_schema=thrift_schema,
         thrift_schema_path=thrift_schema_path,
+        pybind_header=pybind_header,
+        pybind_header_path=torch_prefix
+        + "csrc/utils/generated_serialization_bindings.h",
     )
 
 

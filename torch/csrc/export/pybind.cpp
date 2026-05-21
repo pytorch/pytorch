@@ -2,6 +2,7 @@
 #include <torch/csrc/export/pt2_archive_constants.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/export/upgrader.h>
+#include <torch/csrc/utils/generated_serialization_bindings.h>
 #include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -12,23 +13,34 @@ void initExportBindings(PyObject* module) {
   auto exportModule = rootModule.def_submodule("_export");
   auto pt2ArchiveModule = exportModule.def_submodule("pt2_archive_constants");
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<ExportedProgram>(exportModule, "CppExportedProgram");
+  registerSerializationBindings(exportModule);
 
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
-        auto parsed = nlohmann::json::parse(serialized);
-
-        // Query the current Python schema version as target
-        // TODO: expose schema_version in gneerated_serialization_types.h and
+        // Query the current Python schema version as target.
+        // TODO: expose schema_version in generated_serialization_types.h and
         // access it here directly.
-        py::module_ schema_module =
-            py::module_::import("torch._export.serde.schema");
-        py::tuple schema_version_tuple = schema_module.attr("SCHEMA_VERSION");
-        int target_version = schema_version_tuple[0].cast<int>();
+        static int target_version = []() {
+          py::module_ schema_module =
+              py::module_::import("torch._export.serde.schema");
+          py::tuple schema_version_tuple = schema_module.attr("SCHEMA_VERSION");
+          return schema_version_tuple[0].cast<int>();
+        }();
+
+        nlohmann::json parsed;
+        {
+          py::gil_scoped_release release;
+          parsed = nlohmann::json::parse(serialized);
+        }
 
         auto upgraded = upgrade(parsed, target_version);
-        return upgraded.get<ExportedProgram>();
+
+        ExportedProgram result;
+        {
+          py::gil_scoped_release release;
+          result = upgraded.get<ExportedProgram>();
+        }
+        return result;
       });
 
   exportModule.def("serialize_exported_program", [](const ExportedProgram& ep) {
@@ -47,6 +59,16 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "deregister_example_upgraders", []() { deregisterExampleUpgraders(); });
+
+  exportModule.def(
+      "deserialize_payload_config", [](const std::string& serialized) {
+        PayloadConfig result;
+        {
+          py::gil_scoped_release release;
+          result = nlohmann::json::parse(serialized).get<PayloadConfig>();
+        }
+        return result;
+      });
 
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
     pt2ArchiveModule.attr(entry.first) = entry.second;
