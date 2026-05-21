@@ -2623,7 +2623,7 @@ def calc_conv_nd_return_shape(
         dilation = [dilation[0]] * len(dims)
 
     output_padding_list: list[int] | None = None
-    if output_padding:
+    if is_transposed and output_padding:
         if isinstance(output_padding, IntLike):
             # pyrefly: ignore [bad-assignment]
             output_padding_list = [output_padding] * len(dims)
@@ -2631,6 +2631,26 @@ def calc_conv_nd_return_shape(
             output_padding_list = [output_padding[0]] * len(dims)
         else:
             output_padding_list = output_padding
+
+        from torch.fx.experimental.symbolic_shapes import sym_or
+
+        for i in range(len(dims)):
+            torch._check(
+                sym_or(
+                    # pyrefly: ignore [bad-index, index-error]
+                    output_padding_list[i] < stride[i],
+                    # pyrefly: ignore [bad-index, index-error]
+                    output_padding_list[i] < dilation[i],
+                ),
+                lambda i=i: (
+                    "output padding must be smaller than either stride or dilation, "
+                    f"but got output_padding[{i}]: {output_padding_list[i]} "
+                    # pyrefly: ignore [bad-index, index-error]
+                    f"stride[{i}]: {stride[i]} "
+                    # pyrefly: ignore [bad-index, index-error]
+                    f"dilation[{i}]: {dilation[i]}"
+                ),
+            )
 
     # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
     # in aten/src/ATen/native/Convolution.cpp).
