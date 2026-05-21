@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 def _collect_exclusive_users(start: fx.Node) -> list[fx.Node]:
     """BFS collecting nodes whose inputs are all within the chain."""
     chain: list[fx.Node] = [start]
-    chain_set: set[fx.Node] = {start}
+    chain_set: OrderedSet[fx.Node] = OrderedSet([start])
     i = 0
     while i < len(chain):
         for user in chain[i].users:
@@ -72,7 +72,7 @@ def _collect_chain_to_node(target: fx.Node) -> list[fx.Node]:
         root = parents[0]
 
     chain: list[fx.Node] = [root]
-    chain_set: set[fx.Node] = {root}
+    chain_set: OrderedSet[fx.Node] = OrderedSet([root])
     i = 0
     while i < len(chain):
         for user in chain[i].users:
