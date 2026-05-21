@@ -385,6 +385,7 @@ class CustomOpDef:
                                 kwargs,
                                 result,
                                 get_module,
+                                schema,
                             )
                         return result
 

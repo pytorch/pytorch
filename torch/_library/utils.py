@@ -433,7 +433,105 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
         storages.add(key)
 
 
-def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: "???"):
+def _is_maybe_out_arg(arg: _C.Argument) -> bool:
+    return (
+        arg.alias_info is not None
+        and arg.alias_info.is_write
+        and arg.type == _C.OptionalType(_C.TensorType.get())
+    )
+
+
+def is_maybe_out_schema_alias(arg: _C.Argument, argument: Any, output: Any) -> bool:
+    return (
+        _is_maybe_out_arg(arg)
+        and isinstance(output, torch.Tensor)
+        and output is argument
+    )
+
+
+def _raise_aliasing_error(name, get_module):
+    raise RuntimeError(
+        f"{name} (with implementation in {get_module()}): "
+        f"The output of this custom operator (1) must not "
+        f"also be an input to this custom operator and "
+        f"(2) may not alias any inputs to this custom operator "
+        f"or other returns. "
+        f"The most common way to trigger this error is if "
+        f"we have y = custom_op(x) and y and x are the same Tensor. "
+        f"Please instead return a clone of the offending output "
+        f"tensor(s) (e.g. return x.clone()) or refactor the custom "
+        f"operator to not return y."
+    )
+
+
+def _has_same_storage(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    try:
+        return lhs.untyped_storage()._cdata == rhs.untyped_storage()._cdata
+    except RuntimeError:
+        return False
+
+
+def _schema_args(schema, args, kwargs):
+    arguments_by_name = {arg.name: arg for arg in schema.arguments}
+    for idx, arg in enumerate(args):
+        if idx < len(schema.arguments):
+            yield schema.arguments[idx], arg
+    for name, arg in kwargs.items():
+        schema_arg = arguments_by_name.get(name)
+        if schema_arg is not None:
+            yield schema_arg, arg
+
+
+def _check_maybe_out_aliasing_constraint(
+    name, schema, args, kwargs, result, get_module
+):
+    maybe_out_args = [
+        arg
+        for schema_arg, arg in _schema_args(schema, args, kwargs)
+        if _is_maybe_out_arg(schema_arg)
+    ]
+    if not maybe_out_args:
+        return
+
+    tuple_result = result
+    if not isinstance(result, tuple):
+        tuple_result = (result,)
+    top_level_maybe_out_ids = {
+        id(output)
+        for output in tuple_result
+        if isinstance(output, torch.Tensor)
+        for arg in maybe_out_args
+        if output is arg
+    }
+    for output in iter_tensors(tuple_result, {}):
+        for arg in maybe_out_args:
+            if arg is None:
+                continue
+            if output is arg and id(output) in top_level_maybe_out_ids:
+                continue
+            if _has_same_storage(output, arg):
+                _raise_aliasing_error(name, get_module)
+
+
+def _inputs_for_aliasing_check(schema, args, kwargs):
+    checked_args = []
+    for idx, arg in enumerate(args):
+        if idx >= len(schema.arguments) or not _is_maybe_out_arg(schema.arguments[idx]):
+            checked_args.append(arg)
+
+    arguments_by_name = {arg.name: arg for arg in schema.arguments}
+    checked_kwargs = {}
+    for name, arg in kwargs.items():
+        schema_arg = arguments_by_name.get(name)
+        if schema_arg is None or not _is_maybe_out_arg(schema_arg):
+            checked_kwargs[name] = arg
+
+    return tuple(checked_args), checked_kwargs
+
+
+def _c_check_aliasing_constraint(
+    name, args, kwargs, result, get_module=lambda: "???", schema=None
+):
     """
     custom operators' outputs must not have any aliases
     This version uses C++ implementation for perf.
@@ -443,19 +541,13 @@ def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: 
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
-    if _C._any_output_is_alias_to_input_or_output(args, kwargs, tuple_result):
-        raise RuntimeError(
-            f"{name} (with implementation in {get_module()}): "
-            f"The output of this custom operator (1) must not "
-            f"also be an input to this custom operator and "
-            f"(2) may not alias any inputs to this custom operator "
-            f"or other returns. "
-            f"The most common way to trigger this error is if "
-            f"we have y = custom_op(x) and y and x are the same Tensor. "
-            f"Please instead return a clone of the offending output "
-            f"tensor(s) (e.g. return x.clone()) or refactor the custom "
-            f"operator to not return y."
+    if schema is not None:
+        _check_maybe_out_aliasing_constraint(
+            name, schema, args, kwargs, result, get_module
         )
+        args, kwargs = _inputs_for_aliasing_check(schema, args, kwargs)
+    if _C._any_output_is_alias_to_input_or_output(args, kwargs, tuple_result):
+        _raise_aliasing_error(name, get_module)
 
 
 class MutationChecker:

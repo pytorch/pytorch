@@ -942,7 +942,16 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+    def wrap_actual_out(out):
+        if isinstance(out, torch.Tensor):
+            for orig_arg, mutable_out in zip(all_bases, unwrapped_mutable_out):
+                if out is mutable_out:
+                    return orig_arg
+        return ctx.wrap_tensors(out)
+
+    if isinstance(unwrapped_actual_out, tuple):
+        return tuple(wrap_actual_out(out) for out in unwrapped_actual_out)
+    return wrap_actual_out(unwrapped_actual_out)
 
 
 # auto_functionalize functions
