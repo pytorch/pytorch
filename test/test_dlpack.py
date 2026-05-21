@@ -365,7 +365,7 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=0)
 
     @skipMeta
-    @onlyAccelerator
+    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
         dev0, dev1 = devices[:2]
