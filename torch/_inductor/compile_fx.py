@@ -1273,12 +1273,10 @@ class _InProcessFxCompile(FxCompile):
         fx_wrapper: bool = graph_kwargs.get("fx_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
-        extern_node_serializer: _ExternNodeSerializer | None = (
-            graph_kwargs.get("extern_node_serializer", None)
+        extern_node_serializer: _ExternNodeSerializer | None = graph_kwargs.get(
+            "extern_node_serializer", None
         )
-        get_decomp_fn: _DecompFn = graph_kwargs.get(
-            "get_decomp_fn", _DEFAULT_DECOMP_FN
-        )
+        get_decomp_fn: _DecompFn = graph_kwargs.get("get_decomp_fn", _DEFAULT_DECOMP_FN)
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
@@ -2067,15 +2065,17 @@ def compile_fx_aot(
         _ExternNodeSerializer | None,
         config_patches_with_options.pop("extern_node_serializer", None),
     )
-    # pyrefly: ignore [annotation-mismatch, redefinition]
-    config_patches: _ConfigPatches = cast(_ConfigPatches, config_patches_with_options)
+    config_only_patches = cast(_ConfigPatches, config_patches_with_options)
 
-    if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
+    if not (config_only_patches.get("fx_wrapper", False) or config.fx_wrapper):
         # If fx_wrapper is not set, then set cpp_wrapper
-        config_patches["cpp_wrapper"] = True
+        config_only_patches["cpp_wrapper"] = True
 
-    output_path = config_patches.get(
-        "aot_inductor.output_path", config.aot_inductor.output_path
+    output_path = cast(
+        str | None,
+        config_only_patches.get(
+            "aot_inductor.output_path", config.aot_inductor.output_path
+        ),
     )
 
     if output_path:
@@ -2086,14 +2086,16 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
-        config_patches = {
-            **config_patches,
+        config_only_patches = {
+            **config_only_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
 
     from .utils import maybe_aoti_standalone_config
 
-    config_patches = cast(_ConfigPatches, maybe_aoti_standalone_config(config_patches))
+    config_only_patches = cast(
+        _ConfigPatches, maybe_aoti_standalone_config(config_only_patches)
+    )
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
     with (
@@ -2113,7 +2115,7 @@ def compile_fx_aot(
                 inner_compile,
                 extern_node_serializer=extern_node_serializer,
             ),
-            config_patches=config_patches,
+            config_patches=config_only_patches,
         )
 
         assert isinstance(compiled_artifacts, CompiledAOTI)
