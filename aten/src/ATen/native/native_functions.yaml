@@ -3025,7 +3025,7 @@
   autogen: native_group_norm_backward.out
   tags: core
 
-- func: native_group_norm_backward.multiple_grads(Tensor grad_out, Tensor grad_mean, Tensor grad_rstd, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: native_group_norm_backward.multiple_grads(Tensor? grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask, Tensor? grad_mean, Tensor? grad_rstd) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm_backward_multiple_grads
   autogen: native_group_norm_backward.multiple_grads_out
@@ -8542,8 +8542,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_src_out
-    MPS: scatter_src_out_mps
+    CPU, CUDA, MPS: scatter_src_out
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   structured_delegate: scatter.value_out
@@ -8558,8 +8557,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_value_out
-    MPS: scatter_value_out_mps
+    CPU, CUDA, MPS: scatter_value_out
 
 - func: scatter.reduce(Tensor self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor
   structured_delegate: scatter.reduce_out
@@ -8573,8 +8571,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_reduce_out
-    MPS: scatter_reduce_out_mps
+    CPU, CUDA, MPS: scatter_reduce_out
 
 - func: scatter.value_reduce(Tensor self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor
   structured_delegate: scatter.value_reduce_out
@@ -8588,8 +8585,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_value_reduce_out
-    MPS: scatter_value_reduce_out_mps
+    CPU, CUDA, MPS: scatter_value_reduce_out
 
 - func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
@@ -8610,8 +8606,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_add
-    MPS: scatter_add_mps_out
+    CPU, CUDA, MPS: scatter_add
 
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
@@ -9619,8 +9614,7 @@
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: gather_out
-    MPS: gather_out_mps
+    CPU, CUDA, MPS: gather_out
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
