@@ -299,7 +299,6 @@ dtensor_numeric_only_fails = {
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
     xfail("nn.functional.linear_cross_entropy"),
-    xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
