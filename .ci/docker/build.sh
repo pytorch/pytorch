@@ -179,14 +179,14 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    XPU_VERSION=2025.2
+    XPU_VERSION=2025.3
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    XPU_VERSION=2025.3
+    XPU_VERSION=2026.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -249,9 +249,9 @@ case "$tag" in
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
+    CUDA_VERSION=13.0.2
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10

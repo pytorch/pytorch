@@ -10,6 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
@@ -25,7 +29,10 @@ env
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
-  export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+  JEMALLOC_LIB=$(find /usr/lib* -name "libjemalloc.so.2" 2>/dev/null | head -1)
+  if [[ -n "${JEMALLOC_LIB}" ]]; then
+    export LD_PRELOAD="${JEMALLOC_LIB}"
+  fi
   echo "NVCC version:"
   nvcc --version
 fi
@@ -98,7 +105,18 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
-  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+  # Restrict chown to the workspace and the cross-compile sysroot/venv we
+  # actually write into. The workspace path differs by runner: EC2 docker
+  # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
+  # the host path that doesn't exist inside the container; OSDC k8s has it
+  # at ${GITHUB_WORKSPACE} (/__w/pytorch/pytorch) and no /var/lib/jenkins.
+  # Recursing into all of /opt would also fail on OSDC because /opt/git-cache
+  # is a read-only hostPath mount.
+  for dir in "${GITHUB_WORKSPACE:-}" /var/lib/jenkins/workspace /opt/sysroot /opt/riscv-cross-env; do
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      sudo chown -R jenkins "$dir"
+    fi
+  done
 
 fi
 
@@ -239,9 +257,10 @@ echo "The next three invocations are expected to fail with invalid command error
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
+  # s390x builds currently fail when WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -280,6 +299,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
     install_torchao
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
+    install_torchcomms
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -322,6 +345,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       sudo rm -rf original
       popd
     fi
+
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
+    build_rocm_ck_wheel dist/
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then

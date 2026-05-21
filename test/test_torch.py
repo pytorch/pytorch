@@ -34,7 +34,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI200_ARCH, MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
@@ -355,6 +355,8 @@ class TestTorchDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
+
+        self.assertFalse(s0.is_shared())
 
         with self.assertRaisesRegex(NotImplementedError, r'Not available'):
             s0.tolist()
@@ -1485,6 +1487,31 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_max_pool3d(self, device):
+        test_cases = [
+            # size, kernel_size, stride, padding, dilation, ceil_mode
+            [(2, 3, 8, 8, 8), 3, 1, 1, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, False],
+            [(2, 3, 8, 8, 8), 2, 2, 0, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, True],
+            [(3, 8, 8, 8), 3, 1, 1, 1, False],  # unbatched
+        ]
+
+        for size, ks, st, pa, di, cm in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res, _ = torch.nn.functional.max_pool3d(
+                        input, ks, st, pa, di, cm, return_indices=True)
+                    res.backward(torch.ones_like(res))
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding
@@ -2547,8 +2574,10 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.005)
+    # On ROCm, AMD XF32 round-down bias in the K=10 mm-based cdist path
+    # (||a-b||² via a·b) pushes max_abs to ~5.8e-3, exceeding 0.005; ideal
+    # NVIDIA TF32 stays under. See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -9189,6 +9218,57 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint8.is_signed)
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint32.is_signed)
 
+    def test_dtype_abbr(self):
+        expected = {
+            torch.float64: "f64",
+            torch.float32: "f32",
+            torch.float16: "f16",
+            torch.bfloat16: "bf16",
+            torch.float8_e4m3fn: "f8e4m3fn",
+            torch.float8_e5m2: "f8e5m2",
+            torch.float8_e4m3fnuz: "f8e4m3fnuz",
+            torch.float8_e5m2fnuz: "f8e5m2fnuz",
+            torch.float8_e8m0fnu: "f8e8m0fnu",
+            torch.float4_e2m1fn_x2: "f4e2m1fnx2",
+            torch.complex32: "c32",
+            torch.complex64: "c64",
+            torch.complex128: "c128",
+            torch.int8: "i8",
+            torch.int16: "i16",
+            torch.int32: "i32",
+            torch.int64: "i64",
+            torch.bool: "b8",
+            torch.uint8: "u8",
+            torch.uint16: "u16",
+            torch.uint32: "u32",
+            torch.uint64: "u64",
+            torch.bits16: "b16x1",
+            torch.bits1x8: "b1x8",
+            torch.bits2x4: "b2x4",
+            torch.bits4x2: "b4x2",
+            torch.bits8: "b8x1",
+        }
+        for dtype, abbr in expected.items():
+            self.assertEqual(dtype.abbr, abbr)
+        self.assertEqual(set(torch._C._get_all_dtypes()), set(expected.keys()))
+
+    def test_get_all_dtypes(self):
+        # The C++ implementation iterates AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS
+        # and filters out quantized and sub-byte placeholder dtypes; pin the
+        # result against a manually computed list so regressions are caught.
+        expected = {
+            torch.uint8, torch.uint16, torch.uint32, torch.uint64,
+            torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64, torch.bfloat16,
+            torch.complex32, torch.complex64, torch.complex128,
+            torch.bool,
+            torch.float8_e5m2, torch.float8_e4m3fn,
+            torch.float8_e5m2fnuz, torch.float8_e4m3fnuz,
+            torch.float8_e8m0fnu, torch.float4_e2m1fn_x2,
+            torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8, torch.bits16,
+        }
+        self.assertEqual(set(torch._C._get_all_dtypes()), expected)
+
     # FIXME: Put the following random tests into their own test class or test suite
     @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNGState(self):
@@ -10442,32 +10522,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_storage_preserve_nonhermetic_in_hermetic_context(self):
-        from torch.library import Library, impl
+        from torch.library import _scoped_library, impl
         global _my_storage
 
-        my_lib = Library("my_lib", "DEF")  # noqa: TOR901
-        my_lib.define('my_func() -> None')
+        with _scoped_library("my_lib", "DEF") as my_lib:
+            my_lib.define('my_func() -> None')
 
-        a = torch.tensor([1.])
-        _my_storage = a.untyped_storage()
+            a = torch.tensor([1.])
+            _my_storage = a.untyped_storage()
 
-        m, t = Tracker.make()
-        _my_storage._tracker = t
-        del t
+            m, t = Tracker.make()
+            _my_storage._tracker = t
+            del t
 
-        @impl(my_lib, 'my_func', '')
-        def my_func():
-            global _my_storage
-            del _my_storage
+            @impl(my_lib, 'my_func', '')
+            def my_func():
+                global _my_storage
+                del _my_storage
 
-        self.assertFalse(m[0])
-        torch.ops.my_lib.my_func()
-        self.assertFalse(m[0])
+            self.assertFalse(m[0])
+            torch.ops.my_lib.my_func()
+            self.assertFalse(m[0])
 
-        s = a.untyped_storage()
-        del a
-        del s
-        self.assertTrue(m[0])
+            s = a.untyped_storage()
+            del a
+            del s
+            self.assertTrue(m[0])
 
     # FIXME: move to test_autograd?
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")

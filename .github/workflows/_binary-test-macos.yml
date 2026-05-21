@@ -1,0 +1,104 @@
+name: test-and-upload (macOS wheel)
+
+# Run the smoke-test of a built macOS arm64 wheel on a fresh macos runner,
+# and — only if the test passes — push the same wheel to S3/R2 by
+# delegating to the shared _binary-upload.yml reusable workflow.
+# Called from a matrix in the main macOS wheel workflow; each matrix entry
+# spawns an independent invocation, giving per-Python-version gating
+# (test-X failing blocks only upload-X).
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+        description: Artifact name, e.g. wheel-py3_10-cpu.
+      setup_python_version:
+        required: true
+        type: string
+        description: Full X.Y.Z version string for actions/setup-python.
+      freethreaded:
+        required: true
+        type: boolean
+      desired_python:
+        required: true
+        type: string
+        description: Short "X.Y" or "X.Yt" — passed through to the uploader.
+      package_type:
+        required: true
+        type: string
+      desired_cuda:
+        required: true
+        type: string
+      gpu_arch_type:
+        required: true
+        type: string
+      docker_image:
+        required: false
+        type: string
+      docker_image_tag_prefix:
+        required: false
+        type: string
+    secrets:
+      github-token:
+        required: true
+      R2_ACCOUNT_ID:
+        required: false
+      R2_ACCESS_KEY_ID:
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        required: false
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout smoke-test script
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/pytorch/smoke_test/
+          show-progress: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.setup_python_version }}
+          freethreaded: ${{ inputs.freethreaded }}
+      - uses: actions/download-artifact@v4.1.7
+        with:
+          name: ${{ inputs.build_name }}
+          path: ${{ runner.temp }}/artifacts
+      - name: Smoke-test wheel
+        run: |
+          set -eux -o pipefail
+          venv_dir="${RUNNER_TEMP}/test_venv"
+          rm -rf "$venv_dir"
+          python -mvenv "$venv_dir"
+          # shellcheck disable=SC1091
+          source "$venv_dir/bin/activate"
+          pip install "${RUNNER_TEMP}/artifacts"/*.whl numpy -v
+          python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
+
+  upload:
+    needs: test
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_binary-upload.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: ${{ inputs.package_type }}
+      DESIRED_CUDA: ${{ inputs.desired_cuda }}
+      GPU_ARCH_TYPE: ${{ inputs.gpu_arch_type }}
+      DOCKER_IMAGE: ${{ inputs.docker_image }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ inputs.docker_image_tag_prefix }}
+      DESIRED_PYTHON: ${{ inputs.desired_python }}
+      build_name: ${{ inputs.build_name }}
+      use_s3: false
+    secrets:
+      github-token: ${{ secrets.github-token }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

@@ -283,8 +283,9 @@ struct CppNode : public Node {
   std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+  void release_resources() override;
 
-  void set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node);
+  void set_ctx_grad_fn(c10::intrusive_ptr<Node> node);
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) const override {
@@ -568,13 +569,22 @@ void CppNode<T>::release_variables() {
 }
 
 template <class T>
+void CppNode<T>::release_resources() {
+  Node::release_resources();
+
+  // AutogradContext deletes copy/move, so destroy and reconstruct in place.
+  ctx_.~AutogradContext();
+  new (&ctx_) AutogradContext();
+}
+
+template <class T>
 void CppNode<T>::save_variables_to_ctx() {
   ctx_.save_variables();
 }
 
 template <class T>
-void CppNode<T>::set_ctx_grad_fn(const c10::intrusive_ptr<Node>& node) {
-  ctx_.grad_fn_ = node;
+void CppNode<T>::set_ctx_grad_fn(c10::intrusive_ptr<Node> node) {
+  ctx_.grad_fn_ = std::move(node);
 }
 
 } // namespace torch::autograd

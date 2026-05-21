@@ -17,7 +17,6 @@
 #include <c10/util/irange.h>
 
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -617,7 +616,7 @@ auto handle_torch_function_no_python_arg_parser(
   // (5) FakeTensorMode.__torch_dispatch__ (infra modes next highest)
   // (6) FakeTensor.__torch_fake_dispatch__ (infra subclasses next highest)
 
-  // Why does do FunctionalTensor and FakeTensor even need to be special-cased
+  // Why do FunctionalTensor and FakeTensor even need to be special-cased
   // in the ordering?
   // In theory we could remove their __torch_dispatch__, but both of these
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
@@ -1527,7 +1526,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 
   if (fmt.substr(last_offset) == "|deprecated") {
     hidden = true;
-    // TODO: raise warning when parsing deprecated signatures
     deprecated = true;
   } else if (fmt.substr(last_offset) == "|hidden") {
     hidden = true;
@@ -1876,13 +1874,18 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
+  const bool skip_torch_function = torch::consume_should_skip_torch_function();
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     std::vector<PyObject*> overloaded_args;
     signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
     check_deprecated(signature);
     return PythonArgs(
-        traceable, signature, parsed_args, std::move(overloaded_args));
+        traceable,
+        skip_torch_function,
+        signature,
+        parsed_args,
+        std::move(overloaded_args));
   }
 
   for (auto& signature : signatures_) {
@@ -1891,7 +1894,11 @@ PythonArgs PythonArgParser::raw_parse(
             self, args, kwargs, parsed_args, overloaded_args, false)) {
       check_deprecated(signature);
       return PythonArgs(
-          traceable, signature, parsed_args, std::move(overloaded_args));
+          traceable,
+          skip_torch_function,
+          signature,
+          parsed_args,
+          std::move(overloaded_args));
     }
   }
 
@@ -1985,7 +1992,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
             i,
             Py_TYPE(obj)->tp_name));
   }
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);

@@ -42,7 +42,7 @@ def _reload_python_module(
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[2] / "bin" / "ptxas"
+    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
@@ -54,18 +54,26 @@ def _set_triton_ptxas_path() -> None:
 def _set_triton_libdevice_path() -> None:
     """
     Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    This ensures Triton's pow matches CUDA's powf for bitwise precision.
-    Gated by config.eager_numerics.use_pytorch_libdevice.
+    This ensures Triton's libdevice calls match CUDA eager numerics for bitwise
+    precision.  Gated by config.eager_numerics.use_pytorch_libdevice and by
+    config.emulate_precision_casts, which also requests eager-like numerics.
     """
     from torch._inductor import config
 
-    if not config.eager_numerics.use_pytorch_libdevice:
+    if not (
+        config.eager_numerics.use_pytorch_libdevice or config.emulate_precision_casts
+    ):
         return
 
     _set_triton_libdevice_path_impl()
 
 
 def _set_triton_libdevice_path_impl() -> None:
+    import torch
+
+    if torch.version.cuda is None:
+        return
+
     try:
         from triton import knobs
     except ImportError:
