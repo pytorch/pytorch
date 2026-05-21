@@ -6,6 +6,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import SDPAParams
 from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 @contextlib.contextmanager
@@ -26,7 +27,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertIs(actual.value, expected.value)
         self.assertIs(actual.attn_mask, expected.attn_mask)
 
-    def test_returns_SDPAParams(self):
+    def test_returns_SDPAParams(self, device):
         with allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
@@ -34,16 +35,16 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             def fn(q, k, v, m):
                 return SDPAParams(q, k, v, m, 0.1, True, False)
 
-            q = torch.randn(10)
-            k = torch.randn(10)
-            v = torch.randn(10)
-            m = torch.randn(10)
+            q = torch.randn(10, device=device)
+            k = torch.randn(10, device=device)
+            v = torch.randn(10, device=device)
+            m = torch.randn(10, device=device)
             o = fn(q, k, v, m)
             self.assertTrue(isinstance(o, SDPAParams))
             self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True, False))
             self.assertEqual(counter.frame_count, 1)
 
-    def test_graph_break_SDPAParams(self):
+    def test_graph_break_SDPAParams(self, device):
         with allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
@@ -53,16 +54,16 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
                 return z, q + 1
 
-            q = torch.randn(10)
-            k = torch.randn(10)
-            v = torch.randn(10)
-            m = torch.randn(10)
+            q = torch.randn(10, device=device)
+            k = torch.randn(10, device=device)
+            v = torch.randn(10, device=device)
+            m = torch.randn(10, device=device)
             o, _ = fn(q, k, v, m)
             self.assertTrue(isinstance(o, SDPAParams))
             self.assert_ref_equals_params(o, SDPAParams(q, k, v, m, 0.1, True, False))
             self.assertEqual(counter.frame_count, 2)
 
-    def test_input_SDPAParams(self):
+    def test_input_SDPAParams(self, device):
         with allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
@@ -71,16 +72,16 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
                 return sdpap, sdpap.query + q
 
-            q = torch.randn(10)
-            k = torch.randn(10)
-            v = torch.randn(10)
-            m = torch.randn(10)
+            q = torch.randn(10, device=device)
+            k = torch.randn(10, device=device)
+            v = torch.randn(10, device=device)
+            m = torch.randn(10, device=device)
             s = SDPAParams(q, k, v, m, 0.1, True, False)
             o, _ = fn(s, q)
             self.assertIs(o, s)
             self.assertEqual(counter.frame_count, 1)
 
-    def test_intermediate_attr_access_SDPAParams(self):
+    def test_intermediate_attr_access_SDPAParams(self, device):
         with allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
@@ -91,16 +92,16 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
                 a = z.query
                 return a + 1, z, q
 
-            q = torch.randn(10)
-            k = torch.randn(10)
-            v = torch.randn(10)
-            m = torch.randn(10)
+            q = torch.randn(10, device=device)
+            k = torch.randn(10, device=device)
+            v = torch.randn(10, device=device)
+            m = torch.randn(10, device=device)
             _, o, _ = fn(q, k, v, m)
             expected = SDPAParams(q, k, v, m, 0.1, True, False)
             self.assert_ref_equals_params(o, expected)
             self.assertEqual(counter.frame_count, 1)
 
-    def test_sdpa_c_functions_no_graph_break(self):
+    def test_sdpa_c_functions_no_graph_break(self, device):
         counter = CompileCounter()
 
         @torch.compile(fullgraph=True, backend=counter)
@@ -112,7 +113,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, list)
         self.assertEqual(counter.frame_count, 1)
 
-    def test_sdpa_kernel_decorator_with_compile(self):
+    def test_sdpa_kernel_decorator_with_compile(self, device):
         SDPA_BACKEND_PRIORITY = [
             SDPBackend.MATH,
             SDPBackend.EFFICIENT_ATTENTION,
@@ -131,12 +132,14 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         def f(x):
             return scaled_dot_product_attention(x, x, x)
 
-        x = torch.rand(128, 64, 64, 256, dtype=torch.float16)
+        x = torch.rand(128, 64, 64, 256, dtype=torch.float16, device=device)
         result = f(x)
 
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(counter.frame_count, 1)
 
+
+instantiate_device_type_tests(TestSDPA, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
