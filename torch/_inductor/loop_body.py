@@ -109,6 +109,12 @@ class LoopBody:
     # defined only temporarily
     indexing_exprs_name: dict[sympy.Expr, str]
 
+    @staticmethod
+    def _canonicalize_indexing_expr(expr):
+        if type(expr) is int:
+            return sympy.Integer(expr)
+        return expr
+
     def __init__(
         self,
         fn,
@@ -179,7 +185,9 @@ class LoopBody:
         """
         indexing_exprs = other.indexing_from_args(args, allow_same_symbol_in_index)
         self.indexing_exprs = {
-            name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            name: self._canonicalize_indexing_expr(
+                V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            )
             for name, expr in indexing_exprs.items()
         }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
@@ -478,6 +486,7 @@ class LoopBody:
         buffer_name: str | None = None,
         mode: str | None = None,
     ):
+        expr = self._canonicalize_indexing_expr(expr)
         name = self.indexing_exprs_name.get(expr)
         if not name:
             name = f"index{len(self.indexing_exprs)}"

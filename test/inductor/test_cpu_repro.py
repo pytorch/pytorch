@@ -4682,6 +4682,31 @@ class CPUReproTests(TestCase):
             torch.testing.assert_close(k, ref_k)
             torch.testing.assert_close(v, ref_v)
 
+    def test_issue_181624_cpu_fusion_with_constant_index_expr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hardswish = torch.nn.Hardswish()
+                self.layernorm = torch.nn.LayerNorm([2])
+
+            def forward(self, x):
+                out = self.hardswish(x)
+                out = out.unfold(1, 2, 1)
+                out = F.scaled_dot_product_attention(out, out, out)
+                out = torch.roll(out, 1, 2)
+                out = self.layernorm(out)
+                return torch.nan_to_num(out)
+
+        torch.manual_seed(0)
+        model = Model().eval()
+        x = torch.randn([2, 6])
+
+        with torch.no_grad():
+            expected = model(x)
+            actual = torch.compile(model, backend="inductor")(x)
+
+        torch.testing.assert_close(actual, expected)
+
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
