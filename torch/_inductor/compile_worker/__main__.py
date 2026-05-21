@@ -62,7 +62,7 @@ def main():
         args = parser.parse_args()
         if os.getppid() != args.parent:
             sys.exit(0)
-        read_fd = os.fdopen(args.read_fd, "rb")
+        read_fd = os.fdopen(args.read_fd, "rb", buffering=0)
         write_fd = os.fdopen(args.write_fd, "wb")
 
         pre_fork_setup()

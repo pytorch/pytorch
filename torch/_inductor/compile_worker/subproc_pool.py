@@ -5,13 +5,14 @@ import logging
 import multiprocessing
 import os
 import pickle
+import select
 import struct
 import subprocess
 import sys
 import threading
-import time
 import traceback
 import typing
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -33,6 +34,7 @@ from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 from torch._utils_internal import find_compile_subproc_binary
 from torch.monitor import _WaitCounter, _WaitCounterTracker
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -73,9 +75,21 @@ def _send_msg(
     write_pipe.flush()
 
 
+def _read_exact(read_pipe: IO[bytes], size: int) -> bytes:
+    result = bytearray()
+    while len(result) < size:
+        chunk = read_pipe.read(size - len(result))
+        if not chunk:
+            return b""
+        result.extend(chunk)
+    return bytes(result)
+
+
 def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
-    msg_header, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
-    data = read_pipe.read(length) if length > 0 else b""
+    msg_header, job_id, length = _unpack_msg(_read_exact(read_pipe, msg_bytes))
+    data = _read_exact(read_pipe, length) if length > 0 else b""
+    if length > 0 and not data:
+        return MsgHeader.ERROR, -1, b""
     return msg_header, job_id, data
 
 
@@ -371,24 +385,55 @@ class SubprocMain:
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
         self.pool: ProcessPoolExecutor | None = None
+        self.pool_finalizer: Any | None = None
+        self.pending_futures: OrderedSet[Future[Any]] = OrderedSet()
+        self.pending_futures_lock = threading.Lock()
+        self.deferred_messages: deque[tuple[MsgHeader, int, bytes]] = deque()
         self.running = True
 
     def main(self) -> None:
         while True:
-            msg_header, job_id, data = _recv_msg(self.read_pipe)
+            msg_header, job_id, data = self._next_msg()
             if msg_header == MsgHeader.JOB:
                 self.submit(job_id, data)
             elif msg_header == MsgHeader.WAKEUP:
                 self._start_pool()
             elif msg_header == MsgHeader.QUIESCE:
-                self._quiesce()
+                if not self._quiesce():
+                    return
             else:
                 return self._shutdown()
 
-    def _quiesce(self) -> None:
-        if self.pool is not None:
-            self.pool.shutdown(wait=True)
-            self.pool = None
+    def _next_msg(self) -> tuple[MsgHeader, int, bytes]:
+        if self.deferred_messages:
+            return self.deferred_messages.popleft()
+        return _recv_msg(self.read_pipe)
+
+    def _quiesce(self) -> bool:
+        if self.pool is None:
+            return True
+        if not self._drain_futures_until_shutdown():
+            return False
+        self._shutdown_pool(terminate_workers=False)
+        return True
+
+    def _drain_futures_until_shutdown(self) -> bool:
+        while True:
+            with self.pending_futures_lock:
+                if not self.pending_futures:
+                    return True
+
+            # Preserve quiesce ordering, but allow final shutdown to preempt
+            # long-running compiler work instead of waiting behind QUIESCE.
+            readable, _, _ = select.select([self.read_pipe], [], [], 0.05)
+            if not readable:
+                continue
+
+            msg_header, job_id, data = _recv_msg(self.read_pipe)
+            if msg_header in (MsgHeader.SHUTDOWN, MsgHeader.ERROR):
+                self._shutdown()
+                return False
+            self.deferred_messages.append((msg_header, job_id, data))
 
     def _shutdown(self) -> None:
         with self.write_lock:
@@ -399,7 +444,25 @@ class SubprocMain:
             except BrokenPipeError:
                 pass  # parent process already shutdown
             self.read_pipe.close()
-        self._quiesce()
+        self._shutdown_pool(terminate_workers=True)
+
+    def _shutdown_pool(self, *, terminate_workers: bool) -> None:
+        if self.pool is None:
+            return
+
+        pool = self.pool
+        self.pool = None
+
+        if self.pool_finalizer is not None:
+            self.pool_finalizer.cancel()
+            self.pool_finalizer = None
+
+        if terminate_workers:
+            # The sidecar is exiting, so do not let ProcessPoolExecutor's
+            # interpreter finalization wait for running compiler workers.
+            _terminate_process_pool(pool)
+        else:
+            pool.shutdown(wait=True)
 
     def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
@@ -414,18 +477,21 @@ class SubprocMain:
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
-            if not self.running:
-                return
             try:
-                result = fut.result()
-            except Exception as e:
-                log.exception("Error in subprocess")
-                result = self.pickler.dumps(e)
-            assert isinstance(result, bytes)
-            with self.write_lock:
-                if self.running:
-                    _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
-            return
+                if not self.running:
+                    return
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    log.exception("Error in subprocess")
+                    result = self.pickler.dumps(e)
+                assert isinstance(result, bytes)
+                with self.write_lock:
+                    if self.running:
+                        _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
+            finally:
+                with self.pending_futures_lock:
+                    self.pending_futures.discard(fut)
 
         self._start_pool()
         assert self.pool is not None
@@ -433,6 +499,8 @@ class SubprocMain:
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
         )
+        with self.pending_futures_lock:
+            self.pending_futures.add(future)
         future.add_done_callback(callback)
 
     def _start_pool(self) -> None:
@@ -444,7 +512,7 @@ class SubprocMain:
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(
+        self.pool_finalizer = multiprocessing.util.Finalize(
             None, self.pool.shutdown, exitpriority=sys.maxsize
         )
         _warm_process_pool(self.pool, self.nprocs)
@@ -462,6 +530,34 @@ class SubprocMain:
 
 
 AnyPool = ProcessPoolExecutor | SubprocPool
+
+
+def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:
+    processes = getattr(pool, "_processes", None)
+    if processes is not None:
+        return list(processes.values())
+
+    manager_thread = getattr(pool, "_executor_manager_thread", None)
+    manager_processes = getattr(manager_thread, "processes", None)
+    if manager_processes is not None:
+        return list(manager_processes.values())
+
+    return []
+
+
+def _terminate_process_pool(pool: ProcessPoolExecutor) -> None:
+    processes = _get_process_pool_processes(pool)
+    for process in processes:
+        try:
+            if process.is_alive():
+                process.terminate()
+        except (OSError, ValueError):
+            log.warning("Ignored error terminating compile worker", exc_info=True)
+
+    try:
+        pool.shutdown(wait=True, cancel_futures=True)
+    except Exception:
+        log.warning("Ignored error shutting down compile worker pool", exc_info=True)
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
@@ -491,23 +587,6 @@ def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
 
 class TestException(RuntimeError):
     pass
-
-
-def _touch_test_file(path: str) -> None:
-    with open(path, "wb"):
-        pass
-
-
-def _wait_for_test_file_barrier(
-    started_path: str, release_path: str, timeout: float
-) -> bool:
-    _touch_test_file(started_path)
-    deadline = time.monotonic() + timeout
-    while not os.path.exists(release_path):
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.01)
-    return True
 
 
 def raise_testexc() -> Never:

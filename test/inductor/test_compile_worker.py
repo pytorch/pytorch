@@ -1,14 +1,15 @@
 # Owner(s): ["module: inductor"]
 import operator
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
 import time
 from threading import Event
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
-    _touch_test_file,
-    _wait_for_test_file_barrier,
     raise_testexc,
     SubprocException,
     SubprocPool,
@@ -115,6 +116,101 @@ class TestCompileWorker(TestCase):
             finally:
                 pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_terminates_sidecar_worker_pool(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import subprocess
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(time.sleep, 5)
+            time.sleep(0.5)
+
+            wait = pool.process.wait
+
+            def short_wait(timeout=None):
+                return wait(timeout=2)
+
+            pool.process.wait = short_wait
+
+            try:
+                pool.shutdown()
+            except subprocess.TimeoutExpired:
+                pool.process.kill()
+                pool.process.wait()
+                raise
+
+            print("shutdown returned")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_terminates_while_quiescing(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import subprocess
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(time.sleep, 5)
+            time.sleep(0.5)
+            pool.quiesce()
+
+            wait = pool.process.wait
+
+            def short_wait(timeout=None):
+                return wait(timeout=2)
+
+            pool.process.wait = short_wait
+
+            try:
+                pool.shutdown()
+            except subprocess.TimeoutExpired:
+                pool.process.kill()
+                pool.process.wait()
+                raise
+
+            print("shutdown returned")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
+
 
 class TestCompileWorkerQuiesceOrdering(TestCase):
     @skipIfWindows(msg="pass_fds not supported on Windows.")
@@ -122,22 +218,50 @@ class TestCompileWorkerQuiesceOrdering(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             started_path = os.path.join(tmpdir, "started")
             release_path = os.path.join(tmpdir, "release")
+            wait_for_barrier_code = textwrap.dedent(
+                """
+                import os
+                import sys
+                import time
+
+                started_path, release_path, timeout = sys.argv[1:]
+                open(started_path, "wb").close()
+                deadline = time.monotonic() + float(timeout)
+                while not os.path.exists(release_path):
+                    if time.monotonic() >= deadline:
+                        sys.exit(1)
+                    time.sleep(0.01)
+                """
+            )
             pool = SubprocPool(2)
             try:
                 slow = pool.submit(
-                    _wait_for_test_file_barrier,
-                    started_path,
-                    release_path,
-                    1.0,
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        wait_for_barrier_code,
+                        started_path,
+                        release_path,
+                        "1.0",
+                    ],
                 )
                 self.assertTrue(_wait_for_path(started_path, 10.0))
 
                 pool.quiesce()
                 pool.wakeup()
-                fast = pool.submit(_touch_test_file, release_path)
+                fast = pool.submit(
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; open(sys.argv[1], 'wb').close()",
+                        release_path,
+                    ],
+                )
 
-                self.assertFalse(slow.result(timeout=10.0))
-                self.assertIsNone(fast.result(timeout=10.0))
+                self.assertEqual(slow.result(timeout=10.0), 1)
+                self.assertEqual(fast.result(timeout=10.0), 0)
             finally:
                 pool.shutdown()
 
@@ -202,6 +326,11 @@ class TestTimer(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
+    def test_emulate_precision_casts_sets_libdevice_path(self):
+        """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
+        self._test_libdevice_path_with_compilation()
+
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
@@ -240,6 +369,40 @@ class TestSetTritonLibdevicePath(TestCase):
 
         eager_result = torch.pow(base, exp)
         compiled_result = torch.compile(torch.pow)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
+    def test_erf_bitwise_precision_with_emulate_precision_casts(self):
+        """Test that erf matches eager bitwise when eager numerics mode is active."""
+        import torch
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        torch._dynamo.reset()
+        values = torch.tensor(
+            [
+                -3.9194295406341553,
+                -3.9188895225524902,
+                0.0,
+                1.0,
+                3.9194295406341553,
+            ],
+            device="cuda",
+            dtype=torch.float32,
+        )
+
+        def fn(x):
+            return torch.erf(x)
+
+        eager_result = fn(values)
+        compiled_result = torch.compile(fn)(values)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
     def _test_libdevice_path_with_compilation(self):

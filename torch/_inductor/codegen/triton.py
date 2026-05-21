@@ -53,6 +53,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
@@ -280,7 +281,7 @@ class TritonSymbols:
         for var in expr_vars:
             if symbol_is_type(var, SymT.TMP):
                 cse_var = V.kernel.cse.varname_map[var.name]
-                var_shape = cse_var.shape
+                var_shape = tuple(cse_var.shape)
             elif symbol_is_type(
                 var,
                 (
@@ -1257,6 +1258,11 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        fp8_dtypes = (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        )
+
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -1267,10 +1273,6 @@ class TritonOverrides(OpOverrides):
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
-            fp8_dtypes = (
-                torch.float8_e4m3fn,
-                torch.float8_e5m2,
-            )
             # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
             assert not (
                 src_dtype in fp8_dtypes
@@ -1308,6 +1310,13 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            src_dtype is not None
+            and dtype in fp8_dtypes
+            and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
+        ):
+            return f"{x}.to(tl.float32).to({out_dtype})"
 
         return f"{x}.to({out_dtype})"
 
@@ -2061,6 +2070,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
+        if config.eager_numerics.use_pytorch_libdevice:
+            # Strict numerics should use the backend math library entry point.
+            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+            return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
     @staticmethod
@@ -3748,6 +3761,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value = f"{value}.to({triton_store_type(store_dtype)})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
+        return self.codegen_descriptor_store_line(block_ptr, indexing, value)
+
+    def codegen_descriptor_load_line(self, block_descriptor, indexing):
+        """Generate the descriptor load line. Override for backend customization."""
+        return f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+
+    def codegen_descriptor_store_line(self, block_ptr, indexing, value):
+        """Generate the descriptor store line. Override for backend customization."""
         return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
 
     def check_bounds(
@@ -3993,7 +4014,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
-                    line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+                    line = self.codegen_descriptor_load_line(block_descriptor, indexing)
                 line = indexing.codegen_broadcast_and_reshape(
                     line,
                     indexing.block_shape,
@@ -4479,7 +4500,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
             masked_value: CSEVariable | Sequence[CSEVariable] | None
-            if reduction_type == "online_softmax_reduce":
+            if reduction_type == "online_softmax_reduce" and not isinstance(
+                value, tuple
+            ):
                 # Don't generate mask value for online_softmax since we
                 # will fallback below
                 masked_value = None
@@ -4534,9 +4557,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
                 )
             elif reduction_type == "online_softmax_reduce":
-                # All data is loaded to register anyway, no need to do
-                # online softmax
-                result_var = self.prepare_softmax_twopass_fallback(dtype, value)
+                if isinstance(value, tuple):
+                    assert isinstance(masked_value, Sequence)
+                    result_sum = self.cse.newvar(dtype=dtype, shape=result_var.shape)
+                    result_var = self.online_softmax_reduce_final_reduction(
+                        self.compute,
+                        result_var,
+                        result_sum,
+                        masked_value[0],
+                        masked_value[1],
+                        dim,
+                        dtype,
+                    )
+                else:
+                    # All data is loaded to register anyway, no need to do
+                    # online softmax
+                    result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
                 _result, _dtype, _shape = final_reduction(
@@ -4615,13 +4651,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # combine
                 # Note, we pass config.use_fast_math to the JITFunction
                 # since a triton kernel can not access a config.
-                self.compute.splice(
-                    f"""
-                    {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
-                        {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
+                if isinstance(value, tuple):
+                    value_max, value_sum = value
+                    self.compute.splice(
+                        f"""
+                        {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine_with_sum(
+                            {accumulator_max}, {accumulator_sum}, {value_max}, {value_sum}, {config.use_fast_math}
+                        )
+                        """
                     )
-                    """
-                )
+                else:
+                    self.compute.splice(
+                        f"""
+                        {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
+                            {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
+                        )
+                        """
+                    )
 
                 # mask
                 self.compute.splice(
@@ -5837,6 +5883,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
+        if (rblock := self._get_native_matmul_persistent_rblock()) is not None:
+            out["native_matmul_persistent_rblock"] = rblock
         if self.add_persistent_rblock:
             out["add_persistent_rblock"] = True
         if (
@@ -6161,6 +6209,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return val
 
+    def _get_native_matmul_persistent_rblock(self) -> int | None:
+        if (
+            not self.is_native_matmul
+            or not self.persistent_reduction
+            or self.cooperative_reduction
+        ):
+            return None
+
+        rblocks = [
+            native_matmul_persistent_rblock(self._get_persistent_RBLOCK(tree.numel))
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+        return math.prod(rblocks) if rblocks else None
+
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
         try:
@@ -6168,6 +6231,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return True
         except ValueError:
             return False
+
+    @staticmethod
+    def apply_feature_required_overrides(
+        kernel_features: SIMDKernelFeatures, kernel_kwargs: dict[str, Any]
+    ) -> None:
+        # ops.sort only works with persistent reduction, and is not bandwidth
+        # bound anyway so taking the hit of non-coalesced loads is okay.
+        if kernel_features.contains_op("sort"):
+            kernel_kwargs["override_persistent_reduction"] = True
+            kernel_kwargs["override_cooperative_reduction"] = False
+        # Cannot use persistent reduction with unknown dynamic rnumel.
+        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+            assert not kernel_kwargs.get("override_persistent_reduction")
+            kernel_kwargs["override_persistent_reduction"] = False
 
     def codegen_static_numels(self, code):
         """
@@ -6978,16 +7055,7 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
-        # so taking the hit of non-coalesced loads is okay
-        if kernel_features.contains_op("sort"):
-            kernel_kwargs["override_persistent_reduction"] = True
-            kernel_kwargs["override_cooperative_reduction"] = False
-
-        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
-            # Cannot use persistent reduction with unknown dynamic rnumel
-            assert not kernel_kwargs.get("override_persistent_reduction")
-            kernel_kwargs["override_persistent_reduction"] = False
+        kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
