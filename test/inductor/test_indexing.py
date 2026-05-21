@@ -32,6 +32,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -796,6 +798,33 @@ class ExprPrinterTests(InductorTestCase):
                 if sys.platform in ["darwin", "win32"]
                 else f"std::{s}<int64_t>({{x, 2L*x, 3L*x}})",
             )
+
+    def test_print_custom_Min_Max(self):
+        from torch._inductor.codegen.mps import MetalExprPrinter
+        from torch._inductor.codegen.pallas import pallas_pexpr
+
+        x, y, z = sympy.symbols("x y z", integer=True)
+
+        self.assertEqual(
+            pallas_pexpr(Min(x, y, z)), "jnp.minimum(jnp.minimum(x, y), z)"
+        )
+        self.assertEqual(
+            pallas_pexpr(Max(x, y, z)), "jnp.maximum(jnp.maximum(x, y), z)"
+        )
+
+        metal_printer = MetalExprPrinter()
+        self.assertIn("metal::min", metal_printer.doprint(Min(x, y, z)))
+        self.assertIn("metal::max", metal_printer.doprint(Max(x, y, z)))
+
+    def test_index_propagation_uses_custom_Min_Max(self):
+        from torch._inductor.index_propagation import SymPyOps, TypedExpr
+
+        x, y = sympy.symbols("x y", integer=True)
+        x_expr = TypedExpr(x, torch.int64)
+        y_expr = TypedExpr(y, torch.int64)
+
+        self.assertIsInstance(SymPyOps.minimum(x_expr, y_expr).expr, Min)
+        self.assertIsInstance(SymPyOps.maximum(x_expr, y_expr).expr, Max)
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
