@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -13,7 +14,59 @@
 #include <fmt/format.h>
 
 namespace at::native {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& copyLib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Copy_metallib.h>
+#endif
+
 namespace mps {
+
+// MPS->MPS dtype-and/or-conj/neg-bit copy via the unary-kernel cast path. One kernel per output dtype handles every
+// input dtype the runtime switch covers; the (needs_conj, needs_neg) pair selects the functor. The rare conj+neg case
+// runs two passes (conj into dst, then neg in place) so we don't need a fourth functor.
+static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
+  const bool needs_conj = src.is_conj() != dst.is_conj();
+  const bool needs_neg = src.is_neg() != dst.is_neg();
+
+  // Strip conj/neg bits via aliases so TensorIterator reads/writes raw storage; the functor materializes the requested
+  // bit flips. alias() gives a fresh TensorImpl over the same storage so we don't mutate the caller's tensors.
+  Tensor src_view = src.alias();
+  src_view._set_conj(false);
+  src_view._set_neg(false);
+  Tensor dst_view = dst.alias();
+  dst_view._set_conj(false);
+  dst_view._set_neg(false);
+
+  auto build_iter = [&](at::Tensor& out) {
+    return at::TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .set_check_mem_overlap(false)
+        .resize_outputs(false)
+        .add_output(out)
+        .add_input(src_view)
+        .build();
+  };
+
+  if (needs_conj && needs_neg) {
+    auto iter = build_iter(dst_view);
+    copyLib.exec_unary_kernel(iter, "copy_conj");
+    // Second pass: in-place neg over dst.
+    auto neg_iter = at::TensorIteratorConfig()
+                        .check_all_same_dtype(false)
+                        .set_check_mem_overlap(false)
+                        .resize_outputs(false)
+                        .add_output(dst_view)
+                        .add_input(dst_view)
+                        .build();
+    copyLib.exec_unary_kernel(neg_iter, "copy_neg");
+    return;
+  }
+
+  const std::string_view name = needs_conj ? "copy_conj" : (needs_neg ? "copy_neg" : "copy_identity");
+  auto iter = build_iter(dst_view);
+  copyLib.exec_unary_kernel(iter, std::string(name));
+}
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
@@ -292,13 +345,13 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       auto maybeCastedSource =
           at::empty(dst_.sizes(), dst_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
       auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
+      copy_cast_kernel_mps(maybeCastedSource, src);
 
       uint64_t profile_id = getMPSProfiler().beginProfileCopy(
           maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), true);
       stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
-      copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+      copy_cast_kernel_mps(dst_, src);
     }
   }
   return dst_;
