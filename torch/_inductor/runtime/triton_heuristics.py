@@ -1427,7 +1427,9 @@ class CachingAutotuner(KernelInterface):
         ]
         if len(keep_results) == 1:
             for result in self.compile_results:
-                if result is not keep_results[0] and isinstance(result, StaticTritonCompileResult):
+                if result is not keep_results[0] and isinstance(
+                    result, StaticTritonCompileResult
+                ):
                     close = getattr(result.kernel, "close", None)
                     if close is not None:
                         close()

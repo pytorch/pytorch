@@ -748,7 +748,10 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             release_static_launchers = getattr(
                 kernel, "_release_static_launchers_except", None
             )
-            if release_benchmark_artifacts is None and release_static_launchers is not None:
+            if (
+                release_benchmark_artifacts is None
+                and release_static_launchers is not None
+            ):
                 release_static_launchers(None)
             elif release_benchmark_artifacts is None:
                 for launcher in getattr(kernel, "launchers", ()) or ():
@@ -756,7 +759,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                     if close is not None:
                         close()
                 for compile_result in getattr(kernel, "compile_results", ()) or ():
-                    close = getattr(getattr(compile_result, "kernel", None), "close", None)
+                    close = getattr(
+                        getattr(compile_result, "kernel", None), "close", None
+                    )
                     if close is not None:
                         close()
 
