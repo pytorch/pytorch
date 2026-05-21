@@ -14,6 +14,7 @@ class that handles its unique behaviors while integrating with Dynamo's
 variable tracking system.
 """
 
+import builtins
 import collections
 import operator
 import sys
@@ -1592,6 +1593,34 @@ class TupleVariable(BaseListVariable):
         )
 
 
+class BytearrayVariable(BaseListVariable):
+    # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c#L2826
+    _cpython_type = bytearray
+
+    def python_type(self) -> type[bytearray]:
+        return bytearray
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
+    def debug_repr(self) -> str:
+        return self.debug_repr_helper("bytearray(b'", "')")
+
+    def as_python_constant(self) -> bytearray:
+        return bytearray(x.as_python_constant() for x in self.items)
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return BytearrayIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
+        )
+        codegen.foreach(self.items)
+        codegen.append_output(create_build_tuple(len(self.items)))
+        codegen.extend_output(create_call_function(1, False))
+
+
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
@@ -1997,6 +2026,7 @@ class ListIteratorVariable(IteratorVariable):
         "index",
         *IteratorVariable._nonvar_fields,
     }
+    reduce_builtin_name = "iter"
 
     def __init__(
         self, items: list[VariableTracker], index: int = 0, **kwargs: Any
@@ -2055,6 +2085,80 @@ class ListIteratorVariable(IteratorVariable):
     ) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
+    def reduce_builtin_var(self, tx: "InstructionTranslator") -> VariableTracker:
+        builtin_var = None
+        builtin_name = self.reduce_builtin_name
+        if builtins.__dict__ in tx.output.side_effects:
+            builtins_dict_var = tx.output.side_effects[builtins.__dict__]
+            if isinstance(builtins_dict_var, variables.ConstDictVariable):
+                lookup_key = ConstantVariable.create(builtin_name)
+                lookup_hash = hash(builtin_name)
+                for dict_key, dict_value in list(builtins_dict_var.items.items()):
+                    if dict_key.vt.is_python_equal(lookup_key):
+                        builtin_var = dict_value
+                        break
+                    if getattr(dict_key, "_hash", None) != lookup_hash:
+                        continue
+                    eq_result = dict_key.vt.call_method(tx, "__eq__", [lookup_key], {})
+                    if (
+                        eq_result.is_python_constant()
+                        and eq_result.as_python_constant()
+                    ):
+                        builtin_var = dict_value
+                        break
+        if builtin_var is not None:
+            return builtin_var
+        try:
+            return VariableTracker.build(tx, builtins.__dict__[builtin_name])
+        except (AttributeError, KeyError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        iter_var = self.reduce_builtin_var(tx)
+        if self.is_exhausted or self.index >= len(self.items):
+            return TupleVariable(
+                [
+                    iter_var,
+                    TupleVariable(
+                        [self.reduce_exhausted_arg()],
+                        mutation_type=ValueMutationNew(),
+                    ),
+                ],
+                mutation_type=ValueMutationNew(),
+            )
+        return TupleVariable(
+            [
+                iter_var,
+                TupleVariable(
+                    [self.reduce_arg()],
+                    mutation_type=ValueMutationNew(),
+                ),
+                ConstantVariable.create(self.index),
+            ],
+            mutation_type=ValueMutationNew(),
+        )
+
+    def reduce_arg(self) -> VariableTracker:
+        return ListVariable(list(self.items), mutation_type=ValueMutationNew())
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return ListVariable([], mutation_type=ValueMutationNew())
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
         codegen.add_push_null(
@@ -2073,6 +2177,157 @@ class ListIteratorVariable(IteratorVariable):
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+    def reduce_arg(self) -> VariableTracker:
+        return TupleVariable(list(self.items), mutation_type=ValueMutationNew())
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return TupleVariable([], mutation_type=ValueMutationNew())
+
+
+class StringIteratorVariable(ListIteratorVariable):
+    # PyUnicodeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L16019
+    _cpython_type = type(iter(""))
+
+    def python_type(self) -> type:
+        return type(iter(""))
+
+    def reduce_arg(self) -> VariableTracker:
+        return ConstantVariable.create(
+            "".join(item.as_python_constant() for item in self.items)
+        )
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        return ConstantVariable.create("")
+
+
+class BytesIteratorVariable(TupleIteratorVariable):
+    # PyBytesIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3263
+    _cpython_type = type(iter(b""))
+
+    def python_type(self) -> type:
+        return type(iter(b""))
+
+    def reduce_arg(self) -> VariableTracker:
+        return ConstantVariable.create(
+            bytes(item.as_python_constant() for item in self.items)
+        )
+
+
+class GenericAliasIteratorVariable(TupleIteratorVariable):
+    # Py_GenericAliasIterType: https://github.com/python/cpython/blob/v3.13.0/Objects/genericaliasobject.c
+    _cpython_type = type(iter(tuple[int]))
+
+    _nonvar_fields = {
+        "generic_alias",
+        *TupleIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        generic_alias: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.generic_alias = generic_alias
+
+    def python_type(self) -> type:
+        return type(iter(tuple[int]))
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        iter_var = self.reduce_builtin_var(tx)
+        if self.is_exhausted or self.index >= len(self.items):
+            arg = self.reduce_exhausted_arg()
+        else:
+            arg = self.generic_alias
+        return TupleVariable(
+            [
+                iter_var,
+                TupleVariable([arg], mutation_type=ValueMutationNew()),
+            ],
+            mutation_type=ValueMutationNew(),
+        )
+
+
+class ReversedListIteratorVariable(ListIteratorVariable):
+    # PyListRevIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L4091
+    _cpython_type = type(reversed([]))
+    reduce_builtin_name = "reversed"
+
+    _nonvar_fields = {
+        "original_sequence",
+        "exhausted_sequence",
+        *ListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        original_sequence: VariableTracker | None = None,
+        exhausted_sequence: VariableTracker | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.original_sequence = original_sequence
+        self.exhausted_sequence = exhausted_sequence
+
+    def python_type(self) -> type:
+        return type(reversed([]))
+
+    def reduce_arg(self) -> VariableTracker:
+        if self.original_sequence is not None:
+            return self.original_sequence
+        return ListVariable(
+            list(reversed(self.items)), mutation_type=ValueMutationNew()
+        )
+
+    def reduce_exhausted_arg(self) -> VariableTracker:
+        if self.exhausted_sequence is not None:
+            return self.exhausted_sequence
+        return ListVariable([], mutation_type=ValueMutationNew())
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name != "__reduce__":
+            return super().call_method(tx, name, args, kwargs)
+        result = super().call_method(tx, name, args, kwargs)
+        if not isinstance(result, TupleVariable):
+            raise AssertionError("reversed iterator __reduce__ must return a tuple")
+        if len(result.items) == 3:
+            result.items[2] = ConstantVariable.create(len(self.items) - self.index - 1)
+        return result
+
+
+class BytearrayIteratorVariable(TupleIteratorVariable):
+    # PyByteArrayIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c#L2921
+    _cpython_type = type(iter(bytearray()))
+
+    def python_type(self) -> type:
+        return type(iter(bytearray()))
+
+    def reduce_arg(self) -> VariableTracker:
+        return BytearrayVariable(list(self.items), mutation_type=ValueMutationNew())
 
 
 class RangeIteratorVariable(IteratorVariable):

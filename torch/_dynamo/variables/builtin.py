@@ -100,9 +100,11 @@ from .dicts import (
 from .hashable import HashableTracker
 from .lists import (
     BaseListVariable,
+    BytearrayVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
+    ReversedListIteratorVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -2271,6 +2273,53 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     call_tuple = _call_tuple_list
 
+    def call_bytes(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if kwargs:
+            return None
+        if len(args) > 3:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"bytes expected at most 3 arguments, got {len(args)}"],
+            )
+        if all(arg.is_python_constant() for arg in args):
+            try:
+                result = bytes(*(arg.as_python_constant() for arg in args))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return ConstantVariable.create(result)
+        return None
+
+    def call_bytearray(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if kwargs:
+            return None
+        if len(args) > 3:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"bytearray expected at most 3 arguments, got {len(args)}"],
+            )
+        if all(arg.is_python_constant() for arg in args):
+            try:
+                result = bytearray(*(arg.as_python_constant() for arg in args))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return BytearrayVariable(
+                [ConstantVariable.create(x) for x in result],
+                mutation_type=ValueMutationNew(),
+            )
+        return None
+
     def call_callable(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
@@ -2724,8 +2773,20 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if obj.has_unpack_var_sequence(tx):
             items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+            try:
+                obj_type = obj.python_type()
+            except NotImplementedError:
+                obj_type = None
+            exhausted_sequence: VariableTracker
+            if obj_type is list:
+                exhausted_sequence = ListVariable([], mutation_type=ValueMutationNew())
+            else:
+                exhausted_sequence = TupleVariable([], mutation_type=ValueMutationNew())
+            return ReversedListIteratorVariable(
+                items,
+                original_sequence=obj,
+                exhausted_sequence=exhausted_sequence,
+                mutation_type=ValueMutationNew(),
             )
         return None
 

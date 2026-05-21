@@ -117,6 +117,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    GenericAliasIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
