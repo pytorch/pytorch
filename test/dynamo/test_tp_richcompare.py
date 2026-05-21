@@ -1507,6 +1507,64 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
         self.assertEqual(result, expected)
 
+    # =====================================================================
+    # Tensor vs non-proxyable types
+    # =====================================================================
+
+    def test_tensor_eq_user_defined_object(self):
+        """tensor == UserDefinedObject() should return False (identity fallback)."""
+
+        class MyObj:
+            pass
+
+        def fn(t):
+            return t == MyObj()
+
+        t = torch.randn(3)
+        expected = fn(t)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, expected)
+
+    def test_tensor_ne_user_defined_object(self):
+        class MyObj:
+            pass
+
+        def fn(t):
+            return t != MyObj()
+
+        t = torch.randn(3)
+        expected = fn(t)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, expected)
+
+    # =====================================================================
+    # DispatchKeySet comparison
+    # =====================================================================
+
+    def test_dispatch_key_set_eq(self):
+        from torch._C import DispatchKey, DispatchKeySet
+
+        def fn(a, b):
+            return a == b
+
+        ks1 = DispatchKeySet(DispatchKey.CPU)
+        ks2 = DispatchKeySet(DispatchKey.CPU)
+        expected = fn(ks1, ks2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
+        self.assertEqual(result, expected)
+
+    def test_dispatch_key_set_ne(self):
+        from torch._C import DispatchKey, DispatchKeySet
+
+        def fn(a, b):
+            return a != b
+
+        ks1 = DispatchKeySet(DispatchKey.CPU)
+        ks2 = DispatchKeySet(DispatchKey.CUDA)
+        expected = fn(ks1, ks2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

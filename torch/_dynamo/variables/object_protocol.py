@@ -1051,8 +1051,7 @@ def slot_wrapper_imul(
 # ---------------------------------------------------------------------------
 
 
-def is_richcompare_not_implemented(result: VariableTracker) -> bool:
-    return result.is_constant_match(NotImplemented)
+is_richcompare_not_implemented = is_nb_not_implemented
 
 
 def object_richcompare(
@@ -1079,7 +1078,7 @@ def object_richcompare(
         # object_richcompare, so eq_result is always True or NotImplemented.
         eq_result = self.richcompare_impl(tx, other, "__eq__")
         if is_richcompare_not_implemented(eq_result):
-            return ConstantVariable.create(NotImplemented)
+            return eq_result
         return ConstantVariable.create(not eq_result.as_python_constant())
     else:
         return ConstantVariable.create(NotImplemented)
@@ -1125,8 +1124,8 @@ _OP_STR: dict[str, str] = {
 
 def generic_richcompare(
     tx: "InstructionTranslator",
-    lhs: VariableTracker,
-    rhs: VariableTracker,
+    v: VariableTracker,
+    w: VariableTracker,
     op: str,
 ) -> VariableTracker:
     """Dynamo's do_richcompare.
@@ -1141,49 +1140,49 @@ def generic_richcompare(
     reflected = _REFLECTED_OP[op]
 
     try:
-        lhs_type = lhs.python_type()
+        v_type = v.python_type()
     except NotImplementedError:
-        lhs_type = None
+        v_type = None
     try:
-        rhs_type = rhs.python_type()
+        w_type = w.python_type()
     except NotImplementedError:
-        rhs_type = None
+        w_type = None
 
     checked_reverse = False
 
     # Step 1: subclass priority
     if (
-        lhs_type is not None
-        and rhs_type is not None
-        and lhs_type is not rhs_type
-        and issubclass(rhs_type, lhs_type)
+        v_type is not None
+        and w_type is not None
+        and v_type is not w_type
+        and issubclass(w_type, v_type)
     ):
         checked_reverse = True
-        result = rhs.richcompare_impl(tx, lhs, reflected)
+        result = w.richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
     # Step 2: forward
-    result = lhs.richcompare_impl(tx, rhs, op)
+    result = v.richcompare_impl(tx, w, op)
     if not is_richcompare_not_implemented(result):
         return result
 
     # Step 3: reflected (if not already tried)
     if not checked_reverse:
-        result = rhs.richcompare_impl(tx, lhs, reflected)
+        result = w.richcompare_impl(tx, v, reflected)
         if not is_richcompare_not_implemented(result):
             return result
 
     # Step 4: fallback
     if op in ("__eq__", "__ne__"):
-        identity = vt_identity_compare(lhs, rhs)
+        identity = vt_identity_compare(v, w)
         if identity is not None:
             if op == "__ne__":
                 return ConstantVariable.create(not identity.as_python_constant())
             return identity
         unimplemented(
             gb_type="richcompare identity fallback undetermined",
-            context=f"generic_richcompare({lhs}, {rhs}, {op})",
+            context=f"generic_richcompare({v}, {w}, {op})",
             explanation="Cannot determine object identity for comparison fallback.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
@@ -1191,30 +1190,30 @@ def generic_richcompare(
         raise_type_error(
             tx,
             f"'{_OP_STR[op]}' not supported between instances of "
-            f"'{lhs.python_type_name()}' and '{rhs.python_type_name()}'",
+            f"'{v.python_type_name()}' and '{w.python_type_name()}'",
         )
 
 
 def generic_richcompare_bool(
     tx: "InstructionTranslator",
-    lhs: VariableTracker,
-    rhs: VariableTracker,
+    v: VariableTracker,
+    w: VariableTracker,
     op: str,
 ) -> VariableTracker:
     """Dynamo's PyObject_RichCompareBool for eq/ne.
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1046-L1080
 
-    Like generic_richcompare, but with an identity shortcut first: if lhs
-    and rhs are the same Python object, eq is True and ne is False. This
+    Like generic_richcompare, but with an identity shortcut first: if v
+    and w are the same Python object, eq is True and ne is False. This
     matters for NaN (nan is nan -> True, but nan == nan -> False). Used by
     container comparisons (list_richcompare, tuplerichcompare) which call
     PyObject_RichCompareBool per element in CPython.
     """
-    identity = vt_identity_compare(lhs, rhs)
+    identity = vt_identity_compare(v, w)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
-    return generic_richcompare(tx, lhs, rhs, op)
+    return generic_richcompare(tx, v, w, op)
 
 
 def generic_hash_impl(

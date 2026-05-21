@@ -325,12 +325,15 @@ class BaseListVariable(VariableTracker):
         from .tensor import SymNodeVariable
 
         try:
-            self_base = list if issubclass(self.python_type(), list) else tuple
-            other_base = list if issubclass(other.python_type(), list) else tuple
-            if self_base is not other_base:
-                return ConstantVariable.create(NotImplemented)
+            other_type = other.python_type()
         except NotImplementedError:
             return ConstantVariable.create(NotImplemented)
+        if issubclass(self.python_type(), list):
+            if not issubclass(other_type, list):
+                return ConstantVariable.create(NotImplemented)
+        else:
+            if not issubclass(other_type, tuple):
+                return ConstantVariable.create(NotImplemented)
 
         left = self.items
         right = other.items  # pyrefly: ignore[missing-attribute]
