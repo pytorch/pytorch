@@ -3,6 +3,14 @@ USER_ERROR = [
     "Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. "
     'You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`. '
 ]
+CUSTOM_OP_FAKE_TENSOR_SUBCLASS_DATA_PTR = [
+    "A Tensor subclass argument reached this custom op during fake-value propagation. "
+    "In this case, the subclass's `__torch_dispatch__` may run the custom op implementation "
+    "instead of the registered fake impl.",
+    "Handle FakeTensor-wrapped subclass inputs in the custom op implementation, or change "
+    "the subclass `__torch_dispatch__` to unwrap to operations that have fake implementations.",
+    *USER_ERROR,
+]
 DYNAMO_BUG = [
     "This is likely to be a Dynamo bug. Please report an issue to PyTorch.",
 ]
