@@ -110,7 +110,8 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
 Tensor roll(
     const Tensor& self,
     IntArrayRef shifts,
-    IntArrayRef dims) { // Used by CPU and MPS dispatch.
+    IntArrayRef dims) { // CPU dispatch. MPS has its own native kernel; CUDA has
+                        // roll_cuda.
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }

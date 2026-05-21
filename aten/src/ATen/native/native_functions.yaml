@@ -6393,8 +6393,9 @@
 - func: roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
-    CPU, MPS: roll
+    CPU: roll
     CUDA: roll_cuda
+    MPS: roll_mps
   autogen: roll.out
 
 # default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args

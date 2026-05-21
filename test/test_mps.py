@@ -7566,6 +7566,72 @@ class TestMPS(TestCaseMPS):
         # none of dims that needs to be flipped
         helper((1, 3), [0])
 
+    def test_roll(self):
+        def check(shape, shifts, dims, dtype=torch.float32):
+            if dtype == torch.bool:
+                cpu_x = torch.randint(0, 2, shape, dtype=dtype)
+            elif dtype.is_complex:
+                real = torch.randn(shape)
+                imag = torch.randn(shape)
+                cpu_x = torch.complex(real, imag).to(dtype)
+            elif dtype.is_floating_point:
+                cpu_x = torch.randn(shape, dtype=dtype)
+            elif dtype == torch.uint8:
+                cpu_x = torch.randint(0, 200, shape, dtype=dtype)
+            else:
+                cpu_x = torch.randint(-50, 50, shape, dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+            cpu_out = torch.roll(cpu_x, shifts=shifts, dims=dims)
+            mps_out = torch.roll(x, shifts=shifts, dims=dims)
+            self.assertEqual(mps_out, cpu_out)
+
+        # single-dim shifts (positive, negative, zero, larger than size)
+        for shift in [0, 1, 3, -1, -5, 100, 1920 * 2]:
+            check((1080, 1920), shift, -1)
+            check((1080, 1920), shift, 0)
+
+        # multi-dim
+        check((3, 4, 5), [1, 2], [0, 2])
+        check((3, 4, 5), [-1, 5, 2], [0, 1, 2])
+
+        # empty dims, single shift -> flatten path
+        check((2, 3, 4), 5, [])
+        check((2, 3, 4), -7, [])
+
+        # repeated dims (compose modulo size)
+        check((4, 5), [1, 2], [1, 1])
+        check((4, 5), [3, -2, 1], [0, 0, 0])
+
+        # negative dim index
+        check((3, 5, 7), 2, -2)
+
+        # contiguous and non-contiguous inputs
+        cpu_x = torch.arange(60).view(3, 4, 5).float()
+        cpu_t = cpu_x.transpose(0, 2)  # non-contiguous view
+        mps_t = cpu_x.to('mps').transpose(0, 2)
+        self.assertFalse(cpu_t.is_contiguous())
+        self.assertEqual(torch.roll(mps_t, shifts=1, dims=0),
+                         torch.roll(cpu_t, shifts=1, dims=0))
+
+        # every dtype the Metal kernel registers
+        for dt in [torch.float32, torch.float16, torch.bfloat16,
+                   torch.int64, torch.int32, torch.int16, torch.int8,
+                   torch.uint8, torch.bool,
+                   torch.complex64, torch.complex32]:
+            check((7, 11), 3, 1, dtype=dt)
+
+        # empty tensor
+        cpu_x = torch.zeros((0, 4), dtype=torch.float32)
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.roll(mps_x, shifts=1, dims=0),
+                         torch.roll(cpu_x, shifts=1, dims=0))
+
+        # 0-d scalar via flatten path (single shift, no dims)
+        cpu_x = torch.tensor(5.0)
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.roll(mps_x, shifts=0),
+                         torch.roll(cpu_x, shifts=0))
+
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):
