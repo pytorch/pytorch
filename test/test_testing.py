@@ -457,8 +457,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
-            else:  # device_type ='cuda'
-                dtypes = op.dtypesIfCUDA
+            else:
+                dtypes = op.supported_dtypes(self.device_type)
 
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
@@ -990,7 +990,9 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestAssertCloseMultiDevice, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 class TestAssertCloseErrorMessage(TestCase):
