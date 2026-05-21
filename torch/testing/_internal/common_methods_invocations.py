@@ -23175,9 +23175,6 @@ op_db: list[OpInfo] = [
         ),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
-        skips=(
-            # Not implemented
-            ),
     ),
     OpInfo(
         'scatter_reduce',
