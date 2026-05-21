@@ -1258,7 +1258,8 @@ class CachingAutotuner(KernelInterface):
         stream,
         benchmark_run=False,
         **kwargs,
-    ):  # type:ignore[override]
+    ):
+        # type:ignore[override]
         if hasattr(triton, "set_allocator"):
 
             def alloc_fn(size: int, align: int, stream: Optional[int]):

@@ -1232,7 +1232,7 @@ class triton:
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = True
+    cudagraph_trees = False # Shriraj
 
     # Should we skip cudagraphing graphs with dynamic shape inputs
     # If False, we will re-record a graph for each unique set of shape inputs
@@ -2001,6 +2001,15 @@ class test_configs:
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
+
+# Shriraj force realize everything flag
+realize_all: bool = False  # default OFF
+
+# Shriraj one kernel per node
+one_kernel_per_node: bool = False # default OFF
+
+# Shriraj disable scheduler fusions
+disable_scheduler_fusions: bool = False
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

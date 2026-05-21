@@ -5419,8 +5419,10 @@ class Scheduler:
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
                     )
-
-            self.enter_context(node)
+            if not config.one_kernel_per_node:
+                self.enter_context(node)
+            else:
+                self.flush()
 
             if device := node.get_device():
                 if (

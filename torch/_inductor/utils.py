@@ -556,7 +556,10 @@ def timed(
     times: int = 1,
     device: str = "cuda",
 ) -> float:
+    # Original Version
+    '''
     synchronize(device)
+
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
@@ -566,6 +569,26 @@ def timed(
     # GC the result after timing
     assert result is not None  # type: ignore[possibly-undefined]
     return t1 - t0
+    ''' 
+    # Shriraj version
+    #synchronize(device)
+    torch.manual_seed(1337)
+    timed_results = []
+    # t0 = time.perf_counter()
+    for _ in range(times):
+        #torch.compiler.cudagraph_mark_step_begin()
+        #torch.compiler.cudagraph_mark_step_begin()
+        synchronize(device)
+        t0 = time.perf_counter()
+        #with torch.profiler.profile() as prof:
+        result = model(*example_inputs)
+        synchronize(device)
+        t1 = time.perf_counter()
+        timed_results.append(t1-t0)
+        #print(prof.key_averages().table(sort_by="self_cuda_time_total"))
+    # GC the result after timing
+    assert result is not None  # type: ignore[possibly-undefined]
+    return timed_results
 
 
 def print_performance(

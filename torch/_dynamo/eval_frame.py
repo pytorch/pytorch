@@ -1302,6 +1302,7 @@ def check_for_incompatible_configs() -> None:
     )
 
 
+
 def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator]:
     def rebuild_ctx() -> Union[OptimizeContext, _NullDecorator]:
         ca_kwargs_override = config.compiled_autograd_kwargs_override
@@ -1313,9 +1314,12 @@ def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator
             )
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
-
+    #import time
+    #t0 = time.perf_counter()
     return _optimize(rebuild_ctx, *args, **kwargs)
-
+    #t1 = time.perf_counter()
+    #print(f"time taken: {t1-t0} # _dynamo/eval_frame.py")
+    #return opt
 
 def _optimize(
     rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],

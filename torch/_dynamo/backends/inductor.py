@@ -27,5 +27,5 @@ def inductor(*args: Any, **kwargs: Any) -> Any:
         maybe_warm_pool()
 
         from torch._inductor.compile_fx import compile_fx
-
+    
     return compile_fx(*args, **kwargs)

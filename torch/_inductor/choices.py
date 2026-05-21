@@ -447,6 +447,9 @@ class InductorChoices:
         node2: BaseSchedulerNode,
         shared_data_score: int,
     ) -> bool:
+        import traceback
+        if config.disable_scheduler_fusions:
+            return False
         """
         Heuristics to prevent fusion applied to both horizontal and vertical fusions.  Heuristics here should not
         be needed for correctness and tweaking them may yield additional performance.

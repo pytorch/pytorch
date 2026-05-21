@@ -2384,8 +2384,14 @@ class _TorchCompileInductorWrapper:
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
-
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        import time
+        t0 = time.perf_counter()
+        cf = compile_fx(model_, inputs_, config_patches=self.config)
+        t1 = time.perf_counter()
+        #with open("/scratch/s493v766/workbench/pt/inductor_time_dis0.txt", "a") as f:
+            #f.write(f"{(t1 - t0) * 1000}\n")
+        #print(f"Time taken by the inductor {t1-t0} # torch/__init__.py")
+        return cf
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2633,14 +2639,19 @@ def compile(
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
-
-    return torch._dynamo.optimize(
+    
+    import time
+    t0 = time.perf_counter()
+    opt = torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
     )(model)  # type: ignore[return-value]
+    t1 = time.perf_counter()
+    print(f"torch.compile time: {t1-t0}")
+    return opt
 
 
 def _register_device_module(device_type, module):
