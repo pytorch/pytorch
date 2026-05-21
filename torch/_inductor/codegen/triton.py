@@ -1153,9 +1153,6 @@ def needs_upcast_to_float32(arg: Any) -> bool:
 
 
 class TritonCSEVariable(CSEVariable):
-    supports_runtime_triton_dtype_assert = True
-    supports_runtime_triton_shape_assert = True
-
     def __init__(
         self,
         name: str,
