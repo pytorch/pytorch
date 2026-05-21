@@ -4522,6 +4522,36 @@ class TestMPS(TestCaseMPS):
         big_out = torch.ones(10, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
 
+        # Correctness regression for highly-skewed inputs where most elements
+        # share a single bin. This pattern stresses the atomic accumulator's
+        # contention path; this test asserts MPS still matches CPU exactly on
+        # a representative connected-component-label shape.
+        skewed = torch.zeros(1080 * 1920, dtype=torch.int64, device=device)
+        skewed[100_000:157_600] = 193_501
+        skewed_cpu = skewed.cpu()
+        self.assertEqual(skewed.bincount(minlength=skewed.numel() + 1).cpu(),
+                         skewed_cpu.bincount(minlength=skewed_cpu.numel() + 1))
+
+        # Output-dtype regression for weighted bincount. Notably bfloat16
+        # weights must produce a bfloat16 output (and not be silently widened
+        # or truncated, which was the case in an earlier iteration of this op).
+        indices_dt = torch.tensor([0, 1, 1, 1, 4], dtype=torch.int32, device=device)
+        for wdt, expected in [
+            (torch.bfloat16, torch.bfloat16),
+            (torch.float16, torch.float16),
+            (torch.float32, torch.float32),
+            (torch.int32, torch.int32),
+            (torch.int8, torch.int32),   # legacy MPS contract: narrow ints -> int32
+            (torch.int16, torch.int32),
+            (torch.int64, torch.int32),
+        ]:
+            w = (torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], device=device).to(wdt)
+                 if wdt.is_floating_point else
+                 torch.tensor([1, 2, 3, 4, 5], device=device, dtype=wdt))
+            out = indices_dt.bincount(weights=w)
+            self.assertEqual(out.dtype, expected,
+                             msg=f"bincount(weights dtype={wdt}) returned {out.dtype}, expected {expected}")
+
     def test_bincount(self):
         device = "mps"
         input_size = (5000,)
