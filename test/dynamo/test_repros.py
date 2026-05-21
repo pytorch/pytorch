@@ -7790,6 +7790,31 @@ SavedForBackwardsAOTOutput(idx=5)""",
         expected = torch.nn.functional.one_hot(a, 3)
         self.assertEqual(one_hot(a, 3), expected)
 
+    def test_issue183886_istft_length_pads_in_fake_tensor(self):
+        n_fft = 64
+        hop_length = 32
+        length = 352
+
+        def fn(spec, window):
+            return torch.istft(
+                spec,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                window=window,
+                length=length,
+            )
+
+        spec = torch.view_as_complex(torch.randn(3, n_fft // 2 + 1, 10, 2))
+        window = torch.hann_window(n_fft)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            expected = fn(spec, window)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(spec, window)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.shape, (3, length))
+
     @unittest.expectedFailure
     def test_method_dunder_dict_setitem(self):
         # Reproducer for: getattr(obj, method_name).__dict__['key'] = value

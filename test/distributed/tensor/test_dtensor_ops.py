@@ -1143,6 +1143,14 @@ class TestCompiledDTensorOps(TestDTensorOps):
         """
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
+        def is_accepted_linalg_error(exc):
+            return isinstance(exc, torch._C._LinAlgError) or (
+                # lu_factor intentionally raises a plain RuntimeError from
+                # _linalg_check_errors for singular factors.
+                isinstance(exc, RuntimeError)
+                and str(exc).startswith("torch.linalg.lu_factor:")
+            )
+
         for dtensor_args, dtensor_kwargs in to_dtensor:
             if not to_dtensor.successful():
                 continue
@@ -1155,16 +1163,20 @@ class TestCompiledDTensorOps(TestDTensorOps):
 
             try:
                 compiled_func(*dtensor_args, **dtensor_kwargs)
-            except torch._C._LinAlgError as compiled_exc:
+            except (torch._C._LinAlgError, RuntimeError) as compiled_exc:
+                if not is_accepted_linalg_error(compiled_exc):
+                    raise
                 try:
                     func(*dtensor_args, **dtensor_kwargs)
-                except torch._C._LinAlgError as eager_exc:
+                except (torch._C._LinAlgError, RuntimeError) as eager_exc:
                     # Some valid OpInfo samples can raise for particular DTensor
                     # placements. This test is a compile smoke, so accept
                     # runtime errors that eager DTensor raises in the same way.
-                    if type(compiled_exc) is type(eager_exc) and str(
-                        compiled_exc
-                    ) == str(eager_exc):
+                    if (
+                        is_accepted_linalg_error(eager_exc)
+                        and type(compiled_exc) is type(eager_exc)
+                        and str(compiled_exc) == str(eager_exc)
+                    ):
                         continue
                 raise
 
