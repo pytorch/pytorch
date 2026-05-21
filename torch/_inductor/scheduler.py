@@ -3052,6 +3052,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         self.only_tt_stores = self.node.formal_accesses.only_tt_stores
         self.formal_reads = self.node.formal_accesses.read_writes.reads
         self.formal_writes = self.node.formal_accesses.read_writes.writes
+        self.output_tile = self.node.output_tile
 
         numel = math.prod(node.mutable_args[0].shape)
         rnumel = 1
@@ -3199,18 +3200,46 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.epilogue.node, ir.ComputedBuffer)
+        assert isinstance(self.kernel_node.node, ir.UserDefinedTritonKernel)
         from torch._inductor.codegen.simd import SIMDScheduling
         from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
         from torch._inductor.codegen.triton import FusedUserTritonKernel
 
         ir_node = self.kernel_node.node
         numel = math.prod(ir_node.mutable_args[0].shape)
-
         # Epilogue fusion is gated on pointwise operations, thus 1D tiling, with no reduction.
         tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
+
+        # TODO: What do we actually need from features here?
         kernel_features = SIMDKernelFeatures([self.epilogue], numel)
 
-        fused_user_kernel = FusedUserTritonKernel(tiling, kernel_features, self)
+        formal_out_arg_name = next(iter(self.kernel_node.formal_writes)).name
+
+        block_aliases = None
+        pid_cache = {}
+        if ir_node.output_tile:
+
+            def _construct_block_aliases(mapping: dict[str, str]):
+                expected_keys = {"x", "y", "z"}
+                block_aliases = {}
+                for prefix, alias in mapping.items():
+                    if prefix not in expected_keys:
+                        raise
+                    block_aliases[f"{prefix.upper()}BLOCK"] = alias
+
+                return block_aliases
+
+            block_aliases = _construct_block_aliases(ir_node.output_tile)
+            pid_cache = {}
+
+        fused_user_kernel = FusedUserTritonKernel(
+            tiling,
+            kernel_features,
+            self,
+            formal_out_arg_name,
+            block_aliases=block_aliases,
+            pid_cache=pid_cache,
+        )
         new_kernel_src = fused_user_kernel.codegen()
 
         return self.kernel_node.node.codegen_with_epilogue_fusion(
@@ -7521,6 +7550,28 @@ class Scheduler:
 
         if isinstance(node1, UserTritonSchedulerNode):
             return node1.can_fuse_with(node2)
+
+            # # TODO(JJVRAW): Gate this with whether we have block info & pid mapping.
+            #
+            # # The epilogue can only read from the output buffer.
+            # # Any other tensor/s would require additional load expressions.
+            # if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+            #     why("node2 reads from buffers other than the mutated output")
+            #     return False
+
+            # # The epilogue may depend on expressions which may not available in the user triton kernel
+            # # (e.g. indexing exprs used not in a load)
+            # # If the user has provided the dimensions of the output_tile, we may be able to attempt fusion.
+            # if node1.output_tile:
+            #     # TODO: is_compatible
+            #     pass
+            # else:
+            #     node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+            #     for symbol in node2_inner_fn_free_symbols:
+            #         usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+            #         if any(usage != "load" for usage in usages):
+            #             why("node2 requires expressions not available in node1")
+            #             return False
 
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))

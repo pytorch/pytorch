@@ -528,7 +528,9 @@ def capture_triton(triton_kernel: Callable, /) -> Any:
 
 
 @exposed_in("torch.library")
-def wrap_triton(triton_kernel: Callable, /) -> Any:
+def wrap_triton(
+    triton_kernel: Callable, /, output_tile: dict[str, str] | None = None
+) -> Any:
     """Allows capture of a triton kernel into a graph via make_fx or
     non-strict ``torch.export``.
 
@@ -598,7 +600,7 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     if isinstance(triton_kernel, JITFunction):
         if not is_wrap_triton_enabled():
             return triton_kernel
-        return TraceableTritonKernelWrapper(triton_kernel, None, None)
+        return TraceableTritonKernelWrapper(triton_kernel, None, None, output_tile=output_tile)
 
     if isinstance(triton_kernel, Autotuner):
         # TRITON_INTERPRET=1 can make @triton.autotune wrap an

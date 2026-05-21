@@ -8091,6 +8091,7 @@ class UserDefinedTritonKernel(ExternKernel):
         grid: Any,
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
+        output_tile: dict[str, str] | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8120,6 +8121,7 @@ class UserDefinedTritonKernel(ExternKernel):
         )
         self.kernel_idx = kernel_idx
         self.grid = grid
+        self.output_tile = output_tile
 
         kernel, configs, _, _ = self.get_kernel_and_metadata()
 
