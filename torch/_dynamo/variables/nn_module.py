@@ -26,7 +26,7 @@ import inspect
 import itertools
 import re
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, TYPE_CHECKING
 
@@ -114,14 +114,54 @@ def initialize_lazy_module(
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
         fake_args = [convert_to_fake(arg) for arg in proxy_args]
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
+
+        # Context manager to convert SymInt to concrete int during lazy module init
+        @contextmanager
+        def _materialize_symints_for_lazy_init() -> Generator[None, None, None]:
+            """
+            During lazy module initialization with dynamic=True, modules receive fake
+            tensors with SymInt dimensions. When they extract dimensions (e.g.,
+            input.shape[1]) and pass them to torch.empty() for parameter materialization,
+            the C++ backend rejects SymInts. This patches torch.empty to auto-convert
+            SymInts to concrete ints during initialization.
+            """
+            from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+            original_empty = torch.empty
+
+            def _wrapped_empty(*args: Any, **kwargs: Any) -> torch.Tensor:
+                """Convert SymInt arguments to concrete ints before calling torch.empty."""
+
+                def _convert(val: Any) -> Any:
+                    if isinstance(val, torch.SymInt):
+                        return optimization_hint(val)
+                    elif isinstance(val, (tuple, list)):
+                        return type(val)(_convert(v) for v in val)
+                    return val
+
+                args = tuple(_convert(arg) for arg in args)
+                kwargs = {k: _convert(v) for k, v in kwargs.items()}
+                return original_empty(*args, **kwargs)
+
+            torch.empty = _wrapped_empty
+            try:
+                yield
+            finally:
+                torch.empty = original_empty
+
         try:
-            mod._infer_parameters(mod, fake_args, fake_kwargs)  # type: ignore[operator]
-        except AttributeError:
+            with _materialize_symints_for_lazy_init():
+                mod._infer_parameters(mod, fake_args, fake_kwargs)  # type: ignore[operator]
+        except AttributeError as e:
             # Re-raise with the original error message from the AttributeError
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=["AttributeError during lazy module initialization"],
+                args=[
+                    str(e)
+                    if str(e)
+                    else "AttributeError during lazy module initialization"
+                ],
             )
 
 
