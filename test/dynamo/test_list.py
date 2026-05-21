@@ -3,9 +3,16 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+from functools import cmp_to_key
+
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+    subtest,
+)
 
 
 lst = []
@@ -294,6 +301,99 @@ class ListTests(TupleTests):
         self.assertEqual(p, self.thetype("abcd"))
 
     @make_dynamo_test
+    def test_sort_cmp_to_key(self):
+        def revcmp(a, b):
+            if a == b:
+                return 0
+            if a < b:
+                return 1
+            return -1
+
+        p = self.thetype([0, -2, 2, -1, 1])
+        self.assertIsNone(p.sort(key=cmp_to_key(revcmp)))
+        self.assertEqual(p, self.thetype([2, 1, 0, -1, -2]))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key_mycmp_keyword(self):
+        def revcmp(a, b):
+            if a == b:
+                return 0
+            if a < b:
+                return 1
+            return -1
+
+        p = self.thetype([0, -2, 2, -1, 1])
+        self.assertIsNone(p.sort(key=cmp_to_key(mycmp=revcmp)))
+        self.assertEqual(p, self.thetype([2, 1, 0, -1, -2]))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key_sees_empty_list(self):
+        p = self.thetype([1, 3, 2])
+
+        def cmp(a, b):
+            if p:
+                return (a > b) - (a < b)
+            return (a < b) - (a > b)
+
+        self.assertIsNone(p.sort(key=cmp_to_key(cmp)))
+        self.assertEqual(p, self.thetype([3, 2, 1]))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key_self_modifying_raises(self):
+        p = self.thetype([4, 3, 2, 1])
+
+        def cmp(a, b):
+            p.append(1)
+            return (a > b) - (a < b)
+
+        self.assertRaises(ValueError, p.sort, key=cmp_to_key(cmp))
+        self.assertEqual(p, self.thetype([1, 2, 3, 4]))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key_balanced_self_modifying_raises(self):
+        p = self.thetype([4, 3, 2, 1])
+
+        def cmp(a, b):
+            p.append(1)
+            p.pop()
+            return (a > b) - (a < b)
+
+        self.assertRaises(ValueError, p.sort, key=cmp_to_key(cmp))
+        self.assertEqual(p, self.thetype([1, 2, 3, 4]))
+
+    @parametrize(
+        "mutation",
+        [
+            subtest("extend", name="extend_empty"),
+            subtest("del_slice", name="del_slice"),
+            subtest("reverse", name="reverse"),
+            subtest("sort", name="sort"),
+            subtest("imul", name="imul_zero"),
+        ],
+    )
+    @make_dynamo_test
+    def test_sort_cmp_to_key_noop_self_mutation_allowed(self, mutation):
+        p = self.thetype([4, 3, 2, 1])
+
+        def cmp(a, b):
+            if mutation == "extend":
+                p.extend([])
+            elif mutation == "del_slice":
+                del p[:]
+            elif mutation == "reverse":
+                p.reverse()
+            elif mutation == "sort":
+                p.sort()
+            elif mutation == "imul":
+                p.__imul__(0)
+            else:
+                raise AssertionError(f"unexpected mutation {mutation}")
+            return (a > b) - (a < b)
+
+        self.assertIsNone(p.sort(key=cmp_to_key(cmp)))
+        self.assertEqual(p, self.thetype([1, 2, 3, 4]))
+
+    @make_dynamo_test
     def test_binop_imul(self):
         p = self.thetype([1, 2, 3])
         r = p.__imul__(2)
@@ -403,6 +503,9 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__delitem__)
         self.assertRaises(TypeError, p.__delitem__, 1.1)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
+
+
+instantiate_parametrized_tests(ListTests)
 
 
 if __name__ == "__main__":
