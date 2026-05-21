@@ -600,6 +600,11 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -1025,6 +1030,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     (variable, variable_grad, new_grad),
                     kwargs,
                 )
+                updated_grad = updated_grad.clone(source=None)
                 tx.output.side_effects.store_attr(variable, "grad", updated_grad)
                 return ConstantVariable.create(None)
             return tx.inline_user_function_return(

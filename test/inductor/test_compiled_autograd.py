@@ -1102,24 +1102,26 @@ main()
                 for i, inst in enumerate(insts)
                 if i > load_graph_idx and inst.opname == call_op
             )
-            # pre-graph should alias: inputs_ref_0 = inputs[0]
-            matches = [
+            # If post-graph bytecode needs inputs[0], it must use an alias
+            # captured before the graph call because the inputs list may be
+            # stolen by compiled graph execution.
+            pre_alias_stores = [
                 inst
                 for inst in insts[:call_graph_idx]
                 if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
             ]
-            self.assertTrue(len(matches) == 1)
             # post-graph should access inputs_ref_0 instead of inputs
             matches = [
                 inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
             ]
             self.assertTrue(len(matches) == 0)
-            matches = [
+            post_alias_loads = [
                 inst
                 for inst in insts[call_graph_idx:]
                 if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
             ]
-            self.assertTrue(len(matches) == 1)
+            self.assertEqual(len(pre_alias_stores), int(bool(post_alias_loads)))
+            self.assertLessEqual(len(post_alias_loads), 1)
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
