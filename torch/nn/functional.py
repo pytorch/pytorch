@@ -3840,11 +3840,11 @@ def linear_cross_entropy(
             target = target.unsqueeze(0)
 
         options = options._adjust(
-            num_batches,
-            in_features,
-            num_classes,
-            input.dtype,
-            input.device,
+            num_batches=num_batches,
+            in_features=in_features,
+            num_classes=num_classes,
+            dtype=input.dtype,
+            device=input.device,
         )
 
         # Force allow_retain_graph=True under torch.compile: the default
