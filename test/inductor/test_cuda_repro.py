@@ -334,9 +334,14 @@ class CudaReproTests(TestCase):
         )[0]
         compiled_out.sum().backward()
 
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_q.grad, eager_q.grad)
-        self.assertEqual(compiled_kv.grad, eager_kv.grad)
+        tol_kwargs = {}
+        if device_type == "xpu":
+            # XPU fp16 SDPA compile-vs-eager can drift ~1% relative.
+            tol_kwargs = {"atol": 1e-4, "rtol": 1e-2}
+
+        self.assertEqual(compiled_out, eager_out, **tol_kwargs)
+        self.assertEqual(compiled_q.grad, eager_q.grad, **tol_kwargs)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad, **tol_kwargs)
 
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
