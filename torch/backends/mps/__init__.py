@@ -74,5 +74,4 @@ def _init() -> None:
     from torch._refs import native_group_norm
 
     _lib = _Library("aten", "IMPL")
-    _lib.impl("native_group_norm", native_group_norm, "MPS")
     _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")
