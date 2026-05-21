@@ -311,11 +311,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             if is_compute_node(node):
                 last_compute = node
 
-        if last_compute is not None and not bool(
-            OrderedSet(picked_ag) & OrderedSet(self.node_ancestors[last_compute])
-        ):
-            for ag in picked_ag:
-                overlap_deps[last_compute].add(ag)
+        if last_compute is not None:
+            if not any(
+                self.node_ancestors.is_ancestor(ag, last_compute) for ag in picked_ag
+            ):
+                for ag in picked_ag:
+                    overlap_deps[last_compute].add(ag)
 
         _stable_topological_sort(self.graph, overlap_deps)
         self.graph.lint()
