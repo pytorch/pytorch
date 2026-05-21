@@ -4447,9 +4447,13 @@ class DefaultDictVariable(UserDefinedDictVariable):
         elif name == "__eq__":
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
-                tx, [self, args[0]], {}
-            )
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in __eq__")
+            if not isinstance(self._base_vt, ConstDictVariable):
+                raise AssertionError(
+                    f"Expected ConstDictVariable, got {type(self._base_vt)}"
+                )
+            return self._base_vt.call_dict_eq(tx, args[0])
         return super().call_method(tx, name, args, kwargs)
 
 
