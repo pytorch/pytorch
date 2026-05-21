@@ -16,8 +16,8 @@ from torch._inductor.heuristics.registry import (
     register_codegen_heuristic,
 )
 
-# Import submodules to trigger registration
-from . import pointwise as pointwise, reduction as reduction
+# Import submodule to trigger registration
+from . import pointwise as pointwise
 
 
 __all__ = [
