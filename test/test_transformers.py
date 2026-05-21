@@ -844,6 +844,72 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(eager_out, compiled_out)
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
+    @skipIfTorchDynamo("This test already calls torch.compile.")
+    def test_transformerencoder_all_masked_src_key_padding_mask_matches_compile(self, device):
+        if device not in ("cpu", "cuda", "xpu"):
+            self.skipTest(
+                "TransformerEncoder nested tensor fastpath is supported on CPU, CUDA, and XPU"
+            )
+
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=4,
+                nhead=2,
+                dim_feedforward=8,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=1,
+        ).to(device).eval()
+
+        src = torch.randn(2, 3, 4, device=device)
+        partially_masked = torch.tensor(
+            [[False, True, True], [False, False, True]],
+            dtype=torch.bool,
+            device=device,
+        )
+        all_masked = torch.ones(2, 3, dtype=torch.bool, device=device)
+
+        with patch(
+            "torch._nested_tensor_from_mask", wraps=torch._nested_tensor_from_mask
+        ) as nested_tensor_from_mask:
+            with torch.no_grad():
+                model(src, src_key_padding_mask=partially_masked)
+        self.assertTrue(nested_tensor_from_mask.called)
+
+        with patch(
+            "torch._nested_tensor_from_mask", wraps=torch._nested_tensor_from_mask
+        ) as nested_tensor_from_mask:
+            with torch.no_grad():
+                eager_out = model(src, src_key_padding_mask=all_masked)
+        self.assertFalse(nested_tensor_from_mask.called)
+
+        mask_check_disabled_model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=4,
+                nhead=2,
+                dim_feedforward=8,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=1,
+            mask_check=False,
+        ).to(device).eval()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "to_padded_tensor: at least one constituent tensor should have non-zero numel",
+        ):
+            with torch.no_grad():
+                mask_check_disabled_model(src, src_key_padding_mask=all_masked)
+
+        torch._dynamo.reset()
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            compiled_out = compiled_model(src, src_key_padding_mask=all_masked)
+
+        torch.testing.assert_close(eager_out, compiled_out, equal_nan=True)
+
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_decoder_padding_and_src_mask_bool(self):
 

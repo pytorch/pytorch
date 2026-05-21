@@ -525,11 +525,20 @@ class TransformerEncoder(Module):
                 )
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
-                convert_to_nested = True
-                output = torch._nested_tensor_from_mask(
-                    output, src_key_padding_mask.logical_not(), mask_check=False
-                )
-                src_key_padding_mask_for_layers = None
+                if (
+                    do_mask_check
+                    and not torch.compiler.is_compiling()
+                    and not torch.is_nonzero(src_key_padding_mask.logical_not().any())
+                ):
+                    why_not_sparsity_fast_path = (
+                        "src_key_padding_mask masked all tokens"
+                    )
+                else:
+                    convert_to_nested = True
+                    output = torch._nested_tensor_from_mask(
+                        output, src_key_padding_mask.logical_not(), mask_check=False
+                    )
+                    src_key_padding_mask_for_layers = None
 
         seq_len = _get_seq_len(src, batch_first)
         is_causal = _detect_is_causal_mask(mask, is_causal, seq_len)
