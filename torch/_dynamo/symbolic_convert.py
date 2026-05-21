@@ -3420,7 +3420,7 @@ class InstructionTranslatorBase(
             return
 
         leaf_filename = self.f_code.co_filename
-        leaf_lineno = inst.positions.lineno if inst.positions else None
+        leaf_lineno = inst.positions.lineno if inst.positions else inst.starts_line
         if leaf_lineno is None:
             return
 
