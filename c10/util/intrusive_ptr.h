@@ -793,26 +793,6 @@ inline bool operator==(
   return nullptr == rhs.get();
 }
 
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
-
-template <class TTarget1, class NullType1>
-inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t) noexcept {
-  return !operator==(lhs, nullptr);
-}
-
-template <class TTarget2, class NullType2>
-inline bool operator!=(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(nullptr, rhs);
-}
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
   using owned_type = c10::intrusive_ptr<T>;
@@ -1151,13 +1131,6 @@ inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
 }
 
 // Alias for documentary purposes, to more easily distinguish

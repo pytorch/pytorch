@@ -148,12 +148,6 @@ inline bool operator==(const DataPtr& dp, std::nullptr_t) noexcept {
 inline bool operator==(std::nullptr_t, const DataPtr& dp) noexcept {
   return !dp;
 }
-inline bool operator!=(const DataPtr& dp, std::nullptr_t) noexcept {
-  return dp;
-}
-inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
-  return dp;
-}
 
 // Note [raw_allocate/raw_deallocate and Thrust]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

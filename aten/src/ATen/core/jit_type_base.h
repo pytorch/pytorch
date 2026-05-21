@@ -241,10 +241,6 @@ struct TORCH_API Type {
       return repr_ == nullptr;
     }
 
-    bool operator!=(std::nullptr_t) const {
-      return repr_ != nullptr;
-    }
-
     template <typename U = T, std::enable_if_t<!std::is_same_v<std::remove_const_t<U>, void>, bool> = true>
     U& operator*() const {
       return *get();
@@ -496,31 +492,6 @@ bool operator==(const SingletonOrSharedTypePtr<T>& x, const SingletonTypePtr<U>&
 template <typename T, typename U>
 bool operator==(const SingletonTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
   return (void*)x.get() == (void*)y.get();
-}
-
-template <typename T, typename U>
-bool operator!=(const SingletonOrSharedTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
-  return !(x == y);
-}
-
-template <typename T, typename U>
-bool operator!=(const SingletonOrSharedTypePtr<T>& x, const std::shared_ptr<U>& y) {
-  return !(x == y);
-}
-
-template <typename T, typename U>
-bool operator!=(const std::shared_ptr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
-  return !(x == y);
-}
-
-template <typename T, typename U>
-bool operator!=(const SingletonOrSharedTypePtr<T>& x, const SingletonTypePtr<U>& y) {
-  return !(x == y);
-}
-
-template <typename T, typename U>
-bool operator!=(const SingletonTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
-  return !(x == y);
 }
 
 using TypePtr = SingletonOrSharedTypePtr<Type>;

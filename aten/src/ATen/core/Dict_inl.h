@@ -196,11 +196,6 @@ bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
   return *lhs.impl_ == *rhs.impl_;
 }
 
-template <class Key_, class Value_>
-bool operator!=(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
-  return !(lhs == rhs);
-}
-
 template <class Key, class Value>
 bool Dict<Key, Value>::is(const Dict& rhs) const {
   return this->impl_ == rhs.impl_;

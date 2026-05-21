@@ -204,10 +204,6 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
                    && *lhs.alias_info() == *rhs.alias_info()));
 }
 
-inline bool operator!=(const Argument& lhs, const Argument& rhs) {
-  return !(lhs == rhs);
-}
-
 enum struct TORCH_API SchemaArgType { input, output };
 
 /**
@@ -539,10 +535,6 @@ inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
      && lhs.returns() == rhs.returns()
      && lhs.is_vararg() == rhs.is_vararg()
      && lhs.is_varret() == rhs.is_varret();
-}
-
-inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
-  return !(lhs == rhs);
 }
 
 // print out Argument, which is compatible with FunctionSchema parser

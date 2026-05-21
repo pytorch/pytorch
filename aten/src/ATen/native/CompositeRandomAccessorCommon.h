@@ -230,28 +230,8 @@ public:
   }
 
   C10_HOST_DEVICE
-  bool operator!=(const CompositeRandomAccessor& other) const {
-    return keys != other.keys;
-  }
-
-  C10_HOST_DEVICE
-  bool operator<(const CompositeRandomAccessor& other) const {
-    return keys < other.keys;
-  }
-
-  C10_HOST_DEVICE
-  bool operator<=(const CompositeRandomAccessor& other) const {
-    return keys <= other.keys;
-  }
-
-  C10_HOST_DEVICE
-  bool operator>(const CompositeRandomAccessor& other) const {
-    return keys > other.keys;
-  }
-
-  C10_HOST_DEVICE
-  bool operator>=(const CompositeRandomAccessor& other) const {
-    return keys >= other.keys;
+  auto operator<=>(const CompositeRandomAccessor& other) const {
+    return keys <=> other.keys;
   }
   // }
 

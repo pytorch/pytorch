@@ -76,10 +76,6 @@ class C10_CUDA_API CUDAStream {
     return unwrap() == other.unwrap();
   }
 
-  bool operator!=(const CUDAStream& other) const noexcept {
-    return unwrap() != other.unwrap();
-  }
-
   /// Implicit conversion to cudaStream_t.
   operator cudaStream_t() const {
     return stream();

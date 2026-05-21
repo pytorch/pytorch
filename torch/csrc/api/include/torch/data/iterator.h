@@ -166,11 +166,6 @@ class Iterator {
     return *impl_ == *other.impl_;
   }
 
-  /// Compares two iterators for inequality.
-  bool operator!=(const Iterator& other) const {
-    return !(*this == other);
-  }
-
  private:
   /// Points either to a `ValidIterator` or to a `SentinelIterator`.
   std::shared_ptr<detail::IteratorImpl<Batch>> impl_;

@@ -45,9 +45,6 @@ class TORCH_API BackendDevice {
   bool operator==(const BackendDevice& other) const {
     return compare(other) == 0;
   }
-  bool operator!=(const BackendDevice& other) const {
-    return compare(other) != 0;
-  }
   bool operator<(const BackendDevice& rhs) const {
     return compare(rhs) < 0;
   }

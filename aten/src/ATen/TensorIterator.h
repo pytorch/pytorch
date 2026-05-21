@@ -1023,10 +1023,6 @@ struct TORCH_API SplitUntil32Bit {
       // empty
       return this == &other || (vec.empty() && other.vec.empty());
     }
-    // needed for C++11 range-based for loop
-    bool operator!=(const iterator& other) const {
-      return !(*this == other);
-    }
 
     /// stack of TensorIterators to be split
     std::vector<std::unique_ptr<TensorIterator>> vec;

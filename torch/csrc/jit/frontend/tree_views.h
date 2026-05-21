@@ -130,9 +130,6 @@ struct TreeView {
 template <typename T>
 struct ListIterator {
   ListIterator(TreeList::const_iterator it) : it(it) {}
-  bool operator!=(const ListIterator& rhs) const {
-    return it != rhs.it;
-  }
   bool operator==(const ListIterator& rhs) const {
     return it == rhs.it;
   }

@@ -1016,9 +1016,6 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
       return false;
     return std::equal(this->begin(), this->end(), RHS.begin());
   }
-  bool operator!=(const SmallVectorImpl& RHS) const {
-    return !(*this == RHS);
-  }
 
   bool operator<(const SmallVectorImpl& RHS) const {
     return std::lexicographical_compare(

@@ -27,10 +27,6 @@ struct Edge {
     return this->function == other.function && this->input_nr == other.input_nr;
   }
 
-  bool operator!=(const Edge& other) const noexcept {
-    return !(*this == other);
-  }
-
   /// The function this `Edge` points to.
   c10::intrusive_ptr<Node> function;
 

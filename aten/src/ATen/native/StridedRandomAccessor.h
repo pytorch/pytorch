@@ -151,28 +151,8 @@ public:
   }
 
   C10_HOST_DEVICE
-  bool operator!=(const ConstStridedRandomAccessor& other) const {
-    return !(*this == other);
-  }
-
-  C10_HOST_DEVICE
-  bool operator<(const ConstStridedRandomAccessor& other) const {
-    return ptr < other.ptr;
-  }
-
-  C10_HOST_DEVICE
-  bool operator<=(const ConstStridedRandomAccessor& other) const {
-    return (*this < other) || (*this == other);
-  }
-
-  C10_HOST_DEVICE
-  bool operator>(const ConstStridedRandomAccessor& other) const {
-    return !(*this <= other);
-  }
-
-  C10_HOST_DEVICE
-  bool operator>=(const ConstStridedRandomAccessor& other) const {
-    return !(*this < other);
+  auto operator<=>(const ConstStridedRandomAccessor& other) const {
+    return ptr <=> other.ptr;
   }
   // }
 

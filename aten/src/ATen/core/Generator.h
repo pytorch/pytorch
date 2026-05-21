@@ -66,10 +66,6 @@ struct TORCH_API Generator {
     return this->impl_ == rhs.impl_;
   }
 
-  bool operator!=(const Generator& rhs) const {
-    return !((*this) == rhs);
-  }
-
   bool defined() const {
     return static_cast<bool>(impl_);
   }

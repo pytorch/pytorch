@@ -50,10 +50,6 @@ class C10_XPU_API XPUStream {
     return unwrap() == other.unwrap();
   }
 
-  bool operator!=(const XPUStream& other) const noexcept {
-    return unwrap() != other.unwrap();
-  }
-
   /// Implicit conversion to sycl::queue&.
   operator sycl::queue&() const {
     return queue();

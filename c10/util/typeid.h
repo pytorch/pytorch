@@ -595,9 +595,6 @@ inline TypeMeta::TypeMeta() noexcept
 inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.index_ == rhs.index_);
 }
-inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
 
 inline std::ostream& operator<<(
     std::ostream& stream,

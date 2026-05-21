@@ -176,13 +176,6 @@ static inline bool operator==(
   return *a == *b;
 }
 
-template <typename T>
-static inline bool operator!=(
-    generic_graph_node_list_iterator<T> a,
-    generic_graph_node_list_iterator<T> b) {
-  return *a != *b;
-}
-
 } // namespace torch::jit
 
 namespace std {

@@ -38,9 +38,6 @@ struct TORCH_API OpKind {
   bool operator==(const OpKind& rhs) const {
     return op == rhs.op;
   }
-  bool operator!=(const OpKind& rhs) const {
-    return !operator==(rhs);
-  }
   bool operator<(const OpKind& rhs) const {
     return c10::unique_t(op) < c10::unique_t(rhs.op);
   }
@@ -233,10 +230,6 @@ struct TORCH_API Output {
 
   // To compare the operands of to-be-constructed node and to-be-reused node
   bool operator==(const Value& rhs) const;
-
-  bool operator!=(const Output& rhs) const {
-    return !operator==(rhs);
-  }
 
   const Shape& shape() const {
     return node->shape(index);

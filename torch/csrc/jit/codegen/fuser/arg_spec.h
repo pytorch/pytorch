@@ -31,10 +31,6 @@ struct TORCH_API ArgSpec {
     return (descs_ == other.descs_ && device_ == other.device_);
   }
 
-  bool operator!=(const ArgSpec& spec) const {
-    return !(*this == spec);
-  }
-
   // Getters
   size_t hashCode() const {
     return hash_code_;

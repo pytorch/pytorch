@@ -95,9 +95,6 @@ class C10_API Stream final {
   bool operator==(const Stream& other) const noexcept {
     return this->device_ == other.device_ && this->id_ == other.id_;
   }
-  bool operator!=(const Stream& other) const noexcept {
-    return !(*this == other);
-  }
 
   Device device() const noexcept {
     return device_;

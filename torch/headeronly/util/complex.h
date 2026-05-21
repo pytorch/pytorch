@@ -496,21 +496,6 @@ constexpr bool operator==(const T& lhs, const complex<T>& rhs) {
   return (lhs == rhs.real()) && (T() == rhs.imag());
 }
 
-template <typename T>
-constexpr bool operator!=(const complex<T>& lhs, const complex<T>& rhs) {
-  return !(lhs == rhs);
-}
-
-template <typename T>
-constexpr bool operator!=(const complex<T>& lhs, const T& rhs) {
-  return !(lhs == rhs);
-}
-
-template <typename T>
-constexpr bool operator!=(const T& lhs, const complex<T>& rhs) {
-  return !(lhs == rhs);
-}
-
 template <typename T, typename CharT, typename Traits>
 std::basic_ostream<CharT, Traits>& operator<<(
     std::basic_ostream<CharT, Traits>& os,
@@ -601,7 +586,6 @@ using c10::operator-=;
 using c10::operator*=;
 using c10::operator/=;
 using c10::operator==;
-using c10::operator!=;
 using c10::operator<<;
 using c10::operator>>;
 using c10::polar;

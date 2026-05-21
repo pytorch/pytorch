@@ -32,16 +32,9 @@ inline C10_HOST_DEVICE bool operator==(
   return a.val_ == b.val_;
 }
 
-inline C10_HOST_DEVICE bool operator!=(
-    const Float4_e2m1fn_x2& a,
-    const Float4_e2m1fn_x2& b) {
-  return a.val_ != b.val_;
-}
-
 } // namespace c10
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::Float4_e2m1fn_x2;
 using c10::operator==;
-using c10::operator!=;
 HIDDEN_NAMESPACE_END(torch, headeronly)

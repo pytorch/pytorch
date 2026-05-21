@@ -78,10 +78,6 @@ inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
   return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
 }
 
-inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
-  return !operator==(lhs, rhs);
-}
-
 TORCH_API std::string toString(const OperatorName& opName);
 TORCH_API std::ostream& operator<<(std::ostream& /*os*/, const OperatorName& /*opName*/);
 

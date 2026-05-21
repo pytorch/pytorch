@@ -72,10 +72,6 @@ struct TORCH_API TensorDesc {
     return scalar_type == desc.scalar_type && contiguity == desc.contiguity;
   }
 
-  bool operator!=(const TensorDesc& desc) const {
-    return !(*this == desc);
-  }
-
   static size_t hash(const TensorDesc& spec) {
     return c10::get_hash(
         spec.scalar_type,

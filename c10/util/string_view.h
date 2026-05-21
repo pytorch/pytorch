@@ -265,12 +265,6 @@ class basic_string_view final {
     return lhs.equals_(rhs);
   }
 
-  friend constexpr bool operator!=(
-      basic_string_view lhs,
-      basic_string_view rhs) noexcept {
-    return !(lhs == rhs);
-  }
-
   friend constexpr bool operator<(
       basic_string_view lhs,
       basic_string_view rhs) noexcept {

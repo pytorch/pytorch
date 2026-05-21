@@ -342,9 +342,6 @@ class DispatchKeySet final {
   bool operator==(DispatchKeySet other) const {
     return repr_ == other.repr_;
   }
-  bool operator!=(DispatchKeySet other) const {
-    return repr_ != other.repr_;
-  }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
   [[nodiscard]] constexpr DispatchKeySet add(DispatchKey t) const {
@@ -569,12 +566,6 @@ class DispatchKeySet final {
           current_dispatchkey_idx_ == rhs.current_dispatchkey_idx_ &&
           next_backend_ == rhs.next_backend_ &&
           current_backendcomponent_idx_ == rhs.current_backendcomponent_idx_;
-    }
-    bool operator!=(const self_type& rhs) const {
-      return next_functionality_ != rhs.next_functionality_ ||
-          current_dispatchkey_idx_ != rhs.current_dispatchkey_idx_ ||
-          next_backend_ != rhs.next_backend_ ||
-          current_backendcomponent_idx_ != rhs.current_backendcomponent_idx_;
     }
     DispatchKey operator*() const {
       auto functionality_key =

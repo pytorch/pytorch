@@ -560,10 +560,6 @@ class TORCH_API OperatorHandle {
     return operatorDef_ == other.operatorDef_;
   }
 
-  bool operator!=(const OperatorHandle& other) const {
-    return operatorDef_ != other.operatorDef_;
-  }
-
  private:
   explicit OperatorHandle(
       std::list<Dispatcher::OperatorDef>::iterator operatorIterator)

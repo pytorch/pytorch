@@ -46,9 +46,4 @@ bool operator==(SingletonTypePtr<T> lhs, SingletonTypePtr<U> rhs) {
   return (void*)lhs.get() == (void*)rhs.get();
 }
 
-template <typename T, typename U>
-bool operator!=(SingletonTypePtr<T> lhs, SingletonTypePtr<U> rhs) {
-  return !(lhs == rhs);
-}
-
 } // namespace c10

@@ -67,9 +67,6 @@ class DebugInfoKind {
   constexpr bool operator==(const DebugInfoKind other) const {
     return value_ == other.value_;
   }
-  constexpr bool operator!=(const DebugInfoKind other) const {
-    return value_ != other.value_;
-  }
   constexpr bool operator<(const DebugInfoKind other) const {
     return value_ < other.value_;
   }

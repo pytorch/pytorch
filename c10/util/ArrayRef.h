@@ -288,28 +288,13 @@ bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
 }
 
 template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
-  return !a1.equals(a2);
-}
-
-template <typename T>
 bool operator==(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
   return c10::ArrayRef<T>(a1).equals(a2);
 }
 
 template <typename T>
-bool operator!=(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
-  return !c10::ArrayRef<T>(a1).equals(a2);
-}
-
-template <typename T>
 bool operator==(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
   return a1.equals(c10::ArrayRef<T>(a2));
-}
-
-template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
-  return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
 using IntArrayRef = ArrayRef<int64_t>;

@@ -67,10 +67,6 @@ struct SparseBitVectorElement {
     return true;
   }
 
-  bool operator!=(const SparseBitVectorElement& RHS) const {
-    return !(*this == RHS);
-  }
-
   // Return the bits that make up word Idx in our element.
   BitWord word(unsigned Idx) const {
     assert(Idx < BITWORDS_PER_ELEMENT);
@@ -419,10 +415,6 @@ class SparseBitVector {
       // bitmap.
       return AtEnd == RHS.AtEnd && RHS.BitNumber == BitNumber;
     }
-
-    bool operator!=(const SparseBitVectorIterator& RHS) const {
-      return !(*this == RHS);
-    }
   };
 
  public:
@@ -522,10 +514,6 @@ class SparseBitVector {
       return true;
     }
     return false;
-  }
-
-  bool operator!=(const SparseBitVector& RHS) const {
-    return !(*this == RHS);
   }
 
   bool operator==(const SparseBitVector& RHS) const {

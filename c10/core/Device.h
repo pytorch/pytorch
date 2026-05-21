@@ -51,12 +51,6 @@ struct C10_API Device final {
     return this->type_ == other.type_ && this->index_ == other.index_;
   }
 
-  /// Returns true if the type or index of this `Device` differs from that of
-  /// `other`.
-  bool operator!=(const Device& other) const noexcept {
-    return !(*this == other);
-  }
-
   /// Sets the device index.
   void set_index(DeviceIndex index) {
     index_ = index;
