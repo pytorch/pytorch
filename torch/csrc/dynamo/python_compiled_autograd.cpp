@@ -1,12 +1,11 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <ranges>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -341,7 +340,9 @@ static variable_list validate_outputs(
 
   torch::autograd::validate_outputs(
       value, new_outputs, [&](const std::string& msg) {
-        return fmt::format("[Compiled Autograd Tracing:]{}", msg);
+        std::ostringstream ss;
+        ss << "[Compiled Autograd Tracing:]" << msg;
+        return ss.str();
       });
   return new_outputs;
 }
@@ -418,16 +419,22 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    auto matching_sizes = cached_keys |
-        std::views::filter([&](const CacheKey& k) {
-                            return k.node_type == node_type;
-                          }) |
-        std::views::transform(&CacheKey::key_size);
-    std::string compile_reason = fmt::format(
-        "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
-        node_name,
-        key.key_size,
-        fmt::join(matching_sizes, ","));
+    std::ostringstream oss;
+    oss << "Cache miss due to new autograd node: " << node_name
+        << " with key size " << std::to_string(key.key_size)
+        << ", previous key sizes=[";
+
+    for (auto it = cached_keys.begin(); it != cached_keys.end(); it++) {
+      if (it->node_type != node_type) {
+        continue;
+      }
+      oss << it->key_size;
+      if (std::next(it) != cached_keys.end()) {
+        oss << ',';
+      }
+    }
+    oss << ']';
+    std::string compile_reason = oss.str();
     log(PythonLogger::DEBUG, compile_reason);
     return compile_reason;
   }
@@ -435,11 +442,16 @@ struct VerboseLogger : public PythonLogger {
   std::string log_dynamic_shapes_miss(
       const std::vector<size_t>& new_dyn_sizes_idx,
       size_t all_dyn_sizes_len) const {
-    std::string recompile_reason = fmt::format(
-        "Cache miss due to {} changed tensor shapes (total of {}): sizes[{}]",
-        new_dyn_sizes_idx.size(),
-        all_dyn_sizes_len,
-        fmt::join(new_dyn_sizes_idx, "], sizes["));
+    std::ostringstream oss;
+    oss << "Cache miss due to " << new_dyn_sizes_idx.size()
+        << " changed tensor shapes (total of " << all_dyn_sizes_len << "): ";
+    for (const auto i : c10::irange(new_dyn_sizes_idx.size() - 1)) {
+      oss << "sizes[" << std::to_string(new_dyn_sizes_idx[i]) << "], ";
+    }
+    oss << "sizes["
+        << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
+        << ']';
+    std::string recompile_reason = oss.str();
     log(PythonLogger::DEBUG, recompile_reason);
     return recompile_reason;
   }
