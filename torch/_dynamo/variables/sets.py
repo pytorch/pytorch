@@ -465,11 +465,18 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] not in self:
+            item = args[0]
+            if not is_hashable(item):
+                if not pyset_check(item):
+                    raise_type_error(
+                        tx, f"unhashable type: '{item.python_type_name()}'"
+                    )
+                item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
+            if item not in self:
                 raise_observed_exception(KeyError, tx, args=args)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.pop(HashableTracker(args[0]))
+            self.items.pop(HashableTracker(item))
             return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
@@ -479,10 +486,17 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] in self:
+            item = args[0]
+            if not is_hashable(item):
+                if not pyset_check(item):
+                    raise_type_error(
+                        tx, f"unhashable type: '{item.python_type_name()}'"
+                    )
+                item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
+            if item in self:
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
-                self.items.pop(HashableTracker(args[0]))
+                self.items.pop(HashableTracker(item))
             return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
