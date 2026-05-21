@@ -1568,6 +1568,42 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # frame count 2 since we added a graph break
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_set_stance_eager_then_compile_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            x1 = torch.randn(10)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(10)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(10, 10)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_stance_eager_then_compile_delayed_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        x1 = torch.randn(4)
+        x2 = torch.randn(4)
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            self.assertEqual(fn(x1), x1 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 3, 4, 5)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
