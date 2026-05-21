@@ -17,7 +17,7 @@ import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._subclasses.complex_tensor import ComplexTensor
+from torch._subclasses.complex_tensor import ComplexTensor, WrapComplexMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
@@ -69,7 +69,8 @@ def decompose_complex_in_graph(
 
     def wrapper(*args: Any) -> Any:
         wrapped = tuple(_maybe_wrap(a) for a in args)
-        result = fx.Interpreter(gm).run(*wrapped)
+        with WrapComplexMode():
+            result = fx.Interpreter(gm).run(*wrapped)
         return pytree.tree_map(_maybe_unwrap, result)
 
     return make_fx(wrapper, decomposition_table=decompositions or {})(*flat_args)

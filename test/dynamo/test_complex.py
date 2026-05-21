@@ -33,6 +33,17 @@ class ComplexTests(ComplexDynamoTestCase):
 
         self.assertEqual(fn_c(a, b, x), sample_function(a, b, x))
 
+    def test_no_complex_in_out(self):
+        def f(re, im):
+            c = torch.complex(re, im)
+            return c.abs()
+
+
+        re = torch.randn(2, 2, dtype=torch.float32)
+        im = torch.randn(2, 2, dtype=torch.float32)
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(fn_c(re, im), f(re, im))
+
     def test_no_complex_inputs(self):
         def f(x, y):
             a = torch.complex(torch.sin(x), torch.cos(y))
@@ -70,17 +81,17 @@ class ComplexTests(ComplexDynamoTestCase):
         self.assertEqual(f(a.clone()), fn_c(a.clone()))
 
     def test_aliasing_semantics_2(self):
-        def fn(a):
+        def f(a):
             return a
 
-        def mutate(f):
+        def mutate(fn):
             a = torch.ones(2, 2, dtype=torch.complex64)
-            out = f(a)
+            out = fn(a)
             a[...] = torch.zeros_like(a)
             return out
 
-        fn_c = torch.compile(fn, fullgraph=True)
-        self.assertEqual(mutate(fn), mutate(fn_c))
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(mutate(f), mutate(fn_c))
 
 
 instantiate_parametrized_tests(ComplexTests)
