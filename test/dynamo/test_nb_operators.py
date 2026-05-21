@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-"""Tests for nb_or (|, or) and nb_subtract (-) operators in PyTorch Dynamo."""
+"""Tests for nb_or (|, or), nb_subtract (-), nb_add (+) operators in PyTorch Dynamo."""
 
 import collections
 import functools
