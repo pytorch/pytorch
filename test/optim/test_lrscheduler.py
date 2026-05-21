@@ -2680,6 +2680,26 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_lrscheduler_constructor_performs_implicit_step(self):
+        class TrackingLRScheduler(LRScheduler):
+            def __init__(self, optimizer):
+                self.get_lr_call_count = 0
+                super().__init__(optimizer)
+
+            def get_lr(self):
+                self.get_lr_call_count += 1
+                return [group["lr"] + 1.0 for group in self.optimizer.param_groups]
+
+        optimizer = SGD([torch.rand(1)], lr=0.1)
+        # Constructing the scheduler currently performs an implicit step
+        # during initialization, so scheduler state and optimizer LRs are
+        # already updated before any explicit scheduler.step() call.
+        scheduler = TrackingLRScheduler(optimizer)
+
+        self.assertEqual(scheduler.get_lr_call_count, 1)
+        self.assertEqual(scheduler.last_epoch, 0)
+        self.assertEqual(scheduler._step_count, 1)
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 1.1)
 
 instantiate_parametrized_tests(TestLRScheduler)
 
