@@ -287,56 +287,132 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
-static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
-    const Tensor & input, const std::optional<Tensor> & weight_opt,
-    const std::optional<Tensor> & bias_opt, int64_t N, int64_t C,
-    int64_t HxW, int64_t group, double eps) {
+static bool has_same_shape(
+    const Tensor& tensor,
+    std::optional<int64_t> tensor_bdim,
+    c10::SymIntArrayRef shape) {
+  if (!tensor.defined()) {
+    return true;
+  }
+  if (rankWithoutBatchDim(tensor, tensor_bdim) != static_cast<int64_t>(shape.size())) {
+    return false;
+  }
+  const auto tensor_shape = tensor.sizes();
+  for (const auto i : c10::irange(shape.size())) {
+    auto j = i;
+    // (0, 1, 2), 1 -> (0, 2, 3)
+    if (tensor_bdim.has_value() && static_cast<int64_t>(i) >= tensor_bdim.value()) {
+      j = j + 1;
+    }
+    if (shape[i] != tensor_shape[j]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static C10_ALWAYS_INLINE void _check_group_norm_inputs(
+    const Tensor& weight,
+    std::optional<int64_t> weight_bdim,
+    const Tensor& bias,
+    std::optional<int64_t> bias_bdim,
+    c10::SymInt C) {
+  TORCH_CHECK(has_same_shape(weight, weight_bdim, {C}),
+    "Expected weight to be of shape {", C, "}, but got {", weight.sizes(), '}');
+  TORCH_CHECK(has_same_shape(bias, bias_bdim, {C}),
+    "Expected bias to be of shape {", C, "}, but got {", bias.sizes(), '}');
+}
+
+static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+native_group_norm_batch_rule(
+    const Tensor& input,
+    std::optional<int64_t> input_bdim,
+    const std::optional<Tensor>& weight_opt,
+    std::optional<int64_t> weight_bdim,
+    const std::optional<Tensor>& bias_opt,
+    std::optional<int64_t> bias_bdim,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
+    int64_t group,
+    double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const auto weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const auto bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  vmap_check_escaped(maybe_layer, "native_group_norm_plumbing");
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  int64_t cur_level = maybe_layer->layerId();
+  const int64_t bdim_size{get_bdim_size3(input, input_bdim, weight, weight_bdim, bias, bias_bdim)};
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  // Only CPU native_group_norm currently supports non-contiguous input tensors.
+  auto input_mem_fmt{input_.device().is_cpu() ? input_.suggest_memory_format() : at::MemoryFormat::Contiguous};
+  input_ = input_.contiguous(input_mem_fmt);
 
-  if (!areAnyBatchedAtLevel({input, weight_opt, bias_opt}, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::native_group_norm(input, weight_opt, bias_opt, N, C, HxW, group, eps);
+  if (!weight_bdim && !bias_bdim) {
+      auto [result0, mean, rstd] = at::native_group_norm_symint(input_, weight_opt, bias_opt, N * bdim_size, C, HxW, group, eps);
+
+      // mean/rstd are of shape {B0 * N, group}, but should be {B0, N, group}
+      mean = mean.reshape_symint({bdim_size, N, group});
+      rstd = rstd.reshape_symint({bdim_size, N, group});
+      const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
+
+      return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
   }
 
-  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
+  _check_group_norm_inputs(weight, weight_bdim, bias, bias_bdim, C);
+  auto [result0, mean, rstd] = at::native_group_norm_symint(input_, std::nullopt, std::nullopt, input_bdim ? N * bdim_size : N, C, HxW, group, eps);
+  // Clear any new memory that was allocated with the call to contiguous.
+  input_.reset();
 
-  Tensor result0;
-  Tensor mean;
-  Tensor rstd;
-  if (input_bdim) {
-    const auto input_ = reshape_dim_into(*input_bdim, 0, input_value);
-    const auto bdim_size = input_value.size(*input_bdim);
-
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    std::tie(result0, mean, rstd) = at::native_group_norm(input_, std::nullopt, std::nullopt, N * bdim_size, C, HxW, group, eps);
-    result0 = makeBatched(reshape_dim_outof(0, bdim_size, result0), 0, cur_level);
-    mean = makeBatched(reshape_dim_outof(0, bdim_size, mean), 0, cur_level);
-    rstd = makeBatched(reshape_dim_outof(0, bdim_size, rstd), 0, cur_level);
+  if (!input_bdim) {
+    // If the input isn't batched, then either weight or bias must be.  Repeat the
+    // output (rather than broadcasting) so that we can reshape as needed below.  DO NOT
+    // repeat mean and rstd, since they won't be modified by weight/bias to be batched.
+    VmapDimVector result_repeats(result0.dim() + 1, 1);
+    result_repeats[0] = bdim_size;
+    result0 = result0.repeat(result_repeats);
   } else {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    std::tie(result0, mean, rstd) = at::native_group_norm(input_value, std::nullopt, std::nullopt, N, C, HxW, group, eps);
+    // mean/rstd are of shape {B0 * N, group}, but should be {B0, N, group}
+    mean = mean.reshape_symint({bdim_size, N, group});
+    rstd = rstd.reshape_symint({bdim_size, N, group});
+  }
+  const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
+
+  auto result_shape{result0.sizes()};
+  result0 = result0.reshape_symint({bdim_size, N, C, HxW});
+
+  // For unclear reasons, doing a single addcmul/multiplication/addition (respectively)
+  // works correctly when modifying result0, but doing a multiplication followed by an
+  // addition (i.e. weight and bias separately) results in incorrect output shapes.
+  // In-place multiplication followed by in-place addition also works, but runs afoul of
+  // the vmap gradient tests.
+  if (weight.defined() && bias.defined()) {
+    auto weight_ = moveBatchDimToFront(weight, weight_bdim); // [B0?, C]
+    weight_ = weight_.unsqueeze(weight_bdim ? 1 : 0); // [B0?, 1, C]
+    weight_ = padRight(weight_, weight_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
+
+    auto bias_ = moveBatchDimToFront(bias, bias_bdim); // [B0?, C]
+    bias_ = bias_.unsqueeze(bias_bdim ? 1 : 0); // [B0?, 1, C]
+    bias_ = padRight(bias_, bias_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
+
+    result0 = at::addcmul(bias_, result0, weight_);
+  }
+  else if (weight.defined()) {
+    auto weight_ = moveBatchDimToFront(weight, weight_bdim); // [B0?, C]
+    weight_ = weight_.unsqueeze(weight_bdim ? 1 : 0); // [B0?, 1, C]
+    weight_ = padRight(weight_, weight_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
+
+    result0 = result0 * weight_;
+  }
+  else if (bias.defined()) {
+    auto bias_ = moveBatchDimToFront(bias, bias_bdim); // [B0?, C]
+    bias_ = bias_.unsqueeze(bias_bdim ? 1 : 0); // [B0?, 1, C]
+    bias_ = padRight(bias_, bias_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
+    result0 = result0 + bias_;
   }
 
-  if (weight.defined()) {
-    const auto padded_weight = padRight(weight, std::nullopt, result0.dim() - 1);
-    result0 = result0 * padded_weight;
-  }
-
-  if (bias.defined()) {
-    const auto padded_bias = padRight(bias, std::nullopt, result0.dim() - 1);
-    result0 = result0 + padded_bias;
-  }
-
-  return std::make_tuple(std::move(result0), std::move(mean), std::move(rstd));
+  result0 = result0.reshape(result_shape);
+  return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
 }
 
 static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
@@ -433,29 +509,6 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     grad_input = makeBatched(std::move(tensor), 0, cur_level);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
-}
-
-static bool has_same_shape(
-    const Tensor& tensor, std::optional<int64_t> tensor_bdim,
-    c10::SymIntArrayRef normalized_shape) {
-  if (!tensor.defined()) {
-    return true;
-  }
-  if (rankWithoutBatchDim(tensor, tensor_bdim) != static_cast<int64_t>(normalized_shape.size())) {
-    return false;
-  }
-  const auto tensor_shape = tensor.sizes();
-  for (const auto i : c10::irange(normalized_shape.size())) {
-    auto j = i;
-    // (0, 1, 2), 1 -> (0, 2, 3)
-    if (tensor_bdim.has_value() && static_cast<int64_t>(i) >= tensor_bdim.value()) {
-      j = j + 1;
-    }
-    if (normalized_shape[i] != tensor_shape[j]) {
-      return false;
-    }
-  }
-  return true;
 }
 
 static C10_ALWAYS_INLINE void check_same_shape(
@@ -871,7 +924,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
   m.impl("cudnn_batch_norm_backward", CUDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::cudnn_batch_norm_backward_wrapper));
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));
-  m.impl("native_group_norm", native_group_norm_plumbing);
+  VMAP_SUPPORT(native_group_norm, native_group_norm_batch_rule);
   m.impl("native_group_norm_backward", native_group_norm_backward_plumbing);
   VMAP_SUPPORT(native_layer_norm, native_layer_norm_batch_rule);
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
