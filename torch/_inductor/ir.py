@@ -13,6 +13,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
+from numbers import Number
 from typing import (
     Any,
     cast,
@@ -222,7 +223,7 @@ class GraphPartitionSignature:
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
     # we cannot get name from Expr.
-    input_nodes: dict[str, IRNode | sympy.Expr | TorchBindObject]
+    input_nodes: dict[str, IRNode | Expr | TorchBindObject]
     output_nodes: list[IRNode]
 
     # mapping from partition input name to a boolean for whether deallocating it
@@ -730,7 +731,7 @@ class IRNode:
         """True for single tensor output (excludes MultiOutput)"""
         return isinstance(self.maybe_get_output_spec(), Layout)
 
-    def get_size(self) -> Sequence[Expr]:
+    def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
     def maybe_get_size(self) -> Sequence[_IntLike] | None:
@@ -1016,10 +1017,10 @@ class Loops(IRNode):
     def get_origin_node(self) -> torch.fx.Node | None:
         return self.origin_node
 
-    def get_size(self) -> Sequence[Expr]:
+    def get_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
-    def get_pointwise_size(self) -> Sequence[Expr]:
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
     @classmethod
@@ -1137,7 +1138,7 @@ class Pointwise(Loops):
 
     __repr__ = __str__
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return []
 
     def get_reduction_type(self) -> str | None:
@@ -1299,7 +1300,7 @@ class Reduction(Loops):
             *(get_free_symbols(e, unbacked_only) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self) -> Sequence[Expr]:
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return self.reduction_ranges
 
     def get_reduction_type(self) -> str | None:
@@ -1593,8 +1594,11 @@ class Reduction(Loops):
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
             ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
+                value = inner_fn(index, rindex)
+                if isinstance(value, tuple):
+                    return value
                 return (
-                    inner_fn(index, rindex),
+                    value,
                     ops.index_expr(flatten_index(rindex), torch.int64),
                 )
 
@@ -1611,8 +1615,8 @@ class Reduction(Loops):
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        ranges: Sequence[Expr],
-        reduction_ranges: Sequence[Expr],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
@@ -1953,7 +1957,7 @@ class Reduction(Loops):
         original_reduction_ranges: Sequence[Expr],
         new_ranges: Sequence[Integer],
         new_reduction_ranges: Sequence[Integer],
-    ) -> Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue]:
+    ) -> Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]:
         assert all(r == 1 for r in original_ranges), (
             f"Only enabled for numel_hint == 1, found {original_ranges=}"
         )
@@ -2045,8 +2049,8 @@ class Reduction(Loops):
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        ranges: Sequence[Expr],
-        reduction_ranges: Sequence[Expr],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
@@ -2091,8 +2095,8 @@ class Reduction(Loops):
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        original_ranges: Sequence[Expr],
-        original_reduction_ranges: Sequence[Expr],
+        original_ranges: Sequence[_IntLike],
+        original_reduction_ranges: Sequence[_IntLike],
         new_ranges: list[Integer],
         new_reduction_ranges: list[Integer],
         reduction_type: ReductionType,
@@ -2125,13 +2129,13 @@ class Reduction(Loops):
 
 
 def _fixed_indexer(
-    size: Sequence[int],
-    stride: Sequence[int] | None = None,
+    size: Sequence[_IntLike],
+    stride: Sequence[_IntLike] | None = None,
     offset: Expr = Integer(0),
-) -> Callable[[Sequence[Expr]], Expr]:
+) -> Callable[[Sequence[_IntLike]], Expr]:
     """A closure containing math to read a given element"""
 
-    def indexer(index: Sequence[int]) -> int:
+    def indexer(index: Sequence[_IntLike]) -> Expr:
         assert stride is not None and len(index) == len(stride)
         assert len(index) == len(size)
         result = offset
@@ -2727,13 +2731,13 @@ class Sort(Loops):
     def get_reduction_type(self) -> str | None:
         return "sort"
 
-    def get_reduction_size(self) -> Sequence[Expr]:
+    def get_reduction_size(self) -> Sequence[Integer]:
         return self.sort_ranges
 
-    def get_size(self) -> Sequence[Expr]:
+    def get_size(self) -> Sequence[Integer]:
         return self.size
 
-    def get_pointwise_size(self) -> Sequence[Expr]:
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
     def index_length(self) -> int:
@@ -3948,7 +3952,7 @@ class Layout(OutputSpec):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: Sequence[Expr],
+        size: Sequence[_IntLike],
         stride: Sequence[Expr] | None = None,
         offset: Expr = Integer(0),
         is_pinned: bool = False,
@@ -3959,7 +3963,7 @@ class Layout(OutputSpec):
         self.device = device
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
-        assert all(isinstance(s, (Expr, int)) for s in size)
+        assert all(isinstance(s, _IntLike) for s in size)
         self._size = size
         self._stride = stride
         self._offset = offset
@@ -3970,11 +3974,11 @@ class Layout(OutputSpec):
         )
 
     @property
-    def size(self) -> Sequence[Expr]:
+    def size(self) -> Sequence[_IntLike]:
         return self._size
 
     @size.setter
-    def size(self, value: Sequence[Expr]) -> None:
+    def size(self, value: Sequence[_IntLike]) -> None:
         self._size = value
 
     @property
@@ -4128,10 +4132,10 @@ class Layout(OutputSpec):
 
         shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
 
-        def contains_unbacked_symints(expr: sympy.Expr | int) -> bool:
+        def contains_unbacked_symints(expr: Expr | int) -> bool:
             if shape_env is None:
                 return False
-            if not isinstance(expr, sympy.Expr):
+            if not isinstance(expr, Expr):
                 return False
             return any(shape_env.is_unbacked_symint(s) for s in expr.free_symbols)
 
@@ -4157,7 +4161,7 @@ class Layout(OutputSpec):
                 isinstance(stride, (int, sympy.Integer))
                 and stride > config.padding_stride_threshold
                 and stride % align != 0
-            ) or (isinstance(stride, sympy.Expr) and config.pad_dynamic_shapes)
+            ) or (isinstance(stride, Expr) and config.pad_dynamic_shapes)
             new_strides[idx] = stride
             if require_padding:
                 new_strides[idx] = ceildiv(stride, align) * align
@@ -5255,7 +5259,7 @@ class ComputedBuffer(OperationBuffer):
         index_vars: Sequence[sympy.Symbol],
         support_vars: Sequence[sympy.Symbol],
         sizes: Sequence[int],
-        memory_addrs: list[sympy.Expr],
+        memory_addrs: list[Expr],
         priority_idx: list[int] | None = None,
     ) -> tuple[
         list[int],
@@ -5572,7 +5576,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         assert self.name is not None
         self.epilogue_fusable_outputs = {self.name: self.name}
 
-        self.subgraph_inps: list[IRNode | sympy.Expr | None] | None = None
+        self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
 
     @cache_on_self_and_args("TritonTemplateBuffer")
@@ -5584,7 +5588,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         subgraph_inps = self.subgraph_inps if self.subgraph_inps else []
 
         for inp in subgraph_inps:
-            if isinstance(inp, sympy.Expr):
+            if isinstance(inp, Expr):
                 res.update(get_free_symbols(inp, unbacked_only))
             elif isinstance(inp, IRNode):
                 res.update(inp.get_free_symbol_uses(unbacked_only))
@@ -7757,7 +7761,7 @@ class UserDefinedTritonKernel(ExternKernel):
             if isinstance(arg, IRNode):
                 args.append(arg.codegen_reference())
                 arg_types.append(arg.get_dtype())
-            elif isinstance(arg, (int, float, bool, sympy.Expr)):
+            elif isinstance(arg, (int, float, bool, Expr)):
                 args.append(arg)
                 arg_types.append(type(arg))
             elif name in constexpr_names:
@@ -8544,14 +8548,25 @@ class FallbackKernel(ExternKernelAlloc):
                         MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
+            def add_alias_if_graph_buffer(t: Any) -> None:
+                if t is None:
+                    return
+                if isinstance(t, (Number, Expr, *SymTypes)):
+                    # The dispatcher accepts Python scalars for some Tensor
+                    # schema arguments by boxing them into temporary scalar tensors.
+                    # Those temporaries cannot alias or mutate graph buffers.
+                    return
+                assert isinstance(t, IRNode), type(t)
+                add_alias(t)
+
             if library_utils.is_tensorlist_like_type(info.type):
                 if arg is not None:
                     for optional_tensor_arg in arg:
-                        add_alias(optional_tensor_arg)
+                        add_alias_if_graph_buffer(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
 
-                add_alias(arg)
+                add_alias_if_graph_buffer(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
@@ -9914,7 +9929,7 @@ class Conditional(ExternKernel):
         return subgraphs
 
     @staticmethod
-    def _maybe_expr(s: int | torch.SymInt) -> int | sympy.Expr:
+    def _maybe_expr(s: int | torch.SymInt) -> int | Expr:
         if isinstance(s, int):
             return s
         return s.node.expr
@@ -10311,8 +10326,8 @@ class WhileLoop(ExternKernel):
         for i, (op, bo) in enumerate(zip(carried_inputs_, body_outputs)):
 
             def _guard_list_equals(
-                lhs_exprs: Sequence[int | sympy.Expr],
-                rhs_exprs: Sequence[int | sympy.Expr],
+                lhs_exprs: Sequence[int | Expr],
+                rhs_exprs: Sequence[int | Expr],
             ) -> None:
                 assert len(lhs_exprs) == len(rhs_exprs)
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
