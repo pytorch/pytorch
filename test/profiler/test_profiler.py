@@ -4943,7 +4943,9 @@ class TestMetadataJsonFormat(TestCase):
             "shared memory",
             "graph node id",
         ]
-        int_keys = common_int_keys if TEST_WITH_ROCM else common_int_keys + cuda_only_int_keys
+        int_keys = (
+            common_int_keys if TEST_WITH_ROCM else common_int_keys + cuda_only_int_keys
+        )
         for key in int_keys:
             self.assertIsInstance(
                 parsed[key],
