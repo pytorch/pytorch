@@ -105,13 +105,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             writer.writeline(f"assert_numel({name}, {numel});")
 
-    def _codegen_assert_size_stride(
-        self,
-        code: IndentedBuffer,
-        name: str,
-        size: str,
-        stride: str,
-        op_name: str,
+    def write_assert_size_stride(
+        self, name: str, size: str, stride: str, op_name: str
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.

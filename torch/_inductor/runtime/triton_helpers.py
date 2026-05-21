@@ -247,23 +247,6 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 
 @triton.jit
-def online_softmax_combine_with_sum(
-    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
-):
-    out_max = maximum(lhs_max, rhs_max)
-
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
-
-    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
-    return out_max, out_sum
-
-
-@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)

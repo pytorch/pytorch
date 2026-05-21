@@ -3,7 +3,6 @@ from collections import defaultdict
 
 import torch
 import torch.fx as fx
-from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -23,7 +22,7 @@ class AugmentedGraphHelper:
     def __init__(
         self,
         graph: fx.Graph,
-        node_ancestors: BitsetAncestors | None = None,
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         # Each node starts in its own singleton set
         self.graph = graph
@@ -139,7 +138,7 @@ class AugmentedGraphHelper:
                 if self.node_ancestors:
                     source_set = self.merge_sets[source]
                     is_ancestor_of_source = any(
-                        self.node_ancestors.is_ancestor(dep, s) for s in source_set
+                        dep in self.node_ancestors[s] for s in source_set
                     )
                     # Add to visited to avoid recomputing this check if we see dep again
                     if is_ancestor_of_source:

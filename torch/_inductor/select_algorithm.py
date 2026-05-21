@@ -3647,7 +3647,7 @@ def _classify_kernel_operation(
                 elif template_name.startswith("flex_"):
                     return "flex"
 
-            elif isinstance(choice, ExternKernelCaller):
+            elif isinstance(choice, ExternKernelChoice):
                 # Check extern kernel names
                 choice_name = choice.name
                 if choice_name in (
@@ -3771,7 +3771,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
         assert len(choices) >= 2
         externs = [
-            choice for choice in choices if isinstance(choice, ExternKernelCaller)
+            choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
             return externs[0]
@@ -5491,7 +5491,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
 
         V.debug.log_autotuning_results(
-            name, input_nodes, timings, elapse, precompile_elapse, prescreening_elapse
+            name, input_nodes, timings, elapse, precompile_elapse
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return

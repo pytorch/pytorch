@@ -24,6 +24,8 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfRocmArch,
+    MI300_ARCH,
     MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -458,16 +460,8 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    # Test asserts fastpath == slowpath, both running under the current
-    # precision — so the @tf32_on_and_off tolerance applies to the mutual
-    # agreement of two TF32-rounded outputs, not to TF32-vs-FP32. Measured
-    # worst case on MI300 at d_model=12/seqlen<=1040 is ~1e-3, well under
-    # 0.002. For d_model=256 the inner GEMMs have K=256 (vs K=12), so
-    # summation-order drift between the two paths under hipBLASLt FAST_TF32
-    # scales ~sqrt(256/12) ≈ 4.6x and compounds through 2 encoder layers;
-    # use a looser tolerance on ROCm to cover that worst case while keeping
-    # CUDA strict. See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.002)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.002)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import dataclasses
 import functools
 import hashlib
 import json
@@ -944,11 +943,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         local: bool,
         remote: bool,
         compile_region_name: str | None = None,
-    ) -> tuple[Callable[..., Any] | None, AOTConfig]:
+    ) -> Callable[..., Any] | None:
         """
-        Load a result from the cache, and reconstruct a runtime wrapper around
-        the object. On a cache miss, return an updated config carrying the
-        cache metadata needed to save the eventual compile result.
+        Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
         compiled_fn = None
         cache_info: dict[str, Any] = {}
@@ -1043,13 +1040,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)
             if cache_key is not None:
-                aot_config = dataclasses.replace(
-                    aot_config,
-                    cache_info=AOTAutogradCacheInfo(
-                        cache_key,
-                        time.time_ns(),
-                        forward_symints=symints,
-                    ),
+                aot_config.cache_info = AOTAutogradCacheInfo(
+                    cache_key,
+                    time.time_ns(),
+                    forward_symints=symints,
                 )
 
         cache_info.update(
@@ -1085,7 +1079,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        return compiled_fn, aot_config
+        return compiled_fn
 
     @classmethod
     def generate_guards_expression(

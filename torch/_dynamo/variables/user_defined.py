@@ -812,7 +812,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 m, self, source_fn=source
             ).call_function(tx, [], {})
         raise_type_error(
-            tx, f"bad operand type for unary -: '{self.python_type_name()}'"
+            tx, f"object of type {self.python_type_name()} has no negative"
         )
 
     def nb_positive_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -823,19 +823,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 m, self, source_fn=source
             ).call_function(tx, [], {})
         raise_type_error(
-            tx, f"bad operand type for unary +: '{self.python_type_name()}'"
-        )
-
-    def nb_absolute_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        m = self._maybe_get_baseclass_method("__abs__")
-        if m:
-            source = self.source and AttrSource(self.source, "__abs__")
-            return variables.UserMethodVariable(
-                m, self, source_fn=source
-            ).call_function(tx, [], {})
-        raise_type_error(
-            tx,
-            f"bad operand type for abs(): '{self.python_type_name()}'",
+            tx, f"object of type {self.python_type_name()} has no positive"
         )
 
     def _call_cross_entropy_loss(
@@ -1836,7 +1824,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = self.lookup_class_mro_attr("__neg__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(
-                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
+                tx, f"object of type {self.python_type_name()} has no negative"
             )
         if type_attr is None:
             raise_type_error(tx, "'NoneType' object is not callable")
@@ -1844,7 +1832,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method("__neg__")
         if method is None:
             raise_type_error(
-                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
+                tx, f"object of type {self.python_type_name()} has no negative"
             )
 
         return self.call_method(tx, "__neg__", [], {})
@@ -1858,7 +1846,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = self.lookup_class_mro_attr("__pos__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(
-                tx, f"bad operand type for unary +: '{self.python_type_name()}'"
+                tx, f"object of type {self.python_type_name()} has no positive"
             )
         if type_attr is None:
             raise_type_error(tx, "'NoneType' object is not callable")
@@ -1866,35 +1854,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method("__pos__")
         if method is None:
             raise_type_error(
-                tx,
-                f"bad operand type for unary +: '{self.python_type_name()}'",
+                tx, f"object of type {self.python_type_name()} has no positive"
             )
 
         return self.call_method(tx, "__pos__", [], {})
-
-    def nb_absolute_impl(
-        self,
-        tx: "InstructionTranslator",
-    ) -> VariableTracker:
-        # CPython: slot_nb_absolute calls __abs__() via vectorcall_method.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9406
-        type_attr = self.lookup_class_mro_attr("__abs__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            raise_type_error(
-                tx,
-                f"bad operand type for abs(): '{self.python_type_name()}'",
-            )
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__abs__")
-        if method is None:
-            raise_type_error(
-                tx,
-                f"bad operand type for abs(): '{self.python_type_name()}'",
-            )
-
-        return self.call_method(tx, "__abs__", [], {})
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
@@ -2006,28 +1969,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method, self, source_fn=source_fn, source=self.source
             ).call_function(tx, [key], {})
         return super().mp_subscript_impl(tx, key)
-
-    def sq_repeat_impl(
-        self,
-        tx: "InstructionTranslator",
-        count: VariableTracker,
-    ) -> VariableTracker:
-        # CPython's slot wrapper for ``__mul__`` on a list/tuple subclass that
-        # doesn't override ``__mul__`` calls the base class's sq_repeat,
-        # producing a plain list/tuple (not the subclass).  Delegate to the
-        # inner _base_vt which has the right sq_repeat_impl.
-        if self._base_vt is not None:
-            return self._base_vt.sq_repeat_impl(tx, count)
-        return super().sq_repeat_impl(tx, count)
-
-    def sq_inplace_repeat_impl(
-        self,
-        tx: "InstructionTranslator",
-        count: VariableTracker,
-    ) -> VariableTracker:
-        if self._base_vt is not None:
-            return self._base_vt.sq_inplace_repeat_impl(tx, count)
-        return super().sq_inplace_repeat_impl(tx, count)
 
     def _vectorcall_maybe(
         self,
@@ -2188,21 +2129,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return variables.ConstantVariable.create(NotImplemented)
 
-    def nb_multiply_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        return self.SLOT1BIN(
-            tx,
-            other,
-            "__mul__",
-            "__rmul__",
-            nb_slot=PyNumberSlots.NB_MULTIPLY,
-            reverse=reverse,
-        )
-
     def nb_or_impl(
         self,
         tx: "InstructionTranslator",
@@ -2274,13 +2200,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10362-L10363
         return self.call_method(tx, "__isub__", [other], {})
-
-    def nb_inplace_multiply_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-    ) -> VariableTracker:
-        return self.call_method(tx, "__imul__", [other], {})
 
     def call_method(
         self,

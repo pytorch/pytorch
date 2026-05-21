@@ -42,37 +42,28 @@ static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t d
   return kernelName + "_kernel_" + (dim < 5 ? std::to_string(dim == 0 ? 1 : dim) : "n");
 }
 
-static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc,
-                                           const std::string& dtypeDst,
-                                           bool needsConj,
-                                           bool needsNeg) {
+static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst, bool needsConj) {
   const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
   const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
-  const std::string sign = needsNeg ? "-" : "";
   if (dstComplex) {
     // TODO: Document why explicit cast is needed only for bfloat types
     if (dtypeSrc == "bfloat") {
-      return dtypeDst + "(" + sign + "float(x), 0.0)";
+      return dtypeDst + "(float(x), 0.0)";
     }
-    if (srcComplex) {
-      // conj negates imag; neg negates both. Combined: real negated, imag kept.
-      const std::string imag = (needsConj != needsNeg) ? "-x.y" : "x.y";
-      return dtypeDst + "(" + sign + "x.x, " + imag + ")";
-    }
-    return dtypeDst + "(" + sign + "x, 0.0)";
+    return dtypeDst + (srcComplex ? needsConj ? "(x.x, -x.y)" : "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
     // TODO: Document why explicit cast is needed only for bfloat types
     if (dtypeDst == "bfloat") {
-      return "bfloat(" + sign + "x.x)";
+      return "bfloat(x.x)";
     }
-    return sign + "x.x";
+    return "x.x";
   }
   // TODO: Document why explicit cast is needed only for bfloat types
   if (dtypeDst == "bfloat") {
-    return "bfloat(" + sign + "x)";
+    return "bfloat(x)";
   }
-  return dtypeSrc == "bfloat" ? dtypeDst + "(" + sign + "x)" : "(" + sign + "x)";
+  return dtypeSrc == "bfloat" ? dtypeDst + "(x)" : "(x)";
 }
 
 static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);
@@ -82,9 +73,8 @@ static id<MTLComputePipelineState> getPipelineState(const std::string& kernel,
                                                     const std::string& dtypeSrc,
                                                     const std::string& dtypeDst,
                                                     bool needsScatter,
-                                                    bool needsConj,
-                                                    bool needsNeg) {
-  auto cvtFunc = genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj, needsNeg);
+                                                    bool needsConj) {
+  auto cvtFunc = genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj);
   return (needsScatter ? scatterLib : gatherLib).getPipelineStateForFunc(kernel, {dtypeSrc, dtypeDst, cvtFunc});
 }
 
@@ -133,8 +123,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
                                                              scalarToMetalTypeString(src),
                                                              scalarToMetalTypeString(output),
                                                              /*needsScatter=*/false,
-                                                             src.is_conj() != dst.is_conj(),
-                                                             src.is_neg() != dst.is_neg());
+                                                             src.is_conj() != dst.is_conj());
 
     // this function call is a no-op if MPS Profiler is not enabled
     getMPSProfiler().beginProfileKernel(gatherPSO, functionName, {src, output});
@@ -187,8 +176,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
                                                                 scalarToMetalTypeString(src),
                                                                 scalarToMetalTypeString(output),
                                                                 /*needsScatter=*/true,
-                                                                src.is_conj() != output.is_conj(),
-                                                                src.is_neg() != output.is_neg());
+                                                                src.is_conj() != output.is_conj());
 
       getMPSProfiler().beginProfileKernel(scatterPSO, functionName, {src, output});
 

@@ -1,12 +1,11 @@
-from __future__ import annotations
-
 import inspect
 import logging
 import sys
 import traceback
 import types
 from collections import namedtuple
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -17,26 +16,22 @@ from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_tr
 from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
-from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
+from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.node import Argument, Target
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
-
-    from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.fx import Node
-    from torch.fx.node import Argument, Target
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -227,7 +222,7 @@ class ModuleToTrace(torch.nn.Module):
         self._export_root = foo
         self.in_spec = in_spec
 
-    def forward(self, *flat_args: Any) -> ExportTracerOutput:
+    def forward(self, *flat_args: Any) -> "ExportTracerOutput":
         args, kwargs = pytree.tree_unflatten(flat_args, self.in_spec)
         res = self._export_root(*args, **kwargs)
         out_flat, out_spec = pytree.tree_flatten(res)
@@ -247,7 +242,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_inputs: list[Any],
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
-        graph_output_map: dict[int, OutputReturnInfo],
+        graph_output_map: dict[int, tuple[str, Any]],
         fake_mode: Any | None = None,
         graph_inputs: dict[int, Any] | None = None,
     ) -> None:
@@ -354,7 +349,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             placeholder_idx = self.placeholders.index(self.current_node)
             if placeholder_idx in self.graph_inputs:
                 source = self.graph_inputs[placeholder_idx]
-                if not isinstance(source, GetItemSource):
+                if not isinstance(source, torch._dynamo.source.GetItemSource):
                     example_val = self.current_node.meta.get(
                         "val"
                     ) or self.current_node.meta.get("example_value")
@@ -382,9 +377,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             output_type, val = self.graph_output_map[i]
 
             if output_type == "graph_out":
-                new_outputs.append(original_outputs[cast(int, val)])
+                new_outputs.append(original_outputs[val])
             elif output_type == "input":
-                input_idx = cast(GetItemSource, val).index
+                input_idx = val.index
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
@@ -435,7 +430,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
     orig_callable: Callable[..., Any],
-    fake_mode: FakeTensorMode | None,
+    fake_mode: Optional["FakeTensorMode"],
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,

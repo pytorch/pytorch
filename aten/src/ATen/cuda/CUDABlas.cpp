@@ -889,19 +889,7 @@ void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<fl
 template <>
 void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
 {
-  auto preferred = at::globalContext().blasPreferredBackend();
-#ifdef USE_ROCM
-  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
-  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
-  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
-  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
-  if (preferred == BlasBackend::Cublaslt &&
-      at::ROCmBackwardPassGuard::is_backward_pass() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
-    preferred = BlasBackend::Cublas;
-  }
-#endif
-  if (preferred == BlasBackend::Cublaslt) {
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
     }
@@ -937,23 +925,13 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
     TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  auto preferred = at::globalContext().blasPreferredBackend();
-#ifdef USE_ROCM
-  // See bgemm_internal<at::Half>: reroute fp16 backward GEMMs off hipBLASLt on
-  // gfx90a to preserve subnormals (issue #182952).
-  if (preferred == BlasBackend::Cublaslt &&
-      at::ROCmBackwardPassGuard::is_backward_pass() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
-    preferred = BlasBackend::Cublas;
-  }
-#endif
-  if (preferred == BlasBackend::Cublaslt) {
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
     }
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (preferred == BlasBackend::Ck) {
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
@@ -1441,23 +1419,11 @@ void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<floa
 template <>
 void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
 {
-  auto preferred = at::globalContext().blasPreferredBackend();
-#ifdef USE_ROCM
-  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl on gfx90a,
-  // so a backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
-  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
-  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
-  if (preferred == BlasBackend::Cublaslt &&
-      at::ROCmBackwardPassGuard::is_backward_pass() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
-    preferred = BlasBackend::Cublas;
-  }
-#endif
-  if (preferred == BlasBackend::Cublaslt) {
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
-  else if (preferred == BlasBackend::Ck) {
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
     at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #endif
@@ -1490,21 +1456,11 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  auto preferred = at::globalContext().blasPreferredBackend();
-#ifdef USE_ROCM
-  // See gemm_internal<at::Half>: reroute fp16 backward GEMMs off hipBLASLt on
-  // gfx90a to preserve subnormals (issue #182952).
-  if (preferred == BlasBackend::Cublaslt &&
-      at::ROCmBackwardPassGuard::is_backward_pass() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
-    preferred = BlasBackend::Cublas;
-  }
-#endif
-  if (preferred == BlasBackend::Cublaslt) {
+  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (preferred == BlasBackend::Ck) {
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif

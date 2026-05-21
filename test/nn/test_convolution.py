@@ -61,10 +61,12 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     MACOS_VERSION,
+    MI300_ARCH,
     parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -3522,14 +3524,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
+    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    # Test disables cuDNN, forcing the ATen slow_conv2d fallback in
-    # ConvolutionMM2d.cu which calls at::cuda::blas::gemm directly. On ROCm
-    # the weight-gradient GEMM (K=25 per-batch, accumulated across 2 batches
-    # in FP32) picks up hipBLASLt FAST_TF32 and breaches 0.005 with AMD XF32
-    # round-down bias (measured 5.9e-3); ideal NV-TF32 passes at 2.7e-3.
-    # See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3560,11 +3557,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
+    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    # Structurally identical to test_Conv2d_size_1_kernel: cuDNN disabled →
-    # ATen slow_conv_transpose2d fallback → GEMM under hipBLASLt FAST_TF32
-    # on ROCm. See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)

@@ -80,41 +80,6 @@ def patches(fn):
     return wrapped
 
 
-class TestAlgorithmSelectorChoiceTypes(TestCase):
-    def _extern_kernel_caller(self, name):
-        choice = ExternKernelChoice.lookup(name)
-        if choice is None:
-            self.fail(f"missing extern kernel choice: {name}")
-        return choice.bind(input_nodes=[], layout=None)
-
-    def test_pick_deterministic_choice_prefers_extern_kernel_caller(self):
-        first_choice = select_algorithm.ChoiceCaller("not_extern", [], None, "")
-        extern_choice = self._extern_kernel_caller("mm")
-
-        picked = select_algorithm.AlgorithmSelectorCache().pick_deterministic_choice(
-            [first_choice, extern_choice]
-        )
-
-        self.assertIs(picked, extern_choice)
-
-    def test_classify_kernel_operation_uses_extern_kernel_caller_name(self):
-        cases = (
-            ("mm", "mm"),
-            ("addmm", "mm"),
-            ("convolution", "conv"),
-        )
-        for choice_name, expected in cases:
-            with self.subTest(choice_name=choice_name):
-                extern_choice = self._extern_kernel_caller(choice_name)
-
-                self.assertEqual(
-                    select_algorithm._classify_kernel_operation(
-                        "unclassified_name", [extern_choice], []
-                    ),
-                    expected,
-                )
-
-
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()

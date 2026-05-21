@@ -50,7 +50,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, cast, NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -134,7 +134,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import CodeOptions, DynamoTracerOutput, OutputGraphCommon
+from .output_graph import DynamoTracerOutput, OutputGraphCommon
 from .pgo import (
     _log_size_mismatch_recompile,
     log_frame_dynamic_whitelist,
@@ -896,7 +896,7 @@ def trace_frame(
     one_graph: bool,
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
-    code_options: CodeOptions,
+    code_options: dict[str, object],
     *,
     export: bool = False,
     export_constraints: Any | None = None,
@@ -1547,7 +1547,7 @@ def compile_frame(  # type: ignore[return]
     speculation_log = SpeculationLog()
 
     def transform(
-        instructions: list[Instruction], code_options: dict[str, Any]
+        instructions: list[Instruction], code_options: dict[str, object]
     ) -> DynamoTracerOutput:
         tf_mode_stack: list[torch.overrides.TorchFunctionMode] = list(
             torch_function_mode_stack_state_mgr.stack
@@ -1563,7 +1563,7 @@ def compile_frame(  # type: ignore[return]
             one_graph,
             speculation_log,
             instructions,
-            cast(CodeOptions, code_options),
+            code_options,
             export=export,
             export_constraints=export_constraints,
             frame_state=frame_state,

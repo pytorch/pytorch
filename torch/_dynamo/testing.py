@@ -208,8 +208,7 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            # The nop-insertion path does not inspect code object attributes.
-            code_options={},  # type: ignore[arg-type]
+            code_options={},
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,

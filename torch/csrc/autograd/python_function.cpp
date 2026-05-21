@@ -118,7 +118,8 @@ static PyObject* unpack_saved_variables(
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
-      value = Py_NewRef(Py_None);
+      Py_INCREF(Py_None);
+      value = Py_None;
     } else {
       value = unpack_fn(unpacked_var);
     }
@@ -262,30 +263,27 @@ auto PyNode::apply_with_saved_impl(
   for (const auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
       // input at i is not a variable, skip index
-      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_NewRef(Py_None));
+      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_None);
       offset++;
       continue;
     }
 
     const auto& input_info = input_infos[i - offset];
 
-    THPObjectPtr device(THPDevice_New(input_info.device));
+    PyObject* device(THPDevice_New(input_info.device));
     if (!device)
       throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
-    THPObjectPtr fwdInputMetadata(PyTuple_New(4));
+    PyObject* fwdInputMetadata = PyTuple_Pack(
+        4,
+        autograd::utils::wrap(input_info.layout),
+        device,
+        autograd::utils::wrap(input_info.scalar_type),
+        to_py_size(input_info.size));
     if (!fwdInputMetadata)
       throw python_error();
-    PyTuple_SET_ITEM(
-        fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
-    PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
-    PyTuple_SET_ITEM(
-        fwdInputMetadata.get(),
-        2,
-        autograd::utils::wrap(input_info.scalar_type));
-    PyTuple_SET_ITEM(fwdInputMetadata.get(), 3, to_py_size(input_info.size));
 
-    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata.release());
+    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata);
   }
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
@@ -293,13 +291,11 @@ auto PyNode::apply_with_saved_impl(
   auto [bwd_idx, maybe_bwd_state_idx, opaque_obj_indices] =
       saved.retrieve_pynode_objs(this);
 
-  THPObjectPtr backward_state_idx;
+  PyObject* backward_state_idx = Py_None;
   if (maybe_bwd_state_idx.has_value()) {
     backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
-  } else {
-    backward_state_idx = Py_NewRef(Py_None);
   }
 
   THPObjectPtr opaque_indices_list(
@@ -323,7 +319,7 @@ auto PyNode::apply_with_saved_impl(
       saved_tensors.get(),
       bwd_idx,
       pyobj(),
-      backward_state_idx.get(),
+      backward_state_idx,
       opaque_indices_list.get()));
 
   if (!r)
@@ -482,7 +478,7 @@ PyObject* PyNode::to_py_args(
   };
 
   auto num_inputs = inputs.size();
-  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
+  PyObject* pyInputs = PyTuple_New(static_cast<Py_ssize_t>(num_inputs));
   if (!pyInputs)
     throw_python_error();
   auto& output_info = py_fn->output_info;
@@ -498,10 +494,10 @@ PyObject* PyNode::to_py_args(
     }
     if (!input)
       throw_python_error();
-    PyTuple_SET_ITEM(pyInputs.get(), i, input);
+    PyTuple_SET_ITEM(pyInputs, i, input);
   }
 
-  return pyInputs.release();
+  return pyInputs;
 }
 
 variable_list PyNode::to_variable_list(
@@ -711,7 +707,8 @@ static void _wrap_outputs(
         }
         variable_idx++;
       } else {
-        input = Py_NewRef(Py_None);
+        Py_INCREF(Py_None);
+        input = Py_None;
       }
       PyTuple_SET_ITEM(pyInputs.get(), i, input);
     }
@@ -968,7 +965,8 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
             "expected a Tensor argument, but got ", THPUtils_typename(arg));
         throw python_error();
       }
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
+      Py_INCREF(Py_False);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -1363,7 +1361,8 @@ static PyObject* resolve_kwargs_to_positional(
     PyObject* args,
     PyObject* kwargs) {
   if (!kwargs || PyDict_Size(kwargs) == 0) {
-    return Py_NewRef(args);
+    Py_INCREF(args);
+    return args;
   }
 
   THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
@@ -1799,17 +1798,17 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
-  THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
+  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
   if (!result) {
     throw python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
-        result.get(),
+        result,
         i,
         py::cast(self->compiled_autograd_symints[i]).release().ptr());
   }
-  return result.release();
+  return result;
   END_HANDLE_TH_ERRORS
 }
 

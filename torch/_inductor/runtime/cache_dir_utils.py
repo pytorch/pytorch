@@ -20,12 +20,7 @@ def cache_dir() -> str:
 
 
 def default_cache_dir() -> str:
-    try:
-        username = getpass.getuser()
-    except (KeyError, ModuleNotFoundError, OSError):
-        getuid = getattr(os, "getuid", None)
-        username = f"uid_{getuid()}" if callable(getuid) else "unknown_user"
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", username)
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
     return os.path.join(
         tempfile.gettempdir() if not is_fbcode() else "/var/tmp",
         "torchinductor_" + sanitized_username,

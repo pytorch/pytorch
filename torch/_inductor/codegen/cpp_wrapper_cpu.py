@@ -291,7 +291,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
-        self.needs_vec_isa = self.device == "cpu"
 
     @staticmethod
     def create(
@@ -1435,7 +1434,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
             return
         if cpp_definition is not None:
-            self.needs_vec_isa = True
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
         else:
@@ -1558,14 +1556,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Close the wrapper code block
             result.splice('"""\n)')
 
-        if config.cpp_wrapper_build_separate:
-            kernel_code = "kernel_src"
-            needs_vec_isa = "False"
-            kernel_needs_vec_isa = str(self.needs_vec_isa)
-        else:
-            kernel_code = "None"
-            needs_vec_isa = str(self.needs_vec_isa)
-            kernel_needs_vec_isa = "None"
+        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1573,8 +1564,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
-                needs_vec_isa={needs_vec_isa},
-                kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
@@ -2088,21 +2077,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
-    def _codegen_assert_size_stride(
-        self,
-        code: IndentedBuffer,
-        name: str,
-        size: str,
-        stride: str,
-        op_name: str,
+    def write_assert_size_stride(
+        self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        if V.graph.aot_mode and V.graph.is_const_graph:
-            return
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
         if V.graph.aot_mode:
-            code.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
+            if V.graph.is_const_graph:
+                return
+            self.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
         else:
-            code.writeline(stmt)
+            self.writeline(stmt)
 
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (
