@@ -215,6 +215,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         y = fn(x)
         self.assertEqual(y, x.sin())
 
+    def test_symmetric_difference_update_replays_removed_source_items(self):
+        def fn(s):
+            s.symmetric_difference_update({1, 3})
+            return torch.tensor(len(s))
+
+        expected_set = {1, 2}
+        expected_result = fn(expected_set)
+
+        actual_set = {1, 2}
+        actual_result = torch.compile(fn, backend="eager", fullgraph=True)(actual_set)
+
+        self.assertEqual(actual_result, expected_result)
+        self.assertEqual(actual_set, expected_set)
+
 
 class TestSetGuards(LoggingTestCase):
     def test_set_with_function(self):
