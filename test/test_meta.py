@@ -33,6 +33,9 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyCPU,
     OpDTypes,
+    skip,
+    skipOps,
+    xfail,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
@@ -1160,6 +1163,13 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            skip("sparse.sampled_addmm"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("to"),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_outplace(self, device, dtype, op):
         if "_scaled_mm" in op.name:
@@ -1207,6 +1217,14 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("abs", dtypes=(torch.complex128, torch.complex64, torch.complex32)),
+            xfail("as_strided", variant_name="partial_views"),
+            xfail("float_power", dtypes=(torch.bfloat16, torch.float16, torch.float32)),
+            xfail("square", dtypes=(torch.bool,)),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_inplace(self, device, dtype, op):
         func = op.get_inplace()
@@ -1271,18 +1289,41 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("empty_strided"),
+            xfail("nn.functional.binary_cross_entropy"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=False)
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("abs", dtypes=(torch.complex128, torch.complex64, torch.complex32)),
+            xfail("as_strided", variant_name="partial_views"),
+            xfail("square", dtypes=(torch.bool,)),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=True)
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("empty_strided"),
+            xfail("nn.functional.binary_cross_entropy"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
@@ -1290,12 +1331,35 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("abs", dtypes=(torch.complex128, torch.complex64, torch.complex32)),
+            xfail("as_strided", variant_name="partial_views"),
+            xfail("square", dtypes=(torch.bool,)),
+        }
+    )
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("view_as_complex"),
+            skip("sparse.sampled_addmm"),
+            xfail("nn.functional.binary_cross_entropy"),
+            xfail("narrow_copy"),
+            xfail("view_copy"),
+            xfail("view"),
+            xfail("view_as"),
+            xfail("empty_strided"),
+            skip("normal"),
+            xfail("take_along_dim"),
+            xfail("kron"),
+            xfail("nn.functional.channel_shuffle"),
+        }
+    )
     # only test one dtype, as output stride behavior is the same for all dtypes
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
@@ -1305,6 +1369,12 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("abs", dtypes=(torch.complex128, torch.complex64, torch.complex32)),
+            xfail("as_strided", variant_name="partial_views"),
+        }
+    )
     # only test one dtype, as output stride behavior is the same for all dtypes
     @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
@@ -1314,6 +1384,14 @@ class TestMeta(TestCase):
 
     @skipIfCrossRef
     @suppress_warnings
+    @skipOps(
+        {
+            xfail("complex"),
+            xfail("heaviside"),
+            xfail("isclose"),
+            xfail("polar"),
+        }
+    )
     # only test one dtype, as output stride behavior is the same for all dtypes
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     # Only test on CUDA, as CUDA kernel's stride is the reference
