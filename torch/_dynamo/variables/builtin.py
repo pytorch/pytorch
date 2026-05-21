@@ -2854,10 +2854,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
         if a.is_symnode_like() and b.is_symnode_like():
+            # In-place bitwise ops on immutable bool/int values rebind the local.
+            # Emit the out-of-place op so FX codegen does not assign to a literal.
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
-                    "call_function", operator.iand, *proxy_args_kwargs([a, b], {})
+                    "call_function", operator.and_, *proxy_args_kwargs([a, b], {})
                 ),
                 sym_num=None,
             )
