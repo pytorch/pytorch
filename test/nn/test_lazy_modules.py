@@ -156,12 +156,11 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIsInstance(lazy_module, nn.Linear)
+        self.assertNotIsInstance(lazy_module, nn.LazyLinear)
         self.assertTrue(lazy_module.weight.shape == (10, 5))
         self.assertTrue(lazy_module.bias.shape == (10,))
+        self.assertEqual(lazy_module.in_features, 5)
 
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
@@ -173,15 +172,12 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
-        self.assertTrue(isinstance(lazy_module, nn.LazyLinear))
+        self.assertIsInstance(lazy_module, nn.Linear)
+        self.assertNotIsInstance(lazy_module, nn.LazyLinear)
+        self.assertEqual(lazy_module.in_features, 5)
 
         input = torch.randn(5, 5)
         lazy_module(input)
-        self.assertFalse(isinstance(lazy_module, nn.LazyLinear))
         self.assertTrue(lazy_module.in_features == 5)
 
     def _check_lazy_conv(
@@ -245,11 +241,9 @@ class TestLazyModules(TestCase):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIsInstance(lazy_module, module.__class__)
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
+        self.assertEqual(lazy_module.in_channels, module.in_channels)
         if lazy_module.bias is not None:
             self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
 
@@ -353,6 +347,30 @@ class TestLazyModules(TestCase):
             (32, 16, 2, 2),
             (32,),
         )
+
+    @suppress_warnings
+    def test_lazy_conv2d_state_and_forward(self):
+        module = nn.Conv2d(3, 16, 3, padding=1)
+        lazy_module = nn.LazyConv2d(16, 3, padding=1)
+        lazy_module.load_state_dict(module.state_dict())
+        self.assertIsInstance(lazy_module, nn.Conv2d)
+        self.assertNotIsInstance(lazy_module, nn.LazyConv2d)
+        self.assertEqual(lazy_module.in_channels, 3)
+
+        x = torch.randn(1, 3, 8, 8)
+        self.assertTrue(torch.equal(lazy_module(x), module(x)))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d_state_and_forward(self):
+        module = nn.ConvTranspose2d(3, 16, 3, padding=1)
+        lazy_module = nn.LazyConvTranspose2d(16, 3, padding=1)
+        lazy_module.load_state_dict(module.state_dict())
+        self.assertIsInstance(lazy_module, nn.ConvTranspose2d)
+        self.assertNotIsInstance(lazy_module, nn.LazyConvTranspose2d)
+        self.assertEqual(lazy_module.in_channels, 3)
+
+        x = torch.randn(1, 3, 8, 8)
+        self.assertTrue(torch.equal(lazy_module(x), module(x)))
 
     @suppress_warnings
     def test_lazy_conv3d(self):
@@ -605,10 +623,8 @@ class TestLazyModules(TestCase):
         module = cls(10)
         lazy_module = lazy_cls(affine=True, track_running_stats=True)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIsInstance(lazy_module, cls)
+        self.assertEqual(lazy_module.num_features, 10)
         self.assertEqual(lazy_module.weight.shape, (10,))
         self.assertEqual(lazy_module.bias.shape, (10,))
         self.assertEqual(lazy_module.running_mean.shape, (10,))
@@ -627,10 +643,9 @@ class TestLazyModules(TestCase):
                     affine=affine, track_running_stats=track_running_stats
                 )
                 lazy_module.load_state_dict(module.state_dict())
-                # Parameters have been initialized but the module won't become a full
-                # InstanceNorm one until the first iteration. This is due to
-                # limitations on the state_dict loading logic
-                self.assertFalse(lazy_module.has_uninitialized_params())
+                self.assertIsInstance(lazy_module, cls)
+                if affine or track_running_stats:
+                    self.assertEqual(lazy_module.num_features, 10)
                 if affine:
                     self.assertEqual(lazy_module.weight.shape, (10,))
                     self.assertEqual(lazy_module.bias.shape, (10,))
@@ -676,6 +691,19 @@ class TestLazyModules(TestCase):
     def test_lazy_batchnorm2d_state(self):
         self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
         self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
+
+    def test_lazy_batchnorm2d_state_and_forward(self):
+        module = nn.BatchNorm2d(16)
+        module.eval()
+        lazy_module = nn.LazyBatchNorm2d()
+        lazy_module.load_state_dict(module.state_dict())
+        lazy_module.eval()
+        self.assertIsInstance(lazy_module, nn.BatchNorm2d)
+        self.assertNotIsInstance(lazy_module, nn.LazyBatchNorm2d)
+        self.assertEqual(lazy_module.num_features, 16)
+
+        x = torch.randn(2, 16, 4, 4)
+        self.assertTrue(torch.allclose(lazy_module(x), module(x)))
 
     def test_lazy_batchnorm3d(self):
         self._check_lazy_norm(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))

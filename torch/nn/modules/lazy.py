@@ -34,6 +34,14 @@ class _LazyProtocol(Protocol):
 
     def _infer_parameters(self, module, input): ...
 
+    def _lazy_load_pre_materialize_hook(self): ...
+
+    def _materialize(self): ...
+
+    def has_uninitialized_params(self): ...
+
+    cls_to_become: type[Any] | None
+
     @property
     def _parameters(self): ...
 
@@ -226,6 +234,29 @@ class LazyModuleMixin:
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
+        # _materialize removes hooks, but only for future calls; the current load completes normally.
+        if not self.has_uninitialized_params():
+            self._lazy_load_pre_materialize_hook()
+            self._materialize()
+
+    def _lazy_load_pre_materialize_hook(self: _LazyProtocol):
+        """Called before ``_materialize`` during ``load_state_dict``.
+
+        Override in subclasses to set module-specific attributes (e.g.
+        ``in_features``, ``in_channels``) from the already-loaded parameters,
+        since ``initialize_parameters`` is not called on the load path.
+        """
+        pass
+
+    def _materialize(self: _LazyProtocol):
+        """Remove lazy hooks and, if ``cls_to_become`` is set, mutate ``__class__`` to the concrete type."""
+        self._initialize_hook.remove()
+        self._load_hook.remove()
+        delattr(self, '_initialize_hook')
+        delattr(self, '_load_hook')
+        if self.cls_to_become is not None:
+            self.__class__ = self.cls_to_become
+
     def initialize_parameters(self: _LazyProtocol, *args, **kwargs):
         r"""Initialize parameters according to the input batch properties.
 
@@ -263,12 +294,7 @@ class LazyModuleMixin:
         module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
             raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
-        module._initialize_hook.remove()
-        module._load_hook.remove()
-        delattr(module, '_initialize_hook')
-        delattr(module, '_load_hook')
-        if module.cls_to_become is not None:
-            module.__class__ = module.cls_to_become
+        module._materialize()
     # fmt: on
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
