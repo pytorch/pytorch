@@ -198,6 +198,40 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_aliasing_guard_failure_with_unavailable_list_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + data[0] + data[1]
+            return x
+
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure.reason)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=cnt, guard_fail_fn=guard_fail_fn)(
+            fn
+        )
+
+        t1, t2 = torch.randn(4), torch.randn(4)
+        data = [torch.randn(4), torch.randn(4)]
+        self.assertEqual(compiled_fn(t1, t2, data), fn(t1, t2, data))
+
+        t = torch.randn(4)
+        self.assertEqual(compiled_fn(t, t, None), fn(t, t, None))
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(failure_reasons), 1)
+        self.assertIn("Duplicate tensors found", failure_reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate",
+            failure_reasons[0],
+        )
+        self.assertIn("data[0]", failure_reasons[0])
+        self.assertIn("data[1]", failure_reasons[0])
+
     def test_object_alias_relation_guards_without_lambda(self):
         class Box:
             pass
