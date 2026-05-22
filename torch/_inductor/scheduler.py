@@ -6866,7 +6866,14 @@ class Scheduler:
         groups. After reindexing, the shared reads have identical index
         expressions, enabling the codegen to CSE loads.
 
-        Returns True if reindexing was applied.
+        When SIMDKernel.is_compatible fails (e.g. for a transpose/permute
+        whose loop dimensions are ordered differently from what the
+        reduction expects), falls back to apply_new_loop_order which
+        preserves original index expressions (just reordered) instead of
+        apply_loop_reindexing which creates a new flat index mapping that
+        doesn't respect buffer strides.
+
+        Returns True if reindexing/reordering was applied.
         """
         from .codegen.simd import SIMDKernel
 
@@ -6901,11 +6908,40 @@ class Scheduler:
         ):
             return False
 
-        if not all(
+        # Check if the pointwise's iteration ranges are already compatible
+        # with the reduction's groups.
+        compatible = all(
             SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
             for sn in snodes
-        ):
-            return False
+        )
+
+        # When is_compatible fails, the pointwise's loop dimensions may be
+        # in an order that can't be split into the reduction's groups (e.g.
+        # a transpose produces [B, A] but the reduction expects (A, B)).
+        # Try reordering via apply_new_loop_order which preserves original
+        # index expressions (just reordered) so memory access stays correct.
+        reorder_perm: tuple[int, ...] | None = None
+        if not compatible:
+            num_iter_dims = len(snodes[0]._sizes[0]) if snodes else 0
+            if num_iter_dims < 2:
+                return False
+
+            for perm in itertools.permutations(range(num_iter_dims)):
+                if perm == tuple(range(num_iter_dims)):
+                    continue  # already tried identity order
+                # Check if this reorder would make all snodes compatible
+                if all(
+                    SIMDKernel.is_compatible(
+                        (red_numel, red_rnumel),
+                        ([sn._sizes[0][i] for i in perm], sn._sizes[1]),
+                    )
+                    for sn in snodes
+                ):
+                    reorder_perm = perm
+                    break
+
+            if reorder_perm is None:
+                return False
 
         # Nothing to reindex if the pointwise already uses the reduction split.
         target_iter_sizes = (red_numel, red_rnumel)
@@ -6918,8 +6954,17 @@ class Scheduler:
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
-        for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+        if reorder_perm is not None:
+            # Use loop reordering: preserves original index expressions
+            for sn in snodes:
+                sn.apply_new_loop_order(list(reorder_perm))
+                # Update group to match reduction's groups
+                device = sn.node.get_device_or_error()
+                group_fn = self.get_backend(device).group_fn
+                sn.group = (device, group_fn(sn._sizes))
+        else:
+            for sn in snodes:
+                sn.apply_loop_reindexing([red_numel, red_rnumel])
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
