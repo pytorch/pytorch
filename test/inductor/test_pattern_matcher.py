@@ -1253,6 +1253,60 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_preserve_accumulator_addmm_with_pointwise(self):
+        args = [
+            torch.randn(10, 20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_expanded_bias_addmm(self):
+        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
+        args = [
+            bias,
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+        self.assertEqual(bias.stride(0), 0)
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.addmm(*args).relu())
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("inplace", [False, True])
+    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
+        def fn(x, ws):
+            buf = torch.zeros_like(x)
+            for w in ws:
+                if inplace:
+                    buf.addmm_(w, w)
+                else:
+                    buf = torch.addmm(buf, w, w)
+                buf = torch.cos(buf)
+            return buf
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
+            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
+        ]
+
+        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
+        self.assertEqual(actual, fn(*args))
+        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
+        self.assertNotIn("extern_kernels.mm(", code[0])
+
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
         {
@@ -1388,14 +1442,15 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        # bias addmm -> elementwise should be decomposed into
+        # mm -> add -> elementwise.
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(16, 32, device=GPU_TYPE),
+            torch.randn(32, device=GPU_TYPE),
         ]
 
         counters.clear()
@@ -1739,6 +1794,64 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (x, scale), 0, 0)
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
+
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_softmax_nonfinite_matches_eager(self):
+        def check(fn, args):
+            torch._dynamo.reset()
+            counters.clear()
+            expected = fn(*args)
+            actual, _ = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual[0], expected[0])
+            self.assertTrue(torch.isnan(expected[-1]).all().item())
+            self.assertTrue(torch.isnan(actual[-1]).all().item())
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        def mul_softmax(x, scale):
+            for _ in range(3):
+                x = x * scale
+            return x, F.softmax(x, dim=0)
+
+        def div_softmax(x, inv_scale):
+            x = x / inv_scale
+            return x, F.softmax(x, dim=0)
+
+        def duplicated_mul_softmax(x, scale):
+            y = x
+            for _ in range(3):
+                y = y * scale
+            z = x
+            for _ in range(3):
+                z = z * scale
+            return y, F.softmax(z, dim=0)
+
+        torch.manual_seed(100)
+        check(mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(duplicated_mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(
+            div_softmax,
+            (
+                torch.tensor([[1.0, -1.0, 2.0, -2.0]]),
+                torch.tensor([1e-45]),
+            ),
+        )
+
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_amax_sub_nonfinite_matches_eager(self):
+        def fn(x, scale):
+            y = x * scale
+            return y - torch.amax(y, dim=0, keepdim=True)
+
+        torch._dynamo.reset()
+        counters.clear()
+        x = torch.tensor([[10.0], [0.0]])
+        scale = torch.tensor([1e38])
+        expected = fn(x, scale)
+        actual, _ = run_and_get_code(torch.compile(fn), x, scale)
+        self.assertTrue(torch.isnan(expected[0, 0]).item())
+        self.assertTrue(torch.isnan(actual[0, 0]).item())
+        self.assertEqual(actual[1, 0].item(), float("-inf"))
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
