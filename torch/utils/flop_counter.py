@@ -453,6 +453,10 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
+    if cum_seq_q is None and query.ndim == 4:
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_flash_attention_nested_shapes(
@@ -561,6 +565,11 @@ def _flash_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    if cum_seq_q is None and query.ndim == 4:
+        grad_out = grad_out.transpose(-2, -3)
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_flash_attention_nested_shapes(
