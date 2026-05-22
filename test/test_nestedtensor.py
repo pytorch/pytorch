@@ -8642,6 +8642,13 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("batch_dim" not in sample.name),
         name="broken_select_backward",
     ),
+    # index_select(): non-batch-dim operation also feeds an NJT grad_output into
+    # the dense backward formula.
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "index_select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" not in sample.name),
+        name="broken_index_select_backward",
+    ),
     # prod(): completely broken in every way
     XFailRule(
         op_match_fn=lambda device, op: (op.full_name == "prod"),

@@ -1963,7 +1963,9 @@ def index_select_default(func, *args, **kwargs):
                         start=start.item(),
                         length=length.item(),
                     )
-                    for start, length in zip(selected_starts, selected_lengths)
+                    for start, length in zip(
+                        selected_starts, selected_lengths, strict=True
+                    )
                 ],
                 dim=inp._ragged_idx - 1,
             )
