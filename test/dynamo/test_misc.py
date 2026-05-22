@@ -4195,6 +4195,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
 
+    def test_direct_aten_set_unsupported(self):
+        def fn(x, y):
+            out = torch.ops.aten.set(x, source=y)
+            return torch.ops.aten.lift(out)
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported direct torch\\.ops\\.aten\\.set call"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="inductor")(x, y), fn(x, y))
+
     def test_out_variants_with_resizing_on_graph_inputs(self):
         def fn(x, y):
             return torch.cosh(x, out=y) + 1
