@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-BERT_pytorch,pass,6
+BERT_pytorch,pass,8
 
 
 
@@ -10,43 +10,43 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-LearningToPaint,pass,6
+LearningToPaint,pass,8
 
 
 
-Super_SloMo,pass,7
+Super_SloMo,pass,8
 
 
 
-alexnet,pass,6
+alexnet,pass,8
 
 
 
-basic_gnn_edgecnn,pass,20
+basic_gnn_edgecnn,pass,21
 
 
 
-basic_gnn_gcn,pass,13
+basic_gnn_gcn,pass,14
 
 
 
-basic_gnn_gin,pass,7
+basic_gnn_gin,pass,8
 
 
 
-basic_gnn_sage,pass,7
+basic_gnn_sage,pass,8
 
 
 
-dcgan,pass,6
+dcgan,pass,8
 
 
 
-demucs,pass,9
+demucs,pass,10
 
 
 
-densenet121,pass,6
+densenet121,pass,8
 
 
 
@@ -54,7 +54,7 @@ detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
 
 
 
-dlrm,pass,6
+dlrm,pass,8
 
 
 
@@ -62,19 +62,19 @@ drq,pass,7
 
 
 
-fastNLP_Bert,pass,10
+fastNLP_Bert,pass,12
 
 
 
-functorch_dp_cifar10,pass,7
+functorch_dp_cifar10,pass,8
 
 
 
-functorch_maml_omniglot,pass,7
+functorch_maml_omniglot,pass,8
 
 
 
-lennard_jones,pass,7
+lennard_jones,pass,8
 
 
 
@@ -82,19 +82,19 @@ llava,model_fail_to_load,0
 
 
 
-maml_omniglot,pass,7
+maml_omniglot,pass,8
 
 
 
-microbench_unbacked_tolist_sum,pass,9
+microbench_unbacked_tolist_sum,pass,10
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,8
 
 
 
-mobilenet_v2,pass,6
+mobilenet_v2,pass,8
 
 
 
@@ -102,19 +102,19 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,8
 
 
 
-moco,pass,13
+moco,pass,14
 
 
 
-nanogpt,pass,7
+nanogpt,pass,8
 
 
 
-nvidia_deeprecommender,pass,7
+nvidia_deeprecommender,pass,8
 
 
 
@@ -122,31 +122,31 @@ opacus_cifar10,eager_fail_to_run,0
 
 
 
-phlippe_densenet,pass,6
+phlippe_densenet,pass,8
 
 
 
-phlippe_resnet,pass,6
+phlippe_resnet,pass,8
 
 
 
-pytorch_stargan,pass,6
+pytorch_stargan,pass,8
 
 
 
-pytorch_unet,pass_due_to_skip,7
+pytorch_unet,pass_due_to_skip,8
 
 
 
-resnet152,pass,7
+resnet152,pass,8
 
 
 
-resnet18,pass,6
+resnet18,pass,8
 
 
 
-resnet50,pass,6
+resnet50,pass,7
 
 
 
@@ -154,7 +154,7 @@ resnet50_quantized_qat,eager_fail_to_run,0
 
 
 
-resnext50_32x4d,pass,7
+resnext50_32x4d,pass,8
 
 
 
@@ -162,23 +162,23 @@ sam,eager_fail_to_run,0
 
 
 
-shufflenet_v2_x1_0,pass,6
+shufflenet_v2_x1_0,pass,8
 
 
 
-soft_actor_critic,pass,6
+soft_actor_critic,pass,7
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,18
 
 
 
-squeezenet1_1,pass,6
+squeezenet1_1,pass,8
 
 
 
-torch_multimodal_clip,pass,7
+torch_multimodal_clip,pass,8
 
 
 
@@ -186,15 +186,15 @@ torchrec_dlrm,pass,6
 
 
 
-tts_angular,pass,9
+tts_angular,pass,10
 
 
 
-vgg16,pass,6
+vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_to_run,38
+vision_maskrcnn,fail_to_run,39
 
 
 

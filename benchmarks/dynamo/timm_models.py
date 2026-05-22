@@ -368,8 +368,15 @@ class TimmRunner(BenchmarkRunner):
                 pred = pred[0]
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
+        result = None
+        if collect_outputs and self.collect_training_outputs_before_optimizer_step():
+            result = self.clone_tensors_for_accuracy(
+                collect_results(mod, None, loss, cloned_inputs)
+            )
         self.optimizer_step()
         if collect_outputs:
+            if result is not None:
+                return result
             return collect_results(mod, None, loss, cloned_inputs)
         return None
 

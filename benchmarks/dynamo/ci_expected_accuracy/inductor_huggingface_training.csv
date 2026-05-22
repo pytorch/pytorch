@@ -2,19 +2,19 @@ name,accuracy,graph_breaks
 
 
 
-AlbertForMaskedLM,pass,4
+AlbertForMaskedLM,pass,6
 
 
 
-AllenaiLongformerBase,pass,9
+AllenaiLongformerBase,pass,10
 
 
 
-BartForCausalLM,pass,7
+BartForCausalLM,pass,9
 
 
 
-BertForMaskedLM,pass,5
+BertForMaskedLM,pass,6
 
 
 
@@ -26,15 +26,15 @@ DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
-DistilBertForMaskedLM,pass,5
+DistilBertForMaskedLM,pass,6
 
 
 
-DistillGPT2,pass,8
+DistillGPT2,pass,9
 
 
 
-ElectraForCausalLM,pass,4
+ElectraForCausalLM,pass,6
 
 
 
@@ -42,27 +42,27 @@ GPT2ForSequenceClassification,pass,6
 
 
 
-GoogleFnet,pass,5
+GoogleFnet,pass,6
 
 
 
-LayoutLMForMaskedLM,pass,5
+LayoutLMForMaskedLM,pass,6
 
 
 
-M2M100ForConditionalGeneration,pass,4
+M2M100ForConditionalGeneration,pass,6
 
 
 
-MBartForCausalLM,pass,7
+MBartForCausalLM,pass,9
 
 
 
-MT5ForConditionalGeneration,pass,5
+MT5ForConditionalGeneration,pass,6
 
 
 
-MegatronBertForCausalLM,pass,5
+MegatronBertForCausalLM,pass,6
 
 
 
@@ -70,15 +70,15 @@ MobileBertForMaskedLM,pass,3
 
 
 
-OPTForCausalLM,pass,7
+OPTForCausalLM,pass,9
 
 
 
-PLBartForCausalLM,pass,7
+PLBartForCausalLM,pass,9
 
 
 
-PegasusForCausalLM,pass,7
+PegasusForCausalLM,pass,9
 
 
 
@@ -86,19 +86,19 @@ Qwen/Qwen3-0.6B,eager_fail_to_run,0
 
 
 
-RobertaForCausalLM,pass,5
+RobertaForCausalLM,pass,6
 
 
 
-T5ForConditionalGeneration,pass,5
+T5ForConditionalGeneration,pass,6
 
 
 
-T5Small,pass,5
+T5Small,pass,6
 
 
 
-TrOCRForCausalLM,pass,6
+TrOCRForCausalLM,pass,8
 
 
 
@@ -106,11 +106,11 @@ XGLMForCausalLM,pass,6
 
 
 
-XLNetLMHeadModel,pass,5
+XLNetLMHeadModel,pass,6
 
 
 
-YituTechConvBert,pass,5
+YituTechConvBert,pass,6
 
 
 
