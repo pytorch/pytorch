@@ -266,6 +266,47 @@ class TestNbXor(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, y), fn(x, y))
 
+    def test_xor_tensor_and_tensor_int(self):
+        def fn(x, y):
+            return x ^ y
+
+        x = torch.tensor([0b1110, 0b1100], dtype=torch.int64)
+        y = torch.tensor([0b1100, 0b1010], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_xor_tensor_and_int(self):
+        def fn(x):
+            return x ^ 7
+
+        x = torch.tensor([0b1110, 0b1100], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_xor_int_and_tensor(self):
+        def fn(x):
+            return 7 ^ x
+
+        x = torch.tensor([0b1110, 0b1100], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_xor_tensor_and_bool(self):
+        def fn(x):
+            return x ^ True
+
+        x = torch.tensor([True, False, True, False])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_xor_bool_and_tensor(self):
+        def fn(x):
+            return True ^ x
+
+        x = torch.tensor([True, False, True, False])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_inplace_xor_tensor(self):
         def fn(x, y):
             x ^= y
