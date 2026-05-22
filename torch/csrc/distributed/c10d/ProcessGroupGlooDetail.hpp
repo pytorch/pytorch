@@ -284,7 +284,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const ReduceOp reduceOp;
   const uint32_t tag;
 
@@ -302,7 +302,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     const auto& scalarType = tensor.scalar_type();
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     // Use tensor.numel() instead of tensors[0].numel() to
     // get the right number of elements when tensors[0] is complex
     GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors, tensor.numel());
@@ -399,7 +399,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         inputs(inputs),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
@@ -568,7 +568,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     gloo::AllgatherOptions opts(context_);
     opts.setOutput(buffer.mutable_data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     gloo::allgather(opts);
 
     return metadata;
@@ -600,7 +600,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         input.numel());
     opts.setOutput(output.mutable_data_ptr<int64_t>(), counts);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     gloo::allgatherv(opts);
 
     // Compile indices tensor per rank.
@@ -646,7 +646,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(
         valueTensor.scalar_type(), setOutput, opts, output, counts);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     gloo::allgatherv(opts);
 
     // Compile values tensor per rank.

@@ -1,6 +1,5 @@
 # Owner(s): ["module: c10d"]
 import unittest
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -26,13 +25,12 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
-    MI300_ARCH,
     parametrize,
     run_tests,
-    runOnRocmArch,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -63,6 +61,7 @@ def _fp8_all_gather(
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -235,16 +234,39 @@ class MicroPipelineTPTest(TestCase):
             self.assertEqual(eager_stride, compiled_stride)
 
         if gather_dim == A_dims - 1:
-            # Decomposing the matmul on the K dimension is not supported
+            # Gathering on the K dimension of the matmul -- fusion not supported.
             self.assertNotIn("fused_all_gather_matmul", code)
-            self.assertIn("all_gather_into_tensor", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_fuse_all_gather_matmul_view_optimization(self):
+        """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view
+        (no data movement), so the all_gather is optimized away entirely and
+        there is no all_gather+matmul pattern to fuse."""
+        group = dist.group.WORLD
+
+        def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            A = all_gather_tensor(A_shard, gather_dim=1, group=group)
+            return A @ B
+
+        # batch=1: after all_gather, shape[0] == world_size == group_size,
+        # so the view optimization in _maybe_view_chunk_cat applies.
+        # Shard is [1, 32, 32], all_gather gives [2, 32, 32], view to [1, 64, 32].
+        A_shard = torch.rand(1, 32, 32, device="cuda")
+        B = torch.rand(32, 16, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, A_shard, B)
+
+        self.assertNotIn("fused_all_gather_matmul", code)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
@@ -260,7 +282,7 @@ class MicroPipelineTPTest(TestCase):
             B: torch.Tensor,
             A_scale: torch.Tensor,
             B_scale: torch.Tensor,
-            out_dtype: Optional[torch.dtype],
+            out_dtype: torch.dtype | None,
         ) -> torch.Tensor:
             A = _fp8_all_gather(
                 A_shard, gather_dim=gather_dim, group_name=group.group_name
@@ -301,9 +323,6 @@ class MicroPipelineTPTest(TestCase):
             # Decomposing the matmul on the K dimension is not supported
             self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
             self.assertNotIn("all_gather_into_tensor", str(gm.graph))
-
-        if torch.cuda.get_device_capability() < (8, 9):
-            return
 
         with _test_mode():
             compiled = torch.compile(func)
@@ -346,13 +365,13 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
-        if scatter_dim >= A_dims:
+        if scatter_dim >= A_dims - 1:
             return
 
         group = dist.group.WORLD
@@ -389,9 +408,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
-        if torch.cuda.get_device_capability() < (8, 9):
-            return
-
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
@@ -400,9 +416,9 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [0, 1, 2])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
+    @parametrize("scatter_dim", [0, 1])
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -497,6 +513,7 @@ class MicroPipelineTPTest(TestCase):
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -516,6 +533,7 @@ class MicroPipelineTP4GPUTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(shape_padding=False)
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
             "cuda",

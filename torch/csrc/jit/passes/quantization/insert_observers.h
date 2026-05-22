@@ -46,7 +46,7 @@ TORCH_API Module InsertObservers(
  *
  * For each Tensor that needs to be observed in the method, insert observer
  * module to the input module and observe_<method-name> methods to the module.
- * This method is clone of mehtod_name with forward calls of observer added.
+ * This method is clone of method_name with forward calls of observer added.
  *
  * \param module the input module
  * \param method_name the method we want to insert observers for

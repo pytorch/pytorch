@@ -43,10 +43,15 @@ namespace torch::_export::archive_spec {
      "data/constants/{}_constants_config.json")                                \
   DO(TENSOR_CONSTANT_FILENAME_PREFIX, "tensor_")                               \
   DO(CUSTOM_OBJ_FILENAME_PREFIX, "custom_obj_")                                \
+  DO(OPAQUE_OBJ_FILENAME_PREFIX, "opaque_obj_")                                \
   /* example inputs */                                                         \
   DO(SAMPLE_INPUTS_DIR, "data/sample_inputs/")                                 \
   DO(SAMPLE_INPUTS_FILENAME_FORMAT,                                            \
      "data/sample_inputs/{}.pt") /* {model_name} */                            \
+  DO(TS_SAMPLE_INPUTS_FILENAME_FORMAT,                                         \
+     "extra/{}.forward.sample_input.pt") /* {model_name} */                    \
+  /* ExecuTorch artifacts, including PTE files */                              \
+  DO(EXECUTORCH_DIR, "data/executorch/")                                       \
   /* extra folder */                                                           \
   DO(EXTRA_DIR, "extra/")                                                      \
   DO(MODULE_INFO_PATH, "extra/module_info.json")                               \

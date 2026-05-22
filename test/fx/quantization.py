@@ -129,7 +129,10 @@ class ConvNormRelu(MinMaxObserver):
             self.bn_node = node
             self.bn = quantizer.modules[self.bn_node.target]
             node = node.args[0]
-        assert isinstance(quantizer.modules[node.target], torch.nn.modules.Conv2d)
+        if not isinstance(quantizer.modules[node.target], torch.nn.modules.Conv2d):
+            raise AssertionError(
+                f"Expected Conv2d, got {type(quantizer.modules[node.target])}"
+            )
         self.conv_node = node
         self.conv = quantizer.modules[self.conv_node.target]
 
@@ -205,7 +208,8 @@ def _parent_name(target):
 
 class DefaultQuant(MinMaxObserver):
     def quantize(self, input):
-        assert self.all_tensors
+        if not self.all_tensors:
+            raise AssertionError("Expected self.all_tensors to be non-empty")
         scale, zeropoint = self.scale_zeropoint()
         return torch.quantize_per_tensor(
             Proxy(input), scale, zeropoint, torch.quint8
@@ -341,7 +345,7 @@ class Quantizer:
                     lambda a: map_arg(a, lambda n: load_arg(n, quantized=True)),
                 )
                 if r is NotImplemented:
-                    # quantizer choose to to quantize the node take the entire match, and just copy it over
+                    # quantizer choose to quantize the node take the entire match, and just copy it over
                     env[node.name] = copy_recursive(node)
                 else:
                     quant_env[node.name] = r

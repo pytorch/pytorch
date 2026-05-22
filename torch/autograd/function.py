@@ -4,8 +4,9 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import Concatenate, deprecated, ParamSpec
+from collections.abc import Callable
+from typing import Any, Concatenate, TypeVar
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._C as _C
@@ -145,10 +146,11 @@ class FunctionCtx:
 
         """
         for tensor in tensors:
-            assert isinstance(tensor, torch.Tensor) or tensor is None, (
-                "save_for_forward expects all arguments to be tensors; you should "
-                "save non-tensors as attributes on ctx."
-            )
+            if not (isinstance(tensor, torch.Tensor) or tensor is None):
+                raise AssertionError(
+                    "save_for_forward expects all arguments to be tensors; you should "
+                    "save non-tensors as attributes on ctx."
+                )
 
         self.saved_for_forward = tensors
 
@@ -297,12 +299,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     This class is used for internal autograd work. Do not use.
     """
 
-    def apply(self, *args):
-        r"""
-        Apply method used when executing this Node during the backward
-        """
-        # _forward_cls is defined by derived class
-        # The user should define either backward or vjp but never both.
+    def _get_user_fn(self):
         backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
         vjp_fn = self._forward_cls.vjp  # type: ignore[attr-defined]
         if backward_fn is not Function.backward and vjp_fn is not Function.vjp:
@@ -311,8 +308,29 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
                 "Function is not allowed. You should only implement one "
                 "of them."
             )
-        user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
+        return vjp_fn if vjp_fn is not Function.vjp else backward_fn
+
+    def apply(self, *args):
+        r"""
+        Apply method used when executing this Node during the backward.
+
+        Called by the autograd engine (non-boxed path) and by direct
+        grad_fn.apply() calls. When boxed_grads_call is True, boxes
+        grads into a mutable list before calling user's backward.
+        """
+        user_fn = self._get_user_fn()
+        fwd_cls = self._forward_cls  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
+        if getattr(fwd_cls, "boxed_grads_call", False):
+            args = (list(args),)
         return user_fn(self, *args)
+
+    def apply_boxed(self, *args):
+        r"""
+        Apply method called by the autograd engine when boxed_grads_call
+        is True. Grads arrive as a single mutable list argument, allowing
+        backward to free individual grads mid-execution.
+        """
+        return self._get_user_fn()(self, *args)
 
     def apply_jvp(self, *args):
         r"""
@@ -443,6 +461,32 @@ class _SingleLevelFunction(
     # vjp and backward are alias of each other
     vjp = backward
 
+    """
+    Bool that specifies if PyTorch should clear saved tensors after the first
+    access to ``ctx.saved_tensors``. When set to True, accessing saved_tensors
+    clears the internal references, allowing the tensors to be cleared as soon
+    as the Tensor returned by saved_tensors is deleted.
+
+    This is useful for reducing memory pressure in backward passes when you
+    only need to access saved tensors once.
+
+    Default is False.
+    """
+    clear_saved_tensors_on_access = False
+
+    """
+    Bool that specifies if backward should receive grads as a single mutable
+    list argument instead of individual args in an immutable tuple. This allows
+    backward to free individual grads mid-execution by removing them from the
+    list, reducing peak memory.
+
+    When True, ``backward(ctx, grads)`` receives a single list instead of
+    ``backward(ctx, *grads)``.
+
+    Default is False.
+    """
+    boxed_grads_call = False
+
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         r"""Define a formula for differentiating the operation with forward mode automatic differentiation.
@@ -569,11 +613,11 @@ class Function(_SingleLevelFunction):
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
 
-            return bound_args.args
+            return bound_args.args, bound_args.kwargs
 
         is_setup_ctx_defined = _is_setup_context_defined(cls.setup_context)
         if is_setup_ctx_defined:
-            args = bind_default_args(cls.forward, *args, **kwargs)
+            args, kwargs = bind_default_args(cls.forward, *args, **kwargs)
 
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
@@ -732,7 +776,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: list[Optional[torch.Tensor]] = []
+        res: list[torch.Tensor | None] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):

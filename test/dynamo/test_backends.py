@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +7,7 @@ import torch._dynamo
 import torch._dynamo.backends
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
+from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
@@ -100,24 +100,47 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, device, options=None):
+    def _check_backend_works(self, backend, device, boxed=True, options=None):
         model = Seq().eval()
         model.to(device)
-        input = torch.randn(2, 10, device=device)
-        r1 = model(input)
-        r2 = torch.compile(model, backend=backend, options=options)(input)
+
+        if not boxed:
+            compiled_model = torch.compile(model, backend=backend, options=options)
+        else:
+
+            def boxed_assert(gm, *example_args):
+                fn = lookup_backend(backend)(gm, *example_args)
+                if not fn._boxed_call:
+                    raise AssertionError("Expected fn._boxed_call to be True")
+                return fn
+
+            compiled_model = torch.compile(model, backend=boxed_assert, options=options)
+
+        input1 = torch.randn(2, 10, device=device, requires_grad=True)
+        input2 = input1.detach().clone().requires_grad_(True)
+
+        r1 = model(input1)
+        r2 = compiled_model(input2)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
+        r1.sum().backward()
+        r2.sum().backward()
+        self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
+
+        # Clean up compilation state before test returns to avoid false positive
+        # memory leak detection (leak check runs before tearDown)
+        torch._dynamo.reset()
+
     def test_eager(self, device):
-        self._check_backend_works("eager", device)
+        self._check_backend_works("eager", device, boxed=False)
 
     def test_eager_noexcept(self, device):
-        self._check_backend_works("eager_noexcept", device)
+        self._check_backend_works("eager_noexcept", device, boxed=False)
 
     @skipIfHpu
     @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):
-        self._check_backend_works("ts", device)
+        self._check_backend_works("ts", device, boxed=False)
 
     def test_aot_eager(self, device):
         self._check_backend_works("aot_eager", device)
@@ -223,8 +246,8 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertIn("Break Reasons", explain_str)
 
         # Verify that for the given functions above, we report the correct number of graphs, graph breaks, and ops
-        self.assertEqual(8, explain_output.graph_count)
-        self.assertEqual(7, explain_output.graph_break_count)
+        self.assertEqual(2, explain_output.graph_count)
+        self.assertEqual(1, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
 
 
@@ -233,10 +256,18 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
     def test_register_backend_api(self):
         from torch._dynamo import register_backend
+        from torch._dynamo.backends import registry as backend_registry
 
         backend_run = False
+        backend_name = "my_custom_backend"
 
-        @register_backend
+        def cleanup_backend():
+            backend_registry._COMPILER_FNS.pop(backend_name, None)
+            backend_registry._BACKENDS.pop(backend_name, None)
+
+        self.addCleanup(cleanup_backend)
+
+        @register_backend(name=backend_name)
         def my_custom_backend(gm, example_inputs):
             nonlocal backend_run
             backend_run = True
@@ -305,32 +336,39 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         backends_group = "torch_dynamo_backends"
         name = "mycustombackend"
 
-        mock_3_9 = MagicMock()
-        mock_3_9.load.return_value = lambda: "mocked 3.9"
-        mock_3_9.name = name
-
         mock_3_10 = MagicMock()
         mock_3_10.load.return_value = lambda: "mocked 3.10"
 
         def mock_eps(group=None):
-            if sys.version_info < (3, 10):
-                return {backends_group: [mock_3_9]}
-            else:
-                assert group == backends_group, group
-                mock_group = MagicMock()
-                mock_group.names = [name]
-                mock_group[name] = mock_3_10
-                # mock_group[name].load.return_value = lambda: "mocked 3.10"
-                return mock_group
+            if group != backends_group:
+                raise AssertionError(f"Expected group {backends_group}, got {group}")
+            mock_group = MagicMock()
+            mock_group.names = [name]
+            mock_group[name] = mock_3_10
+            return mock_group
 
         with patch("importlib.metadata.entry_points", mock_eps):
             from torch._dynamo.backends import registry
+
+            orig_backends = dict(registry._BACKENDS)
+            orig_compiler_fns = dict(registry._COMPILER_FNS)
+
+            def restore_registry():
+                registry._BACKENDS.clear()
+                registry._BACKENDS.update(orig_backends)
+                registry._COMPILER_FNS.clear()
+                registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._lazy_import.cache_clear()
+                registry._discover_entrypoint_backends.cache_clear()
+
+            self.addCleanup(restore_registry)
 
             registry._lazy_import.cache_clear()
             registry._discover_entrypoint_backends.cache_clear()
 
             backends = list_backends()
-            assert name in backends, (name, backends)
+            if name not in backends:
+                raise AssertionError(f"Expected {name} in backends, got {backends}")
 
     def test_backend_recompilation(self):
         def fn(x):
@@ -386,8 +424,47 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
 
-devices = ["cpu", "cuda", "hpu"]
-instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
+class TestDefaultBackend(torch._dynamo.test_case.TestCase):
+    def test_set_default_backend(self):
+        self.addCleanup(torch.compiler.set_default_backend, None)
+
+        self.assertEqual(torch.compiler.get_default_backend(), "inductor")
+
+        torch.compiler.set_default_backend("eager")
+        self.assertEqual(torch.compiler.get_default_backend(), "eager")
+
+        torch.compiler.set_default_backend(None)
+        self.assertEqual(torch.compiler.get_default_backend(), "inductor")
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compiler.set_default_backend(cnt)
+        self.assertIs(torch.compiler.get_default_backend(), cnt)
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f)
+        opt_f(torch.randn(3, 3))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_set_default_backend_explicit_override(self):
+        self.addCleanup(torch.compiler.set_default_backend, None)
+
+        eager_and_record = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compiler.set_default_backend(eager_and_record)
+
+        def f(x):
+            return torch.relu(x)
+
+        # Explicit backend= should override the default
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnt)
+        opt_f(torch.randn(3, 3))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(eager_and_record.graphs), 0)
+
+
+instantiate_device_type_tests(TestOptimizations, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

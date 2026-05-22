@@ -1,5 +1,6 @@
-# mypy: allow-untyped-defs
+from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any, TYPE_CHECKING
 
 from torch.fx.graph_module import (
     _format_import_block,
@@ -12,13 +13,17 @@ from torch.package import PackageExporter, sys_importer
 from ._compatibility import compatibility
 
 
+if TYPE_CHECKING:
+    from torch.fx.graph import PythonCode
+
+
 _use_lazy_graph_module_flag = False
 _force_skip_lazy_graph_module_flag = False
 
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def _force_skip_lazy_graph_module():
+def _force_skip_lazy_graph_module() -> Iterator[None]:
     """
     Skip using lazy graph module disregarding the setting of _use_lazy_graph_module.
     Use to skip _LazyGraphModule when testing inductor torchscript related backend.
@@ -37,7 +42,7 @@ def _force_skip_lazy_graph_module():
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def _use_lazy_graph_module(should_use: bool):
+def _use_lazy_graph_module(should_use: bool) -> Iterator[None]:
     try:
         global _use_lazy_graph_module_flag
         prior = _use_lazy_graph_module_flag
@@ -50,11 +55,13 @@ def _use_lazy_graph_module(should_use: bool):
 
 
 @compatibility(is_backward_compatible=False)
-def _get_graph_module_cls():
+def _get_graph_module_cls() -> type[GraphModule]:
     return _LazyGraphModule if _use_lazy_graph_module_flag else GraphModule
 
 
-def _make_graph_module(*args, graph_module_cls=None, **kwargs):
+def _make_graph_module(
+    *args: Any, graph_module_cls: type[GraphModule] | None = None, **kwargs: Any
+) -> GraphModule:
     if graph_module_cls is None:
         graph_module_cls = _get_graph_module_cls()
 
@@ -88,14 +95,14 @@ class _LazyGraphModule(GraphModule):
     """
 
     @classmethod
-    def from_graphmodule(cls, gm: GraphModule):
+    def from_graphmodule(cls, gm: GraphModule) -> GraphModule:
         if isinstance(gm, _LazyGraphModule):
             return gm
         else:
             return _LazyGraphModule(gm, gm.graph)
 
     @staticmethod
-    def force_recompile(gm):
+    def force_recompile(gm: GraphModule) -> None:
         """
         Sometimes we need force a recompile as a workaround
         - we want to do the real recompilation before symbolic_trace to avoid error:
@@ -104,21 +111,22 @@ class _LazyGraphModule(GraphModule):
         if isinstance(gm, _LazyGraphModule):
             gm.real_recompile()
 
-    def real_recompile(self):
+    def real_recompile(self) -> None:
         if self._needs_recompile():
             self._real_recompile()
 
     @classmethod
-    def _needs_recompile(cls):
+    def _needs_recompile(cls) -> bool:
         return cls.forward is cls._lazy_forward
 
-    def _lazy_forward(self, *args, **kwargs):
+    def _lazy_forward(self, *args: Any, **kwargs: Any) -> Any:
         # Call self.real_recompile() rather than self._real_recompile() here.
         # The _lazy_forward method may be saved and call repeatedly.
         # Calling self.real_recompile can make sure we skip recompilation if
         # we have already done so.
         self.real_recompile()
-        assert not self._needs_recompile()
+        if self._needs_recompile():
+            raise AssertionError("Recompilation required after real_recompile()")
 
         # call `__call__` rather than 'forward' since recompilation may
         # install a wrapper for `__call__` to provide a customized error
@@ -127,7 +135,9 @@ class _LazyGraphModule(GraphModule):
 
     forward = _lazy_forward
 
-    def __reduce_package__(self, exporter: PackageExporter):
+    def __reduce_package__(
+        self, exporter: PackageExporter
+    ) -> tuple[Any, tuple[Any, str]]:
         """
         Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
         than 'self.recompile' since for a _LazyGraphModule, self.recompile just
@@ -147,7 +157,7 @@ class _LazyGraphModule(GraphModule):
             (dict_without_graph, generated_module_name),
         )
 
-    def __reduce__(self):
+    def __reduce__(self) -> tuple[Any, tuple[Any, str]]:
         """
         Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
         than 'self.recompile' since for a _LazyGraphModule, self.recompile just
@@ -159,11 +169,11 @@ class _LazyGraphModule(GraphModule):
         del dict_without_graph["_graph"]
         return (reduce_graph_module, (dict_without_graph, import_block))
 
-    def _real_recompile(self):
+    def _real_recompile(self) -> "PythonCode":
         return super().recompile()
 
     @classmethod
-    def recompile(cls):
+    def recompile(cls) -> None:  # pyrefly: ignore[bad-override]
         cls.forward = cls._lazy_forward
 
     @property

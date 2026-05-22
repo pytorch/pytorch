@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import inspect
+
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import counters
@@ -12,6 +14,11 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from .pre_grad import efficient_conv_bn_eval_pass
+
+
+# Cache the signature of F.batch_norm at module load time to avoid repeated
+# introspection during graph transformation (fixes performance regression).
+_BATCH_NORM_SIGNATURE = inspect.signature(torch.nn.functional.batch_norm)
 
 
 def efficient_conv_bn_eval(
@@ -85,7 +92,7 @@ def efficient_conv_bn_eval_decomposed(
     conv_weight,
     conv_bias,
     x,
-    conv_remainging_args,
+    conv_remaining_args,
 ):
     """
     Implementation based on https://arxiv.org/abs/2305.11624
@@ -108,14 +115,10 @@ def efficient_conv_bn_eval_decomposed(
     else:
         bias_on_the_fly = torch.zeros_like(bn_running_var)
 
-    if bn_weight is not None:
-        bn_weight = bn_weight
-    else:
+    if bn_weight is None:
         bn_weight = torch.ones_like(bn_running_var)
 
-    if bn_bias is not None:
-        bn_bias = bn_bias
-    else:
+    if bn_bias is None:
         bn_bias = torch.zeros_like(bn_running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
@@ -135,7 +138,7 @@ def efficient_conv_bn_eval_decomposed(
     )
 
     input = x
-    return conv(*((input, weight_on_the_fly, bias_on_the_fly) + conv_remainging_args))
+    return conv(*((input, weight_on_the_fly, bias_on_the_fly) + conv_remaining_args))
 
 
 @register_graph_pattern(
@@ -144,22 +147,43 @@ def efficient_conv_bn_eval_decomposed(
             torch.nn.functional.batch_norm,
         ]
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
 )
 def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs):
+    """
+    Graph transformation pass for fusing F.batch_norm with preceding conv operations.
+
+    This pass handles F.batch_norm calls with default arguments by normalizing
+    the args tuple using inspect.signature. It fuses batch normalization with
+    the preceding convolution for more efficient evaluation.
+    """
     bn_node = match.nodes[0]
     graph = match.graph
-    assert len(bn_node.args) == 8
+
+    # Normalize arguments by binding to cached signature and applying defaults.
+    # This handles cases where F.batch_norm is called with fewer than 8 args.
+    bound_args = _BATCH_NORM_SIGNATURE.bind(*bn_node.args, **bn_node.kwargs)
+    bound_args.apply_defaults()
+    # Use bound_args.args instead of mutating bn_node.args
+    normalized_args = bound_args.args
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
-    # bn_node.args is `training`
-    if bn_node.args[-3]:
+    # normalized_args[5] is the "training" argument
+    training_arg = normalized_args[5]
+
+    # Safety check: if 'training' is a symbolic Node (from tracing/export),
+    # we cannot optimize since we don't know the value at compile time.
+    if isinstance(training_arg, torch.fx.Node):
+        return
+
+    if training_arg:
         return
 
     # Check if the input is Conv
-    input_node = bn_node.args[0]
+    input_node = normalized_args[0]
 
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
@@ -187,16 +211,16 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 
     with graph.inserting_before(bn_node):
         # prepare args for the fused function
-        bn_running_mean = bn_node.args[1]
-        bn_running_var = bn_node.args[2]
-        bn_weight = bn_node.args[3]
-        bn_bias = bn_node.args[4]
-        bn_eps = bn_node.args[7]
+        bn_running_mean = normalized_args[1]
+        bn_running_var = normalized_args[2]
+        bn_weight = normalized_args[3]
+        bn_bias = normalized_args[4]
+        bn_eps = normalized_args[7]
         assert len(conv_node.args) >= 2  # type: ignore[union-attr]
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
-        conv_remainging_args = conv_node.args[3:]  # type: ignore[union-attr]
+        conv_remaining_args = conv_node.args[3:]  # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
@@ -207,7 +231,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
             conv_weight,
             conv_bias,
             conv_input,
-            conv_remainging_args,
+            conv_remaining_args,
         )
 
         # create a new node
@@ -235,6 +259,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
             torch.ops.aten.batch_norm.default,
         ]
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -287,7 +312,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
-        conv_remainging_args = conv_node.args[3:]  # type: ignore[union-attr]
+        conv_remaining_args = conv_node.args[3:]  # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
@@ -298,7 +323,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
             conv_weight,
             conv_bias,
             conv_input,
-            conv_remainging_args,
+            conv_remaining_args,
         )
 
         # create a new node
@@ -330,6 +355,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
             nn.SyncBatchNorm,
         ],
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,

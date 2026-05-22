@@ -6,7 +6,9 @@
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/bit_cast.h>
+#include <algorithm>
 #include <cmath>
+
 namespace at {
 namespace vec {
 // Note [CPU_CAPABILITY namespace]
@@ -100,7 +102,7 @@ class Vectorized<BFloat16> {
     std::memcpy(
         reinterpret_cast<bfloat16_t*>(ptr),
         reinterpret_cast<const bfloat16_t*>(tmp),
-        count * sizeof(bfloat16_t));
+        std::min<int64_t>(count, size()) * sizeof(bfloat16_t));
   }
   const BFloat16& operator[](int idx) const = delete;
   BFloat16& operator[](int idx) = delete;
@@ -191,7 +193,7 @@ class Vectorized<BFloat16> {
     auto vals = svreinterpret_u16_bf16(values);
     vals = sveor_u16_x(ptrue, vals, mask);
     return svreinterpret_bf16_u16(vals);
-  };
+  }
   Vectorized<BFloat16> round() const;
   Vectorized<BFloat16> tan() const;
   Vectorized<BFloat16> tanh() const;
@@ -308,8 +310,8 @@ Vectorized<c10::BFloat16> inline operator/(
 }
 
 inline Vectorized<BFloat16>::Vectorized() {
-  const short zero = 0;
-  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
+  auto vals_f = svdup_n_f32(0);
+  values = convert_float_bfloat16(vals_f, vals_f);
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {
@@ -349,47 +351,47 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
     return convert_float_bfloat16(v1, v2);                     \
   }
 
-DEFINE_BF16_FUNC_VIA_FLOAT(isnan);
-DEFINE_BF16_FUNC_VIA_FLOAT(angle);
-DEFINE_BF16_FUNC_VIA_FLOAT(acos);
-DEFINE_BF16_FUNC_VIA_FLOAT(acosh);
-DEFINE_BF16_FUNC_VIA_FLOAT(asin);
-DEFINE_BF16_FUNC_VIA_FLOAT(atan);
-DEFINE_BF16_FUNC_VIA_FLOAT(atanh);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(atan2);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(copysign);
-DEFINE_BF16_FUNC_VIA_FLOAT(erf);
-DEFINE_BF16_FUNC_VIA_FLOAT(erfc);
-DEFINE_BF16_FUNC_VIA_FLOAT(exp);
-DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
-DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
-DEFINE_BF16_FUNC_VIA_FLOAT(i0);
-DEFINE_BF16_FUNC_VIA_FLOAT(i0e);
-DEFINE_BF16_FUNC_VIA_FLOAT(digamma);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
-DEFINE_BF16_FUNC_VIA_FLOAT(log);
-DEFINE_BF16_FUNC_VIA_FLOAT(log2);
-DEFINE_BF16_FUNC_VIA_FLOAT(log10);
-DEFINE_BF16_FUNC_VIA_FLOAT(log1p);
-DEFINE_BF16_FUNC_VIA_FLOAT(sin);
-DEFINE_BF16_FUNC_VIA_FLOAT(sinh);
-DEFINE_BF16_FUNC_VIA_FLOAT(cos);
-DEFINE_BF16_FUNC_VIA_FLOAT(cosh);
-DEFINE_BF16_FUNC_VIA_FLOAT(ceil);
-DEFINE_BF16_FUNC_VIA_FLOAT(floor);
-DEFINE_BF16_FUNC_VIA_FLOAT(round);
-DEFINE_BF16_FUNC_VIA_FLOAT(tan);
-DEFINE_BF16_FUNC_VIA_FLOAT(tanh);
-DEFINE_BF16_FUNC_VIA_FLOAT(trunc);
-DEFINE_BF16_FUNC_VIA_FLOAT(lgamma);
-DEFINE_BF16_FUNC_VIA_FLOAT(sqrt);
-DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal);
-DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow);
+DEFINE_BF16_FUNC_VIA_FLOAT(isnan)
+DEFINE_BF16_FUNC_VIA_FLOAT(angle)
+DEFINE_BF16_FUNC_VIA_FLOAT(acos)
+DEFINE_BF16_FUNC_VIA_FLOAT(acosh)
+DEFINE_BF16_FUNC_VIA_FLOAT(asin)
+DEFINE_BF16_FUNC_VIA_FLOAT(atan)
+DEFINE_BF16_FUNC_VIA_FLOAT(atanh)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(atan2)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(copysign)
+DEFINE_BF16_FUNC_VIA_FLOAT(erf)
+DEFINE_BF16_FUNC_VIA_FLOAT(erfc)
+DEFINE_BF16_FUNC_VIA_FLOAT(exp)
+DEFINE_BF16_FUNC_VIA_FLOAT(exp2)
+DEFINE_BF16_FUNC_VIA_FLOAT(expm1)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot)
+DEFINE_BF16_FUNC_VIA_FLOAT(i0)
+DEFINE_BF16_FUNC_VIA_FLOAT(i0e)
+DEFINE_BF16_FUNC_VIA_FLOAT(digamma)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter)
+DEFINE_BF16_FUNC_VIA_FLOAT(log)
+DEFINE_BF16_FUNC_VIA_FLOAT(log2)
+DEFINE_BF16_FUNC_VIA_FLOAT(log10)
+DEFINE_BF16_FUNC_VIA_FLOAT(log1p)
+DEFINE_BF16_FUNC_VIA_FLOAT(sin)
+DEFINE_BF16_FUNC_VIA_FLOAT(sinh)
+DEFINE_BF16_FUNC_VIA_FLOAT(cos)
+DEFINE_BF16_FUNC_VIA_FLOAT(cosh)
+DEFINE_BF16_FUNC_VIA_FLOAT(ceil)
+DEFINE_BF16_FUNC_VIA_FLOAT(floor)
+DEFINE_BF16_FUNC_VIA_FLOAT(round)
+DEFINE_BF16_FUNC_VIA_FLOAT(tan)
+DEFINE_BF16_FUNC_VIA_FLOAT(tanh)
+DEFINE_BF16_FUNC_VIA_FLOAT(trunc)
+DEFINE_BF16_FUNC_VIA_FLOAT(lgamma)
+DEFINE_BF16_FUNC_VIA_FLOAT(sqrt)
+DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal)
+DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow)
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(
     const Vectorized<BFloat16>& other) const {
@@ -586,7 +588,86 @@ Vectorized<BFloat16> inline fmadd(
   return a * b + c;
 }
 
-#endif // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+template <>
+void inline transpose_mxn<BFloat16>(
+    const BFloat16* src,
+    int64_t ld_src,
+    BFloat16* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
+  if (M <= 0 || N <= 0) {
+    return;
+  }
+  constexpr int TILE = 8;
+
+  alignas(64) BFloat16 tile_in[TILE * TILE];
+  alignas(64) BFloat16 tile_out[TILE * TILE];
+
+  // Predicated bf16 load with zeroing of inactiva lanes as raw 16-bit lanes
+  auto ld_bf16_u16_zeroed = [](const BFloat16* p, int count) -> svuint16_t {
+    svuint16_t z = svdup_n_u16(0);
+    if (count <= 0) {
+      return z;
+    }
+    // Works for any count<= vector lanes
+    svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
+    const uint16_t* pu16 = reinterpret_cast<const uint16_t*>(p);
+    svuint16_t v = svld1_u16(pg, pu16);
+    return svsel_u16(pg, v, z);
+  };
+
+  // Predicated bf16 store as raw 16-bit lanes(only those active will be stored)
+  auto st_bf16_u16 = [](BFloat16* p, int count, svuint16_t v) {
+    if (count <= 0) {
+      return;
+    }
+    svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
+    uint16_t* pu16 = reinterpret_cast<uint16_t*>(p);
+    svst1_u16(pg, pu16, v);
+  };
+
+  for (int i0 = 0; i0 < M; i0 += TILE) {
+    const int m_blk = std::min(TILE, M - i0);
+    for (int j0 = 0; j0 < N; j0 += TILE) {
+      const int n_blk = std::min(TILE, N - j0);
+
+      // Load src tile into tile_in(row major, ld=TILE), pad with zeros
+      // Use SVE load+store(from the helpers above) into each row
+      for (int r = 0; r < TILE; r++) {
+        for (int c = 0; c < TILE; c++) {
+          tile_in[r * TILE + c] = BFloat16(0);
+        }
+        if (r < m_blk) {
+          const BFloat16* srow = src + (i0 + r) * ld_src + j0;
+          svuint16_t v = ld_bf16_u16_zeroed(srow, n_blk);
+          st_bf16_u16(tile_in + r * TILE, n_blk, v);
+        }
+      }
+
+      // Transpose tile_in to tile_out (scalar on tiny tile)
+      for (int r = 0; r < TILE; r++) {
+        for (int c = 0; c < TILE; c++) {
+          tile_out[r * TILE + c] = BFloat16(0);
+        }
+      }
+      for (int r = 0; r < m_blk; r++) {
+        for (int c = 0; c < n_blk; c++) {
+          tile_out[c * TILE + r] = tile_in[r * TILE + c];
+        }
+      }
+
+      // Store tile_out to dst with SVE store(from the helpers above)
+      for (int r = 0; r < n_blk; r++) {
+        BFloat16* drow = dst + (j0 + r) * ld_dst + i0;
+        svuint16_t v = ld_bf16_u16_zeroed(tile_out + r * TILE, m_blk);
+        st_bf16_u16(drow, m_blk, v);
+      }
+    }
+  }
+}
+
+#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
 } // namespace CPU_CAPABILITY
 } // namespace vec

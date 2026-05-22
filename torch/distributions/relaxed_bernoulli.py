@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -40,15 +39,16 @@ class LogitRelaxedBernoulli(Distribution):
     (Jang et al., 2017)
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.real
 
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         self.temperature = temperature
         if (probs is None) == (logits is None):
@@ -57,10 +57,13 @@ class LogitRelaxedBernoulli(Distribution):
             )
         if probs is not None:
             is_scalar = isinstance(probs, _Number)
+            # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             is_scalar = isinstance(logits, _Number)
+            # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -138,16 +141,18 @@ class RelaxedBernoulli(TransformedDistribution):
     """
 
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    # pyrefly: ignore [bad-override]
     support = constraints.unit_interval
     has_rsample = True
+    # pyrefly: ignore [bad-override]
     base_dist: LogitRelaxedBernoulli
 
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
         super().__init__(base_dist, SigmoidTransform(), validate_args=validate_args)

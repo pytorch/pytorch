@@ -96,7 +96,6 @@ function pip_build_and_install() {
     python3 -m pip wheel \
       --no-build-isolation \
       --no-deps \
-      --no-use-pep517 \
       -w "${wheel_dir}" \
       "${build_target}"
   fi
@@ -128,17 +127,6 @@ function get_exit_code() {
   return $retcode
 }
 
-function get_bazel() {
-  # Download and use the cross-platform, dependency-free Python
-  # version of Bazelisk to fetch the platform specific version of
-  # Bazel to use from .bazelversion.
-  retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
-  shasum --algorithm=1 --check \
-    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
-  chmod u+x tools/bazel
-}
-
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
@@ -165,7 +153,7 @@ function detect_cuda_arch() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
+  retry pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -173,8 +161,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
-  pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
+  retry pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  retry pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -193,21 +181,63 @@ function install_torchvision() {
     export FORCE_CUDA=1
     export WITH_CUDA=1
   fi
-  pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+  retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
 }
 
-function install_torchrec_and_fbgemm() {
-  local torchrec_commit
-  torchrec_commit=$(get_pinned_commit torchrec)
+function install_fbgemm() {
+  local build_variant=$1
+
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
   fi
+
+  # Check if the wheel has been already been built
+  local wheel_dir=dist/fbgemm_gpu
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  pip_install tabulate==0.9.0 tensordict==0.10.0  # needed for newer fbgemm
+  pip_install patchelf  # needed for rocm fbgemm
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}" --recurse-submodules
+    python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    popd
+
+    # Save the wheel before cleaning up
+    mkdir -p dist/fbgemm_gpu
+    cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
+  fi
+
+  # Install fbgemm wheel
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+
+  # Clean up
+  rm -rf fbgemm
+}
+
+function install_torchrec_and_fbgemm() {
+  local torchrec_commit
+  torchrec_commit=$(get_pinned_commit torchrec)
+
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
@@ -216,9 +246,6 @@ function install_torchrec_and_fbgemm() {
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
-
-    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
-    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
 
     # Find rocm_version.h header file for ROCm version extract
     rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
@@ -240,45 +267,13 @@ function install_torchrec_and_fbgemm() {
     echo "ROCm version: $ROCM_INT"
     export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
 
-    pip_install tabulate  # needed for newer fbgemm
-    pip_install patchelf  # needed for rocm fbgemm
-
-    local wheel_dir=dist/fbgemm_gpu
-    local found_whl=0
-    for file in "${wheel_dir}"/*.whl
-    do
-      if [[ -f "${file}" ]]; then
-        found_whl=1
-        break
-      fi
-    done
-
-    # Build the wheel if it doesn't exist
-    if [ "${found_whl}" == "0" ]; then
-      git clone --recursive https://github.com/pytorch/fbgemm
-      pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}" --recurse-submodules
-      python setup.py bdist_wheel \
-        --build-variant=rocm \
-        -DHIP_ROOT_DIR="${ROCM_PATH}" \
-        -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-        -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
-      popd
-
-      # Save the wheel before cleaning up
-      mkdir -p dist/fbgemm_gpu
-      cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
-    fi
-
-    for file in "${wheel_dir}"/*.whl
-    do
-      pip_install_whl "${file}"
-    done
-
-    rm -rf fbgemm
+    install_fbgemm "rocm"
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
-    pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+    # Skip fbgemm for CUDA 13 as it's not compatible yet
+    if [[ "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
+      install_fbgemm "cuda"
+    fi
   fi
 }
 
@@ -298,6 +293,72 @@ function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
+}
+
+function install_torchcomms() {
+  local commit
+  commit=$(get_pinned_commit torchcomms)
+  export USE_GLOO=1
+  export USE_NCCLX=0
+  export USE_TRANSPORT=0
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    export USE_NCCL=1
+  else
+    export USE_NCCL=0
+  fi
+  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
+}
+
+function install_flash_attn_cute() {
+  echo "Installing FlashAttention 4 from PyPI..."
+  pip_install flash-attn-4==4.0.0b5
+  echo "FlashAttention 4 installation complete."
+}
+
+function install_cutlass_dsl() {
+  # cutlass-dsl requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
+  echo "Installing NVIDIA CUTLASS DSL from PyPI..."
+  pip_install nvidia-cutlass-dsl
+  echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_cutlass_api() {
+  # cutlass-api requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
+  echo "Installing CUTLASS API from Github..."
+
+  # Install CuTeDSL dependency first
+  install_cutlass_dsl
+
+  # Grab latest til we have a pinned commit
+  local cutlass_commit
+  cutlass_commit=$(git ls-remote https://github.com/NVIDIA/cutlass.git refs/heads/cutlass_api | cut -f1)
+
+  rm -rf cutlass-build
+  git clone --depth 1 -b cutlass_api https://github.com/NVIDIA/cutlass.git cutlass-build
+
+  pushd cutlass-build
+  git checkout "${cutlass_commit}"
+
+  # Install cutlass_api with torch extras
+  pip_install "python/cutlass_api[torch]"
+  popd
+
+  rm -rf cutlass-build
+  echo "CUTLASS API installation complete."
 }
 
 function print_sccache_stats() {

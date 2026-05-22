@@ -19,6 +19,13 @@ inline namespace CPU_CAPABILITY {
 #error "Big endian is not supported."
 #endif
 
+// GCC does not properly optimize bf16 operators
+#if defined(__ARM_FEATURE_BF16) && (__clang_major__ >= 19)
+#define BF16_ARITHMETIC_SUPPORTED() 1
+#else
+#define BF16_ARITHMETIC_SUPPORTED() 0
+#endif
+
 // Unlike the float16_t family of types, bfloat16_t is not available
 // when we're not targeting bfloat16 hardware support on some
 // platforms (but not Mac, so we have to be careful not to shadow the
@@ -240,8 +247,24 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
 
   Vectorized() = default;
 
+// Workaround for GCC <= 13 miscompiling a constant bf16 broadcast: it lowers
+// `vdupq_n_bf16((bf16)1.0f)` to `fmov v?.8h, 1.0e+0` (FP16 immediate, writes
+// 0x3C00 per lane = ~0.00781 as bf16) instead of materializing 0x3F80.
+// Fixed in gcc-14. A plain u16 reinterpret isn't enough -- gcc constant-tracks
+// past `vreinterpretq_bf16_u16(vdupq_n_u16(..))` and rematerializes the buggy
+// fmov at the use site -- so we additionally launder val.x through an asm
+// barrier to make it opaque to the optimizer. Gated on __ARM_FEATURE_BF16
+// since without it `at_vdupq_n_bf16` is a uint16x8_t broadcast (safe path).
+#if __GNUC__ <= 13 && !defined(__clang__) && defined(__ARM_FEATURE_BF16)
+  Vectorized(c10::BFloat16 val) {
+    uint16_t bits = val.x;
+    asm volatile("" : "+r"(bits));
+    values = at_vreinterpretq_bf16_u16(vdupq_n_u16(bits));
+  }
+#else
   Vectorized(c10::BFloat16 val)
       : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
+#endif
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
@@ -303,7 +326,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const at_bfloat16_t*>(ptr),
-        count * sizeof(at_bfloat16_t));
+        std::min<int64_t>(count, size()) * sizeof(at_bfloat16_t));
     return at_vld1q_bf16(reinterpret_cast<const at_bfloat16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
@@ -313,7 +336,10 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
     } else {
       at_bfloat16_t tmp_values[size()];
       at_vst1q_bf16(reinterpret_cast<at_bfloat16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(at_bfloat16_t));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(at_bfloat16_t));
     }
   }
   Vectorized<c10::BFloat16> isnan() const {
@@ -352,18 +378,72 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
         other, &Vectorized<float>::name);                        \
   }
 
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
   Vectorized frac() const;
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt)
+
+#ifdef __ARM_FEATURE_BF16
+  // Flip sign bit
+  Vectorized<c10::BFloat16> neg() const {
+    return vreinterpretq_bf16_s16(vreinterpretq_s16_bf16(values) ^ (-32768));
+  }
+  // Fast reciprocal is fine because we are truncating results
+  Vectorized<c10::BFloat16> reciprocal() const {
+    auto x = vcvtq_low_f32_bf16(values);
+    auto y = vcvtq_high_f32_bf16(values);
+    x = vrecpeq_f32(x);
+    y = vrecpeq_f32(y);
+    return vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(x), y);
+  }
+  // Clearing the sign bit
+  Vectorized<c10::BFloat16> abs() const {
+    return vreinterpretq_bf16_u16(vreinterpretq_u16_bf16(values) & 0x7FFF);
+  }
+#else
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
+#endif
+
+// These functions are optimized on clang-21+
+#if BF16_ARITHMETIC_SUPPORTED() && (__clang_major__ >= 21)
+  Vectorized<c10::BFloat16> operator==(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values == other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator!=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values != other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator<(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values < other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator<=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values <= other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator>(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values > other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator>=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values >= other.values;
+  }
+#else
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<=)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>=)
+#endif
 
 #undef DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
 #undef DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
@@ -412,28 +492,52 @@ template <>
 Vectorized<c10::BFloat16> inline operator+(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x + y;
+#else
   return binary_operator_via_float(std::plus<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator-(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x - y;
+#else
   return binary_operator_via_float(std::minus<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator*(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x * y;
+#else
   return binary_operator_via_float(std::multiplies<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator/(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x / y;
+#else
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
+#endif
 }
 
 // frac. Implement this here so we can use subtraction
@@ -544,12 +648,19 @@ Vectorized<c10::BFloat16> inline fmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return x * y + z;
+#else
   // NOTE [BF16 FMA]: There isn't an FMA that accumulates into BF16!  Also,
   // vbfmlalbq_f32 and vbfmlaltq_f32 take the even and odd-numbered
   // elements, not the bottom and top half, so they don't seem
   // particularly useful here. Ideally we would include dot product in
   // the Vectorized interface...
   return a * b + c;
+#endif
 }
 
 template <>
@@ -557,8 +668,15 @@ Vectorized<c10::BFloat16> inline fnmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return (-x) * y + z;
+#else
   // See NOTE [BF16 FMA] above.
   return -a * b + c;
+#endif
 }
 
 template <>
@@ -566,8 +684,15 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return x * y - z;
+#else
   // See NOTE [BF16 FMA] above.
   return a * b - c;
+#endif
 }
 
 template <>
@@ -575,8 +700,15 @@ Vectorized<c10::BFloat16> inline fnmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return (-x) * y - z;
+#else
   // See NOTE [BF16 FMA] above.
   return -a * b - c;
+#endif
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

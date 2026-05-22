@@ -38,7 +38,8 @@ class ProfileMetrics:
         return self
 
     def __add__(self, other: ProfileMetrics) -> ProfileMetrics:
-        assert isinstance(other, ProfileMetrics)
+        if not isinstance(other, ProfileMetrics):
+            raise AssertionError(f"Expected ProfileMetrics, got {type(other)}")
         return ProfileMetrics(
             self.microseconds + other.microseconds,
             self.operators + other.operators,
@@ -50,7 +51,9 @@ class ProfileMetrics:
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
             self.microseconds / max(1, other.microseconds),
+            # pyrefly: ignore [bad-argument-type]
             self.operators / max(1, other.operators),
+            # pyrefly: ignore [bad-argument-type]
             self.fusions / max(1, other.fusions),
         )
 

@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/passes/autocast.h>
 
 #include <ATen/autocast_mode.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -134,8 +133,6 @@ std::optional<AutocastScope> parseAutocast(
     //
     TORCH_CHECK(false, "Unsupported autocast syntax");
   }
-
-  return std::nullopt;
 }
 
 void castTensorInputs(

@@ -73,7 +73,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn(x, y)
 
-        assert counter.op_count == 1
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count 1, got {counter.op_count}")
 
     def test_add_tensor2(self):
         def fn(a, b):
@@ -86,7 +87,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn(x, y)
 
-        assert counter.op_count == 1
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count 1, got {counter.op_count}")
 
     def test_add_tensor_list(self):
         def fn(lst):
@@ -98,7 +100,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn([x, y])
 
-        assert counter.op_count == 1
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count 1, got {counter.op_count}")
 
     def test_add_tensor_dict(self):
         def fn(dt):
@@ -110,7 +113,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn({"a": x, "b": y})
 
-        assert counter.op_count == 1
+        if counter.op_count != 1:
+            raise AssertionError(f"Expected op_count 1, got {counter.op_count}")
 
     def test_add_skip(self):
         def fn(a, b):
@@ -122,7 +126,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         y = 5
         opt_fn(x, y)
 
-        assert counter.op_count == 0
+        if counter.op_count != 0:
+            raise AssertionError(f"Expected op_count 0, got {counter.op_count}")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):
@@ -136,7 +141,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.optimize_assert(counter):
             fn(x)
 
-        assert counter.op_count == 0
+        if counter.op_count != 0:
+            raise AssertionError(f"Expected op_count 0, got {counter.op_count}")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_custom_list(self):
@@ -158,7 +164,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.optimize_assert(counter):
             fn(x)
 
-        assert counter.op_count == 0
+        if counter.op_count != 0:
+            raise AssertionError(f"Expected op_count 0, got {counter.op_count}")
 
     def test_do_not_skip_side_effects(self):
         # https://github.com/pytorch/pytorch/issues/110765
@@ -177,16 +184,22 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
             mod = MyModule(mode=mode)
             model = torch.compile(mod, backend="eager", fullgraph=mode != 6)
-            assert _variable == 0
-            assert _variable_2 == 0
+            if _variable != 0:
+                raise AssertionError(f"Expected _variable 0, got {_variable}")
+            if _variable_2 != 0:
+                raise AssertionError(f"Expected _variable_2 0, got {_variable_2}")
 
             model(torch.tensor([1]))
-            assert _variable == 1
-            assert _variable_2 == 0
+            if _variable != 1:
+                raise AssertionError(f"Expected _variable 1, got {_variable}")
+            if _variable_2 != 0:
+                raise AssertionError(f"Expected _variable_2 0, got {_variable_2}")
 
             model(torch.tensor([1]))
-            assert _variable == 2
-            assert _variable_2 == 0
+            if _variable != 2:
+                raise AssertionError(f"Expected _variable 2, got {_variable}")
+            if _variable_2 != 0:
+                raise AssertionError(f"Expected _variable_2 0, got {_variable_2}")
 
 
 if __name__ == "__main__":

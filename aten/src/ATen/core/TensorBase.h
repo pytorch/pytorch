@@ -24,7 +24,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -100,7 +99,7 @@ class TORCH_API TensorBase {
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
-  explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
+  explicit TensorBase(unsafe_borrow_t /*unused*/, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
@@ -111,9 +110,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorImpl with nullptr is not supported");
-    }
+    TORCH_CHECK(impl_.get(), "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -247,6 +244,9 @@ class TORCH_API TensorBase {
   size_t weak_use_count() const noexcept {
     return impl_.weak_use_count();
   }
+  bool is_uniquely_owned() const noexcept {
+    return impl_.is_uniquely_owned();
+  }
 
   std::string toString() const;
 
@@ -340,7 +340,7 @@ class TORCH_API TensorBase {
                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
                 "equivalent dense tensor, multiply numel() by element_size()");
-    return impl_->sym_numel() * impl_->itemsize();
+    return impl_->sym_numel() * c10::SymInt(impl_->itemsize());
   }
 
   int64_t numel() const {
@@ -570,6 +570,10 @@ class TORCH_API TensorBase {
     return impl_->is_meta();
   }
 
+  bool is_fake() const {
+    return impl_->is_fake();
+  }
+
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
@@ -627,11 +631,9 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  // Implemented in aten/src/ATen/templates/TensorMethods.cpp
+  template <typename T>
   const T* const_data_ptr() const;
-
-  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;
@@ -858,7 +860,7 @@ class TORCH_API TensorBase {
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn() const;
 
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -930,6 +932,10 @@ public:
 
   const TensorBase& requires_grad_(bool _requires_grad=true) const;
 
+  std::optional<ScalarType> grad_dtype() const;
+
+  void set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -950,7 +956,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 
 private:
-  TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
+  TensorBase __dispatch_contiguous(c10::MemoryFormat /*memory_format*/) const;
 };
 
 inline DeviceIndex get_device(const TensorBase& self) {

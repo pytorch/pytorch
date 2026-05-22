@@ -80,7 +80,8 @@ struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
       ts = ts | x.key_set();
     }
   }
-  [[noreturn]] void operator()(at::ArrayRef<std::optional<at::Tensor>>) {
+  [[noreturn]] void operator()(
+      at::ArrayRef<std::optional<at::Tensor>> /*unused*/) {
     // Just checking that the handling of Tensor?[] didn't change.
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -95,7 +96,7 @@ struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
     }
   }
   template <typename T>
-  void operator()(const T&) {
+  void operator()(const T& /*unused*/) {
     // do nothing
   }
 };

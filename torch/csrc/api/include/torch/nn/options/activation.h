@@ -686,23 +686,23 @@ struct TORCH_API MultiheadAttentionForwardFuncOptions {
 
   TORCH_ARG(bool, training) = true;
 
-  TORCH_ARG(Tensor, key_padding_mask) = {};
+  TORCH_ARG(Tensor, key_padding_mask);
 
   TORCH_ARG(bool, need_weights) = true;
 
-  TORCH_ARG(Tensor, attn_mask) = {};
+  TORCH_ARG(Tensor, attn_mask);
 
   TORCH_ARG(bool, use_separate_proj_weight) = false;
 
-  TORCH_ARG(Tensor, q_proj_weight) = {};
+  TORCH_ARG(Tensor, q_proj_weight);
 
-  TORCH_ARG(Tensor, k_proj_weight) = {};
+  TORCH_ARG(Tensor, k_proj_weight);
 
-  TORCH_ARG(Tensor, v_proj_weight) = {};
+  TORCH_ARG(Tensor, v_proj_weight);
 
-  TORCH_ARG(Tensor, static_k) = {};
+  TORCH_ARG(Tensor, static_k);
 
-  TORCH_ARG(Tensor, static_v) = {};
+  TORCH_ARG(Tensor, static_v);
 
   TORCH_ARG(bool, average_attn_weights) = true;
 };

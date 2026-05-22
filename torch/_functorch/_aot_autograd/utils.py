@@ -1,26 +1,32 @@
-# mypy: allow-untyped-defs
 """
 Contains various utils for AOTAutograd, including those for handling collections.
 """
 
+import copy
 import dataclasses
+import logging
 import operator
 import warnings
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from functools import partial, wraps
+from typing import Any, overload, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
 
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-from .descriptors import AOTOutput
+
+_T = TypeVar("_T")
+if TYPE_CHECKING:
+    from .schemas import AOTConfig, ViewAndMutationMeta
 
 
 KNOWN_TYPES = [
@@ -36,38 +42,13 @@ KNOWN_TYPES = [
     torch.ScriptObject,
 ]
 
-original_zip = zip
-
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
+annotation_log = getArtifactLogger(__name__, "annotation")
+
+strict_zip = partial(zip, strict=True)
 
 
-def strict_zip(*iterables, strict=True, **kwargs):
-    if not strict:
-        return original_zip(*iterables, **kwargs)
-
-    length = len(iterables[0])
-    for iterable in iterables[1:]:
-        if len(iterable) != length:
-            raise ValueError(
-                "The iterables have different lengths and strict mode is enabled."
-            )
-
-    return original_zip(*iterables, **kwargs)
-
-
-def _get_symint_hints(exprs):
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_symint_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
-
-
-def partial_flatten_asdict(obj: Any) -> Any:
+def partial_flatten_asdict(obj: object) -> Any:
     if dataclasses.is_dataclass(obj):
         return {
             field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)
@@ -80,7 +61,15 @@ def partial_flatten_asdict(obj: Any) -> Any:
         return obj
 
 
-def normalize_as_list(x):
+@overload
+def normalize_as_list(x: _T) -> list[_T]: ...
+@overload
+def normalize_as_list(x: tuple[_T, ...]) -> list[_T]: ...
+@overload
+def normalize_as_list(x: list[_T]) -> list[_T]: ...
+
+
+def normalize_as_list(x: object) -> list[object]:
     if isinstance(x, tuple):
         return list(x)
     elif isinstance(x, list):
@@ -88,7 +77,7 @@ def normalize_as_list(x):
     return [x]
 
 
-def _get_autocast_states():
+def _get_autocast_states() -> list[Any]:
     return [
         torch.is_autocast_enabled("cuda"),
         torch.is_autocast_enabled("cpu"),
@@ -98,17 +87,21 @@ def _get_autocast_states():
     ]
 
 
-def make_boxed_func(f):
-    def g(args):
+def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
+    @simple_wraps(f)
+    def g(args: list[Any]) -> Any:
         return f(*args)
 
-    g._boxed_call = True  # type: ignore[attr-defined]
+    # pyrefly: ignore[missing-attribute]
+    g._boxed_call = True
     return g
 
 
-def make_boxed_compiler(compiler):
+def make_boxed_compiler(
+    compiler: Callable[..., Any],
+) -> Callable[..., Any]:
     @wraps(compiler)
-    def f(fx_g, inps):
+    def f(fx_g: Any, inps: Any) -> Any:
         out_f = compiler(fx_g, inps)
         fx_g = make_boxed_func(out_f)
         return fx_g
@@ -117,11 +110,15 @@ def make_boxed_compiler(compiler):
 
 
 def call_func_at_runtime_with_args(
-    f, args: Union[tuple[Any], list[Any]], steal_args=False, disable_amp=False
-):
+    f: Callable[..., Any],
+    args: Sequence[Any],
+    steal_args: bool = False,
+    disable_amp: bool = False,
+) -> list[Any]:
     if not steal_args:
         args = list(args)
-    assert isinstance(args, list)
+    if not isinstance(args, list):
+        raise AssertionError(f"args must be a list, got {type(args)}")
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
@@ -133,7 +130,8 @@ def call_func_at_runtime_with_args(
             warnings.warn(
                 "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale.",
+                stacklevel=2,
             )
             out = normalize_as_list(f(*args))
     return out
@@ -141,44 +139,51 @@ def call_func_at_runtime_with_args(
 
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
-    spec: Optional[pytree.TreeSpec] = None
+    spec: pytree.TreeSpec | None = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple: Optional[bool] = (
+    is_simple: bool | None = (
         None  # if the output spec is a tuple/list, we won't bother unflattening it.
     )
-    is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
+    is_really_simple: bool | None = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
-        assert self.spec is None or self.spec == spec
-        assert spec is not None
+        if not (self.spec is None or self.spec == spec):
+            raise AssertionError(f"spec mismatch: existing={self.spec}, new={spec}")
+        if spec is None:
+            raise AssertionError("spec must not be None")
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children_specs
+            child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
         if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x: list[Any]) -> Any:
+    def unflatten(self, x: Sequence[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
             return x
-        assert self.spec is not None
+        if self.spec is None:
+            raise AssertionError("spec must be set before calling unflatten")
         return pytree.tree_unflatten(x, self.spec)
 
 
 # Creates a function that returns flattened inputs and outputs
 # Also returns the output tree spec, which is needed to recover the "unflattened"
 # output tree structure later.
-def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThunk]:
+def create_tree_flattened_fn(
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    kwargs: dict[str, Any] | None = None,
+) -> tuple[Callable[..., list[Any]], PytreeThunk]:
     if kwargs is None:
         kwargs = {}
     # Save the args_spec for flat_tensor_args to unflatten while tracing
     _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
     out_spec = PytreeThunk()
 
-    def flat_fn(*flat_args):
+    def flat_fn(*flat_args: Any) -> list[Any]:
         # The input are flattened tensor args. Prepare the args in the
         # order that original function expects. Add static args as well.
         # They will appear as tensor constants in the traced graph.
@@ -187,11 +192,7 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThu
         tree_out = fn(*args, **kwargs)
         flat_out, spec = pytree.tree_flatten(tree_out)
         for i in flat_out:
-            is_known_type = False
-            for j in KNOWN_TYPES:
-                if isinstance(i, j):
-                    is_known_type = True
-                    break
+            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_opaque_value(i)
             if not is_known_type:
                 raise RuntimeError(
                     f"Found {type(i)} in output, which is not a known type. "
@@ -207,7 +208,8 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThu
     # Can't use functools.wraps here because the wrapper has different
     # calling convention
     if hasattr(fn, "_orig_mod"):
-        flat_fn._orig_mod = fn._orig_mod  # type: ignore[attr-defined]
+        # pyrefly: ignore[missing-attribute]
+        flat_fn._orig_mod = fn._orig_mod
 
     return flat_fn, out_spec
 
@@ -225,7 +227,7 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThu
 # (2) There could be multiple, if this index corresponds to a synthetic base
 #     that has multiple input aliases.
 # (3) If any of those corresponding inputs get metadata mutations, then we clone the base.
-def maybe_to_fresh_input(idx, t, meta):
+def maybe_to_fresh_input(idx: int, t: Any, meta: "ViewAndMutationMeta") -> Any:
     if not isinstance(t, torch.Tensor):
         return t
     if idx in meta.mutated_inp_runtime_indices:
@@ -241,111 +243,271 @@ def maybe_to_fresh_input(idx, t, meta):
     return t
 
 
-def is_with_effects(node):
-    return (
+def is_with_effects(node: torch.fx.Node) -> bool:
+    if (
         node.op == "call_function"
-        and node.target == torch.ops.higher_order.with_effects
-    )
+        and node.target is torch.ops.higher_order.with_effects
+    ):
+        return True
+    elif (
+        node.op == "call_function"
+        and node.target is torch.ops.higher_order.invoke_subgraph
+    ):
+        # Check if subgraph has effects by looking in the cache
+        from torch._guards import InvokeSubgraphCache, TracingContext
+
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx:
+            invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+                torch.ops.higher_order.invoke_subgraph
+            )
+            if invoke_subgraph_cache:
+                if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+                    raise AssertionError(
+                        f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+                    )
+                # pyrefly: ignore[bad-argument-type]
+                effects = invoke_subgraph_cache.get_effects(node.args[1])
+                return effects is not None
+    return False
 
 
-def is_with_effects_op(node, op):
-    return is_with_effects(node) and node.args[1] == op
-
-
-def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
+def unlift_tokens(
+    fw_module: torch.fx.GraphModule,
+    fw_metadata: "ViewAndMutationMeta",
+    aot_config: "AOTConfig",
+    bw_module: torch.fx.GraphModule | None = None,
+) -> None:
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     # Logic:
-    # 1. Inputs identified as input tokens:
-    #    - If used as a first argument in with_effects
+    # 1. In the case of with_effects:
+    #   Before:
+    #   ```
+    #   def forward(self, token, arg1_1):
+    #       with_effects = torch.ops.higher_order.with_effects(token, ...)
+    #       getitem = with_effects[0]
+    #       getitem_1 = with_effects[0]
+    #       return (getitem, getitem_1)
+    #   ```
     #
-    # 2. Outputs identified as output tokens:
-    #    - If Produced by getitem(with_effects, 0)
+    #   After:
+    #   ```
+    #   def forward(self, arg1_1):
+    #       _make_token_default = torch.ops.prims._make_token.default()
+    #       with_effects = torch.ops.higher_order.with_effects(_make_token_default, ...)
+    #       getitem = with_effects[0]
+    #       getitem_1 = with_effects[0]
+    #       _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem]);
+    #       return (getitem_1,)
+    #   ```
     #
-    # 3. Checks invariants of number input output tokens:
-    # forward:
-    # expected_num_erased_inputs == len(fw_metadata.tokens)
-    # expected_num_erased_outputs == len(fw_metadata.tokens)
-    # backward:
-    # expected_num_erased_inputs == fw_metadata.num_backward_tokens
-    # expected_num_erased_outputs == fw_metadata.num_backward_tokens
+    # 2. In the case of an invoke_subgraph node, we will use the
+    # InvokeSubgraphCache to determine if the subgraph has effects. Then we will
+    # turn it into a `with_effects` node. This is so that at the toplevel graph,
+    # the nodes will have the correct with_effects threading. We will apply this
+    # pass recursively to submodules so the tokens will be removed from the
+    # subgraph's inputs.
+    #
+    #   Before:
+    #   ```
+    #   def forward(self, token, arg1_1):
+    #       repeated_subgraph0 = self.repeated_subgraph0
+    #       invoke_subgraph = torch.ops.higher_order.invoke_subgraph(
+    #           repeated_subgraph0, 'subgraph_0', token, x, arg1_1)
+    #       getitem = invoke_subgraph[0]
+    #       getitem_1 = invoke_subgraph[1]
+    #       return (getitem, getitem1)
+    #   ```
+    #
+    #   After:
+    #   ```
+    #   def forward(self, arg1_1):
+    #       _make_token_default = torch.ops.prims._make_token.default()
+    #       repeated_subgraph0 = self.repeated_subgraph0
+    #       with_effects_1 = torch.ops.higher_order.with_effects(
+    #           _make_token_default, torch.ops.higher_order.invoke_subgraph,
+    #           repeated_subgraph0, 'subgraph_0', arg1_1)
+    #       getitem = with_effects_1[0]
+    #       getitem_1 = with_effects_1[1];  with_effects_1 = None
+    #       _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem])
+    #       return (getitem_1,)
+    #   ```
+    #
+    # 3. The toplevel module should have the following invariants:
+    #   forward:
+    #     expected_num_erased_inputs == len(fw_metadata.tokens)
+    #     expected_num_erased_outputs == len(fw_metadata.tokens)
+    #   backward:
+    #     expected_num_erased_inputs == fw_metadata.num_backward_tokens
+    #     expected_num_erased_outputs == fw_metadata.num_backward_tokens
     num_forward_tokens = len(fw_metadata.tokens)
     num_backward_tokens = fw_metadata.num_backward_tokens
 
-    def rewrite_with_effects_input_token(module, node):
+    def replace_input_token_with_make_token(
+        module: torch.fx.GraphModule, node: torch.fx.Node
+    ) -> None:
         with module.graph.inserting_before(node):
             new_token_node = module.graph.call_function(
                 torch.ops.prims._make_token.default, ()
             )
             new_token_node.meta["val"] = torch.tensor([])
             new_token_node.meta["tensor_meta"] = torch.tensor([])
+            node.replace_all_uses_with(new_token_node)
+            module.graph.erase_node(node)
 
-            args = list(node.args)
-            args[0] = new_token_node
-            node.args = tuple(args)
+    def get_output_tokens(node: torch.fx.Node) -> set[torch.fx.Node]:
+        output_tokens = set()
+        for user in list(node.users.keys()):
+            # Check if this is a getitem accessing index 0 (the token)
+            if (
+                user.op == "call_function"
+                and user.target is operator.getitem
+                and len(user.args) > 1
+                and user.args[1] == 0
+            ):
+                # Check if this getitem is used in an output
+                for user_user in list(user.users.keys()):
+                    if user_user.op == "output":
+                        output_tokens.add(user)
+        return output_tokens
 
-    def rewrite_output(module, node, output_token_nodes, other_output_args):
-        for output_token_node in output_token_nodes:
-            assert (
-                output_token_node.op == "call_function"
-                and output_token_node.target == operator.getitem
-                and output_token_node.args[1] == 0
-            )
-        with module.graph.inserting_before(node):
+    def _unlift_tokens_from_module_helper(
+        module: torch.fx.GraphModule,
+        subgraph_str: str,
+        expected_num_erased: int | None,
+    ) -> None:
+        input_token_nodes = set()
+        output_token_nodes = set()
+
+        for node in module.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.with_effects
+            ):
+                if node.args[0].op == "placeholder":
+                    input_token_nodes.add(node.args[0])
+                    replace_input_token_with_make_token(module, node.args[0])
+
+                tokens_from_with_effects = get_output_tokens(node)
+                output_token_nodes = output_token_nodes | tokens_from_with_effects
+
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.invoke_subgraph
+            ):
+                subgraph_node, identifier, *operands = node.args
+
+                # Check if subgraph has effects by looking in the cache
+                from torch._guards import InvokeSubgraphCache, TracingContext
+
+                effects = None
+                tracing_ctx = TracingContext.try_get()
+                if tracing_ctx:
+                    invoke_subgraph_cache = (
+                        tracing_ctx.hop_dispatch_set_cache.get_cache(
+                            torch.ops.higher_order.invoke_subgraph
+                        )
+                    )
+                    if invoke_subgraph_cache:
+                        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+                            raise AssertionError(
+                                f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+                            )
+                        effects = invoke_subgraph_cache.get_effects(identifier)
+
+                if effects is not None:
+                    # Wrap invoke_subgraph with with_effects
+                    # Before: invoke_subgraph(subgraph, id, token, *args) -> (token_out, result)
+                    # After: with_effects(token, invoke_subgraph, subgraph, id, *args) -> (token_out, result)
+                    #
+                    # Note: The subgraph itself will be unlifted separately when we iterate
+                    # through named_modules() below.
+
+                    num_tokens = len(effects)
+                    if num_tokens != 1:
+                        raise AssertionError(
+                            f"Multiple token subgraph NYI, got {num_tokens} tokens"
+                        )
+                    token_args = operands[:num_tokens]
+                    non_token_args = operands[num_tokens:]
+
+                    # Create with_effects wrapper around invoke_subgraph
+                    # with_effects(token, op, *args) where op is invoke_subgraph
+                    # Pass the subgraph and non-token args to invoke_subgraph
+                    with module.graph.inserting_before(node):
+                        new_node = module.graph.call_function(
+                            torch.ops.higher_order.with_effects,
+                            # pyrefly: ignore [bad-argument-type]
+                            (
+                                token_args[0],  # pyrefly: ignore[bad-argument-type]
+                                torch.ops.higher_order.invoke_subgraph,
+                                subgraph_node,
+                                identifier,
+                                *tuple(non_token_args),
+                            ),
+                        )
+                        node.replace_all_uses_with(new_node)
+                        new_node.meta = node.meta
+                        module.graph.erase_node(node)
+
+                    for token in token_args:
+                        if token.op == "placeholder":
+                            input_token_nodes.add(token)
+                            replace_input_token_with_make_token(module, token)
+
+                    # Get output tokens from the new with_effects node
+                    tokens_from_invoke_subgraph = get_output_tokens(new_node)
+                    output_token_nodes = (
+                        output_token_nodes | tokens_from_invoke_subgraph
+                    )
+
+        if not output_token_nodes and not input_token_nodes:
+            return
+
+        output_node = next(reversed(module.graph.find_nodes(op="output")))
+        if output_node is None:
+            raise AssertionError("output node not found in graph")
+        with module.graph.inserting_before(output_node):
             module.graph.call_function(
                 torch.ops.prims._sink_tokens.default,
-                (output_token_nodes,),
+                (list(output_token_nodes),),
             )
-            node.args = (other_output_args,)
-
-    def do(module, subgraph, expected_num_erased):
-        num_erased_inputs = 0
-        num_erased_outs = 0
-        input_nodes = []
-        input_token_nodes = set()
-        with_effect_nodes = []
-        output_token_nodes = []
-        other_output_nodes = []
-        for node in module.graph.nodes:
-            if node.op == "placeholder":
-                input_nodes.append(node)
-            elif is_with_effects(node):
-                with_effect_nodes.append(node)
-                if node.args[0] in input_nodes:
-                    input_token_nodes.add(node.args[0])
-                    rewrite_with_effects_input_token(module, node)
-            elif node.op == "output":
-                outs = node.args[0]
-                for out in outs:
-                    if (
-                        isinstance(out, torch.fx.node.Node)
-                        and out.op == "call_function"
-                        and out.target == operator.getitem
-                        and out.args[1] == 0
-                        and out.args[0] in with_effect_nodes
-                    ):
-                        output_token_nodes.append(out)
-                    else:
-                        other_output_nodes.append(out)
-
-                rewrite_output(module, node, output_token_nodes, other_output_nodes)
-                num_erased_outs = len(output_token_nodes)
-
-        for input_token_node in input_token_nodes:
-            module.graph.erase_node(input_token_node)
-
-        num_erased_inputs = len(input_token_nodes)
-
-        assert num_erased_inputs == expected_num_erased, (
-            f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
+        new_out_args = tuple(
+            [out for out in output_node.args[0] if out not in output_token_nodes]
         )
-        assert num_erased_outs == expected_num_erased, (
-            f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
-        )
+        output_node.args = (new_out_args,)
+
+        if expected_num_erased:
+            if len(input_token_nodes) != expected_num_erased:
+                raise AssertionError(
+                    f"{subgraph_str} num_erased_inputs:{len(input_token_nodes)} "
+                    f"{input_token_nodes} != expected {expected_num_erased} \n"
+                    f"{fw_module.print_readable(print_output=False)}"
+                )
+            if len(output_token_nodes) != expected_num_erased:
+                raise AssertionError(
+                    f"{subgraph_str} num_erased_outs:{len(output_token_nodes)} "
+                    f"{output_token_nodes} != expected {expected_num_erased} \n"
+                    f"{fw_module.print_readable(print_output=False)}"
+                )
 
         module.recompile()
+
+    def unlift_tokens_from_module(
+        module: torch.fx.GraphModule, subgraph_str: str, expected_num_erased: int
+    ) -> None:
+        for name, m in module.named_modules():
+            if isinstance(m, torch.fx.GraphModule):
+                if name == "":
+                    _unlift_tokens_from_module_helper(
+                        m, subgraph_str, expected_num_erased
+                    )
+                else:
+                    # Subgraph -- we may or may not have effects applied
+                    _unlift_tokens_from_module_helper(m, f"{subgraph_str}_{name}", None)
 
     if num_forward_tokens > 0:
         if aot_config.enable_log:
@@ -362,7 +524,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(
+        unlift_tokens_from_module(
             fw_module,
             "forward",
             num_forward_tokens,
@@ -383,7 +545,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(bw_module, "backward", num_backward_tokens)
+        unlift_tokens_from_module(bw_module, "backward", num_backward_tokens)
 
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
@@ -391,7 +553,9 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     fw_metadata.num_backward_tokens = 0
 
 
-def root_module_when_exporting_non_strict(flat_fn):
+def root_module_when_exporting_non_strict(
+    flat_fn: Callable[..., Any],
+) -> torch.nn.Module | None:
     # When exporting in non-strict mode, we wrap the root module in a specific pattern.
     # See `_aot_export_non_strict` in torch.export._trace.py.
     # We look for that wrapping pattern here.
@@ -401,34 +565,28 @@ def root_module_when_exporting_non_strict(flat_fn):
         return None
 
 
-def copy_fwd_metadata_to_bw_nodes(fx_g):
-    """
-    Input: `fx_g` which contains the joint fwd+bwd FX graph created by
-    aot_autograd.
+def _is_forward_node_with_seq_nr(node: torch.fx.Node) -> bool:
+    # For now, assume that if nn_module_stack_metadata is populated, this
+    # node is from the forward. Ignore nodes without `seq_nr`.
+    # TODO(future): there is likely a less brittle way to do this by walking
+    # the descendants of graph inputs corresponding to fwd inputs, didn't
+    # seem obvious at first glance on how to partition graph inputs into
+    # fwd vs bwd without relying on string names.
+    return node.meta.get("partitioner_tag") != "is_backward" and "seq_nr" in node.meta
 
-    This function walks the graph and copies over metadata from forward nodes
-    to backward nodes, using the `seq_nr` field as a one-to-many mapping
-    from forward node to backward node. This metadata is useful for performance
-    profiling and debugging.
-    """
 
-    def _is_forward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is populated, this
-        # node is from the forward. Ignore nodes without `seq_nr`.
-        # TODO(future): there is likely a less brittle way to do this by walking
-        # the descendants of graph inputs corresponding to fwd inputs, didn't
-        # seem obvious at first glance on how to partition graph inputs into
-        # fwd vs bwd without relying on string names.
-        return "nn_module_stack" in node.meta and "seq_nr" in node.meta
+def _is_backward_node_with_seq_nr(node: torch.fx.Node) -> bool:
+    # For now, assume that if nn_module_stack_metadata is not populated,
+    # this node is from the backward. Ignore nodes without `seq_nr`.
+    # TODO(future): there is likely a less brittle way to do this, same
+    # as with the forward.
+    return node.meta.get("partitioner_tag") == "is_backward" and "seq_nr" in node.meta
 
-    def _is_backward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is not populated,
-        # this node is from the backward. Ignore nodes without `seq_nr`.
-        # TODO(future): there is likely a less brittle way to do this, same
-        # as with the forward.
-        return ("nn_module_stack" not in node.meta) and "seq_nr" in node.meta
 
-    fwd_seq_nr_to_node = {}
+def _collect_fwd_nodes_from_subgraph(
+    fx_g: torch.fx.GraphModule, fwd_seq_nr_to_node: dict[str, torch.fx.Node]
+) -> None:
+    """Collect forward nodes from a single subgraph into the global mapping."""
     for node in fx_g.graph.nodes:
         if not _is_forward_node_with_seq_nr(node):
             continue
@@ -438,36 +596,100 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
             # that the current op did not create an autograd node, and there
             # is no corresponding backward node, so we skip.
             continue
-        fwd_seq_nr_to_node[node.meta["seq_nr"]] = node
+        fwd_seq_nr_to_node[seq_nr] = node
 
+
+def _copy_metadata_to_bw_nodes_in_subgraph(
+    fx_g: torch.fx.GraphModule, fwd_seq_nr_to_node: dict[str, torch.fx.Node]
+) -> None:
+    """Copy metadata from forward nodes to backward nodes in a single subgraph."""
     for node in fx_g.graph.nodes:
+        annotation_log.debug("node: %s", node.name)
+        seq_nr = node.meta.get("seq_nr")
+        annotation_log.debug("seq_nr: %s", seq_nr)
+
         if not _is_backward_node_with_seq_nr(node):
             continue
+
+        # We exclude gradient accumulation nodes from copying tags
+        if node.meta.get("is_gradient_acc", False):
+            annotation_log.debug("is_gradient_acc")
+            continue
+
         # fwd_node should always exist, but handle non-existence just in case
         fwd_node = fwd_seq_nr_to_node.get(node.meta["seq_nr"])
         if fwd_node is not None:
-            node.meta["fwd_nn_module_stack"] = fwd_node.meta["nn_module_stack"]
+            node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
+            # TODO: better to change to a specific field of custom?
+            custom = fwd_node.meta.get("custom")
+            if custom is not None:
+                # Merge rather than overwrite so bw-only keys survive
+                # fw keys win on conflict.
+                node.meta["custom"] = {
+                    **node.meta.get("custom", {}),
+                    **copy.deepcopy(custom),
+                }
 
 
-def register_buffer_assignment_hook(mod, assigned_buffers):
+def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
+    """
+    Input: `fx_g` which contains the joint fwd+bwd FX graph created by
+    aot_autograd.
+
+    This function walks the graph and copies over metadata from forward nodes
+    to backward nodes, using the `seq_nr` field as a one-to-many mapping
+    from forward node to backward node. This metadata is useful for performance
+    profiling and debugging.
+
+    This function supports matching forward and backward nodes across different
+    subgraphs (e.g., in recursive submodules from HOPs), enabling backward nodes
+    in any submodule to match forward nodes in any submodule.
+    """
+
+    # Build a global mapping of seq_nr to forward nodes across all subgraphs
+    fwd_seq_nr_to_node: dict[str, torch.fx.Node] = {}
+
+    # First pass: collect all forward nodes from all subgraphs
+    for submod in fx_g.modules():
+        if isinstance(submod, torch.fx.GraphModule):
+            _collect_fwd_nodes_from_subgraph(submod, fwd_seq_nr_to_node)
+
+    if annotation_log.isEnabledFor(logging.DEBUG):
+        for k, v in fwd_seq_nr_to_node.items():
+            annotation_log.debug("forward:: key: %s, value: %s", k, v)
+
+    # Second pass: copy metadata to backward nodes in all subgraphs
+    # using the global forward mapping
+    for submod in fx_g.modules():
+        if isinstance(submod, torch.fx.GraphModule):
+            _copy_metadata_to_bw_nodes_in_subgraph(submod, fwd_seq_nr_to_node)
+
+
+def register_buffer_assignment_hook(
+    mod: torch.nn.Module, assigned_buffers: dict[str, str]
+) -> Any:
     """
     Register a hook that intercepts buffer assignments.
     This is used to detect when a buffer is assigned to, and then we can
     map that buffer to the corresponding proxy node in the graph.
     """
 
-    def _map_assigned_buffer_to_proxy(_mod, name, buffer):
+    def _map_assigned_buffer_to_proxy(
+        _mod: torch.nn.Module, name: str, buffer: Any
+    ) -> Any:
         # We intercept buffer assignments on the root module through this hook.
         if _mod._buffers is mod._buffers:
             # either buffer is a functional tensor, which wraps a fake tensor
             if isinstance(buffer, FunctionalTensor):
                 buffer = buffer.from_functional()
             # or buffer is a fake tensor
-            assert isinstance(buffer, FakeTensor)
+            if not isinstance(buffer, FakeTensor):
+                raise AssertionError(f"expected FakeTensor, got {type(buffer)}")
             # The fake tensor in turn is associated with a proxy node.
             proxy_mode = torch.fx.experimental.proxy_tensor.get_proxy_mode()
-            assert proxy_mode is not None
+            if proxy_mode is None:
+                raise AssertionError("proxy_mode must not be None")
             proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
                 buffer, proxy_mode.tracer
             ).proxy.node
@@ -494,22 +716,64 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-def get_cuda_generator_meta_val(device_idx: int):
+_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda"}
+
+
+def register_graphsafe_rng_device_type(device_type: str) -> None:
+    """Register a device type as supporting graphsafe RNG operations.
+
+    The device backend module (``torch.<device_type>``) must provide:
+    - ``_get_generator(device: torch.device) -> Generator``: return the default
+      generator for the given device. The generator must implement
+      ``graphsafe_get_state()``, ``graphsafe_set_state(state)``, and
+      ``clone_state()``.
+    - ``get_rng_state(device_index: int) -> Tensor``: return the current RNG
+      state tensor.
+
+    Args:
+        device_type: The device type string (e.g. "cuda", "xpu").
     """
-    Get a generator value to use as a meta val
+    from torch._prims.rng_prims import register_graphsafe_rng_dispatch
 
-    newly cloned generator will not contain tensors. it is only Generators that are
-    registered to a CUDAGraph that contain tensors. since this does not contain Tensor
-    it is fine to use in the meta.
+    key_name = torch._C._dispatch_key_for_device(device_type)
+    dispatch_key = getattr(torch._C.DispatchKey, key_name)
+    _GRAPHSAFE_RNG_DEVICE_TYPES.add(device_type)
+    register_graphsafe_rng_dispatch(dispatch_key)
+
+
+def supports_graphsafe_rng(device: torch.device) -> bool:
+    """Check whether a device supports graphsafe RNG operations."""
+    return device.type in _GRAPHSAFE_RNG_DEVICE_TYPES
+
+
+def get_default_generator(device: torch.device) -> Any:
+    """Get the default RNG generator for a device.
+
+    Calls ``torch.<device_type>._get_generator(device)``.
     """
-    return torch.cuda.default_generators[device_idx].clone_state()
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is None or not hasattr(device_mod, "_get_generator"):
+        raise AssertionError(
+            f"Device type '{device.type}' does not implement _get_generator. "
+            f"Registered graphsafe RNG types: {sorted(_GRAPHSAFE_RNG_DEVICE_TYPES)}."
+        )
+    return device_mod._get_generator(device)
 
 
-def top_saved_tensors_hooks():
+def get_device_rng_state(device: torch.device) -> torch.Tensor:
+    """Get the RNG state tensor for a device."""
+    device_mod = getattr(torch, device.type, None)
+    if device_mod is not None and hasattr(device_mod, "get_rng_state"):
+        idx = device.index if device.index is not None else 0
+        return device_mod.get_rng_state(idx)
+    return torch.get_rng_state()
+
+
+def top_saved_tensors_hooks() -> Any:
     return torch._C._autograd._top_saved_tensors_default_hooks(True)
 
 
-def saved_tensors_hooks_are_inlineable(hooks) -> bool:
+def saved_tensors_hooks_are_inlineable(hooks: Any) -> bool:
     if not hooks:
         return False
     pack, unpack = hooks
@@ -526,7 +790,7 @@ _S = TypeVar("_S")
 def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
-    def inner(*args, **kwargs):
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         return f(*args, **kwargs)[0]
 
     return inner
@@ -545,38 +809,74 @@ def simple_wraps(
     return wraps(f, assigned=("__doc__", "__annotations__", "__type_params__"))
 
 
-def call_and_expect_output_descs(fn, args):
+_Ts = TypeVarTuple("_Ts")
+
+
+def call_and_expect_output_descs(
+    fn: Callable[[*_Ts], tuple[Any, Any]], args: tuple[Unpack[_Ts]]
+) -> tuple[Any, Any]:
+    from .descriptors import AOTOutput
+
     outs_pair = fn(*args)
-    assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
+    if not (isinstance(outs_pair, tuple) and len(outs_pair) == 2):
+        raise AssertionError(
+            f"expected tuple of length 2, got {type(outs_pair)} with value {outs_pair}"
+        )
     outs, outs_descs = outs_pair
     # The Tensor tests protects against the test when there are no outputs
     out_vals, out_spec = pytree.tree_flatten(outs)
     out_desc_vals, out_desc_spec = pytree.tree_flatten(outs_descs)
-    assert out_spec == out_desc_spec, (
-        fn_wrappers(fn),
-        outs,
-        outs_descs,
-        out_spec,
-        out_desc_spec,
-    )
-    assert not any(isinstance(x, AOTOutput) for x in out_vals), (
-        fn_wrappers(fn),
-        outs,
-        outs_descs,
-        out_vals,
-    )
-    assert all(
+    if out_spec != out_desc_spec:
+        raise AssertionError(
+            f"output spec mismatch: {fn_wrappers(fn)}, outs={outs}, outs_descs={outs_descs}, "
+            f"out_spec={out_spec}, out_desc_spec={out_desc_spec}"
+        )
+    if any(isinstance(x, AOTOutput) for x in out_vals):
+        raise AssertionError(
+            f"unexpected AOTOutput in out_vals: {fn_wrappers(fn)}, outs={outs}, "
+            f"outs_descs={outs_descs}, out_vals={out_vals}"
+        )
+    if not all(
         isinstance(d, AOTOutput)
         for (x, d) in zip(out_vals, out_desc_vals)
         if isinstance(x, (torch.Tensor, torch.SymInt)) or type(x) is int
-    ), (fn_wrappers(fn), outs, outs_descs, out_vals, out_desc_vals)
+    ):
+        raise AssertionError(
+            f"expected all descriptors to be AOTOutput: {fn_wrappers(fn)}, outs={outs}, "
+            f"outs_descs={outs_descs}, out_vals={out_vals}, out_desc_vals={out_desc_vals}"
+        )
     return outs_pair
 
 
-def fn_wrappers(fn):
+def fn_wrappers(fn: Callable[..., Any]) -> list[Callable[..., Any]]:
     fns = [fn]
     f = fn
     while hasattr(f, "__wrapped__"):
         f = f.__wrapped__
         fns.append(f)
     return fns
+
+
+def _is_primal(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "placeholder"
+        and "tangents" not in str(node.target)
+        and not _is_bwd_seed_offset(node)
+        and not _is_fwd_seed_offset(node)
+    )
+
+
+def _is_tangent(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and "tangents" in str(node.target)
+
+
+def _is_bwd_seed_offset(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and (
+        "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
+    )
+
+
+def _is_fwd_seed_offset(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and (
+        "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
+    )

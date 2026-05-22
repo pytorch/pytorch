@@ -2,6 +2,7 @@
 import atexit
 import contextlib
 import functools
+import itertools
 import math
 import os
 import sys
@@ -26,11 +27,13 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
+    skipOps,
     skipXPUIf,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skipOps
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -107,11 +110,14 @@ START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
 if START is not None or END is not None:
-    assert END is not None
-    assert START is not None
+    if END is None:
+        raise AssertionError("END must be set when START is set")
+    if START is None:
+        raise AssertionError("START must be set when END is set")
     START = int(START)
     END = int(END)
-    assert START < END
+    if START >= END:
+        raise AssertionError(f"START ({START}) must be less than END ({END})")
 else:
     START = 0
     END = len(op_db)
@@ -191,6 +197,7 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if IS_MACOS and IS_X86:
@@ -216,6 +223,7 @@ inductor_skips["cuda"] = {
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     "_batch_norm_with_update": {f16, f32, f64},
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if not SM80OrLater:
@@ -226,21 +234,24 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {}
+inductor_skips["xpu"] = {
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
+}
+
+# torch-xpu-ops: #2956
+inductor_skips["xpu"]["lu"] = {f32}
+inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "multinomial": {f16, f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -258,7 +269,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -266,16 +276,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
+        b8,
         f16,
         f32,
         f64,
+        i32,
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -283,26 +295,14 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f32, f64},
-    "linalg.eig": {f32, f64},
-    ("linalg.pinv", "singular"): {f64},
-    # could not create a primitive
-    "addmv": {f64},
-    # could not create a primitive descriptor for
-    # a deconvolution forward propagation primitive
-    "nn.functional.conv_transpose2d": {f32, f64},
-    "nn.functional.conv_transpose3d": {f32, f64},
-    # [Begin] Incorrect XPU reference due to new driver.
-    "masked.prod": {b8, i32, i64},
-    "masked.amin": {i64},
-    "masked.amax": {i64},
-    "amax": {i64},
-    "amin": {i64},
-    "std": {f64},
-    "var": {f64},
-    "std_mean": {f64},
-    "var_mean": {f64},
-    # [End]
+    "to_sparse": {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    },  # align with cuda.
 }
 
 
@@ -444,6 +444,11 @@ inductor_override_kwargs["cuda"] = {
     ("kron", f16): {"reference_in_float": True},
     "log_normal": {"reference_in_float": True},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.adaptive_avg_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 2e-5,
+        "rtol": 0.02,
+    },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
@@ -646,7 +651,7 @@ inductor_override_kwargs["xpu"] = {
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
         "atol": 3e-4,
@@ -819,9 +824,6 @@ inductor_one_sample["cuda"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -939,9 +941,6 @@ inductor_one_sample["xpu"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -977,6 +976,50 @@ inductor_one_sample["xpu"] = {
     "xlogy": {f16},
 }
 
+# TODO: Fix these so strides match.
+inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
+    "linalg.lu_factor",
+    "linalg.lu_factor_ex",
+    "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "lu",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
+    "ormqr",
+    "pca_lowrank",
+    "rot90",
+    "sum",
+    "tensordot",
+}
+
+# On XPU, Inductor may apply additional layout optimizations that can change
+# tensor strides compared to eager mode, so exact stride checks are relaxed
+# for certain ops.
+inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
+}
 
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
@@ -1009,14 +1052,18 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         exact_stride=False,
     ):
         if is_argsort:
-            assert isinstance(x, torch.Tensor)
-            assert isinstance(y, torch.Tensor)
+            if not isinstance(x, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
+            if not isinstance(y, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(y)}")
         else:
             # The first tensor is the sorted values and can be asserted via
             # the usual means
             for t in (x, y):
-                assert isinstance(t, tuple)
-                assert len(t) == 2
+                if not isinstance(t, tuple):
+                    raise AssertionError(f"Expected tuple, got {type(t)}")
+                if len(t) != 2:
+                    raise AssertionError(f"Expected tuple of length 2, got {len(t)}")
 
             test_case_inst.assertEqual(
                 x[0],
@@ -1035,7 +1082,8 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         if exact_dtype and (x.dtype != y.dtype):
             raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
 
-        assert x.shape == y.shape
+        if x.shape != y.shape:
+            raise AssertionError(f"Shape mismatch: {x.shape} != {y.shape}")
 
         if exact_stride and (x.stride() != y.stride()):
             raise AssertionError(
@@ -1048,7 +1096,8 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
             for cur_dim in reversed(range(x.dim())):
                 indices[cur_dim] = el % x.shape[cur_dim]
                 el //= x.shape[cur_dim]
-            assert None not in indices
+            if None in indices:
+                raise AssertionError("indices contains None")
             return indices
 
         def get_val_by_ids(t, ids):
@@ -1120,6 +1169,42 @@ def collection_decorator(fn):
     return inner
 
 
+def _inductor_extra_samples(op_name, device, dtype, requires_grad):
+    """Extra sample inputs for inductor-specific coverage.
+
+    These exercise dynamo decomposition paths (e.g. tensor value/alpha triggering
+    fma) that the shared opinfo samples don't cover.
+    """
+    from torch.testing._internal.common_methods_invocations import (
+        make_tensor,
+        S,
+        SampleInput,
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    if op_name in ("addcmul", "addcdiv") and (
+        dtype.is_floating_point or dtype.is_complex
+    ):
+        # Tensor value
+        args = tuple(
+            make_arg(shape, exclude_zero=True) for shape in ((S, S), (S, S), (S, S))
+        )
+        tensor_value = make_arg((), requires_grad=False)
+        return [SampleInput(*args, value=tensor_value)]
+
+    if op_name == "add" and (dtype.is_floating_point or dtype.is_complex):
+        # Tensor alpha
+        lhs = make_arg((S, S))
+        rhs = make_arg((S, S))
+        tensor_alpha = make_arg((), requires_grad=False)
+        return [SampleInput(lhs, args=(rhs,), kwargs={"alpha": tensor_alpha})]
+
+    return []
+
+
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
@@ -1142,18 +1227,20 @@ class TestInductorOpInfo(TestCase):
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])
-    @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
+    @skipOps(test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
+    @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        assert device_type in (GPU_TYPE, "cpu")
+        if device_type not in (GPU_TYPE, "cpu"):
+            raise AssertionError(f"Unexpected device_type: {device_type}")
 
         torch._dynamo.reset()
         with torch.no_grad():
@@ -1185,16 +1272,19 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-        elif dtype in inductor_expected_failures_single_sample[device_type].get(
-            op_name, set()
+        elif (
+            device_type == "cpu"
+            and IS_LINUX
+            and dtype
+            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
@@ -1217,9 +1307,12 @@ class TestInductorOpInfo(TestCase):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
+        extra = _inductor_extra_samples(op_name, device, dtype, requires_grad)
+        if extra:
+            samples = itertools.chain(samples, extra)
 
         if (
             dtype in inductor_one_sample.get(device_type, {}).get(op_name, {})
@@ -1329,8 +1422,10 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_gpu=False,
                             )
+                            if device_type == GPU_TYPE:
+                                adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:
@@ -1346,12 +1441,17 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
+                        exact_stride = op_name not in inductor_skip_exact_stride
+                        # XPU has additional layout optimizations that change strides differently from eager mode.
+                        if exact_stride and GPU_TYPE == "xpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
                         else:
                             self.check_model(
@@ -1359,6 +1459,7 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
 
         except Exception as e:

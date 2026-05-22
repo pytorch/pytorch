@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <stdexcept>
 #include <string>
 
@@ -26,12 +27,10 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
   if (PyUnicode_Check(obj)) {
     Py_ssize_t size = 0;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
-    if (!data) {
-      throw std::runtime_error("error unpacking string as utf-8");
-    }
+    TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string(data, (size_t)size);
   }
-  throw std::runtime_error("unpackString: expected bytes or unicode object");
+  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
 }
 
 // Unpacks PyBytes (PyString) or PyUnicode as std::string_view
@@ -50,12 +49,10 @@ inline std::string_view THPUtils_unpackStringView(PyObject* obj) {
   if (PyUnicode_Check(obj)) {
     Py_ssize_t size = 0;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
-    if (!data) {
-      throw std::runtime_error("error unpacking string as utf-8");
-    }
+    TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string_view(data, (size_t)size);
   }
-  throw std::runtime_error("unpackString: expected bytes or unicode object");
+  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
 }
 
 inline PyObject* THPUtils_packString(const char* str) {
@@ -68,7 +65,12 @@ inline PyObject* THPUtils_packString(const std::string& str) {
 }
 
 inline PyObject* THPUtils_internString(const std::string& str) {
-  return PyUnicode_InternFromString(str.c_str());
+  PyObject* obj = PyUnicode_FromStringAndSize(
+      str.data(), static_cast<Py_ssize_t>(str.size()));
+  if (obj == nullptr)
+    return nullptr;
+  PyUnicode_InternInPlace(&obj);
+  return obj;
 }
 
 // Precondition: THPUtils_checkString(obj) must be true
@@ -89,7 +91,7 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  * avoids lookups for None, tuple, and List objects,
  * and doesn't create a PyErr since this code ignores it.
  *
- * This can be much faster then PyObject_GetAttrString where
+ * This can be much faster than PyObject_GetAttrString where
  * exceptions are not used by caller.
  *
  * 'obj' is the object to search for attribute.
@@ -102,6 +104,14 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  */
 
 inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
+#if IS_PYTHON_3_13_PLUS
+  PyObject* res = (PyObject*)nullptr;
+  int result_code = PyObject_GetOptionalAttrString(obj, name, &res);
+  if (result_code == -1) {
+    PyErr_Clear();
+  }
+  return py::reinterpret_steal<py::object>(res);
+#else
   PyTypeObject* tp = Py_TYPE(obj);
   PyObject* res = (PyObject*)nullptr;
 
@@ -126,4 +136,5 @@ inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
     }
   }
   return py::reinterpret_steal<py::object>(res);
+#endif
 }

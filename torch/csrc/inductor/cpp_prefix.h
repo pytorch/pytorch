@@ -9,12 +9,13 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
 // the CPU backend, we have to make sure the used headers are implemented
 // in a header-only way, i.e. all the function and class definitions are
-// in .h files instead of .cpp files, to avoid ABI backward-compatiblity
+// in .h files instead of .cpp files, to avoid ABI backward-compatibility
 // breakage.
 
 #include <ATen/NumericUtils.h>
@@ -72,6 +73,41 @@ struct IsVecType<at::vec::VectorizedN<T, N>> : std::true_type {};
 
 template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VecMask<src_t, src_n>& mask) {
+  return mask.template cast<dst_t, dst_n>();
+}
+
+template <typename dst_t, int dst_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::Vectorized<bool>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(
+      at::vec::VectorizedN<bool, 1>(mask));
+}
+
+template <typename dst_t, int dst_n, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VectorizedN<bool, src_n>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(mask);
+}
+#endif
+
+template <typename T>
+struct GetScalarType {
+  using type = T;
+};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct GetScalarType<at::vec::Vectorized<T>> {
+  using type = T;
+};
+template <typename T, int N>
+struct GetScalarType<at::vec::VectorizedN<T, N>> {
+  using type = T;
+};
 #endif
 
 template <typename T, uint64_t kChunkSize>
@@ -139,7 +175,7 @@ struct WelfordHelper {
   // 1. Save the reciprocal of weights to avoid redundant divisions.
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
-  static std::vector<typename T::value_type> weight_recps;
+  static std::vector<typename GetScalarType<T>::type> weight_recps;
   std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
@@ -154,9 +190,9 @@ struct WelfordHelper {
 };
 
 template <typename T, uint64_t kChunkSize>
-std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps =
-    []() {
-      using scalar_t = typename T::value_type;
+std::vector<typename GetScalarType<T>::type>
+    WelfordHelper<T, kChunkSize>::weight_recps = []() {
+      using scalar_t = typename GetScalarType<T>::type;
       std::vector<scalar_t> temp(kChunkSize);
       for (const auto i : c10::irange(kChunkSize)) {
         temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
@@ -175,7 +211,16 @@ Welford<T> welford_combine(
   if (b.index == 0) {
     return a;
   }
+  // Guard against inf - inf = NaN when both means are infinite and equal.
+  // This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
   auto delta = b.mean - a.mean;
+  if constexpr (IsVecType<T>::value) {
+    delta = T::blendv(delta, T(0), a.mean == b.mean);
+  } else {
+    if (std::isinf(a.mean) && a.mean == b.mean) {
+      delta = T(0);
+    }
+  }
   auto a_weight = use_index ? T(a.index) : a.weight;
   auto b_weight = use_index ? T(b.index) : b.weight;
   auto new_weight = a_weight + b_weight;
@@ -202,21 +247,19 @@ Welford<T> welford_combine(
   // stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
   // https://en.wikipedia.org/wiki/Pairwise_summation
-  if constexpr (IsVecType<T>::value) {
-    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
-      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
-      w->num_chunks += 1;
-      acc.mean = T(0);
-      acc.m2 = T(0);
-      acc.weight = T(0);
-      acc.index = 0;
-      uint64_t mask = w->num_chunks;
-      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
-        w->welford_stk[j] =
-            welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
-        w->welford_stk[j - 1] = Welford<T>();
-        mask >>= 1;
-      }
+  if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+    w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+    w->num_chunks += 1;
+    acc.mean = T(0);
+    acc.m2 = T(0);
+    acc.weight = T(0);
+    acc.index = 0;
+    uint64_t mask = w->num_chunks;
+    for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+      w->welford_stk[j] =
+          welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+      w->welford_stk[j - 1] = Welford<T>();
+      mask >>= 1;
     }
   }
   // Add a single data point
@@ -224,22 +267,18 @@ Welford<T> welford_combine(
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
-  if constexpr (!IsVecType<T>::value) {
-    new_mean = acc.mean + delta / new_weight;
-  } else {
-    // use new_index to fecth 1 / new_weight to avoid divisions
-    new_mean = acc.mean +
-        ((w == nullptr || acc.index >= w->weight_recps.size())
-             ? delta / new_weight
-             : delta * T(w->weight_recps[acc.index]));
-  }
+  // use new_index to fecth 1 / new_weight to avoid divisions
+  new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+           ? delta / new_weight
+           : delta * T(w->weight_recps[acc.index]));
   auto new_delta = data - new_mean;
   auto result =
       Welford<T>{new_mean, acc.m2 + delta * new_delta, new_weight, new_index};
   return result;
 }
 
-template <typename T, uint64_t kChunkSize = 0>
+template <typename T, uint64_t kChunkSize>
 Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
@@ -256,7 +295,7 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
@@ -296,21 +335,48 @@ inline T cascade_sum_combine(
 }
 
 template <typename T>
-T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::maximum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> max_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::minimum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> min_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a & b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
   return T::set(a, out, tail_size);
+}
+
+template <>
+inline at::vec::VecMask<float, 1> sum_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
 }
 
 template <typename T>
@@ -322,6 +388,12 @@ T prod_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
 template <typename T>
 T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a ^ b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T any_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a | b;
   return T::set(a, out, tail_size);
 }
 #endif
@@ -442,7 +514,7 @@ struct IndexValueVec {
     index = at::vec::VectorizedN<int64_t, NI>(0);
   };
 
-  IndexValueVec() {};
+  IndexValueVec() = default;
 };
 
 template <
@@ -574,6 +646,15 @@ inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
   return argmin_vec_impl(a, next_value, next_idx, tail_size);
 }
 
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
 template <typename T, int NV, int NI, bool horizontal>
 inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     IndexValueVec<T, NV, NI>& a,
@@ -582,6 +663,15 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     std::optional<int64_t> tail_size = std::nullopt) {
   auto next_idx = create_index<T, NI, horizontal>(next_index);
   return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
 template <typename T, int NV, int NI>
@@ -657,8 +747,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -682,8 +772,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -733,9 +823,39 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 #endif
 
+inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
+
+inline void inductor_cpu_note_integer_div_by_zero() {
+  if (inductor_cpu_integer_div_error_flag != nullptr) {
+    inductor_cpu_integer_div_error_flag->store(1, std::memory_order_relaxed);
+  } else {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
+inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
+  if (err.load(std::memory_order_acquire)) {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
 template <typename T, typename U>
-inline typename std::common_type_t<T, U> mod(T a, U b) {
-  return a % b;
+inline std::common_type_t<T, U> mod(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
+      "for floating-point operands.");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
+    return C(0);
+  }
+  return a_c % b_c;
 }
 template <>
 inline float mod(float a, float b) {
@@ -745,6 +865,61 @@ template <>
 inline double mod(double a, double b) {
   return std::fmod(a, b);
 }
+
+template <typename T>
+inline T remainder_integral(T a, T b) {
+  static_assert(
+      std::is_integral_v<T>, "remainder_integral expects integral scalar T");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return T(0);
+  }
+  if (a == std::numeric_limits<T>::min() && b == T(-1)) {
+    return T(0);
+  }
+  T r = a % b;
+  if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
+    r += b;
+  }
+  return r;
+}
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> remainder_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  // Some Vectorized<T> (e.g. Vectorized8<int8_t>) deletes operator[];
+  // use store/load like
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = remainder_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> remainder_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = remainder_integral(a[i], b[i]);
+  }
+  return out;
+}
+#endif
 
 template <typename scalar_t>
 inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
@@ -859,14 +1034,16 @@ template <typename T, int NI, int NV>
 void atomic_add_vec(
     T* addr,
     at::vec::VectorizedN<int64_t, NI> index,
-    at::vec::VectorizedN<T, NV> offset) {
+    at::vec::VectorizedN<T, NV> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
-  for (int i = 0; i < len; i++) {
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }

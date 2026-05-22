@@ -11,12 +11,13 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+
+import functools
 import inspect
 import os
-
-# import sys
 import pkgutil
 import re
+import sys
 from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
@@ -44,6 +45,10 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+# Add the source directory to sys.path so that redirects.py can be imported
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from redirects import redirects  # noqa: F401
+
 
 # -- General configuration ------------------------------------------------
 
@@ -66,6 +71,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_reredirects",
 ]
 
 myst_enable_extensions = [
@@ -73,6 +79,12 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+# Don't execute notebooks during the docs build. Notebook correctness is
+# verified by the separate docs_test CI job; re-executing them here just
+# adds ~3 minutes to the build for no benefit.
+nb_execution_mode = "off"
+suppress_warnings = ["myst-nb.lexer"]
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
@@ -131,9 +143,8 @@ switcher_version = "main" if not RELEASE else version
 
 html_static_path = ["_static"]
 html_theme_options = {
-    "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
-    "canonical_url": "https://pytorch.org/docs/stable/",
+    "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
         "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
@@ -143,10 +154,11 @@ html_theme_options = {
     "external_links": [
         {
             "name": "Tutorials",
-            "url": "https://pytorch.org/tutorials/",
+            "url": "https://docs.pytorch.org/tutorials/",
         },
     ],
     "show_version_warning_banner": True,
+    "llm_generate_full": "false",
     "icon_links": [
         {
             "name": "X",
@@ -170,12 +182,16 @@ html_theme_options = {
         },
     ],
     "navbar_align": "left",
-    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
     "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
+    # RunLLM Widget Configuration (uncomment and set assistant_id to enable)
+    # Each repository should have its own unique assistant_id from RunLLM
+    "runllm_assistant_id": "834",
+    "runllm_name": "PyTorch Assistant",
     "pytorch_project": "docs",
 }
 
@@ -206,71 +222,61 @@ templates_path = [
     os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
 ]
 # TODO: document these and remove them from here.
+# Fixes the duplicated
+autosummary_filename_map = {
+    "torch.nn.utils.prune.identity": "torch.nn.utils.prune.identity_function",
+    "torch.nn.utils.prune.Identity": "torch.nn.utils.prune.Identity_class",
+    "torch.optim.adamw.adamw": "torch.optim.adamw.adamw_function",
+    "torch.optim.adamw.AdamW": "torch.optim.adamw.AdamW_class",
+    "torch.optim.asgd.asgd": "torch.optim.asgd.asgd_function",
+    "torch.optim.asgd.ASGD": "torch.optim.asgd.ASGD_class",
+    "torch.optim.nadam.nadam": "torch.optim.nadam.nadam_function",
+    "torch.optim.nadam.NAdam": "torch.optim.nadam.NAdam_class",
+    "torch.optim.radam.radam": "torch.optim.radam.radam_function",
+    "torch.optim.radam.RAdam": "torch.optim.radam.RAdam_class",
+    "torch.optim.rmsprop.rmsprop": "torch.optim.rmsprop.rmsprop_function",
+    "torch.optim.rmsprop.RMSprop": "torch.optim.rmsprop.RMSprop_class",
+    "torch.optim.rprop.rprop": "torch.optim.rprop.rprop_function",
+    "torch.optim.rprop.Rprop": "torch.optim.rprop.Rprop_class",
+    "torch.optim.sgd.sgd": "torch.optim.sgd.sgd_function",
+    "torch.optim.sgd.SGD": "torch.optim.sgd.SGD_class",
+    "torch.optim.adadelta.adadelta": "torch.optim.adadelta.adadelta_function",
+    "torch.optim.adadelta.Adadelta": "torch.optim.adadelta.Adadelta_class",
+    "torch.optim.adagrad.adagrad": "torch.optim.adagrad.adagrad_function",
+    "torch.optim.adagrad.Adagrad": "torch.optim.adagrad.Adagrad_class",
+    "torch.optim.adam.adam": "torch.optim.adam.adam_function",
+    "torch.optim.adam.Adam": "torch.optim.adam.Adam_class",
+    "torch.optim.adamax.adamax": "torch.optim.adamax.adamax_function",
+    "torch.optim.adamax.Adamax": "torch.optim.adamax.Adamax_class",
+    "torch.mtia.stream": "torch.mtia.stream_function",
+    "torch.mtia.Stream": "torch.mtia.Stream_class",
+    "torch.cpu.stream": "torch.cpu.stream_function",
+    "torch.cpu.Stream": "torch.cpu.Stream_class",
+    "torch.cuda.stream": "torch.cuda.stream_function",
+    "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.xpu.stream": "torch.xpu.stream_function",
+    "torch.xpu.Stream": "torch.xpu.Stream_class",
+}
 
 coverage_ignore_functions = [
-    # torch
-    "typename",
-    # torch.cuda
-    "check_error",
-    "cudart",
-    "is_bf16_supported",
-    # torch.cuda._sanitizer
-    "zip_arguments",
-    "zip_by_key",
-    # torch.distributed.autograd
-    "is_available",
-    # torch.distributed.checkpoint.state_dict
-    "gc_context",
-    "state_dict",
-    # torch.distributed.elastic.events
-    "construct_and_record_rdzv_event",
-    "record_rdzv_event",
-    # torch.distributed.elastic.metrics
-    "initialize_metrics",
-    # torch.distributed.elastic.rendezvous.registry
-    "get_rendezvous_handler",
-    # torch.distributed.launch
-    "launch",
-    "main",
-    "parse_args",
-    # torch.distributed.rpc
-    "is_available",
-    # torch.distributed.run
-    "config_from_args",
-    "determine_local_world_size",
-    "get_args_parser",
-    "get_rdzv_endpoint",
-    "get_use_env",
-    "main",
-    "parse_args",
-    "parse_min_max_nnodes",
-    "run",
-    "run_script_path",
-    # torch.distributions.constraints
-    "is_dependent",
+    "main",  # utility script
+    "run",  # utility script
+    # TorchVitals (C++ bindings still in torch._C, Python wrappers removed)
+    "read_vitals",
+    "set_vital",
+    "vitals_enabled",
     # torch.hub
     "import_module",
-    # torch.jit
-    "export_opnames",
     # torch.jit.unsupported_tensor_ops
     "execWrapper",
-    # torch.onnx
-    "unregister_custom_op_symbolic",
-    # torch.ao.quantization
-    "default_eval_fn",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
-    # torch.distributed.algorithms.ddp_comm_hooks
-    "register_ddp_comm_hook",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
-    "set_module",
     "burn_in_info",
     "get_info_and_burn_skeleton",
-    "get_inline_skeleton",
-    "get_model_info",
     "get_storage_info",
     "hierarchical_pickle",
     # torch.amp.autocast_mode
@@ -337,36 +343,16 @@ coverage_ignore_functions = [
     "module_contains_param",
     "module_to_fqn",
     "swap_module",
-    # torch.ao.quantization.backend_config.executorch
-    "get_executorch_backend_config",
-    # torch.ao.quantization.backend_config.fbgemm
-    "get_fbgemm_backend_config",
     # torch.ao.quantization.backend_config.native
     "get_native_backend_config",
     "get_native_backend_config_dict",
     "get_test_only_legacy_native_backend_config",
     "get_test_only_legacy_native_backend_config_dict",
-    # torch.ao.quantization.backend_config.onednn
-    "get_onednn_backend_config",
     # torch.ao.quantization.backend_config.qnnpack
     "get_qnnpack_backend_config",
     # torch.ao.quantization.backend_config.tensorrt
     "get_tensorrt_backend_config",
     "get_tensorrt_backend_config_dict",
-    # torch.ao.quantization.backend_config.utils
-    "entry_to_pretty_str",
-    "get_fused_module_classes",
-    "get_fuser_method_mapping",
-    "get_fusion_pattern_to_extra_inputs_getter",
-    "get_fusion_pattern_to_root_node_getter",
-    "get_module_to_qat_module",
-    "get_pattern_to_dtype_configs",
-    "get_pattern_to_input_type_to_index",
-    "get_qat_module_classes",
-    "get_root_module_to_quantized_reference_module",
-    "pattern_to_human_readable",
-    "remove_boolean_dispatch_from_name",
-    # torch.ao.quantization.backend_config.x86
     "get_x86_backend_config",
     # torch.ao.quantization.fuse_modules
     "fuse_known_modules",
@@ -397,25 +383,6 @@ coverage_ignore_functions = [
     "insert_observers_for_model",
     "prepare",
     "propagate_dtypes_for_known_nodes",
-    # torch.ao.quantization.fx.utils
-    "all_node_args_except_first",
-    "all_node_args_have_no_tensors",
-    "assert_and_get_unique_device",
-    "collect_producer_nodes",
-    "create_getattr_from_value",
-    "create_node_from_old_node_preserve_meta",
-    "get_custom_module_class_keys",
-    "get_linear_prepack_op_for_dtype",
-    "get_new_attr_name_with_prefix",
-    "get_non_observable_arg_indexes_and_types",
-    "get_qconv_prepack_op",
-    "get_skipped_module_name_and_classes",
-    "graph_module_from_producer_nodes",
-    "maybe_get_next_module",
-    "node_arg_is_bias",
-    "node_arg_is_weight",
-    "return_arg_list",
-    # torch.ao.quantization.pt2e.graph_utils
     "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
@@ -428,32 +395,10 @@ coverage_ignore_functions = [
     "fold_bn_weights_into_conv_node",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
-    "get_default_qat_qconfig",
     "get_default_qat_qconfig_dict",
-    "get_default_qconfig",
     "get_default_qconfig_dict",
-    "qconfig_equals",
-    # torch.ao.quantization.quantization_mappings
-    "get_default_compare_output_module_list",
-    "get_default_dynamic_quant_module_mappings",
-    "get_default_dynamic_sparse_quant_module_mappings",
-    "get_default_float_to_quantized_operator_mappings",
-    "get_default_qat_module_mappings",
-    "get_default_qconfig_propagation_list",
-    "get_default_static_quant_module_mappings",
-    "get_default_static_quant_reference_module_mappings",
-    "get_default_static_sparse_quant_module_mappings",
-    "get_dynamic_quant_module_class",
-    "get_embedding_qat_module_mappings",
-    "get_embedding_static_quant_module_mappings",
-    "get_quantized_operator",
-    "get_static_quant_module_class",
-    "no_observer_set",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_fx
-    "attach_preserved_attrs_to_model",
-    "convert_to_reference_fx",
     # torch.ao.quantization.quantize_jit
     "convert_dynamic_jit",
     "convert_jit",
@@ -477,48 +422,24 @@ coverage_ignore_functions = [
     "get_weight_qspec",
     "propagate_annotation",
     "register_annotator",
-    # torch.ao.quantization.utils
     "activation_dtype",
-    "activation_is_dynamically_quantized",
-    "activation_is_int32_quantized",
-    "activation_is_int8_quantized",
-    "activation_is_statically_quantized",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
     "check_node",
-    "determine_qparams",
-    "get_combined_dict",
-    "get_fqn_to_example_inputs",
-    "get_qconfig_dtypes",
-    "get_qparam_dict",
-    "get_quant_type",
-    "get_swapped_custom_module_class",
-    "getattr_from_fqn",
     "has_no_children_ignoring_parametrizations",
     "is_per_channel",
     "is_per_tensor",
     "op_is_int8_dynamically_quantized",
     "to_underlying_dtype",
-    "validate_qmin_qmax",
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
-    # torch.backends.xeon.run_cpu
-    "create_args",
     # torch.cuda.amp.autocast_mode
     "custom_bwd",
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.cuda.graphs
-    "graph_pool_handle",
-    "is_current_stream_capturing",
-    "make_graphed_callables",
-    # torch.mtia.memory
-    "reset_peak_memory_stats",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -527,90 +448,13 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
-    # torch.cuda.nvtx
-    "range",
-    "range_end",
-    "range_start",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
-    # torch.cuda.random
-    "get_rng_state",
-    "get_rng_state_all",
-    "initial_seed",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "set_rng_state",
-    "set_rng_state_all",
-    # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
-    "hook_with_zero_step",
-    "hook_with_zero_step_interleaved",
-    # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
-    "post_localSGD_hook",
-    # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
-    "quantization_perchannel_hook",
-    "quantization_pertensor_hook",
-    # torch.distributed.algorithms.model_averaging.utils
-    "average_parameters",
-    "average_parameters_or_parameter_groups",
-    "get_params_to_average",
     # torch.distributed.checkpoint.default_planner
-    "create_default_global_load_plan",
-    "create_default_global_save_plan",
     "create_default_local_load_plan",
-    "create_default_local_save_plan",
-    # torch.distributed.checkpoint.optimizer
-    "load_sharded_optimizer_state_dict",
-    # torch.distributed.checkpoint.planner_helpers
-    "create_read_items_for_chunk_list",
-    # torch.distributed.checkpoint.state_dict_loader
-    "load_state_dict",
-    # torch.distributed.checkpoint.state_dict_saver
-    "save_state_dict",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
-    # torch.distributed.collective_utils
-    "all_gather",
-    "all_gather_object_enforce_type",
-    "broadcast",
-    # torch.distributed.distributed_c10d
-    "all_gather",
-    "all_gather_coalesced",
-    "all_gather_into_tensor",
-    "all_gather_object",
-    "all_reduce",
-    "all_reduce_coalesced",
-    "all_to_all",
-    "all_to_all_single",
-    "barrier",
-    "batch_isend_irecv",
-    "broadcast",
-    "broadcast_object_list",
-    "destroy_process_group",
-    "gather",
-    "gather_object",
-    "get_backend",
-    "get_backend_config",
-    "get_global_rank",
-    "get_group_rank",
-    "get_process_group_ranks",
-    "get_rank",
-    "get_world_size",
-    "init_process_group",
-    "irecv",
-    "is_backend_available",
-    "is_gloo_available",
-    "is_initialized",
-    "is_mpi_available",
-    "is_nccl_available",
-    "is_torchelastic_launched",
-    "is_ucc_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -661,38 +505,19 @@ coverage_ignore_functions = [
     "configure",
     "expires",
     # torch.distributed.elastic.utils.api
-    "get_env_variable_or_raise",
     "get_socket_with_port",
     # torch.distributed.elastic.utils.distributed
     "create_c10d_store",
-    "get_free_port",
     "get_socket_with_port",
-    # torch.distributed.elastic.utils.log_level
-    "get_log_level",
-    # torch.distributed.elastic.utils.logging
-    "get_logger",
     # torch.distributed.elastic.utils.store
     "barrier",
     "get_all",
     "synchronize",
     "store_timeout",
     # torch.distributed.fsdp.wrap
-    "always_wrap_policy",
-    "enable_wrap",
-    "lambda_auto_wrap_policy",
-    "size_based_auto_wrap_policy",
-    "transformer_auto_wrap_policy",
-    "wrap",
     # torch.distributed.nn.functional
-    "all_gather",
-    "all_reduce",
     "all_to_all",
     "all_to_all_single",
-    "broadcast",
-    "gather",
-    "reduce",
-    "reduce_scatter",
-    "scatter",
     # torch.distributed.nn.jit.instantiator
     "get_arg_return_types_from_interface",
     "instantiate_non_scriptable_remote_module_template",
@@ -701,12 +526,9 @@ coverage_ignore_functions = [
     "get_remote_module_template",
     # torch.distributed.optim.utils
     "as_functional_optim",
-    "register_functional_optim",
     # torch.distributed.rendezvous
-    "register_rendezvous_handler",
     "rendezvous",
     # torch.distributed.rpc.api
-    "get_worker_info",
     "method_factory",
     "new_method",
     "remote",
@@ -714,431 +536,31 @@ coverage_ignore_functions = [
     "rpc_sync",
     "shutdown",
     # torch.distributed.rpc.backend_registry
-    "backend_registered",
     "construct_rpc_backend_options",
     "init_backend",
-    "register_backend",
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.api
-    "parallelize_module",
-    # torch.distributed.tensor.parallel.input_reshard
-    "input_reshard",
-    # torch.distributed.tensor.parallel.loss
-    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
-    # torch.distributions.utils
-    "broadcast_all",
-    "clamp_probs",
-    "logits_to_probs",
-    "probs_to_logits",
-    "tril_matrix_to_vec",
-    "vec_to_tril_matrix",
-    # torch.fx.annotate
-    "annotate",
-    # torch.fx.experimental.accelerator_partitioner
-    "check_dependency",
-    "combine_two_partitions",
-    "get_bfs_level_partition",
-    "get_device_partition_stats",
-    "get_device_to_partitions_mapping",
-    "get_logical_id_to_device",
-    "get_node_to_partition_mapping",
-    "reorganize_partitions",
-    "reset_partition_device",
-    "set_parents_and_children",
-    # torch.fx.experimental.const_fold
-    "get_unique_attr_name_in_module",
-    "split_const_subgraphs",
-    # torch.fx.experimental.debug
-    "set_trace",
-    # torch.fx.experimental.graph_gradual_typechecker
-    "adaptiveavgpool2d_check",
-    "adaptiveavgpool2d_inference_rule",
-    "add_inference_rule",
-    "all_eq",
-    "bn2d_inference_rule",
-    "broadcast_types",
-    "calculate_out_dimension",
-    "conv2d_inference_rule",
-    "conv_refinement_rule",
-    "conv_rule",
-    "element_wise_eq",
-    "expand_to_tensor_dim",
-    "first_two_eq",
-    "flatten_check",
-    "flatten_inference_rule",
-    "flatten_refinement_rule",
-    "get_attr_inference_rule",
-    "get_greatest_upper_bound",
-    "get_parameter",
-    "linear_check",
-    "linear_inference_rule",
-    "linear_refinement_rule",
-    "maxpool2d_check",
-    "maxpool2d_inference_rule",
-    "register_algebraic_expressions_inference_rule",
-    "register_inference_rule",
-    "register_refinement_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "transpose_inference_rule",
-    # torch.fx.experimental.merge_matmul
-    "are_nodes_independent",
-    "may_depend_on",
-    "merge_matmul",
-    "split_result_tensors",
-    # torch.fx.experimental.meta_tracer
-    "embedding_override",
-    "functional_relu_override",
-    "gen_constructor_wrapper",
-    "nn_layernorm_override",
-    "proxys_to_metas",
-    "symbolic_trace",
-    "torch_abs_override",
-    "torch_nn_relu_override",
-    "torch_relu_override",
-    "torch_where_override",
-    # torch.fx.experimental.migrate_gradual_types.constraint
-    "is_algebraic_expression",
-    "is_bool_expr",
-    "is_dim",
-    # torch.fx.experimental.migrate_gradual_types.constraint_generator
-    "adaptive_inference_rule",
-    "add_layer_norm_constraints",
-    "add_linear_constraints",
-    "arange_inference_rule",
-    "assert_inference_rule",
-    "batchnorm_inference_rule",
-    "bmm_inference_rule",
-    "broadcasting_inference_rule",
-    "conv2d_inference_rule",
-    "cumsum_inference_rule",
-    "embedding_inference_rule",
-    "embedding_inference_rule_functional",
-    "eq_inference_rule",
-    "equality_inference_rule",
-    "expand_inference_rule",
-    "flatten_inference_rule",
-    "full_inference_rule",
-    "gen_broadcasting_constraints",
-    "gen_embedding_rules",
-    "gen_layer_norm_constraints",
-    "generate_flatten_constraints",
-    "get_attr_inference_rule",
-    "getitem_inference_rule",
-    "gt_inference_rule",
-    "index_select_inference_rule",
-    "layer_norm_functional",
-    "layer_norm_inference_rule",
-    "linear_constraints",
-    "linear_inference_rule",
-    "lt_inference_rule",
-    "masked_fill_inference_rule",
-    "maxpool_inference_rule",
-    "neq_inference_rule",
-    "range_check",
-    "register_inference_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "size_inference_rule",
-    "tensor_inference_rule",
-    "torch_dim_inference_rule",
-    "torch_linear_inference_rule",
-    "transpose_inference_rule",
-    "type_inference_rule",
-    "view_inference_rule",
-    # torch.fx.experimental.migrate_gradual_types.constraint_transformation
-    "apply_padding",
-    "broadcast_dim",
-    "calc_last_two_dims",
-    "create_equality_constraints_for_broadcasting",
-    "gen_all_reshape_possibilities",
-    "gen_broadcasting_constraints",
-    "gen_consistency_constraints",
-    "gen_greatest_upper_bound",
-    "gen_lists_of_dims",
-    "generate_all_broadcasting_possibilities_no_padding",
-    "generate_all_int_dyn_dim_possibilities",
-    "generate_binconstraint_d",
-    "generate_binconstraint_t",
-    "generate_broadcasting",
-    "generate_calc_conv",
-    "generate_calc_maxpool",
-    "generate_calc_product",
-    "generate_conj",
-    "generate_d_gub",
-    "generate_disj",
-    "generate_gub",
-    "generate_reshape",
-    "is_dim_div_by_target",
-    "is_target_div_by_dim",
-    "no_broadcast_dim_with_index",
-    "register_transformation_rule",
-    "transform_constraint",
-    "transform_get_item",
-    "transform_get_item_tensor",
-    "transform_index_select",
-    "transform_transpose",
-    "valid_index",
-    "valid_index_tensor",
-    # torch.fx.experimental.migrate_gradual_types.transform_to_z3
-    "evaluate_conditional_with_constraints",
-    # torch.fx.experimental.migrate_gradual_types.util
-    "gen_bvar",
-    "gen_dvar",
-    "gen_nat_constraints",
-    "gen_tensor_dims",
-    "gen_tvar",
-    # torch.fx.experimental.optimization
-    "extract_subgraph",
-    "fuse",
-    "gen_mkl_autotuner",
-    "matches_module_pattern",
-    "modules_to_mkldnn",
-    "optimize_for_inference",
-    "remove_dropout",
-    "replace_node_module",
-    "reset_modules",
-    "use_mkl_length",
-    # torch.fx.experimental.partitioner_utils
-    "get_comm_latency_between",
-    "get_extra_size_of",
-    "get_latency_of_one_partition",
-    "get_latency_of_partitioned_graph",
-    "get_partition_to_latency_mapping",
-    # torch.fx.experimental.proxy_tensor
-    "decompose",
-    "disable_autocast_cache",
-    "disable_proxy_modes_tracing",
-    "dispatch_trace",
-    "extract_val",
-    "fake_signature",
-    "fetch_sym_proxy",
-    "fetch_object_proxy",
-    "get_innermost_proxy_mode",
-    "get_isolated_graphmodule",
-    "get_proxy_slot",
-    "get_torch_dispatch_modes",
-    "has_proxy_slot",
-    "is_sym_node",
-    "maybe_handle_decomp",
-    "proxy_call",
-    "set_meta",
-    "set_original_aten_op",
-    "set_proxy_slot",
-    "snapshot_fake",
-    "thunkify",
-    "track_tensor",
-    "track_tensor_tree",
-    "wrap_key",
-    "wrapper_and_args_for_make_fx",
-    # torch.fx.experimental.recording
-    "record_shapeenv_event",
-    "replay_shape_env_events",
-    "shape_env_check_state_equal",
-    # torch.fx.experimental.sym_node
-    "ceil_impl",
-    "floor_ceil_helper",
-    "floor_impl",
-    "method_to_operator",
-    "sympy_is_channels_last_contiguous_2d",
-    "sympy_is_channels_last_contiguous_3d",
-    "sympy_is_channels_last_strides_2d",
-    "sympy_is_channels_last_strides_3d",
-    "sympy_is_channels_last_strides_generic",
-    "sympy_is_contiguous",
-    "sympy_is_contiguous_generic",
-    "to_node",
-    "wrap_node",
-    "sym_sqrt",
-    # torch.fx.experimental.symbolic_shapes
-    "bind_symbols",
-    "cast_symbool_to_symint_guardless",
-    "create_contiguous",
-    "error",
-    "eval_guards",
-    "eval_is_non_overlapping_and_dense",
-    "expect_true",
-    "find_symbol_binding_fx_nodes",
-    "free_symbols",
-    "free_unbacked_symbols",
-    "fx_placeholder_targets",
-    "fx_placeholder_vals",
-    "guard_bool",
-    "guard_float",
-    "guard_int",
-    "guard_scalar",
-    "has_hint",
-    "has_symbolic_sizes_strides",
-    "is_channels_last_contiguous_2d",
-    "is_channels_last_contiguous_3d",
-    "is_channels_last_strides_2d",
-    "is_channels_last_strides_3d",
-    "is_contiguous",
-    "is_non_overlapping_and_dense_indicator",
-    "is_nested_int",
-    "is_symbol_binding_fx_node",
-    "is_symbolic",
-    # torch.fx.experimental.unification.core
-    "reify",
-    # torch.fx.experimental.unification.match
-    "edge",
-    "match",
-    "ordering",
-    "supercedes",
-    # torch.fx.experimental.unification.more
-    "reify_object",
-    "unifiable",
-    "unify_object",
-    # torch.fx.experimental.unification.multipledispatch.conflict
-    "ambiguities",
-    "ambiguous",
-    "consistent",
-    "edge",
-    "ordering",
-    "super_signature",
-    "supercedes",
-    # torch.fx.experimental.unification.multipledispatch.core
-    "dispatch",
-    "ismethod",
-    # torch.fx.experimental.unification.multipledispatch.dispatcher
-    "ambiguity_warn",
-    "halt_ordering",
-    "restart_ordering",
-    "source",
-    "str_signature",
-    "variadic_signature_matches",
-    "variadic_signature_matches_iter",
-    "warning_text",
-    # torch.fx.experimental.unification.multipledispatch.utils
-    "expand_tuples",
-    "groupby",
-    "raises",
-    "reverse_dict",
-    # torch.fx.experimental.unification.multipledispatch.variadic
-    "isvariadic",
-    # torch.fx.experimental.unification.unification_tools
-    "assoc",
-    "assoc_in",
-    "dissoc",
-    "first",
-    "get_in",
-    "getter",
-    "groupby",
-    "itemfilter",
-    "itemmap",
-    "keyfilter",
-    "keymap",
-    "merge",
-    "merge_with",
-    "update_in",
-    "valfilter",
-    "valmap",
-    # torch.fx.experimental.unification.utils
-    "freeze",
-    "hashable",
-    "raises",
-    "reverse_dict",
-    "transitive_get",
-    "xfail",
-    # torch.fx.experimental.unification.variable
-    "var",
-    "vars",
-    # torch.fx.experimental.unify_refinements
-    "check_for_type_equality",
-    "convert_eq",
-    "infer_symbolic_types",
-    "infer_symbolic_types_single_pass",
-    "substitute_all_types",
-    "substitute_solution_one_type",
-    "unify_eq",
-    # torch.fx.experimental.validator
-    "bisect",
-    "translation_validation_enabled",
-    "translation_validation_timeout",
-    "z3op",
-    "z3str",
-    # torch.fx.graph_module
-    "reduce_graph_module",
-    "reduce_package_graph_module",
-    # torch.fx.node
-    "has_side_effect",
-    "map_aggregate",
-    "map_arg",
-    # torch.fx.operator_schemas
-    "check_for_mutable_operation",
-    "create_type_hint",
-    "get_signature_for_torch_op",
-    "normalize_function",
-    "normalize_module",
-    "type_matches",
-    # torch.fx.passes.annotate_getitem_nodes
-    "annotate_getitem_nodes",
-    # torch.fx.passes.backends.cudagraphs
-    "partition_cudagraphs",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
-    "get_size_of_all_nodes",
-    "get_size_of_node",
     "get_tensor_meta",
-    "replace_target_nodes_with",
-    # torch.fx.passes.infra.pass_manager
-    "pass_result_wrapper",
-    "this_before_that_pass_constraint",
-    # torch.fx.passes.operator_support
-    "any_chain",
-    "chain",
-    "create_op_support",
-    # torch.fx.passes.param_fetch
-    "default_matching",
-    "extract_attrs_for_lowering",
-    "lift_lowering_attrs_to_nodes",
-    # torch.fx.passes.pass_manager
-    "inplace_wrapper",
-    "log_hook",
-    "loop_pass",
-    "these_before_those_pass_constraint",
-    "this_before_that_pass_constraint",
-    # torch.fx.passes.reinplace
-    "reinplace",
     # torch.fx.passes.split_module
     "split_module",
+    "split_module_simple",
     # torch.fx.passes.split_utils
     "getattr_recursive",
-    "setattr_recursive",
-    "split_by_tags",
-    # torch.fx.passes.splitter_base
-    "generate_inputs_for_submodules",
     # torch.fx.passes.tools_common
     "get_acc_ops_name",
     "get_node_target",
-    "is_node_output_tensor",
     "legalize_graph",
-    # torch.fx.passes.utils.common
-    "compare_graphs",
-    "lift_subgraph_as_module",
     # torch.fx.passes.utils.fuser_utils
-    "erase_nodes",
-    "fuse_as_graphmodule",
     "fuse_by_partitions",
     "insert_subgm",
-    "topo_sort",
-    "validate_partition",
-    # torch.fx.passes.utils.source_matcher_utils
-    "check_subgraphs_connected",
-    "get_source_partitions",
     # torch.fx.proxy
     "assert_fn",
-    # torch.fx.subgraph_rewriter
-    "replace_pattern",
-    "replace_pattern_with_filters",
-    # torch.fx.tensor_type
-    "is_consistent",
-    "is_more_precise",
     # torch.fx.traceback
     "format_stack",
     "get_current_meta",
@@ -1146,8 +568,15 @@ coverage_ignore_functions = [
     "preserve_node_meta",
     "reset_grad_fn_seq_nr",
     "set_current_meta",
+    "set_current_replay_node",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
+    "get_current_replay_node",
+    # torch.fx.experimental.proxy_tensor
+    "wrap_key",
+    "wrapper_and_args_for_make_fx",
+    # torch.fx.experimental.sym_node
+    "wrap_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
@@ -1187,13 +616,6 @@ coverage_ignore_functions = [
     "quantize_linear_modules",
     "quantize_rnn_cell_modules",
     "quantize_rnn_modules",
-    # torch.library
-    "define",
-    "get_ctx",
-    "impl",
-    "impl_abstract",
-    # torch.masked.maskedtensor.core
-    "is_masked_tensor",
     # torch.masked.maskedtensor.creation
     "as_masked_tensor",
     "masked_tensor",
@@ -1254,8 +676,6 @@ coverage_ignore_functions = [
     "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
     "apply_permutation",  # deprecated
-    # torch.nn.modules.utils
-    "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
     "broadcast",
     "broadcast_coalesced",
@@ -1474,344 +894,16 @@ coverage_ignore_functions = [
     # torch.onnx.symbolic_opset7
     "max",
     "min",
-    # torch.onnx.symbolic_opset8
-    "addmm",
-    "bmm",
-    "empty",
-    "empty_like",
-    "flatten",
-    "full",
-    "full_like",
-    "gt",
-    "lt",
-    "matmul",
-    "mm",
-    "ones",
-    "ones_like",
-    "prelu",
-    "repeat",
-    "zeros",
-    "zeros_like",
-    # torch.onnx.symbolic_opset9
-    "abs",
-    "acos",
-    "adaptive_avg_pool1d",
-    "adaptive_avg_pool2d",
-    "adaptive_avg_pool3d",
-    "adaptive_max_pool1d",
-    "adaptive_max_pool2d",
-    "adaptive_max_pool3d",
-    "add",
-    "addcmul",
-    "addmm",
-    "alias",
-    "amax",
-    "amin",
-    "aminmax",
-    "arange",
-    "argmax",
-    "argmin",
-    "as_strided",
-    "as_tensor",
-    "asin",
-    "atan",
-    "atan2",
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
-    "baddbmm",
-    "batch_norm",
-    "bernoulli",
-    "bitwise_not",
-    "bitwise_or",
-    "bmm",
-    "broadcast_tensors",
-    "broadcast_to",
-    "bucketize",
-    "cat",
-    "cdist",
-    "ceil",
-    "clamp",
-    "clamp_max",
-    "clamp_min",
-    "clone",
-    "constant_pad_nd",
-    "contiguous",
-    "conv1d",
-    "conv2d",
-    "conv3d",
-    "conv_tbc",
-    "conv_transpose1d",
-    "conv_transpose2d",
-    "conv_transpose3d",
-    "convert_element_type",
-    "convolution",
-    "cos",
-    "cosine_similarity",
-    "cross",
-    "cumsum",
-    "detach",
     "dim",
-    "div",
-    "dot",
-    "dropout",
-    "elu",
-    "embedding",
-    "embedding_bag",
-    "empty",
-    "empty_like",
-    "eq",
-    "erf",
-    "exp",
-    "expand",
-    "expand_as",
-    "eye",
-    "fill",
-    "flatten",
-    "floor",
-    "floor_divide",
-    "floordiv",
-    "frobenius_norm",
-    "full",
-    "full_like",
-    "gather",
-    "ge",
-    "gelu",
-    "get_pool_ceil_padding",
-    "glu",
-    "group_norm",
-    "gru",
-    "gt",
-    "hann_window",
-    "hardshrink",
-    "hardsigmoid",
-    "hardswish",
-    "hardtanh",
-    "index",
-    "index_add",
-    "index_copy",
-    "index_fill",
-    "index_put",
-    "index_select",
-    "instance_norm",
-    "is_floating_point",
-    "is_pinned",
-    "isnan",
-    "item",
-    "kl_div",
-    "layer_norm",
-    "le",
-    "leaky_relu",
-    "lerp",
-    "lift",
-    "linalg_cross",
-    "linalg_matrix_norm",
-    "linalg_norm",
-    "linalg_vector_norm",
-    "linear",
-    "linspace",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "log_sigmoid",
-    "log_softmax",
-    "logical_and",
-    "logical_not",
-    "logical_or",
-    "logical_xor",
-    "logit",
-    "logsumexp",
-    "lstm",
-    "lstm_cell",
-    "lt",
-    "masked_fill",
-    "masked_fill_",
-    "matmul",
-    "max",
-    "max_pool1d",
-    "max_pool1d_with_indices",
-    "max_pool2d",
-    "max_pool2d_with_indices",
-    "max_pool3d",
-    "max_pool3d_with_indices",
-    "maximum",
-    "meshgrid",
-    "min",
-    "minimum",
-    "mish",
-    "mm",
-    "movedim",
-    "mse_loss",
-    "mul",
-    "multinomial",
-    "mv",
-    "narrow",
-    "native_layer_norm",
-    "ne",
-    "neg",
-    "new_empty",
-    "new_full",
-    "new_ones",
-    "new_zeros",
-    "nonzero",
-    "nonzero_numpy",
-    "noop_complex_operators",
-    "norm",
-    "numel",
-    "numpy_T",
-    "one_hot",
-    "ones",
-    "ones_like",
-    "onnx_placeholder",
-    "overload_by_arg_count",
-    "pad",
-    "pairwise_distance",
-    "permute",
-    "pixel_shuffle",
-    "pixel_unshuffle",
-    "pow",
-    "prelu",
-    "prim_constant",
-    "prim_constant_chunk",
-    "prim_constant_split",
-    "prim_data",
-    "prim_device",
-    "prim_dtype",
-    "prim_if",
-    "prim_layout",
-    "prim_list_construct",
-    "prim_list_unpack",
-    "prim_loop",
-    "prim_max",
-    "prim_min",
-    "prim_shape",
-    "prim_tolist",
-    "prim_tuple_construct",
-    "prim_type",
-    "prim_unchecked_cast",
-    "prim_uninitialized",
-    "rand",
-    "rand_like",
-    "randint",
-    "randint_like",
-    "randn",
-    "randn_like",
-    "reciprocal",
-    "reflection_pad",
-    "relu",
-    "relu6",
-    "remainder",
-    "repeat",
-    "repeat_interleave",
-    "replication_pad",
-    "reshape",
-    "reshape_as",
-    "rnn_relu",
-    "rnn_tanh",
-    "roll",
-    "rrelu",
-    "rsqrt",
-    "rsub",
-    "scalar_tensor",
-    "scatter",
-    "scatter_add",
-    "select",
-    "selu",
-    "sigmoid",
-    "sign",
-    "silu",
-    "sin",
-    "size",
-    "slice",
-    "softmax",
-    "softplus",
-    "softshrink",
-    "sort",
-    "split",
-    "split_with_sizes",
-    "sqrt",
-    "square",
-    "squeeze",
-    "stack",
-    "std",
-    "std_mean",
-    "sub",
-    "t",
-    "take",
-    "tan",
-    "tanh",
-    "tanhshrink",
-    "tensor",
-    "threshold",
-    "to",
-    "topk",
-    "transpose",
-    "true_divide",
-    "type_as",
-    "unbind",
-    "unfold",
-    "unsafe_chunk",
-    "unsafe_split",
-    "unsafe_split_with_sizes",
-    "unsqueeze",
-    "unsupported_complex_operators",
-    "unused",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
-    "var",
-    "var_mean",
-    "view",
-    "view_as",
-    "where",
-    "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_negation",
-    "zero",
-    "zeros",
-    "zeros_like",
-    # torch.onnx.utils
-    "disable_apex_o2_state_dict_hook",
     "export",
-    "export_to_pretty_string",
-    "exporter_context",
-    "is_in_onnx_export",
-    "model_signature",
-    "register_custom_op_symbolic",
-    "select_model_mode_for_export",
-    "setup_onnx_logging",
-    "unconvertible_ops",
-    "unpack_quantized_tensor",
-    "warn_on_static_input_change",
-    # torch.onnx.verification
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.optimizer
-    "register_optimizer_step_post_hook",
-    "register_optimizer_step_pre_hook",
     # torch.overrides
     "enable_reentrant_dispatch",
-    # torch.package.analyze.find_first_use_of_broken_modules
-    "find_first_use_of_broken_modules",
-    # torch.package.analyze.is_from_package
-    "is_from_package",
-    # torch.package.analyze.trace_dependencies
-    "trace_dependencies",
-    # torch.profiler.itt
-    "range",
-    # torch.profiler.profiler
-    "schedule",
-    "supported_activities",
-    "tensorboard_trace_handler",
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
-    "check_module_version_greater_or_equal",
-    "default_restore_location",
     "load",
     "location_tag",
     "mkdtemp",
@@ -1820,46 +912,26 @@ coverage_ignore_functions = [
     "storage_to_tensor_type",
     "validate_cuda_device",
     "validate_hpu_device",
-    # torch.signal.windows.windows
-    "bartlett",
-    "blackman",
-    "cosine",
-    "exponential",
-    "gaussian",
-    "general_cosine",
-    "general_hamming",
-    "hamming",
-    "hann",
-    "kaiser",
-    "nuttall",
-    # torch.sparse.semi_structured
-    "to_sparse_semi_structured",
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
-    "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
     # torch.utils.benchmark.utils.common
     "ordered_unique",
-    "select_unit",
     "set_torch_threads",
-    "trim_sigfig",
     "unit_to_english",
     # torch.utils.benchmark.utils.compare
     "optional_min",
     # torch.utils.benchmark.utils.compile
-    "bench_all",
     "bench_loop",
-    "benchmark_compile",
     # torch.utils.benchmark.utils.cpp_jit
     "compile_callgrind_template",
     "compile_timeit_template",
     "get_compat_bindings",
     # torch.utils.benchmark.utils.fuzzer
     "dtype_size",
-    "prod",
     # torch.utils.benchmark.utils.timer
     "timer",
     # torch.utils.benchmark.utils.valgrind_wrapper.timer_interface
@@ -1875,36 +947,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    "set_checkpoint_early_stop",
-    "set_device_states",
-    # torch.utils.collect_env
-    "check_release_file",
-    "get_cachingallocator_config",
-    "get_clang_version",
-    "get_cmake_version",
-    "get_conda_packages",
-    "get_cpu_info",
-    "get_cuda_module_loading_config",
-    "get_cudnn_version",
-    "get_env_info",
-    "get_gcc_version",
-    "get_gpu_info",
-    "get_libc_version",
-    "get_lsb_version",
-    "get_mac_version",
-    "get_nvidia_driver_version",
-    "get_nvidia_smi",
-    "get_os",
-    "get_pip_packages",
-    "get_platform",
-    "get_pretty_env_info",
-    "get_python_platform",
-    "get_running_cuda_version",
-    "get_windows_version",
-    "is_xnnpack_available",
-    "pretty_str",
-    # torch.utils.cpp_backtrace
-    "get_cpp_backtrace",
     # torch.utils.cpp_extension
     "check_compiler_is_gcc",
     "check_compiler_ok_for_platform",
@@ -1945,75 +987,20 @@ coverage_ignore_functions = [
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
-    "validate_input_col",
     "validate_pathname_binary_tuple",
     # torch.utils.data.datapipes.utils.decoder
     "audiohandler",
-    "basichandlers",
     "extension_extract_fn",
-    "handle_extension",
     "imagehandler",
     "mathandler",
     "videohandler",
-    # torch.utils.data.dataset
-    "random_split",
-    # torch.utils.data.graph
-    "traverse",
-    "traverse_dps",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
     "apply_shuffle_seed",
     "apply_shuffle_settings",
     "get_all_graph_pipes",
-    # torch.utils.flop_counter
-    "addmm_flop",
-    "baddbmm_flop",
-    "bmm_flop",
-    "conv_backward_flop",
-    "conv_flop",
-    "conv_flop_count",
-    "convert_num_with_suffix",
-    "get_shape",
-    "get_suffix_str",
-    "mm_flop",
-    "normalize_tuple",
-    "register_flop_formula",
-    "sdpa_backward_flop",
-    "sdpa_backward_flop_count",
-    "sdpa_flop",
-    "sdpa_flop_count",
-    "shape_wrapper",
-    "transpose_shape",
-    # torch.utils.hipify.hipify_python
-    "add_dim3",
-    "compute_stats",
-    "extract_arguments",
-    "file_add_header",
-    "file_specific_replacement",
-    "find_bracket_group",
-    "find_closure_group",
-    "find_parentheses_group",
-    "fix_static_global_kernels",
-    "get_hip_file_path",
-    "hip_header_magic",
-    "hipify",
-    "is_caffe2_gpu_file",
-    "is_cusparse_file",
-    "is_out_of_place",
-    "is_pytorch_file",
-    "is_special_file",
-    "match_extensions",
-    "matched_files_iter",
-    "openf",
-    "preprocess_file_and_save_result",
-    "preprocessor",
-    "processKernelLaunches",
-    "replace_extern_shared",
-    "replace_math_functions",
-    "str2bool",
     # torch.utils.hooks
-    "unserializable_hook",
     "warn_if_has_hooks",
     # torch.utils.jit.log_extract
     "extract_ir",
@@ -2025,7 +1012,6 @@ coverage_ignore_functions = [
     # torch.utils.mkldnn
     "to_mkldnn",
     # torch.utils.mobile_optimizer
-    "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",
@@ -2048,8 +1034,6 @@ coverage_ignore_functions = [
     "tensor_proto",
     "text",
     "video",
-    # torch.utils.throughput_benchmark
-    "format_time",
 ]
 
 coverage_ignore_classes = [
@@ -2176,8 +1160,6 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
-    # torch.cuda.memory
-    "MemPool",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2234,71 +1216,6 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    # torch.ao.nn.intrinsic.modules.fused
-    "ConvAdd2d",
-    "ConvAddReLU2d",
-    "LinearBn1d",
-    "LinearLeakyReLU",
-    "LinearTanh",
-    # torch.ao.nn.intrinsic.qat.modules.conv_fused
-    "ConvBnReLU1d",
-    "ConvBnReLU2d",
-    "ConvBnReLU3d",
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
-    # torch.ao.nn.intrinsic.qat.modules.linear_fused
-    "LinearBn1d",
-    # torch.ao.nn.intrinsic.qat.modules.linear_relu
-    "LinearReLU",
-    # torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu
-    "LinearReLU",
-    # torch.ao.nn.intrinsic.quantized.modules.bn_relu
-    "BNReLU2d",
-    "BNReLU3d",
-    # torch.ao.nn.intrinsic.quantized.modules.conv_add
-    "ConvAdd2d",
-    "ConvAddReLU2d",
-    # torch.ao.nn.intrinsic.quantized.modules.conv_relu
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
-    # torch.ao.nn.intrinsic.quantized.modules.linear_relu
-    "LinearLeakyReLU",
-    "LinearReLU",
-    "LinearTanh",
-    # torch.ao.nn.qat.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    # torch.ao.nn.qat.modules.embedding_ops
-    "Embedding",
-    "EmbeddingBag",
-    # torch.ao.nn.qat.modules.linear
-    "Linear",
-    # torch.ao.nn.quantizable.modules.activation
-    "MultiheadAttention",
-    # torch.ao.nn.quantizable.modules.rnn
-    "LSTM",
-    "LSTMCell",
-    # torch.ao.nn.quantized.dynamic.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    # torch.ao.nn.quantized.dynamic.modules.linear
-    "Linear",
-    # torch.ao.nn.quantized.dynamic.modules.rnn
-    "GRU",
-    "GRUCell",
-    "LSTM",
-    "LSTMCell",
-    "PackedParameter",
-    "RNNBase",
-    "RNNCell",
-    "RNNCellBase",
     # torch.ao.nn.quantized.modules.activation
     "ELU",
     "Hardswish",
@@ -2444,34 +1361,10 @@ coverage_ignore_classes = [
     "default_debug_observer",
     "default_placeholder_observer",
     "default_reuse_input_observer",
-    # torch.ao.quantization.pt2e.duplicate_dq_pass
-    "DuplicateDQPass",
-    # torch.ao.quantization.pt2e.port_metadata_pass
-    "PortNodeMetaForQDQ",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
-    # torch.ao.quantization.quantizer.composable_quantizer
-    "ComposableQuantizer",
-    # torch.ao.quantization.quantizer.embedding_quantizer
-    "EmbeddingQuantizer",
-    # torch.ao.quantization.quantizer.quantizer
-    "DerivedQuantizationSpec",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "SharedQuantizationSpec",
-    # torch.ao.quantization.quantizer.x86_inductor_quantizer
-    "X86InductorQuantizer",
-    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
-    "XPUInductorQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer
-    "XNNPACKQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "OperatorConfig",
-    "QuantizationConfig",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
@@ -2483,10 +1376,6 @@ coverage_ignore_classes = [
     # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
-    # torch.cuda.graphs
-    "CUDAGraph",
-    # torch.cuda.streams
-    "Event",
     # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
     "PostLocalSGDState",
     # torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook
@@ -2924,6 +1813,8 @@ coverage_ignore_classes = [
     "PackagingErrorReason",
     # torch.package.package_importer
     "PackageImporter",
+    # torch.autograd.profiler_util
+    "EventMetadata",
     # torch.profiler.profiler
     "ExecutionTraceObserver",
     "profile",
@@ -3195,6 +2086,36 @@ master_doc = "index"
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
+@functools.cache
+def _add_docstr_source_lines(module_file):
+    pattern = re.compile(r"^([A-Za-z_]\w*)\s*=\s*_add_docstr\(")
+    source_lines = {}
+    try:
+        with open(module_file, encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                match = pattern.match(line)
+                if match is not None:
+                    source_lines[match.group(1)] = lineno
+    except OSError:
+        return {}
+
+    return source_lines
+
+
+def _find_add_docstr_source(module, fullname):
+    if "." in fullname or not re.match(r"^[A-Za-z_]\w*$", fullname):
+        return None
+
+    module_file = getattr(module, "__file__", None)
+    if module_file is None or not module_file.endswith(".py"):
+        return None
+
+    lineno = _add_docstr_source_lines(module_file).get(fullname)
+    if lineno is None:
+        return None
+    return module_file, lineno
+
+
 def linkcode_resolve(domain, info):
     if domain != "py":
         return None
@@ -3203,15 +2124,21 @@ def linkcode_resolve(domain, info):
 
     try:
         module = __import__(info["module"], fromlist=[""])
+    except Exception:
+        return None
+
+    try:
         obj = module
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
-        # Get the source file and line number
         obj = inspect.unwrap(obj)
         fn = inspect.getsourcefile(obj)
         source, lineno = inspect.getsourcelines(obj)
     except Exception:
-        return None
+        resolved = _find_add_docstr_source(module, info["fullname"])
+        if resolved is None:
+            return None
+        fn, lineno = resolved
 
     # Determine the tag based on the torch_version
     if RELEASE:
@@ -3281,6 +2208,11 @@ autodoc_type_aliases = {
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True
 
+# Exclude inherited IntEnum methods that have RST formatting issues in their docstrings
+autodoc_default_options = {
+    "exclude-members": "from_bytes, to_bytes",
+}
+
 # -- katex javascript in header
 #
 #    def setup(app):
@@ -3306,11 +2238,9 @@ autodoc_docstring_signature = True
 
 html_css_files = [
     "css/jit.css",
-    "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
@@ -3342,12 +2272,7 @@ def coverage_post_process(app, exception):
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
-    # Here, we make sure that no module is missing from that list
     modules = app.env.domaindata["py"]["modules"]
-
-    # We go through all the torch submodules and make sure they are
-    # properly tested
-    missing = set()
 
     def is_not_internal(modname):
         split_name = modname.split(".")
@@ -3355,6 +2280,61 @@ def coverage_post_process(app, exception):
             if name[0] == "_":
                 return False
         return True
+
+    # Sphinx's built-in coverage only catches items that pass
+    # inspect.isfunction() or inspect.isclass(), missing decorated/wrapped
+    # callables (e.g. @cache, @lru_cache, @deprecated). Cross-reference
+    # __all__ exports directly against the documented objects dict.
+    objects = app.env.domaindata["py"]["objects"]
+    ignore_names = set(app.config.coverage_ignore_functions) | set(
+        app.config.coverage_ignore_classes
+    )
+    # pybind11 objects from torch._C that are in __all__ but cannot be
+    # documented via autosummary: the first three have .str members that
+    # create ambiguous cross-references with Python's builtin str;
+    # unify_type_list has a C++ arglist Sphinx cannot parse.
+    ignore_names |= {"ErrorReport", "FutureType", "StreamObjType", "unify_type_list"}
+    undocumented = []
+    for mod_name in modules:
+        if not is_not_internal(mod_name):
+            continue
+        try:
+            mod = __import__(mod_name, fromlist=["__all__"])
+        except ImportError:
+            continue
+        for name in getattr(mod, "__all__", []):
+            if name.startswith("_") or name in ignore_names:
+                continue
+            full_name = f"{mod_name}.{name}"
+            obj = getattr(mod, name, None)
+            if obj is None or not callable(obj):
+                continue
+            if getattr(obj, "__module__", mod_name) != mod_name:
+                continue
+            if full_name in objects:
+                continue
+            # Check if documented under a parent module (e.g.
+            # torch.distributed.distributed_c10d.get_rank is documented
+            # as torch.distributed.get_rank via currentmodule).
+            parts = mod_name.split(".")
+            if any(
+                f"{'.'.join(parts[:i])}.{name}" in objects for i in range(1, len(parts))
+            ):
+                continue
+            undocumented.append(full_name)
+
+    if undocumented:
+        items = "\n".join(f"  - {u}" for u in sorted(undocumented))
+        print(
+            f"\nThe following public APIs are in __all__ but not documented:\n{items}\n"
+            "Either add them to the appropriate .rst/.md doc file or "
+            "remove from __all__."
+        )
+        sys.exit(1)
+
+    # We go through all the torch submodules and make sure they are
+    # properly documented
+    missing = set()
 
     # The walk function does not return the top module
     if "torch" not in modules:
@@ -3438,12 +2418,89 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
+    # Force serial reads to avoid pipe congestion from large env pickles.
+    # Sphinx's parallel read sends the entire environment (100s of MB for
+    # PyTorch) through a 64KB OS pipe per worker, which causes extreme
+    # slowdowns with many workers. Serial reads avoid this overhead while
+    # parallel writes (which send trivial payloads) remain enabled.
+    from sphinx.builders import Builder
+
+    _orig_read_serial = Builder._read_serial
+
+    def _serial_read_ignoring_nproc(self, docnames, nproc=1):
+        return _orig_read_serial(self, docnames)
+
+    Builder._read_parallel = _serial_read_ignoring_nproc
+
+    _fix_katex_server_race(app)
+
     return {"version": "0.1", "parallel_read_safe": True}
+
+
+def _fix_katex_server_race(app):
+    """Retry on ConnectionRefusedError when connecting to the KaTeX server.
+
+    sphinxcontrib-katex 0.9.x starts a Node.js server and connects via Unix
+    socket. There's a race: Python sees the socket file (created by bind())
+    and calls connect() before Node.js has called listen(). On slow CI
+    machines this causes ConnectionRefusedError. Fix by retrying connect().
+    """
+    try:
+        from sphinxcontrib.katex import KaTeXServer
+    except ImportError:
+        return
+
+    import socket as _socket
+    import time as _time
+
+    @classmethod
+    def _start_with_retry(cls, rundir, timeout):
+        from subprocess import PIPE, Popen
+
+        from sphinxcontrib.katex import ONE_MILLISECOND
+
+        socket_path = rundir / "katex.sock"
+        cmd = cls.build_command(socket=socket_path)
+        process = Popen(cmd, stdin=PIPE, stdout=PIPE, cwd=rundir)
+
+        startup_start = _time.monotonic()
+        while not socket_path.is_socket():
+            _time.sleep(ONE_MILLISECOND)
+            if _time.monotonic() - startup_start > timeout:
+                raise cls.timeout_error(timeout)
+
+        # Retry connect() — bind() creates the socket file but listen()
+        # is async in Node.js and may not be ready yet.
+        while True:
+            remaining = startup_start + timeout - _time.monotonic()
+            if remaining <= 0:
+                raise cls.timeout_error(timeout)
+            try:
+                sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                sock.settimeout(remaining)
+                sock.connect(str(socket_path))
+                break
+            except ConnectionRefusedError:
+                sock.close()
+                _time.sleep(ONE_MILLISECOND)
+            except TimeoutError:
+                sock.close()
+                raise cls.timeout_error(timeout)  # noqa: B904
+
+        return process, sock
+
+    KaTeXServer.start_server_process = _start_with_retry
 
 
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
     if pagename.startswith("generated/"):
         context["theme_use_edit_page_button"] = False
+        # Limit sidebar depth and collapse inactive sections for generated
+        # API pages to avoid embedding ~300 KB of navigation markup per page.
+        # Only the active section's children are shown.
+        context["theme_navigation_depth"] = 2
+        context["theme_collapse_navigation"] = "true"
 
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and

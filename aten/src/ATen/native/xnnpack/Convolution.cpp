@@ -43,9 +43,9 @@ bool available(
          (kFloat == weight.scalar_type()) &&
          // Bias
          (bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
-                ((transposed ? (weight.size(Layout::Filter::input) ==
+                (transposed ? (weight.size(Layout::Filter::input) ==
                                 ((*bias_sizes_opt)[0] / groups))
-                  : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0])))))
+                  : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0]))))
             : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
@@ -133,10 +133,10 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
   int kernel_height = weight_nhwc.size(2);
 
   int o_offset = 1;
-  int h_offset = (output_channels_per_group);
-  int w_offset = (output_channels_per_group)*(kernel_height);
-  int i_offset = (output_channels_per_group)*(kernel_height)*(kernel_width);
-  int g_offset = (output_channels_per_group)*(kernel_height)*(kernel_width)*(input_channels_per_group);
+  int h_offset = output_channels_per_group;
+  int w_offset = output_channels_per_group*kernel_height;
+  int i_offset = output_channels_per_group*kernel_height*kernel_width;
+  int g_offset = output_channels_per_group*kernel_height*kernel_width*input_channels_per_group;
 
   Tensor reordered = mobile::empty_with_tail_padding(
      weight_nhwc.sizes(),
@@ -225,9 +225,9 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
-      weight_reordered.data_ptr<float>(),                             // kernel
+      weight_reordered.const_data_ptr<float>(),                       // kernel
       (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -349,7 +349,7 @@ Tensor run(
 
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
-      padded_input_nhwc.data_ptr<float>(),                   // input
+      padded_input_nhwc.const_data_ptr<float>(),                   // input
       output.data_ptr<float>());                             // output
   } else {
     size_t workspace_size = SIZE_MAX;
@@ -369,7 +369,7 @@ Tensor run(
     setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
       nullptr,                                               // workspace
-      padded_input_nhwc.data_ptr<float>(),                   // input
+      padded_input_nhwc.const_data_ptr<float>(),                   // input
       output.data_ptr<float>());                             // output
   }
 

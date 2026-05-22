@@ -140,6 +140,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
 
     if dense.dtype != torch.float:
         sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))  # type: ignore[possibly-undefined]
+        # pyrefly: ignore [unbound-name]
         sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
         sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
     else:
@@ -172,6 +173,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     meta_offsets = _calculate_meta_reordering_scatter_offsets(
         m, meta_ncols, meta_dtype, device
     )
+    # pyrefly: ignore [unbound-name]
     meta_reordered.scatter_(0, meta_offsets, meta.view(-1))
 
     return (sparse, meta_reordered.view(m, meta_ncols))
@@ -214,7 +216,7 @@ def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
     meta_nrows, meta_ncols = meta_reordered.shape
     if meta_nrows != m:
         raise RuntimeError(
-            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of spase matrix {m}"
+            f"Number of rows of meta matrix {meta_nrows} must be equal to number of columns of sparse matrix {m}"
         )
     if meta_ncols * ksparse * quadbits_per_meta_elem != 2 * k:
         raise RuntimeError(

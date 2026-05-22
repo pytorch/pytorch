@@ -4,7 +4,6 @@ This module provides a set of functions to create ONNX operators in the FX graph
 which are exportable to ONNX.
 """
 
-# flake8: noqa: B950
 from __future__ import annotations
 
 
@@ -17,14 +16,14 @@ __all__ = [
 ]
 
 
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx.ops import _impl, _symbolic_impl
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 # https://github.com/onnx/onnx/blob/f542e1f06699ea7e1db5f62af53355b64338c723/onnx/onnx.proto#L597

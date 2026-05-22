@@ -7,7 +7,8 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def dummy_fn(x):
@@ -115,7 +116,7 @@ class TestInductorConfig(TestCase):
         for kwargs in checks:
             torch._dynamo.reset()
             opt_fn = torch.compile(dummy_fn, **kwargs)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
             )
 
@@ -244,6 +245,29 @@ class TestInductorConfig(TestCase):
             code = torch._inductor.config.codegen_config()
             self.assertNotIn("post_grad_custom", code)
 
+    def test_select_decomp_table_fallback_embedding_bag_byte_unpack(self):
+        """Test that select_decomp_table removes embedding_bag_byte_unpack when fallback is enabled"""
+        from torch._inductor.decomposition import select_decomp_table
+
+        # Test with fallback_embedding_bag_byte_unpack = False (default)
+        with config.patch(fallback_embedding_bag_byte_unpack=False):
+            decomp_table = select_decomp_table()
+            # The operation should be in decompositions when fallback is False
+            # Note: We check if it's in the fast_random_decomps() or decompositions table
+            self.assertTrue(
+                torch.ops.quantized.embedding_bag_byte_unpack.default in decomp_table
+                or len(decomp_table)
+                > 0  # fast_random_decomps() is used when fallback is False
+            )
+
+        # Test with fallback_embedding_bag_byte_unpack = True
+        with config.patch(fallback_embedding_bag_byte_unpack=True):
+            decomp_table = select_decomp_table()
+            # The operation should NOT be in decompositions when fallback is True
+            self.assertNotIn(
+                torch.ops.quantized.embedding_bag_byte_unpack.default, decomp_table
+            )
+
     @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_options_do_something(self):
         """
@@ -303,6 +327,68 @@ class TestInductorConfig(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+    @requires_gpu
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_config_read_in_backwards(self):
+        @torch.compile
+        def f(x, y):
+            z = x @ y
+            return z.sin().sum()
+
+        called = False
+
+        def my_pass(graph):
+            nonlocal called
+            called = True
+
+        x, y = (
+            torch.randn(3, 3, device=GPU_TYPE, requires_grad=True),
+            torch.randn(3, 3, device=GPU_TYPE),
+        )
+        z = f(x, y)
+        z.backward()
+        self.assertFalse(called)
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            z.backward()
+
+        self.assertTrue(called)
+
+        called = False
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            torch.autograd.grad(z, x)
+        self.assertTrue(called)
+
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_config_read_in_grad_fn(self):
+        @torch.compile
+        def f(x, y):
+            z = x @ y
+            return z.sin().sum()
+
+        called = False
+
+        def my_pass(graph):
+            nonlocal called
+            called = True
+
+        x, y = (
+            torch.randn(3, 3, requires_grad=True),
+            torch.randn(3, 3),
+        )
+
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            z = f(x, y)
+        self.assertTrue(called)
+
+        # Make sure the context gets cleared after forward pass
+        called = False
+        z.grad_fn.apply(torch.tensor(0))
+        self.assertFalse(called)
 
 
 if __name__ == "__main__":

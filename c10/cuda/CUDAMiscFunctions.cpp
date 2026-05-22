@@ -1,7 +1,5 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
-#include <cuda_runtime.h>
-#include <cstring>
 #include <string>
 
 namespace c10::cuda {
@@ -18,8 +16,13 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
     default:
       help_text.append("\nSearch for `")
           .append(cudaGetErrorName(error))
+#if defined(USE_ROCM)
+          .append(
+              "' in https://rocm.docs.amd.com/projects/HIP/en/latest/index.html for more information.");
+#else
           .append(
               "' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.");
+#endif
       break;
   }
   return help_text;
@@ -39,6 +42,33 @@ const char* get_cuda_check_suffix() noexcept {
            "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
   }
 }
+// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
+const char* get_cuda_async_error_suffix(cudaError_t error) noexcept {
+  switch (error) {
+    case cudaErrorLaunchFailure:
+    case cudaErrorIllegalAddress:
+    case cudaErrorAssert:
+#ifndef USE_ROCM
+    case cudaErrorIllegalInstruction:
+    case cudaErrorMisalignedAddress:
+#endif
+    {
+      static auto device_blocking_flag =
+          c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
+      static bool blocking_enabled = device_blocking_flag.value_or(false);
+      if (!blocking_enabled) {
+        return "\nCUDA kernel errors might be asynchronously reported at some"
+               " other API call, so the stacktrace below might be incorrect."
+               "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
+      }
+      return "";
+    }
+    default:
+      return "\nFor more detailed error information, run with"
+             " CUDA_LOG_FILE=stderr";
+  }
+}
+
 std::mutex* getFreeMutex() {
   static std::mutex cuda_free_mutex;
   return &cuda_free_mutex;

@@ -22,7 +22,7 @@ LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
 LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries_wheel"
-LABEL_CIFLOW_ROCM = "ciflow/rocm"
+LABEL_CIFLOW_S390 = "ciflow/s390"
 
 
 @dataclass
@@ -62,6 +62,9 @@ class BinaryBuildWorkflow:
     macos_runner: str = "macos-14-xlarge"
     # Mainly used for libtorch builds
     build_variant: str = ""
+    # Libtorch extraction configs: lightweight jobs that extract libtorch
+    # from a wheel build instead of building libtorch from scratch
+    libtorch_extraction_configs: list[dict[str, str]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.build_environment == "":
@@ -100,104 +103,55 @@ class OperatingSystem:
     LINUX_S390X = "linux-s390x"
 
 
+_LINUX_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
+    OperatingSystem.LINUX
+)
+
 LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX,
-            generate_binary_build_matrix.RELEASE,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-]
-
-ROCM_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_variant="rocm",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["6.4"],
-            python_versions=["3.9"],
-        ),
+        build_configs=_LINUX_WHEEL_CONFIGS,
         ciflow_config=CIFlowConfig(
             labels={
                 LABEL_CIFLOW_BINARIES,
                 LABEL_CIFLOW_BINARIES_WHEEL,
-                LABEL_CIFLOW_ROCM,
+                LABEL_CIFLOW_BINARIES_LIBTORCH,
             },
             isolated_workflow=True,
         ),
-        branches="main",
+        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
+            OperatingSystem.LINUX,
+            _LINUX_WHEEL_CONFIGS,
+        ),
     ),
 ]
 
-LINUX_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["12.8"],
-            python_versions=["3.12"],
-        ),
-        branches="main",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX,
-            generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-    ),
-]
+_WINDOWS_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
+    OperatingSystem.WINDOWS
+)
+_WINDOWS_ARM64_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
+    OperatingSystem.WINDOWS_ARM64,
+    arches=["cpu"],
+    python_versions=["3.11", "3.12", "3.13"],
+)
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS
-        ),
+        build_configs=_WINDOWS_WHEEL_CONFIGS,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
+                LABEL_CIFLOW_BINARIES_LIBTORCH,
+            },
             isolated_workflow=True,
         ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
             OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.RELEASE,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
+            _WINDOWS_WHEEL_CONFIGS,
         ),
     ),
     BinaryBuildWorkflow(
@@ -217,29 +171,18 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS_ARM64,
-            arches=["cpu"],
-            python_versions=["3.11", "3.12", "3.13"],
-        ),
+        build_configs=_WINDOWS_ARM64_WHEEL_CONFIGS,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
+                LABEL_CIFLOW_BINARIES_LIBTORCH,
+            },
             isolated_workflow=True,
         ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS_ARM64,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
             OperatingSystem.WINDOWS_ARM64,
-            generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
+            _WINDOWS_ARM64_WHEEL_CONFIGS,
         ),
     ),
     BinaryBuildWorkflow(
@@ -259,65 +202,27 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
-WINDOWS_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-]
+_MACOS_ARM64_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
+    OperatingSystem.MACOS_ARM64
+)
 
 MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
-        package_type="libtorch",
-        build_variant=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS,
-            generate_binary_build_matrix.RELEASE,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        macos_runner="macos-14-xlarge",
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.MACOS_ARM64,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.MACOS_ARM64
-        ),
-        macos_runner="macos-14-xlarge",
+        build_configs=_MACOS_ARM64_WHEEL_CONFIGS,
+        macos_runner="macos-26-xlarge",
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
+                LABEL_CIFLOW_BINARIES_LIBTORCH,
+            },
             isolated_workflow=True,
+        ),
+        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
+            OperatingSystem.MACOS_ARM64,
+            _MACOS_ARM64_WHEEL_CONFIGS,
         ),
     ),
 ]
@@ -344,7 +249,11 @@ S390X_BINARY_BUILD_WORKFLOWS = [
             OperatingSystem.LINUX_S390X
         ),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
+                LABEL_CIFLOW_S390,
+            },
             isolated_workflow=True,
         ),
     ),
@@ -373,21 +282,8 @@ def main() -> None:
             S390X_BINARY_BUILD_WORKFLOWS,
         ),
         (
-            # Give rocm it's own workflow file
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            ROCM_SMOKE_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            LINUX_BINARY_SMOKE_WORKFLOWS,
-        ),
-        (
             jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
             WINDOWS_BINARY_BUILD_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
-            WINDOWS_BINARY_SMOKE_WORKFLOWS,
         ),
         (
             jinja_env.get_template("macos_binary_build_workflow.yml.j2"),
@@ -407,7 +303,7 @@ def main() -> None:
         if not isinstance(workflows, Iterable):
             raise Exception(  # noqa: TRY002
                 f"How is workflows not iterable? {workflows}"
-            )  # noqa: TRY002
+            )
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
 

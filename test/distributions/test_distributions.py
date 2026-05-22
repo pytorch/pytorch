@@ -115,13 +115,16 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     set_rng_seed,
     skipIfTorchDynamo,
+    TEST_XPU,
     TestCase,
 )
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 TEST_NUMPY = True
 try:
@@ -1788,45 +1791,60 @@ class TestDistributions(DistributionsTestCase):
             ).logpmf(sample)
             self.assertEqual(log_prob, expected, atol=1e-4, rtol=0)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_zero_excluded_binomial(self):
         vals = Binomial(
-            total_count=torch.tensor(1.0).cuda(), probs=torch.tensor(0.9).cuda()
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.9).to(device_type),
         ).sample(torch.Size((100000000,)))
         self.assertTrue((vals >= 0).all())
         vals = Binomial(
-            total_count=torch.tensor(1.0).cuda(), probs=torch.tensor(0.1).cuda()
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.1).to(device_type),
         ).sample(torch.Size((100000000,)))
         self.assertTrue((vals < 2).all())
         vals = Binomial(
-            total_count=torch.tensor(1.0).cuda(), probs=torch.tensor(0.5).cuda()
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.5).to(device_type),
         ).sample(torch.Size((10000,)))
         # vals should be roughly half zeroes, half ones
-        assert (vals == 0.0).sum() > 4000
-        assert (vals == 1.0).sum() > 4000
+        zeros_count = (vals == 0.0).sum()
+        ones_count = (vals == 1.0).sum()
+        if zeros_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 0.0).sum() > 4000, got {zeros_count}"
+            )
+        if ones_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
+            )
 
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
+        devices = ["cpu"]
+        if TEST_CUDA:
+            devices.append("cuda")
 
-        for count_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=count_dtype)
-            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
+        for device in devices:
+            for count_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for count.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
-        for prob_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=torch.float)
-            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+            for prob_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for prob.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
@@ -2050,15 +2068,15 @@ class TestDistributions(DistributionsTestCase):
                 )
         torch.set_default_dtype(saved_dtype)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
             self._check_sampler_discrete(
-                Poisson(torch.tensor([rate]).cuda()),
+                Poisson(torch.tensor([rate]).to(device_type)),
                 scipy.stats.poisson(rate),
-                f"Poisson(lambda={rate}, cuda)",
+                f"Poisson(lambda={rate}, {device_type})",
                 failure_rate=1e-3,
             )
 
@@ -2500,7 +2518,9 @@ class TestDistributions(DistributionsTestCase):
         # TODO: Once _check_log_prob works with multidimensional distributions,
         #       add proper testing of the log probabilities.
         dist = LogisticNormal(mean, std)
-        assert dist.log_prob(dist.sample()).detach().cpu().numpy().shape == (5,)
+        shape = dist.log_prob(dist.sample()).detach().cpu().numpy().shape
+        if shape != (5,):
+            raise AssertionError(f"Expected log_prob shape (5,), got {shape}")
 
     def _get_logistic_normal_ref_sampler(self, base_dist):
         def _sampler(num_samples):
@@ -3490,13 +3510,13 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_gpu_shape(self):
-        alpha = torch.randn(2, 3).cuda().exp().requires_grad_()
-        beta = torch.randn(2, 3).cuda().exp().requires_grad_()
-        alpha_1d = torch.randn(1).cuda().exp().requires_grad_()
-        beta_1d = torch.randn(1).cuda().exp().requires_grad_()
+        alpha = torch.randn(2, 3).to(device_type).exp().requires_grad_()
+        beta = torch.randn(2, 3).to(device_type).exp().requires_grad_()
+        alpha_1d = torch.randn(1).to(device_type).exp().requires_grad_()
+        beta_1d = torch.randn(1).to(device_type).exp().requires_grad_()
         self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
         self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
@@ -3527,7 +3547,10 @@ class TestDistributions(DistributionsTestCase):
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
-            a, b = torch.tensor([alpha]).cuda(), torch.tensor([beta]).cuda()
+            a, b = (
+                torch.tensor([alpha]).to(device_type),
+                torch.tensor([beta]).to(device_type),
+            )
             self._check_sampler_sampler(
                 Gamma(a, b),
                 scipy.stats.gamma(alpha, scale=1.0 / beta),
@@ -3973,11 +3996,11 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(frac_zeros, 0.5, atol=0.05, rtol=0)
             self.assertEqual(frac_ones, 0.5, atol=0.05, rtol=0)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_beta_underflow_gpu(self):
         set_rng_seed(1)
         num_samples = 50000
-        conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
+        conc = torch.tensor(1e-2, dtype=torch.float64).to(device_type)
         beta_samples = Beta(conc, conc).sample([num_samples])
         self.assertEqual((beta_samples == 0).sum(), 0)
         self.assertEqual((beta_samples == 1).sum(), 0)
@@ -4786,7 +4809,7 @@ class TestRsample(DistributionsTestCase):
                         "expected_grad: %.5g" % expected_grad,  # noqa: UP031
                         "actual_grad: %.5g" % actual_grad,  # noqa: UP031
                         "error = %.2g"  # noqa: UP031
-                        % torch.abs(expected_grad - actual_grad).max(),  # noqa: UP031
+                        % torch.abs(expected_grad - actual_grad).max(),
                     ]
                 ),
             )
@@ -4870,7 +4893,7 @@ class TestDistributionShapes(DistributionsTestCase):
                     expected_shape = (
                         dist.batch_shape if dist.batch_shape else torch.Size()
                     )
-                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"  # noqa: B950
+                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"
                     self.assertEqual(actual_shape, expected_shape, msg=message)
                 except NotImplementedError:
                     continue
@@ -5713,11 +5736,11 @@ class TestKL(DistributionsTestCase):
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
-        for i in range(0, n):
-            loc = [torch.randn(4) for _ in range(0, 2)]
+        for i in range(n):
+            loc = [torch.randn(4) for _ in range(2)]
             scale_tril = [
                 transform_to(constraints.lower_cholesky)(torch.randn(4, 4))
-                for _ in range(0, 2)
+                for _ in range(2)
             ]
             p = MultivariateNormal(loc=loc[0], scale_tril=scale_tril[0])
             q = MultivariateNormal(loc=loc[1], scale_tril=scale_tril[1])
@@ -5746,10 +5769,10 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_multivariate_normal_batched(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
         scale_tril = [
             transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3))
-            for _ in range(0, 2)
+            for _ in range(2)
         ]
         expected_kl = torch.stack(
             [
@@ -5757,7 +5780,7 @@ class TestKL(DistributionsTestCase):
                     MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
                     MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i]),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -5768,7 +5791,7 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_multivariate_normal_batched_broadcasted(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
         scale_tril = [
             transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)),
             transform_to(constraints.lower_cholesky)(torch.randn(3, 3)),
@@ -5779,7 +5802,7 @@ class TestKL(DistributionsTestCase):
                     MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
                     MultivariateNormal(loc[1][i], scale_tril=scale_tril[1]),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -5791,15 +5814,15 @@ class TestKL(DistributionsTestCase):
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
-        for i in range(0, n):
-            loc = [torch.randn(4) for _ in range(0, 2)]
-            cov_factor = [torch.randn(4, 3) for _ in range(0, 2)]
+        for i in range(n):
+            loc = [torch.randn(4) for _ in range(2)]
+            cov_factor = [torch.randn(4, 3) for _ in range(2)]
             cov_diag = [
-                transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)
+                transform_to(constraints.positive)(torch.randn(4)) for _ in range(2)
             ]
             covariance_matrix = [
                 cov_factor[i].matmul(cov_factor[i].t()) + cov_diag[i].diag()
-                for i in range(0, 2)
+                for i in range(2)
             ]
             p = LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0])
             q = LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1])
@@ -5852,10 +5875,10 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_lowrank_multivariate_normal_batched(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
-        cov_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
+        cov_factor = [torch.randn(b, 3, 2) for _ in range(2)]
         cov_diag = [
-            transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)
+            transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(2)
         ]
         expected_kl = torch.stack(
             [
@@ -5867,7 +5890,7 @@ class TestKL(DistributionsTestCase):
                         loc[1][i], cov_factor[1][i], cov_diag[1][i]
                     ),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -5878,7 +5901,7 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
-            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+            if type(p) is type(q) and issubclass(type(p), ExponentialFamily):
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
                 self.assertEqual(
@@ -6207,7 +6230,8 @@ class TestNumericalStability(DistributionsTestCase):
 
     def test_continuous_bernoulli_gradient(self):
         def expec_val(x, probs=None, logits=None):
-            assert not (probs is None and logits is None)
+            if probs is None and logits is None:
+                raise AssertionError("At least one of probs or logits must be provided")
             if logits is not None:
                 probs = 1.0 / (1.0 + math.exp(-logits))
             bern_log_lik = x * math.log(probs) + (1.0 - x) * math.log1p(-probs)
@@ -6224,7 +6248,8 @@ class TestNumericalStability(DistributionsTestCase):
             return log_lik
 
         def expec_grad(x, probs=None, logits=None):
-            assert not (probs is None and logits is None)
+            if probs is None and logits is None:
+                raise AssertionError("At least one of probs or logits must be provided")
             if logits is not None:
                 probs = 1.0 / (1.0 + math.exp(-logits))
             grad_bern_log_lik = x / probs - (1.0 - x) / (1.0 - probs)

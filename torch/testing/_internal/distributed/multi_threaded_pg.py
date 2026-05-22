@@ -5,7 +5,6 @@ import threading
 import weakref
 from dataclasses import dataclass
 from functools import partial, reduce
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -71,6 +70,24 @@ _reduce_ops = {
 }
 
 
+# Note [Hide collectives mutation from autograd]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Threaded PG is intended to closely simulate the behavior of regular process
+# groups.  However, our regular PG implementations perform a dispatch through
+# c10d, whereas Threaded PG does not for some reason (some superficial
+# but not very convincing reasons include that Threaded PG is implemented
+# in Python but you can't override Backend in Python, you can only override
+# ProcessGroup in Python), thereby bypassing the dispatch step.  Now we have
+# a problem: c10d's signatures are LIES, they mutate their (output) tensor
+# arguments but their annotations don't have mutations on them so we don't
+# actually update any view metadata if you do differentiation.  This
+# ordinarily "doesn't matter" because distributed collectives aren't
+# differentiable anyway, but it's possible to tickle this in testing if
+# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# fix this, but the easiest way was to use the .detach() trick to hide
+# the mutations from autograd.
+
+
 class AllToAll:
     @torch.no_grad()
     def work(self, data):
@@ -79,7 +96,10 @@ class AllToAll:
             output_tensor_list, _ = data[dest_rank]
             for src_rank in range(world_size):
                 _, input_tensor_list = data[src_rank]
-                output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
+                # See Note [Hide collectives mutation from autograd]
+                output_tensor_list[src_rank].detach().copy_(
+                    input_tensor_list[dest_rank]
+                )
 
 
 class AllToAllBase:
@@ -99,9 +119,10 @@ class AllToAllBase:
                     input_buffer.size(0), input_split_sizes, world_size
                 )
 
+                # See Note [Hide collectives mutation from autograd]
                 output_buffer[
                     output_indexes[src_rank] : output_indexes[src_rank + 1]
-                ].copy_(
+                ].detach().copy_(
                     input_buffer[
                         input_indexes[dest_rank] : input_indexes[dest_rank + 1]
                     ]
@@ -110,14 +131,17 @@ class AllToAllBase:
     def _size_cumsum(
         self,
         buf_size: int,
-        sizes: Union[torch.Tensor, list[int], None],
+        sizes: torch.Tensor | list[int] | None,
         world_size: int,
     ) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
             sizes = torch.full((world_size,), buf_size // world_size, dtype=torch.int64)
         if not isinstance(sizes, torch.Tensor):
             sizes = torch.tensor(sizes, dtype=torch.int64)
-        assert sizes.dtype == torch.int64
+        if sizes.dtype != torch.int64:
+            raise AssertionError(
+                f"Expected sizes.dtype == torch.int64, got {sizes.dtype}"
+            )
         sizes = torch.cumsum(
             torch.cat(
                 (torch.tensor([0], dtype=torch.int64, device=sizes.device), sizes),
@@ -144,7 +168,7 @@ class AllReduce:
             # collect all data to the list and make them
             # all on rank 0 device
             tensors = [
-                data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))
+                data[src_rank][i].to(rank_0_device) for src_rank in range(len(data))
             ]
 
             # now mimic reduce across all ranks
@@ -152,7 +176,8 @@ class AllReduce:
 
             # copy all the reduced value to each rank
             for src_rank in range(len(data)):
-                data[src_rank][i].copy_(res.to(data[src_rank][i].device))
+                # See Note [Hide collectives mutation from autograd]
+                data[src_rank][i].detach().copy_(res.to(data[src_rank][i].device))
 
 
 class AllGather:
@@ -161,12 +186,16 @@ class AllGather:
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
             # Can't handle all_gather with multiple tensors
-            assert len(in_tensor_list) == 1
+            if len(in_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle all_gather with multiple tensors, got {len(in_tensor_list)}"
+                )
             src_tensor = in_tensor_list[0]
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
-                dest_tensor.copy_(src_tensor)
+                # See Note [Hide collectives mutation from autograd]
+                dest_tensor.detach().copy_(src_tensor)
 
 
 class Scatter:
@@ -177,15 +206,22 @@ class Scatter:
     def work(self, data):
         src_in_tensor_list = data[self.src][1]
         # Can't handle scatter with multiple input tensor list
-        assert len(src_in_tensor_list) == 1
+        if len(src_in_tensor_list) != 1:
+            raise AssertionError(
+                f"Can't handle scatter with multiple input tensor list, got {len(src_in_tensor_list)}"
+            )
         src_in_tensors = src_in_tensor_list[0]
 
         for rank, each_rank_data in enumerate(data):
             out_tensor_list = each_rank_data[0]
             # Can't handle scatter with multiple output tensor
-            assert len(out_tensor_list) == 1
+            if len(out_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle scatter with multiple output tensor, got {len(out_tensor_list)}"
+                )
             dest_tensor = out_tensor_list[0]
-            dest_tensor.copy_(src_in_tensors[rank])
+            # See Note [Hide collectives mutation from autograd]
+            dest_tensor.detach().copy_(src_in_tensors[rank])
 
 
 class Gather:
@@ -195,14 +231,21 @@ class Gather:
     @torch.no_grad()
     def work(self, data):
         # Can't handle gather with multiple tensor lists
-        assert len(data[self.dst][0]) == 1
+        if len(data[self.dst][0]) != 1:
+            raise AssertionError(
+                f"Can't handle gather with multiple tensor lists, got {len(data[self.dst][0])}"
+            )
         out_tensor_list = data[self.dst][0][0]
         for rank, each_rank_data in enumerate(data):
             src_in_tensor_list = each_rank_data[1]
             # Can't handle gather with multiple tensor lists
-            assert len(src_in_tensor_list) == 1
+            if len(src_in_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle gather with multiple tensor lists, got {len(src_in_tensor_list)}"
+                )
             dest_tensor = out_tensor_list[rank]
-            dest_tensor.copy_(src_in_tensor_list[0])
+            # See Note [Hide collectives mutation from autograd]
+            dest_tensor.detach().copy_(src_in_tensor_list[0])
 
 
 class ReduceScatter:
@@ -216,22 +259,35 @@ class ReduceScatter:
         start_reduction = [False for _ in range(len(data))]
         for each_rank_data in data:
             # Can't handle reduce_scatter with multiple scatter list
-            assert len(each_rank_data[1]) == 1
+            if len(each_rank_data[1]) != 1:
+                raise AssertionError(
+                    f"Can't handle reduce_scatter with multiple scatter list, got {len(each_rank_data[1])}"
+                )
             to_scatter = each_rank_data[1][0]
             for i in range(len(to_scatter)):
                 dest_tensor_on_rank_i = data[i][0]
                 # Can't handle reduce_scatter with multiple output tensor
-                assert len(dest_tensor_on_rank_i) == 1
+                if len(dest_tensor_on_rank_i) != 1:
+                    raise AssertionError(
+                        f"Can't handle reduce_scatter with multiple output tensor, got {len(dest_tensor_on_rank_i)}"
+                    )
                 dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
-                    dest_tensor_on_rank_i[0].copy_(to_scatter[i].to(dst_tensor_device))
+                    # See Note [Hide collectives mutation from autograd]
+                    dest_tensor_on_rank_i[0].detach().copy_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
                     start_reduction[i] = True
                 else:
-                    dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
+                    # See Note [Hide collectives mutation from autograd]
+                    dest_tensor_on_rank_i[0].detach().add_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
         if self.op == dist.ReduceOp.AVG:
             num_ranks = len(data)
             for each_rank_data in data:
-                each_rank_data[0][0] /= num_ranks
+                # See Note [Hide collectives mutation from autograd]
+                each_rank_data[0][0].detach().div_(num_ranks)
 
 
 class Broadcast:
@@ -242,9 +298,12 @@ class Broadcast:
     def work(self, data):
         in_tensor_list = flatten_list(data[self.src])
         for i in range(len(data)):
+            if i == self.src:
+                continue
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                out_tensor_list[j].copy_(in_tensor_list[j])
+                # See Note [Hide collectives mutation from autograd]
+                out_tensor_list[j].detach().copy_(in_tensor_list[j])
 
 
 class Collective:
@@ -343,8 +402,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
-        output_split_sizes: Optional[list[int]],
-        input_split_sizes: Optional[list[int]],
+        output_split_sizes: list[int] | None,
+        input_split_sizes: list[int] | None,
         opts=AllToAllOptions(),
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
@@ -421,7 +480,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
     ):
         works = [
             self._reduce_scatter_base(output_tensor, input_tensor, opts)
-            for output_tensor, input_tensor in zip(output_tensors, input_tensors)
+            for output_tensor, input_tensor in zip(
+                output_tensors, input_tensors, strict=True
+            )
         ]
         for work in works[:-1]:
             work.wait()
@@ -431,7 +492,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
-        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
             res = self._allgather_base(o_t, i_t)
         return res
 
@@ -490,14 +551,15 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
+    pg_map: dict[dist.ProcessGroup, tuple[str, Store | None]]
     pg_names: dict[dist.ProcessGroup, str]
     pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
     pg_backend_config: dict[dist.ProcessGroup, str]
     group_count: int
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
-    pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]]
+    comms: list
 
 
 class ThreadLocalWorld:
@@ -506,7 +568,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}
+                None, {}, {}, {}, {}, 0, {}, {}, {}, []
             )
         return ThreadLocalWorld._world.world
 
@@ -551,8 +613,12 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[_CollOp | P2POp]]:
         return self._get_world().pg_coalesce_state
+
+    @property
+    def comms(self):
+        return self._get_world().comms
 
 
 _old_pg_world = None
@@ -570,4 +636,9 @@ def _install_threaded_pg():
 
 
 def _uninstall_threaded_pg():
+    global _ctx_manager
     dist.distributed_c10d._world = _old_pg_world
+    # Restore autograd multithreading state that was disabled in _install_threaded_pg
+    if _ctx_manager is not None:
+        _ctx_manager.__exit__(None, None, None)
+        _ctx_manager = None

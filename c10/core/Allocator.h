@@ -9,6 +9,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -17,6 +18,17 @@
 #include <c10/util/irange.h>
 
 namespace c10 {
+
+using CaptureId_t = unsigned long long;
+// first is set if the instance is created by CUDAGraph::capture_begin.
+// second is set if the instance is created by at::cuda::graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+struct MempoolIdHash {
+  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
+    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
+  }
+};
 
 // A DataPtr is a unique pointer (with an attached deleter and some
 // context for the deleter) to some memory, which also records what
@@ -119,8 +131,9 @@ class C10_API DataPtr {
   }
   // Unsafely mutates the device on a DataPtr.  Under normal use,
   // you should never actually need to call this function.
-  // We need this for the implementation of the hack detailed
-  // in Note [Masquerading as CUDA]
+  // We used to need this for the implementation of the hack detailed
+  // in Note [Masquerading as CUDA], but that hack has been removed.
+  // Other uses of this function now exist so it cannot be deprecated.
   void unsafe_set_device(Device device) {
     device_ = device;
   }

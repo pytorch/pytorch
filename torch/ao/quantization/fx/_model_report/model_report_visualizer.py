@@ -132,7 +132,7 @@ class ModelReportVisualizer:
                 # if we need plottable, ensure type of val is tensor
                 if (
                     not plottable_features_only
-                    or type(feature_dict[feature_name]) == torch.Tensor
+                    or type(feature_dict[feature_name]) is torch.Tensor
                 ):
                     unique_feature_names.add(feature_name)
 
@@ -223,6 +223,7 @@ class ModelReportVisualizer:
                         feature_val = feature_val.item()
 
                     # we add to our list of values
+                    # pyrefly: ignore [bad-argument-type]
                     tensor_table_row.append(feature_val)
 
                 tensor_table.append(tensor_table_row)
@@ -283,6 +284,7 @@ class ModelReportVisualizer:
                             feature_val = feature_val.item()
 
                         # add value to channel specific row
+                        # pyrefly: ignore [bad-argument-type]
                         new_channel_row.append(feature_val)
 
                     # add to table and increment row index counter
@@ -518,7 +520,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if not type(row_value) == str:
+                if type(row_value) is not str:
                     x_data.append(x_val_to_append)
                     y_data.append(row_value)
         elif is_valid_per_channel_plot:
@@ -541,7 +543,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if not type(row_value) == str:
+                if type(row_value) is not str:
                     # only append if new index we are appending
                     if len(x_data) == 0 or x_data[-1] != x_val_to_append:
                         x_data.append(x_val_to_append)
@@ -591,7 +593,7 @@ class ModelReportVisualizer:
             ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
-            >>> # modules in block1 of model each channel gets it's own line,
+            >>> # modules in block1 of model each channel gets its own line,
             >>> # and it's plotted across the in-order modules on the x-axis
         """
         # checks if we have matplotlib and let's user know to install it if don't

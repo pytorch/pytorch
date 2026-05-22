@@ -498,7 +498,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                     for name, tensor in state_dict.items():
                         # Parameters and buffers are checkpointed in their
                         # original dtypes, which may be different.
-                        if name in named_buffers.keys():
+                        if name in named_buffers:
                             self.assertEqual(tensor.dtype, _BUFFER_ORIG_DTYPE)
                         else:
                             self.assertEqual(
@@ -764,11 +764,13 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
             def forward(self, x, expect_use_full_prec_in_eval):
                 if expect_use_full_prec_in_eval:
-                    assert x.dtype == torch.float32, f"Expected fp32, got {x.dtype}"
+                    if x.dtype != torch.float32:
+                        raise AssertionError(f"Expected fp32, got {x.dtype}")
                 else:
-                    assert x.dtype == low_prec_dtype, (
-                        f"Expected {low_prec_dtype}, got {x.dtype}"
-                    )
+                    if x.dtype != low_prec_dtype:
+                        raise AssertionError(
+                            f"Expected {low_prec_dtype}, got {x.dtype}"
+                        )
                 return self.a(x)
 
         mp_config = MixedPrecision(

@@ -1,5 +1,3 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
 """Registry for aten functions."""
 
 from __future__ import annotations
@@ -8,8 +6,8 @@ from __future__ import annotations
 __all__ = ["onnx_impl", "get_torchlib_ops"]
 
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import onnxscript
@@ -92,5 +90,6 @@ def get_torchlib_ops() -> tuple[_registration.OnnxDecompMeta, ...]:
     from torch.onnx._internal.exporter._torchlib import ops
 
     del ops
-    assert len(_registry) != 0
+    if len(_registry) == 0:
+        raise AssertionError("_registry must not be empty")
     return tuple(_registry)

@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -44,7 +45,6 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
-    skipIfRocm,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
@@ -136,7 +136,8 @@ class TestUnaryUfuncs(TestCase):
     def assertEqualHelper(
         self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs
     ):
-        assert isinstance(actual, torch.Tensor)
+        if not isinstance(actual, torch.Tensor):
+            raise AssertionError(f"expected actual to be torch.Tensor, got {type(actual)}")
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
@@ -153,18 +154,20 @@ class TestUnaryUfuncs(TestCase):
                     # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
                     # to float32
                     if expected.dtype == np.float32:
-                        assert actual.dtype in (
+                        if actual.dtype not in (
                             torch.float16,
                             torch.bfloat16,
                             torch.float32,
-                        )
+                        ):
+                            raise AssertionError(f"actual.dtype {actual.dtype} not in expected dtypes")
                     elif expected.dtype == np.float64:
-                        assert actual.dtype in (
+                        if actual.dtype not in (
                             torch.float16,
                             torch.bfloat16,
                             torch.float32,
                             torch.float64,
-                        )
+                        ):
+                            raise AssertionError(f"actual.dtype {actual.dtype} not in expected dtypes")
                     else:
                         self.fail(
                             f"Expected dtype {expected.dtype} but got {actual.dtype}!"
@@ -284,7 +287,7 @@ class TestUnaryUfuncs(TestCase):
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_small(self, device, dtype, op):
-        if dtype in (torch.bool,):
+        if dtype == torch.bool:
             raise self.skipTest("bool has no small values")
 
         tensors = generate_elementwise_unary_small_value_tensors(
@@ -772,6 +775,48 @@ class TestUnaryUfuncs(TestCase):
                 if fn_name == "angle":
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tan_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tan on CUDA against NumPy reference
+        # Includes values near tan singularities on the real axis
+        eps = 1e-3
+        specials = torch.tensor(
+            [
+                math.pi / 2 - eps,
+                math.pi / 2 + eps,
+                -math.pi / 2 - eps,
+                -math.pi / 2 + eps,
+            ],
+            device=device,
+            dtype=torch.float32,
+        )
+        real = torch.randn(1024, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(1024, device=device, dtype=torch.float32) * 5.0
+        real = torch.cat([real, specials])
+        imag = torch.cat(
+            [
+                imag,
+                torch.linspace(
+                    -3,
+                    3,
+                    steps=specials.numel(),
+                    device=device,
+                ),
+            ]
+        )
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tan, np.tan, z)
+
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tanh on CUDA against NumPy reference
+        real = torch.randn(2048, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(2048, device=device, dtype=torch.float32) * 5.0
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tanh, np.tanh, z)
 
     def check_internal_mem_overlap(
         self, inplace_op, num_inputs, dtype, device, expected_failure=False
@@ -1504,7 +1549,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -1512,7 +1557,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.bool, torch.int8)
     def test_narrow_dtypes(self, device, dtype):
         x_int = torch.randint(2, (8 * 1024,), device=device, dtype=torch.int)
@@ -1568,10 +1613,9 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
-    @skipIfRocm(msg="ROCM tries to allocate 60GB")
     def test_nonzero_large(self, device, dtype):
         indices = (
             torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
@@ -1652,6 +1696,15 @@ class TestUnaryUfuncs(TestCase):
             torch.empty(
                 (static_size, input_tensor.dim()), device=device, dtype=torch.long
             ),
+        )
+
+        # empty input
+        # https://github.com/pytorch/pytorch/issues/162473
+        input_tensor = torch.tensor([], device=device)
+        static_size = 1
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.tensor([[-1]], device=device),
         )
 
         # 1D input
@@ -1835,6 +1888,55 @@ class TestUnaryUfuncs(TestCase):
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
+
+    # test for issue #161871 where mvlgamma_ should handle integer input gracefully
+    # with a clear error message on all architectures (not crash with FPE on x86)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_inplace_integer_error(self, device, dtype):
+        tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"result type .* can't be cast to the desired output type"
+        ):
+            tensor.mvlgamma_(2)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_integer_promotion(self, device, dtype):
+        tensor = torch.tensor([5, 6, 7], device=device, dtype=dtype)
+        result = torch.mvlgamma(tensor, 2)
+
+        self.assertTrue(result.dtype.is_floating_point)
+        self.assertTrue(torch.all(torch.isfinite(result)))
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
+        # Regression test for ptxas codegen bug on sm_100 where FADD in the
+        # subnormal conversion path gets wrong source register for odd elements
+        # in the 8-wide unrolled vectorized_elementwise_kernel.
+        # e4m3fn subnormals: |x| < 2^-6
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
+        y = x.to(torch.float8_e4m3fn)
+        ref = x.cpu().float().to(torch.float8_e4m3fn)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
+        # Same regression test for e5m2.
+        # e5m2 subnormals: |x| < 2^-14
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
+        y = x.to(torch.float8_e5m2)
+        ref = x.cpu().float().to(torch.float8_e5m2)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())

@@ -2,8 +2,8 @@
 """Module for handling symbolic function registration."""
 
 import warnings
-from collections.abc import Collection, Sequence
-from typing import Callable, Generic, Optional, TypeVar, Union
+from collections.abc import Callable, Collection, Sequence
+from typing import Generic, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.onnx import _constants, errors
@@ -14,7 +14,7 @@ OpsetVersion = int
 
 def _dispatch_opset_version(
     target: OpsetVersion, registered_opsets: Collection[OpsetVersion]
-) -> Optional[OpsetVersion]:
+) -> OpsetVersion | None:
     """Finds the registered opset given a target opset version and the available opsets.
 
     Args:
@@ -96,7 +96,7 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
 
-    def get(self, key: _K, default: Optional[_V] = None):
+    def get(self, key: _K, default: _V | None = None):
         return self._merged.get(key, default)
 
     def __contains__(self, key: object) -> bool:
@@ -143,7 +143,7 @@ class _SymbolicFunctionGroup:
 
     # TODO(justinchuby): Add @functools.lru_cache(maxsize=None) if lookup time becomes
     # a problem.
-    def get(self, opset: OpsetVersion) -> Optional[Callable]:
+    def get(self, opset: OpsetVersion) -> Callable | None:
         """Find the most recent version of the function."""
         version = _dispatch_opset_version(opset, self._functions)
         if version is None:
@@ -164,6 +164,7 @@ class _SymbolicFunctionGroup:
                 f"Replacing the existing function with new function. This is unexpected. "
                 f"Please report it on {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
                 errors.OnnxExporterWarning,
+                stacklevel=2,
             )
         self._functions.set_base(opset, func)
 
@@ -184,7 +185,8 @@ class _SymbolicFunctionGroup:
         """
         if not self._functions.overridden(opset):
             warnings.warn(
-                f"No custom function registered for '{self._name}' opset {opset}"
+                f"No custom function registered for '{self._name}' opset {opset}",
+                stacklevel=2,
             )
             return
         self._functions.remove_override(opset)
@@ -243,7 +245,7 @@ class SymbolicRegistry:
             return
         self._registry[name].remove_custom(opset)
 
-    def get_function_group(self, name: str) -> Optional[_SymbolicFunctionGroup]:
+    def get_function_group(self, name: str) -> _SymbolicFunctionGroup | None:
         """Returns the function group for the given name."""
         return self._registry.get(name)
 
@@ -261,8 +263,8 @@ class SymbolicRegistry:
 
 def onnx_symbolic(
     name: str,
-    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
-    decorate: Optional[Sequence[Callable]] = None,
+    opset: OpsetVersion | Sequence[OpsetVersion],
+    decorate: Sequence[Callable] | None = None,
     custom: bool = False,
 ) -> Callable:
     """Registers a symbolic function.
@@ -312,8 +314,8 @@ def onnx_symbolic(
 
 def custom_onnx_symbolic(
     name: str,
-    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
-    decorate: Optional[Sequence[Callable]] = None,
+    opset: OpsetVersion | Sequence[OpsetVersion],
+    decorate: Sequence[Callable] | None = None,
 ) -> Callable:
     """Registers a custom symbolic function.
 

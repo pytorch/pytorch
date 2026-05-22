@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._export
@@ -52,15 +52,16 @@ class AOTIRunnerUtil:
             )
             gm = ep.module()
         else:
-            gm = torch.export._trace._export_to_torch_ir(
-                model,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                disable_constraint_solver=disable_constraint_solver,
-                # Disabling this flag, because instead we can rely on the mapping
-                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-                restore_fqn=False,
-            )
+            with torch._export.config.patch(use_new_tracer_experimental=True):
+                gm = torch.export._trace._export_to_torch_ir(
+                    model,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    disable_constraint_solver=disable_constraint_solver,
+                    # Disabling this flag, because instead we can rely on the mapping
+                    # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                    restore_fqn=False,
+                )
 
         if IS_FBCODE:
             from deeplearning.aot_inductor.extern_node_thrift_serializer import (
@@ -147,16 +148,19 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def compile(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         example_inputs: tuple[torch.Tensor, ...],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         if not isinstance(model, torch.nn.Module):
             # This should really be the default behavior of torch.export.export
             model = WrapperModule(model)
 
-        with torch.no_grad():
+        with (
+            torch.no_grad(),
+            torch._export.config.patch(use_new_tracer_experimental=True),
+        ):
             # strict=False needs extra migration work
             ep = torch.export.export(
                 model,
@@ -172,10 +176,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         example_inputs: tuple[torch.Tensor, ...],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -188,10 +192,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run_multiple(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         list_example_inputs: list[tuple[torch.Tensor, ...]],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -214,6 +218,7 @@ def check_model(
     dynamic_shapes=None,
     atol=None,
     rtol=None,
+    move_model_to_device=True,
 ):
     with (
         torch.no_grad(),
@@ -225,7 +230,7 @@ def check_model(
         ),
     ):
         torch.manual_seed(0)
-        if not isinstance(model, types.FunctionType):
+        if not isinstance(model, types.FunctionType) and move_model_to_device:
             model = model.to(self.device)
 
         # For non mixed device inputs with default "cpu",set the device manually.

@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
+
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-ignored-qualifiers")
   string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
@@ -26,6 +27,24 @@ macro(set_bool OUT IN)
   endif()
 endmacro()
 
+function(rocm_generate_ck_conf SRC DST)
+  set(CK_ENABLE_INT8  "ON")
+  set(CK_ENABLE_FP16  "ON")
+  set(CK_ENABLE_FP32  "ON")
+  set(CK_ENABLE_FP64  "ON")
+  set(CK_ENABLE_BF16  "ON")
+  set(CK_ENABLE_FP8   "ON")
+  set(CK_ENABLE_BF8   "ON")
+  set(CK_USE_XDL  "ON")
+  set(CK_USE_WMMA "ON")
+
+  configure_file(
+    "${SRC}"
+    "${DST}"
+    @ONLY
+  )
+endfunction()
+
 set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
 set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
 set_bool(AT_BLAS_F2C BLAS_F2C)
@@ -38,7 +57,7 @@ set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
-# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+# At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
 if(USE_CUDA OR USE_ROCM)
   configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 endif()
@@ -47,146 +66,169 @@ if(USE_ROCM)
 endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
-file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
-file(GLOB_RECURSE ATen_TRANSFORMER_HEADERS "native/transformers/*.h")
+file(GLOB_RECURSE ATen_CORE_HEADERS CONFIGURE_DEPENDS  "core/*.h")
+file(GLOB_RECURSE ATen_CORE_SRCS CONFIGURE_DEPENDS "core/*.cpp")
+file(GLOB_RECURSE ATen_TRANSFORMER_HEADERS CONFIGURE_DEPENDS "native/transformers/*.h")
 if(NOT BUILD_LITE_INTERPRETER)
-  file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+  file(GLOB_RECURSE ATen_CORE_TEST_SRCS CONFIGURE_DEPENDS "core/*_test.cpp")
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
-file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
-file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
-file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
-file(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
-file(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
-file(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu" "cuda/tunable/*.cu")
-file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
-file(GLOB cudnn_cpp "cudnn/*.cpp")
-file(GLOB ops_h "ops/*.h")
+file(GLOB base_h CONFIGURE_DEPENDS "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
+file(GLOB base_cpp CONFIGURE_DEPENDS "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp" "accelerator/*.cpp")
+file(GLOB cuda_h CONFIGURE_DEPENDS "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
+file(GLOB cuda_cpp CONFIGURE_DEPENDS "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
+file(GLOB cuda_nvrtc_stub_h CONFIGURE_DEPENDS "cuda/nvrtc_stub/*.h")
+file(GLOB cuda_nvrtc_stub_cpp CONFIGURE_DEPENDS "cuda/nvrtc_stub/*.cpp")
+file(GLOB cuda_cu CONFIGURE_DEPENDS "cuda/*.cu" "cuda/detail/*.cu" "cuda/tunable/*.cu")
+file(GLOB cudnn_h CONFIGURE_DEPENDS "cudnn/*.h" "cudnn/*.cuh")
+file(GLOB cudnn_cpp CONFIGURE_DEPENDS "cudnn/*.cpp")
+file(GLOB ops_h CONFIGURE_DEPENDS "ops/*.h")
 
 # MTIA
-file(GLOB mtia_h "mtia/*.h" "mtia/detail/*.h")
-file(GLOB mtia_cpp "mtia/*.cpp" "mtia/detail/*.cpp")
-file(GLOB_RECURSE native_mtia_cpp "native/mtia/*.cpp")
-file(GLOB_RECURSE native_mtia_h "native/mtia/*.h")
+file(GLOB mtia_h CONFIGURE_DEPENDS "mtia/*.h" "mtia/detail/*.h")
+file(GLOB mtia_cpp CONFIGURE_DEPENDS "mtia/*.cpp" "mtia/detail/*.cpp")
+file(GLOB_RECURSE native_mtia_cpp CONFIGURE_DEPENDS "native/mtia/*.cpp")
+file(GLOB_RECURSE native_mtia_h CONFIGURE_DEPENDS "native/mtia/*.h")
 
-file(GLOB xpu_h "xpu/*.h" "xpu/detail/*.h")
-file(GLOB xpu_cpp "xpu/*.cpp" "xpu/detail/*.cpp")
+file(GLOB xpu_h CONFIGURE_DEPENDS "xpu/*.h" "xpu/detail/*.h")
+file(GLOB xpu_cpp CONFIGURE_DEPENDS "xpu/*.cpp" "xpu/detail/*.cpp")
 
-file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h" "hip/tunable/*.cuh" "hip/tunable/*.h")
-file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp" "hip/tunable/*.cpp")
+file(GLOB hip_h CONFIGURE_DEPENDS "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h" "hip/tunable/*.cuh" "hip/tunable/*.h")
+file(GLOB hip_cpp CONFIGURE_DEPENDS "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp" "hip/tunable/*.cpp")
 list(REMOVE_ITEM hip_cpp "${CMAKE_CURRENT_SOURCE_DIR}/hip/detail/LazyNVRTC.cpp")
-file(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip" "hip/tunable/*.hip")
-file(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
-file(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
-file(GLOB miopen_h "miopen/*.h")
-file(GLOB miopen_cpp "miopen/*.cpp")
+file(GLOB hip_hip CONFIGURE_DEPENDS "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip" "hip/tunable/*.hip")
+file(GLOB hip_nvrtc_stub_h CONFIGURE_DEPENDS "hip/nvrtc_stub/*.h")
+file(GLOB hip_nvrtc_stub_cpp CONFIGURE_DEPENDS "hip/nvrtc_stub/*.cpp")
+file(GLOB miopen_h CONFIGURE_DEPENDS "miopen/*.h")
+file(GLOB miopen_cpp CONFIGURE_DEPENDS "miopen/*.cpp")
 
-file(GLOB mkl_cpp "mkl/*.cpp")
-file(GLOB mkldnn_cpp "mkldnn/*.cpp")
+file(GLOB mkl_cpp CONFIGURE_DEPENDS "mkl/*.cpp")
+file(GLOB mkldnn_cpp CONFIGURE_DEPENDS "mkldnn/*.cpp")
 
-file(GLOB mkldnn_xpu_h "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
-file(GLOB mkldnn_xpu_cpp "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
+file(GLOB mkldnn_xpu_h CONFIGURE_DEPENDS "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
+file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
 
-file(GLOB native_cpp "native/*.cpp")
-file(GLOB native_mkl_cpp "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
-file(GLOB vulkan_cpp "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
+file(GLOB native_cpp CONFIGURE_DEPENDS "native/*.cpp")
+file(GLOB native_mkl_cpp CONFIGURE_DEPENDS "native/mkl/*.cpp")
+file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp")
+file(GLOB vulkan_cpp CONFIGURE_DEPENDS "vulkan/*.cpp")
+file(GLOB native_vulkan_cpp CONFIGURE_DEPENDS "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
-file(GLOB native_eigen_cpp "native/sparse/eigen/*.cpp")
+file(GLOB native_eigen_cpp CONFIGURE_DEPENDS "native/sparse/eigen/*.cpp")
 
 # Metal
-file(GLOB metal_h "metal/*.h")
-file(GLOB metal_cpp "metal/*.cpp")
-file(GLOB_RECURSE native_metal_h "native/metal/*.h")
-file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
-file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm" "native/metal/*.cpp")
+file(GLOB metal_h CONFIGURE_DEPENDS "metal/*.h")
+file(GLOB metal_cpp CONFIGURE_DEPENDS "metal/*.cpp")
+file(GLOB_RECURSE native_metal_h CONFIGURE_DEPENDS "native/metal/*.h")
+file(GLOB metal_test_srcs CONFIGURE_DEPENDS "native/metal/mpscnn/tests/*.mm")
+file(GLOB_RECURSE native_metal_srcs CONFIGURE_DEPENDS "native/metal/*.mm" "native/metal/*.cpp")
 EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
-file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
-file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
+file(GLOB metal_prepack_h CONFIGURE_DEPENDS "native/metal/MetalPrepackOpContext.h")
+file(GLOB metal_prepack_cpp CONFIGURE_DEPENDS "native/metal/MetalPrepackOpRegister.cpp")
 
-file(GLOB native_ao_sparse_cpp
+file(GLOB native_ao_sparse_cpp CONFIGURE_DEPENDS
             "native/ao_sparse/*.cpp"
             "native/ao_sparse/cpu/*.cpp"
             "native/ao_sparse/quantized/*.cpp"
             "native/ao_sparse/quantized/cpu/*.cpp")
 # MPS
-file(GLOB mps_cpp "mps/*.cpp")
-file(GLOB mps_mm "mps/*.mm")
-file(GLOB mps_h "mps/*.h")
-file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
-file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
-file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
-file(GLOB_RECURSE native_mps_h "native/mps/*.h")
-file(GLOB_RECURSE native_sparse_mps_mm "native/sparse/mps/*.mm")
-file(GLOB_RECURSE native_mps_sparse_metal "native/sparse/mps/*.metal")
+file(GLOB mps_cpp CONFIGURE_DEPENDS "mps/*.cpp")
+file(GLOB mps_mm CONFIGURE_DEPENDS "mps/*.mm")
+file(GLOB mps_h CONFIGURE_DEPENDS "mps/*.h")
+file(GLOB_RECURSE native_mps_cpp CONFIGURE_DEPENDS "native/mps/*.cpp")
+file(GLOB_RECURSE native_mps_mm CONFIGURE_DEPENDS "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_metal CONFIGURE_DEPENDS "native/mps/*.metal")
+file(GLOB_RECURSE native_mps_h CONFIGURE_DEPENDS "native/mps/*.h")
+file(GLOB_RECURSE native_sparse_mps_mm CONFIGURE_DEPENDS "native/sparse/mps/*.mm")
+file(GLOB_RECURSE native_mps_sparse_metal CONFIGURE_DEPENDS "native/sparse/mps/*.metal")
 
-file(GLOB native_sparse_cpp "native/sparse/*.cpp")
-file(GLOB native_quantized_cpp
+file(GLOB native_sparse_cpp CONFIGURE_DEPENDS "native/sparse/*.cpp")
+file(GLOB native_quantized_cpp CONFIGURE_DEPENDS
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
-file(GLOB native_nested_cpp "native/nested/*.cpp")
-file(GLOB native_transformers_cpp "native/transformers/*.cpp")
+file(GLOB native_nested_cpp CONFIGURE_DEPENDS "native/nested/*.cpp")
+file(GLOB native_transformers_cpp CONFIGURE_DEPENDS "native/transformers/*.cpp")
 
-file(GLOB native_h "native/*.h")
-file(GLOB native_ao_sparse_h
+file(GLOB native_h CONFIGURE_DEPENDS "native/*.h")
+file(GLOB native_ao_sparse_h CONFIGURE_DEPENDS
             "native/ao_sparse/*.h"
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
-file(GLOB native_cpu_h "native/cpu/*.h")
-file(GLOB native_utils_h "native/utils/*.h")
+file(GLOB native_quantized_h CONFIGURE_DEPENDS "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
+file(GLOB native_cpu_h CONFIGURE_DEPENDS "native/cpu/*.h")
+file(GLOB native_utils_h CONFIGURE_DEPENDS "native/utils/*.h")
 
-file(GLOB native_cuda_cu "native/cuda/*.cu")
-file(GLOB native_cuda_cpp "native/cuda/*.cpp")
-file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
-file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
-file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
-file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
-file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
-file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
-file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
-file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
-file(GLOB native_nested_h "native/nested/*.h")
-file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
-file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
+file(GLOB native_cuda_cu CONFIGURE_DEPENDS "native/cuda/*.cu")
+file(GLOB native_cuda_cpp CONFIGURE_DEPENDS "native/cuda/*.cpp")
+file(GLOB native_cuda_h CONFIGURE_DEPENDS "native/cuda/*.h" "native/cuda/*.cuh")
+file(GLOB native_cuda_linalg_cpp CONFIGURE_DEPENDS "native/cuda/linalg/*.cpp")
+file(GLOB native_hip_h CONFIGURE_DEPENDS "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
+file(GLOB native_cudnn_cpp CONFIGURE_DEPENDS "native/cudnn/*.cpp")
+file(GLOB native_sparse_cuda_cu CONFIGURE_DEPENDS "native/sparse/cuda/*.cu")
+file(GLOB native_sparse_cuda_cpp CONFIGURE_DEPENDS "native/sparse/cuda/*.cpp")
+file(GLOB native_quantized_cuda_cu CONFIGURE_DEPENDS "native/quantized/cuda/*.cu")
+file(GLOB native_quantized_cuda_cpp CONFIGURE_DEPENDS "native/quantized/cuda/*.cpp")
+file(GLOB native_quantized_cudnn_cpp CONFIGURE_DEPENDS "native/quantized/cudnn/*.cpp")
+file(GLOB native_nested_h CONFIGURE_DEPENDS "native/nested/*.h")
+file(GLOB native_nested_cuda_cu CONFIGURE_DEPENDS "native/nested/cuda/*.cu")
+file(GLOB native_nested_cuda_cpp CONFIGURE_DEPENDS "native/nested/cuda/*.cpp")
 
-file(GLOB native_hip_hip "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
-file(GLOB native_hip_cpp "native/hip/*.cpp")
-file(GLOB native_hip_linalg_cpp "native/hip/linalg/*.cpp")
-file(GLOB native_miopen_cpp "native/miopen/*.cpp")
-file(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
-file(GLOB native_nested_hip_hip "native/nested/hip/*.hip")
-file(GLOB native_nested_hip_cpp "native/nested/hip/*.cpp")
-file(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
-file(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
-file(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
-file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
-file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
-file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
-file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
-file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
-file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
-file(GLOB native_utils_cpp "native/utils/*.cpp")
-file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
-file(GLOB flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
-file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_api.cpp")
+file(GLOB native_hip_hip CONFIGURE_DEPENDS "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
+file(GLOB native_hip_cpp CONFIGURE_DEPENDS "native/hip/*.cpp")
+file(GLOB native_hip_linalg_cpp CONFIGURE_DEPENDS "native/hip/linalg/*.cpp")
+file(GLOB native_miopen_cpp CONFIGURE_DEPENDS "native/miopen/*.cpp")
+file(GLOB native_cudnn_hip_cpp CONFIGURE_DEPENDS "native/cudnn/hip/*.cpp")
+file(GLOB native_nested_hip_hip CONFIGURE_DEPENDS "native/nested/hip/*.hip")
+file(GLOB native_nested_hip_cpp CONFIGURE_DEPENDS "native/nested/hip/*.cpp")
+file(GLOB native_sparse_hip_hip CONFIGURE_DEPENDS "native/sparse/hip/*.hip")
+file(GLOB native_sparse_hip_cpp CONFIGURE_DEPENDS "native/sparse/hip/*.cpp")
+file(GLOB native_quantized_hip_hip CONFIGURE_DEPENDS "native/quantized/hip/*.hip")
+file(GLOB native_quantized_hip_cpp CONFIGURE_DEPENDS "native/quantized/hip/*.cpp")
+file(GLOB native_transformers_cuda_cu CONFIGURE_DEPENDS "native/transformers/cuda/*.cu")
+file(GLOB native_transformers_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cuda/*.cpp")
+file(GLOB native_transformers_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/*.hip")
+file(GLOB native_transformers_hip_cpp CONFIGURE_DEPENDS "native/transformers/hip/*.cpp")
+file(GLOB native_transformers_xpu_cpp CONFIGURE_DEPENDS "native/transformers/xpu/*.cpp")
+file(GLOB native_quantized_cudnn_hip_cpp CONFIGURE_DEPENDS "native/quantized/cudnn/hip/*.cpp")
+file(GLOB native_utils_cpp CONFIGURE_DEPENDS "native/utils/*.cpp")
+file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
+file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
+file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
 
 # flash_attention hip sources
-file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
+file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
-    message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
-    caffe2_update_option(USE_ROCM_CK_SDPA ON)
+  # Now building CK by default
+  if(USE_ROCM)
+    if(DEFINED ENV{USE_ROCM_CK_SDPA})
+        if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
+          caffe2_update_option(USE_ROCM_CK_SDPA ON)
+        endif()
+    elseif(NOT WIN32)
+      caffe2_update_option(USE_ROCM_CK_SDPA ON)
+    endif()
+    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
+    # empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA)
+      set(_have_ck_sdpa_arch FALSE)
+      foreach(ARCH gfx942 gfx950)
+        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+          set(_have_ck_sdpa_arch TRUE)
+          break()
+        endif()
+      endforeach()
+      if(NOT _have_ck_sdpa_arch)
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
+      endif()
+    endif()
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(USE_ROCM AND USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})
       list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
       if(NUM_ARCHS GREATER 1)
@@ -195,23 +237,114 @@ if(USE_FLASH_ATTENTION)
       endif()
     endif()
     message(STATUS "USE_ROCM_CK_SDPA is set; building PyTorch with CK SDPA enabled")
+
+    # CK SDPA sources require specific compilation flags
+    set(CK_SDPA_EXTRA_HIPCC_FLAGS
+        -fno-autolink
+        -fhip-new-launch-api
+        -fgnuc-version=4.2.1
+        -fno-implicit-modules
+        -fcxx-exceptions
+        -fexceptions
+        -fcolor-diagnostics
+        -faddrsig
+        -fno-rounding-math
+        -mllvm=-amdgpu-internalize-symbols
+        -fvisibility=hidden
+        -Wno-float-equal
+        -fgpu-flush-denormals-to-zero
+        -Wno-unused-parameter
+        -Wno-unknown-warning-option)
+
+    #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
+    #      Add once that support is integrated
+    #check_cxx_compiler_flag("-fno-offload-uniform-block" HAS_NO_OFFLOAD_UNIFORM_BLOCK)
+    #if(HAS_NO_OFFLOAD_UNIFORM_BLOCK)
+    #      list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -fno-offload-uniform-block)
+    #endif()
+    #check_cxx_compiler_flag("-mllvm --lsr-drop-solution=1" HAS_LSR_DROP_SOLUTION)
+    #if(HAS_LSR_DROP_SOLUTION)
+    #    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm --lsr-drop-solution=1)
+    #endif()
+    #check_cxx_compiler_flag("-mllvm -enable-post-misched=0" HAS_ENABLE_POST_MISCHED)
+    #if(HAS_ENABLE_POST_MISCHED)
+    #    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -enable-post-misched=0)
+    #endif()
+    #set(check-coerce)
+    #check_cxx_compiler_flag(" -mllvm -amdgpu-coerce-illegal-types=1" check-coerce)
+    #if(check-coerce)
+    #  list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+    #endif()
+
+    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-early-inline-all=true)
+    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-function-calls=false)
+
+    # Additional CK compiler flags
+    set(CK_SDPA_EXTRA_HIPCC_OPTIONS
+        CK_ENABLE_BF16
+        CK_ENABLE_BF8
+        CK_ENABLE_FP16
+        CK_ENABLE_FP32
+        CK_ENABLE_FP64
+        CK_ENABLE_FP8
+        CK_ENABLE_INT8
+        CK_USE_FNUZ_FP8
+        CK_USE_GFX94
+        CK_USE_XDL
+        __HIP_PLATFORM_AMD__=1
+        __HIP_PLATFORM_HCC__=1
+        CK_TILE_FMHA_FWD_FAST_EXP2=1
+        CK_TILE_FMHA_FWD_SPLITKV_API=1
+        CK_TILE_FMHA_FWD_APPENDKV_API=1
+        CK_TILE_FMHA_FWD_PAGEDKV_API=1
+        __GCC_HAVE_DWARF2_CFI_ASM=1
+        USE_ROCM_CK_SDPA)
+
     message(STATUS "Generating CK kernel instances...")
     add_subdirectory(native/transformers/hip/flash_attn/ck)
-    file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
-    list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
     # FAv3 Generation
     add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
-    file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
-    list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
+    file(GLOB ck_sdpa_sources_hip CONFIGURE_DEPENDS
+         "native/transformers/hip/flash_attn/ck/*.hip"
+         "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+
+    set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
+
+    # Only build for MI3xx series architectures as building for all targets takes too long
+    # We will selectively add supported architectures when/if needed
+    set(_ck_sdpa_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _ck_sdpa_hip_arches ${ARCH})
+      endif()
+    endforeach()
+
+    add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
+    target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
+    set_target_properties(ck_sdpa PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
+    target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
+    target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
+    target_include_directories(ck_sdpa PUBLIC
+                               ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
+                               ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
+                               ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha
+                               ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel
+                               ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include
+                               ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck
+                               ${AITER_EMBEDDED_HSA_HEADER_DIR}
+                               )
+
   endif()
-  file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
-  file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+  file(GLOB flash_attention_hip_aot_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/aot/*.hip")
+  file(GLOB flash_attention_src_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/src/*.hip")
 endif()
 
 #Mem_eff attention sources
-file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
-file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_attention/kernels/*.cu")
-file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
+file(GLOB mem_eff_attention_cuda_cu CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/*.cu")
+file(GLOB mem_eff_attention_cuda_kernels_cu CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/kernels/*.cu")
+file(GLOB mem_eff_attention_cuda_cpp CONFIGURE_DEPENDS "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
   add_library(flash_attention OBJECT EXCLUDE_FROM_ALL ${flash_attention_cuda_kernels_cu} ${flash_attention_cuda_cpp})
@@ -252,89 +385,127 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
-# FBGEMM GenAI
-IF(USE_FBGEMM_GENAI)
-  set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+# MSLK
+IF(USE_MSLK)
+  set(MSLK_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/mslk/external/)
+  set(MSLK_SRCS ${PROJECT_SOURCE_DIR}/third_party/mslk/csrc/gemm/)
+  set(MSLK_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/mslk/include/)
+
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
-    # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
-    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
-    file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
-    list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
+    # If you want to integrate a kernel from MSLK into torch, you have to add it here.
+    set(MSLK_CUTLASS_KERNELS_REGEX ".*(mx8mx8bf16_grouped|f4f4bf16_grouped|f4f4bf16).*")
+    file(GLOB_RECURSE mslk_native_cuda_cu CONFIGURE_DEPENDS
+      "${MSLK_SRCS}/cutlass/*.cu"
+      "${MSLK_SRCS}/cutlass/**/*.cu")
+    list(FILTER mslk_native_cuda_cu INCLUDE REGEX ${MSLK_CUTLASS_KERNELS_REGEX})
 
-    file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
-      "${FBGEMM_GENAI_SRCS}/common/*.cpp"
+    # PyTorch is not built for 10.0a in CI, due to lack of portability,
+    # so we need to explicitly build these files for 10.0a.
+    foreach(cu_file ${mslk_native_cuda_cu})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${cu_file}"
+        "100a;103f;110a")
+    endforeach()
+
+    file(GLOB_RECURSE mslk_native_cuda_cpp CONFIGURE_DEPENDS
+      "${MSLK_SRCS}/common/*.cpp"
     )
 
     # Combine all source files into a single list
-    list(APPEND fbgemm_genai_all_sources
-      ${fbgemm_genai_native_cuda_cu}
-      ${fbgemm_genai_native_cuda_cpp}
+    list(APPEND mslk_all_sources
+      ${mslk_native_cuda_cu}
+      ${mslk_native_cuda_cpp}
     )
 
     # Now, create the library and provide the sources at the same time
-    add_library(fbgemm_genai OBJECT ${fbgemm_genai_all_sources})
+    add_library(mslk OBJECT ${mslk_all_sources})
 
-    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(mslk PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    set(fbgemm_genai_mx8mx8bf16_grouped
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+    set(mslk_cuh
+      "${MSLK_SRCS}/cutlass/mx8mx8bf16_grouped/"
+      "${MSLK_SRCS}/cutlass/f4f4bf16_grouped/"
     )
 
-    target_include_directories(fbgemm_genai PUBLIC
-      ${FBGEMM_THIRD_PARTY}/cutlass/include
-      ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${fbgemm_genai_mx8mx8bf16_grouped}
-      ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
-      ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
+    target_include_directories(mslk PRIVATE
+      ${MSLK_THIRD_PARTY}/cutlass/include
+      ${MSLK_THIRD_PARTY}/cutlass/tools/util/include
+      ${mslk_cuh}
+      ${MSLK_INCLUDE} # includes mslk/gemm/gemm_torch.h, mslk/utils/utils.h, mslk/utils/tuning_cache.hpp
     )
-  else()
-    if(USE_ROCM)
-      # Only include the kernels we want to build to avoid increasing binary size.
-      file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-        "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
-      set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
-      # Add additional HIPCC compiler flags for performance
-      set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
-        -mllvm
-        -amdgpu-coerce-illegal-types=1
-        -mllvm
-        -enable-post-misched=0
-        -mllvm
-        -greedy-reverse-local-assignment=1
-        -fhip-new-launch-api)
+    # Add MSLK include directories for gemm_torch.h
+    list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
+  elseif(USE_ROCM)
+    # MSLK only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the mslk target ends up with an empty
+    # HIP_ARCHITECTURES and CMake errors out.
+    set(_mslk_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _mslk_hip_arches ${ARCH})
+      endif()
+    endforeach()
+  endif()
+  if(USE_MSLK AND USE_ROCM AND _mslk_hip_arches STREQUAL "")
+    message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+    caffe2_update_option(USE_MSLK OFF)
+  endif()
+  if(USE_MSLK AND USE_ROCM)
+    # Path to vendored CK
+    set(MSLK_CK_DIR "${MSLK_THIRD_PARTY}/composable_kernel")
+    rocm_generate_ck_conf(
+      "${MSLK_CK_DIR}/include/ck/config.h.in"
+      "${MSLK_CK_DIR}/include/ck/config.h"
+    )
+    # Only include the kernels we want to build to avoid increasing binary size.
+    file(GLOB_RECURSE mslk_native_rocm_hip CONFIGURE_DEPENDS
+      "${MSLK_SRCS}/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+      "${MSLK_SRCS}/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+    set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES LANGUAGE HIP)
 
-      hip_add_library(
-        fbgemm_genai STATIC
-        ${fbgemm_genai_native_rocm_hip}
-        HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
-      set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
-      target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+    # Add additional HIP compiler flags for performance
+    set(MSLK_EXTRA_HIP_FLAGS
+      -mllvm=-enable-post-misched=0
+      -mllvm=-greedy-reverse-local-assignment=1
+      -fhip-new-launch-api)
+    if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
+        list(PREPEND MSLK_EXTRA_HIP_FLAGS -mllvm=-amdgpu-coerce-illegal-types=1)
+      endif()
 
-      target_include_directories(fbgemm_genai PUBLIC
-        # FBGEMM version of Composable Kernel is used due to some customizations
-        ${FBGEMM_THIRD_PARTY}/composable_kernel/include
-        ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-        ${FBGEMM_THIRD_PARTY}/cutlass/include
-        ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-        ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
-        ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
-      )
-    endif()
+    add_library(mslk STATIC ${mslk_native_rocm_hip})
+    set_target_properties(mslk PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_mslk_hip_arches}")
+    target_compile_options(mslk PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${MSLK_EXTRA_HIP_FLAGS}> ${HIP_CXX_FLAGS})
+    target_compile_definitions(mslk PRIVATE MSLK_NO_EXTENDED_SHAPES)
+
+    target_include_directories(mslk PRIVATE
+      # MSLK version of Composable Kernel is used due to some customizations
+      ${MSLK_THIRD_PARTY}/composable_kernel/include
+      ${MSLK_THIRD_PARTY}/composable_kernel/library/include
+      ${MSLK_THIRD_PARTY}/cutlass/include
+      ${MSLK_THIRD_PARTY}/cutlass/tools/util/include
+      ${MSLK_INCLUDE} # includes mslk/gemm/gemm_torch.h, mslk/utils/utils.h, mslk/utils/tuning_cache.hpp
+    )
+
+    # Add MSLK include directories for gemm_torch.h
+    list(APPEND ATen_HIP_INCLUDE ${MSLK_INCLUDE})
+  endif()
+
+  # Ensure torch_cpu is built before mslk to avoid race conditions
+  if(TARGET mslk)
+    add_dependencies(mslk torch_cpu)
   endif()
 endif()
 
 # XNNPACK
-file(GLOB native_xnnpack "native/xnnpack/*.cpp")
+file(GLOB native_xnnpack CONFIGURE_DEPENDS "native/xnnpack/*.cpp")
 
 # KLEIDIAI
-file(GLOB native_kleidiai "native/kleidiai/*.cpp")
-file(GLOB native_kleidiai_h "native/kleidiai/*.h")
+file(GLOB native_kleidiai CONFIGURE_DEPENDS "native/kleidiai/*.cpp")
+file(GLOB native_kleidiai_h CONFIGURE_DEPENDS "native/kleidiai/*.h")
 
 # Add files needed from jit folders
 append_filelist("jit_core_headers" ATen_CORE_HEADERS)
@@ -386,9 +557,9 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu/detail)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
@@ -458,33 +629,21 @@ endif()
 
 if(USE_ROCM)
   if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
-    # NOTE: The PyTorch build does not actually add_subdirectory
-    # third_party/composable_kernel or use it as a CMake library. What is used
-    # is header only, so this should be ok, except that the CMake build generates
-    # a ck/config.h. We just do that part here. Without this, the ck.h from the
-    # ROCM SDK may get accidentally used instead.
-    function(_pytorch_rocm_generate_ck_conf)
-      set(CK_ENABLE_INT8 "ON")
-      set(CK_ENABLE_FP16 "ON")
-      set(CK_ENABLE_FP32 "ON")
-      set(CK_ENABLE_FP64 "ON")
-      set(CK_ENABLE_BF16 "ON")
-      set(CK_ENABLE_FP8 "ON")
-      set(CK_ENABLE_BF8 "ON")
-      set(CK_USE_XDL "ON")
-      set(CK_USE_WMMA "ON")
-      configure_file(
-        "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
-        )
-    endfunction()
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
-    _pytorch_rocm_generate_ck_conf()
+    # NOTE: The PyTorch build does not actually add_subdirectory
+    # third_party/composable_kernel or use it as a CMake library. What is used
+    # is header only, so this should be ok, except that the CMake build generates
+    # a ck/config.h. We just do that part here. Without this, the ck.h from the
+    # ROCM SDK may get accidentally used instead.
+    rocm_generate_ck_conf(
+      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+    )
   endif()
 
   # Next two lines are needed because TunableOp uses third-party/fmt
@@ -503,8 +662,8 @@ if(USE_ROCM)
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
   if(NOT USE_ROCM_CK_GEMM)
-    file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
-    file(GLOB native_hip_ck "native/hip/ck*.hip")
+    file(GLOB native_hip_bgemm CONFIGURE_DEPENDS "native/hip/bgemm_kernels/*.hip")
+    file(GLOB native_hip_ck CONFIGURE_DEPENDS "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
@@ -587,6 +746,11 @@ if(UNIX)
   if(HAVE_MALLOC_USABLE_SIZE)
     add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
   endif(HAVE_MALLOC_USABLE_SIZE)
+  set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
+  CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
+  if(HAVE_POSIX_FALLOCATE)
+    add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+  endif(HAVE_POSIX_FALLOCATE)
 endif(UNIX)
 
 ADD_DEFINITIONS(-DUSE_EXTERNAL_MZCRC)
@@ -634,6 +798,7 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(SLEEF_BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(SLEEF_BUILD_SCALAR_LIB OFF CACHE BOOL "libsleefscalar will be built." FORCE)
+    set(SLEEF_DISABLE_OPENMP ON CACHE BOOL "OpenMP only used by sleef DFT and tests, both disabled" FORCE)
     if(WIN32)
       set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
     endif()
@@ -668,12 +833,6 @@ if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
-
-  # Add FBGEMM_GENAI include directories for torch_ops.h
-  if(USE_FBGEMM_GENAI)
-    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
-    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
-  endif()
 
   if($ENV{ATEN_STATIC_CUDA})
     if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
@@ -767,12 +926,23 @@ if(USE_MPS)
             metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
+        set(METALLIB_DEPS kernels_basic.metallib)
+        if(CAN_COMPILE_METAL_40)
+            foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
+                cmake_path(GET SHADER STEM TGT_STEM)
+                string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
+                list(APPEND AIR_40 ${TGT_40})
+                metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0")
+            endforeach()
+            air_to_metallib(kernels_40.metallib ${AIR_40})
+            list(APPEND METALLIB_DEPS kernels_40.metallib)
+        endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
-                          DEPENDS kernels_basic.metallib
+                          DEPENDS ${METALLIB_DEPS}
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib metallib_dummy.cpp)
+        add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
@@ -800,7 +970,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h} ${mkldnn_xpu_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)

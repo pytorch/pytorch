@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: jit"]
-# ruff: noqa: F841
 
 import os
 import sys
@@ -19,7 +18,7 @@ class TestLogging(JitTestCase):
         class ModuleThatLogs(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                for i in range(x.size(0)):
+                for _ in range(x.size(0)):
                     x += 1.0
                     torch.jit._logging.add_stat_value("foo", 1)
 
@@ -33,7 +32,7 @@ class TestLogging(JitTestCase):
         old_logger = torch.jit._logging.set_logger(logger)
         try:
             mtl = ModuleThatLogs()
-            for i in range(5):
+            for _ in range(5):
                 mtl(torch.rand(3, 4, 5))
 
             self.assertEqual(logger.get_counter_val("foo"), 15)
@@ -60,7 +59,7 @@ class TestLogging(JitTestCase):
         class ModuleThatTimes(torch.jit.ScriptModule):
             def forward(self, x):
                 tp_start = torch.jit._logging.time_point()
-                for i in range(30):
+                for _ in range(30):
                     x += 1.0
                 tp_end = torch.jit._logging.time_point()
                 torch.jit._logging.add_stat_value("mytimer", tp_end - tp_start)
@@ -80,7 +79,7 @@ class TestLogging(JitTestCase):
             @torch.jit.script_method
             def forward(self, x):
                 tp_start = torch.jit._logging.time_point()
-                for i in range(30):
+                for _ in range(30):
                     x += 1.0
                 tp_end = torch.jit._logging.time_point()
                 torch.jit._logging.add_stat_value("mytimer", tp_end - tp_start)
@@ -97,7 +96,7 @@ class TestLogging(JitTestCase):
 
     def test_counter_aggregation(self):
         def foo(x):
-            for i in range(3):
+            for _ in range(3):
                 torch.jit._logging.add_stat_value("foo", 1)
             return x + 1.0
 

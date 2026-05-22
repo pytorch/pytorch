@@ -40,7 +40,7 @@ Tensor do_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {
 // When dx is constant, the above formula simplifies
 // to dx * [(\sum_{i=1}^n y_i) - (y_1 + y_n)/2]
 Tensor do_trapezoid(const Tensor& y, double dx, int64_t dim) {
-    return (y.sum(dim) - (y.select(dim, 0) + y.select(dim, -1)) * (0.5)) * dx;
+    return (y.sum(dim) - (y.select(dim, 0) + y.select(dim, -1)) * 0.5) * dx;
 }
 
 Tensor zeros_like_except(const Tensor& y, int64_t dim) {

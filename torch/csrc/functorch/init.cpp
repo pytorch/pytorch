@@ -19,6 +19,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
+#include <c10/core/InferenceMode.h>
 
 #include <iostream>
 
@@ -246,13 +247,36 @@ static RandomnessType get_randomness_enum(const std::string& randomness) {
 static int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
+  // When inference_mode is on, new tensors lack autograd dispatch keys
+  // (TensorImpl strips them in its constructor). Toggle the flag off so
+  // tensors created inside the transform can participate in autograd.
+  // Uses AutogradState::set_inference_mode — not the InferenceMode RAII
+  // guard, which would clobber grad_mode and fw_grad_mode.
+  bool prev_inference_mode = c10::InferenceMode::is_enabled();
+  if (prev_inference_mode) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(false);
+    c10::AutogradState::set_tls_state(state);
+  }
   return initAndPushDynamicLayer(
-      TransformType::Grad, std::nullopt, std::nullopt, prev_grad_mode);
+      TransformType::Grad,
+      std::nullopt,
+      std::nullopt,
+      prev_grad_mode,
+      std::nullopt,
+      std::nullopt,
+      prev_inference_mode);
 }
 
 static int64_t _grad_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Grad);
+  auto& meta = std::get<GradInterpreterMeta>(layer.interpreter().meta());
+  if (meta.prevInferenceMode_) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(true);
+    c10::AutogradState::set_tls_state(state);
+  }
   return layer.layerId();
 }
 
@@ -260,17 +284,31 @@ static int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode =
       c10::AutogradState::get_tls_state().get_fw_grad_mode();
+  bool prev_inference_mode = c10::InferenceMode::is_enabled();
+  if (prev_inference_mode) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(false);
+    c10::AutogradState::set_tls_state(state);
+  }
   return initAndPushDynamicLayer(
       TransformType::Jvp,
       std::nullopt,
       std::nullopt,
       std::nullopt,
-      prev_fwd_grad_mode);
+      prev_fwd_grad_mode,
+      std::nullopt,
+      prev_inference_mode);
 }
 
 static int64_t _jvp_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Jvp);
+  auto& meta = std::get<JvpInterpreterMeta>(layer.interpreter().meta());
+  if (meta.prevInferenceMode_) {
+    auto state = c10::AutogradState::get_tls_state();
+    state.set_inference_mode(true);
+    c10::AutogradState::set_tls_state(state);
+  }
   return layer.layerId();
 }
 
@@ -363,6 +401,13 @@ static int64_t maybe_get_level(const Tensor& tensor) {
   return -1;
 }
 
+static void maybe_unsafe_set_level(const Tensor& tensor, int64_t level) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    return batched->_unsafe_set_level(level);
+  }
+}
+
 static int64_t maybe_get_bdim(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
@@ -409,9 +454,15 @@ static void dump_local_tls() {
 namespace {
 
 // Pop the DynamicLayer stack until it's at the given depth.
+// Used by Dynamo for error-recovery cleanup of the transform stack.
+//
+// NB: we peek at .back() to determine the type, then call the
+// type-specific decrement helper which does the actual pop.
+// Do NOT pop before the switch — the helpers call
+// popDynamicLayerAndDeleteMetadata() internally.
 void popDynamicLayerStackToDepth(size_t depth) {
   while (at::functorch::getDynamicLayerStack().size() > depth) {
-    const auto top = popDynamicLayer();
+    const auto& top = at::functorch::getDynamicLayerStack().back();
     switch (top.key()) {
       case at::functorch::TransformType::Vmap:
         _vmap_decrement_nesting();
@@ -519,6 +570,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
+  m.def("_maybe_unsafe_set_level", &maybe_unsafe_set_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
   m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);

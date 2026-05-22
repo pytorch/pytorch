@@ -286,13 +286,46 @@ class TestMathOps(torch.nn.Module):
         return torch.stack((stack_input, stack_other), dim=0)
 
 
+class TestDropout(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        split = x.split([20, 20, 20, 20, 20], 1)
+        getitem_1 = split[0]
+        getitem_2 = split[1]
+        getitem_3 = split[2]
+        getitem_4 = split[3]
+        getitem_5 = split[4]
+        dropout = torch.nn.functional.dropout(
+            getitem_1, p=0.05, training=True, inplace=False
+        )
+        dropout_1 = torch.nn.functional.dropout(
+            getitem_2, p=0.05, training=True, inplace=False
+        )
+        dropout_2 = torch.nn.functional.dropout(
+            getitem_3, p=0.05, training=True, inplace=False
+        )
+        dropout_3 = torch.nn.functional.dropout(
+            getitem_4, p=0.05, training=True, inplace=False
+        )
+        dropout_4 = torch.nn.functional.dropout(
+            getitem_5, p=0.05, training=True, inplace=False
+        )
+        return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
+
+
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            assert key2 in res_dict, f"{key1} does not exist in traced module"
+            if key2 not in res_dict:
+                raise AssertionError(f"{key1} does not exist in traced module")
             if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
                 return False
         return True
@@ -424,6 +457,111 @@ class TestGroupBatchFusion(TestCase):
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
+
+    @requires_gpu()
+    def test_as_strided_storage_offset_after_mm_fusion(self):
+        """
+        Post-grad batch linear fusion rewrites parallel mm nodes into a
+        batched bmm followed by select views. The select outputs preserve the
+        original row stride, but they inherit a non-zero storage offset.
+        Downstream as_strided must inherit that offset instead of resetting to
+        the base storage offset.
+        """
+        import copy
+
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.decomposition import select_decomp_table
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            graph_search_options,
+            PostGradBatchLinearFusion,
+        )
+        from torch._inductor.pattern_matcher import stable_topological_sort
+
+        fused_counts = []
+
+        def fusing_compiler(gm, example_inputs):
+            opts = graph_search_options.copy()
+            opts["min_fuse_set_size"] = 3
+            rule = PostGradBatchLinearFusion(graph_search_options=opts)
+            mm_nodes = [n for n in gm.graph.nodes if rule.match(n) is not None]
+            fused_counts.append(len(mm_nodes))
+            if len(mm_nodes) >= 3:
+                rule.fuse(gm.graph, mm_nodes[:3])
+                stable_topological_sort(gm.graph)
+                gm.graph.lint()
+                gm.recompile()
+            return compile_fx_inner(gm, example_inputs)
+
+        fusing_backend = aot_autograd(
+            fw_compiler=fusing_compiler,
+            decompositions=select_decomp_table(),
+        )
+
+        class QKVModel(torch.nn.Module):
+            def __init__(self, hidden_size=64, num_heads=4):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+                self.q_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.k_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.v_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.scale = self.head_dim**0.5
+
+            def forward(self, x):
+                # Reduced-size version of the issue author's QKV repro.
+                x = x.permute(1, 0, 2)
+                q = self.q_proj(x)
+                k = self.k_proj(x)
+                v = self.v_proj(x)
+                seq_len, batch_size, _ = q.shape
+
+                q = q / self.scale
+                q = q.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                q = q.permute(2, 1, 0, 3)
+                q = q.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                q = q.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+
+                k = k.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                k = k.permute(2, 1, 0, 3)
+                k = k.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                k = k.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+                k = k.permute(0, 2, 1)
+
+                v = v.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                v = v.permute(2, 1, 0, 3)
+                v = v.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                v = v.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+                v = v.permute(0, 2, 1)
+
+                return torch.bmm(q, k), k, v
+
+        torch.manual_seed(42)
+        model = QKVModel().to(GPU_TYPE).eval()
+        x = torch.randn(1, 8, 64, device=GPU_TYPE)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            ref = model(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(copy.deepcopy(model), backend=fusing_backend)
+        with torch.no_grad():
+            res = compiled(x)
+
+        self.assertEqual(fused_counts, [3])
+        for ref_t, res_t in zip(ref, res):
+            self.assertEqual(ref_t, res_t, rtol=1e-3, atol=1e-3)
 
     @requires_gpu()
     @torch._inductor.config.patch(
@@ -581,6 +719,24 @@ class TestGroupBatchFusion(TestCase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_dropout": {},
+        }
+    )
+    def test_batch_dropout_pre_grad_fusion(self):
+        counters.clear()
+        module = TestDropout(GPU_TYPE)
+        input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
+        traced = torch.compile(module)
+        module(*input)
+        traced(*input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
+        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
 
 class TestBMMFusionModule(torch.nn.Module):
     def __init__(self) -> None:
@@ -634,9 +790,10 @@ class TestFindIndependentSubsetGreedy(TestCase):
         unsatisfied = 0
         while desc:
             unsatisfied += 1
-            assert unsatisfied <= len(desc)  # cycle or bad input?
+            if unsatisfied > len(desc):
+                raise AssertionError("cycle or bad input?")
             name, v = desc.popleft()
-            args = tuple(lookup.get(n, None) for n in v)
+            args = tuple(lookup.get(n) for n in v)
             if None in args:
                 desc.append((name, v))
                 continue

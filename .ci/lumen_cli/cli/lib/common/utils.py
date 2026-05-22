@@ -2,6 +2,8 @@
 General Utility helpers for CLI tasks.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import shlex
@@ -9,7 +11,6 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 
 
 logger = logging.getLogger(__name__)
@@ -19,8 +20,8 @@ def run_command(
     cmd: str,
     use_shell: bool = False,
     log_cmd: bool = True,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
+    cwd: str | None = None,
+    env: dict | None = None,
     check: bool = True,
 ) -> int:
     """Run a command with optional shell execution."""
@@ -61,7 +62,7 @@ def run_command(
     return proc.returncode
 
 
-def str2bool(value: Optional[str]) -> bool:
+def str2bool(value: str | None) -> bool:
     """Convert environment variables to boolean values."""
     if not value:
         return False
@@ -120,7 +121,7 @@ def working_directory(path: str):
 
 def get_wheels(
     output_dir: Path,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
 ) -> list[str]:
     """Return a list of wheels found in the given output directory."""
     root = Path(output_dir)

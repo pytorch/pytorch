@@ -31,6 +31,7 @@ enum class OpType : std::uint8_t {
   _REDUCE_SCATTER_BASE = 16,
   COALESCED = 17,
   _ALLREDUCE_SPARSE = 18,
+  REDUCE_SCATTER_TENSOR_COALESCED = 19,
   UNKNOWN = 100,
 };
 
@@ -73,7 +74,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Returns exception if isSuccess() returned false.
   virtual std::exception_ptr exception() const;
 
-  // Returns source rank if this objects represents a recv-from-any.
+  // Returns source rank if this object represents a recv-from-any.
   virtual int sourceRank() const;
 
   // Returns result tensors, if applicable.
@@ -135,7 +136,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
   OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
-      const c10::intrusive_ptr<c10::ivalue::Future>&);
+      const c10::intrusive_ptr<c10::ivalue::Future>& /*future*/);
 
  protected:
   // Completes the work object and optionally sets the exception in a
@@ -166,8 +167,8 @@ struct TORCH_API WorkInfo {
   WorkInfo(
       const OpType& opType,
       const uint64_t seq,
-      const std::chrono::time_point<std::chrono::system_clock>& timeStarted,
-      const std::chrono::time_point<std::chrono::system_clock>& timeFinished,
+      const std::chrono::time_point<std::chrono::steady_clock>& timeStarted,
+      const std::chrono::time_point<std::chrono::steady_clock>& timeFinished,
       const std::chrono::duration<float>& activeDuration)
       : opType(opType),
         seq(seq),
@@ -177,9 +178,12 @@ struct TORCH_API WorkInfo {
 
   OpType opType;
   uint64_t seq;
-  std::chrono::time_point<std::chrono::system_clock> timeStarted;
-  std::chrono::time_point<std::chrono::system_clock> timeFinished;
+  std::chrono::time_point<std::chrono::steady_clock> timeStarted;
+  std::chrono::time_point<std::chrono::steady_clock> timeFinished;
   std::chrono::duration<float> activeDuration;
 };
+
+TORCH_API void set_comm_profiling_name(const std::string& name);
+TORCH_API const std::string& get_comm_profiling_name();
 
 } // namespace c10d

@@ -86,7 +86,7 @@ copy /Y "%LIBTORCH_PREFIX%-%PYTORCH_BUILD_VERSION%.zip" "%PYTORCH_FINAL_PACKAGE_
 goto build_end
 
 :pytorch
-%PYTHON_EXEC% setup.py bdist_wheel -d "%PYTORCH_FINAL_PACKAGE_DIR%"
+%PYTHON_EXEC% -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 
 :build_end
 IF ERRORLEVEL 1 exit /b 1

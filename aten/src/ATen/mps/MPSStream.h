@@ -11,10 +11,15 @@
 #include <c10/util/Exception.h>
 
 #ifdef __OBJC__
-#include <Foundation/Foundation.h>
+// Apple framework headers emit deprecation warnings from CarbonCore and
+// missing-attribute warnings from MPSGraph on recent macOS SDKs.
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wobjc-property-no-attribute")
 #include <Metal/Metal.h>
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 typedef MPSCommandBuffer* MPSCommandBuffer_t;
 typedef id<MTLCommandQueue> MTLCommandQueue_t;
 typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
@@ -73,7 +78,6 @@ class TORCH_API MPSStream {
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
-  void fill(MTLBuffer_t buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -110,6 +114,9 @@ class TORCH_API MPSStream {
     return _stream;
   }
 
+  MTLBuffer_t getErrorBuffer();
+  void checkLastError();
+
  private:
   Stream _stream;
   MTLCommandQueue_t _commandQueue = nil;
@@ -121,6 +128,8 @@ class TORCH_API MPSStream {
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  // Buffer that contains last raised error
+  MTLBuffer_t _errorBuffer = nil;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
@@ -155,4 +164,7 @@ class TORCH_API MPSStreamImpl {
   MPSStreamImpl();
 };
 
+#ifdef __OBJC__
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
+#endif
 } // namespace at::mps

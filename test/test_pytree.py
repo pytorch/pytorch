@@ -1,8 +1,10 @@
 # Owner(s): ["module: pytree"]
 
+import copy
 import enum
 import inspect
 import os
+import pickle
 import re
 import subprocess
 import sys
@@ -11,7 +13,7 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -22,6 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -52,6 +55,14 @@ class GlobalDummyType:
         self.x = x
         self.y = y
 
+    def __eq__(self, other):
+        if not isinstance(other, GlobalDummyType):
+            return NotImplemented
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
 
 cxx_pytree.register_pytree_node(
     GlobalDummyType,
@@ -63,9 +74,6 @@ cxx_pytree.register_pytree_node(
 
 class TestEnum(enum.Enum):
     A = auto()
-
-
-python_leafspec = python_pytree.LeafSpec()
 
 
 class TestGenericPytree(TestCase):
@@ -197,7 +205,7 @@ class TestGenericPytree(TestCase):
         def run_test_with_leaf(leaf):
             values, treespec = pytree.tree_flatten(leaf)
             self.assertEqual(values, [leaf])
-            self.assertEqual(treespec, pytree.LeafSpec())
+            self.assertEqual(treespec, pytree.treespec_leaf())
 
             unflattened = pytree.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, leaf)
@@ -215,7 +223,7 @@ class TestGenericPytree(TestCase):
                 (
                     python_pytree,
                     lambda tup: python_pytree.TreeSpec(
-                        tuple, None, [python_leafspec for _ in tup]
+                        tuple, None, [python_pytree.treespec_leaf() for _ in tup]
                     ),
                 ),
                 name="python",
@@ -250,7 +258,7 @@ class TestGenericPytree(TestCase):
                 (
                     python_pytree,
                     lambda lst: python_pytree.TreeSpec(
-                        list, None, [python_leafspec for _ in lst]
+                        list, None, [python_pytree.treespec_leaf() for _ in lst]
                     ),
                 ),
                 name="python",
@@ -286,7 +294,7 @@ class TestGenericPytree(TestCase):
                     lambda dct: python_pytree.TreeSpec(
                         dict,
                         list(dct.keys()),
-                        [python_leafspec for _ in dct.values()],
+                        [python_pytree.treespec_leaf() for _ in dct.values()],
                     ),
                 ),
                 name="python",
@@ -327,7 +335,7 @@ class TestGenericPytree(TestCase):
                     lambda odict: python_pytree.TreeSpec(
                         OrderedDict,
                         list(odict.keys()),
-                        [python_leafspec for _ in odict.values()],
+                        [python_pytree.treespec_leaf() for _ in odict.values()],
                     ),
                 ),
                 name="python",
@@ -371,7 +379,7 @@ class TestGenericPytree(TestCase):
                     lambda ddct: python_pytree.TreeSpec(
                         defaultdict,
                         [ddct.default_factory, list(ddct.keys())],
-                        [python_leafspec for _ in ddct.values()],
+                        [python_pytree.treespec_leaf() for _ in ddct.values()],
                     ),
                 ),
                 name="python",
@@ -413,7 +421,7 @@ class TestGenericPytree(TestCase):
                 (
                     python_pytree,
                     lambda deq: python_pytree.TreeSpec(
-                        deque, deq.maxlen, [python_leafspec for _ in deq]
+                        deque, deq.maxlen, [python_pytree.treespec_leaf() for _ in deq]
                     ),
                 ),
                 name="python",
@@ -453,7 +461,7 @@ class TestGenericPytree(TestCase):
         def run_test(tup):
             if pytree is python_pytree:
                 expected_spec = python_pytree.TreeSpec(
-                    namedtuple, Point, [python_leafspec for _ in tup]
+                    namedtuple, Point, [python_pytree.treespec_leaf() for _ in tup]
                 )
             else:
                 expected_spec = cxx_pytree.tree_structure(Point(0, 1))
@@ -603,6 +611,24 @@ class TestGenericPytree(TestCase):
         ]
         for case in cases:
             run_test(case)
+
+    @parametrize_pytree_module
+    def test_tree_map_dict_order(self, pytree):
+        d = {"b": 2, "a": 1, "c": 3}
+        od = OrderedDict([("b", 2), ("a", 1), ("c", 3)])
+        dd = defaultdict(int, {"b": 2, "a": 1, "c": 3})
+        for tree in (d, od, dd):
+            result = pytree.tree_map(lambda x: x, tree)
+            self.assertEqual(
+                list(result.keys()),
+                list(tree.keys()),
+                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+            )
+            self.assertEqual(
+                list(result.values()),
+                list(tree.values()),
+                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+            )
 
     @parametrize_pytree_module
     def test_tree_map_only(self, pytree):
@@ -793,6 +819,38 @@ class TestGenericPytree(TestCase):
         deserialized_spec = pytree.treespec_loads(serialized)
         self.assertEqual(spec, deserialized_spec)
 
+    @parametrize_pytree_module
+    def test_treespec_deepcopy_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = copy.deepcopy(treespec)
+            self.assertEqual(treespec, reconstructed)
+
+    @parametrize_pytree_module
+    def test_treespec_pickle_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = pickle.loads(pickle.dumps(treespec))
+            self.assertEqual(treespec, reconstructed)
+
 
 class TestPythonPytree(TestCase):
     def test_deprecated_register_pytree_node(self):
@@ -848,16 +906,16 @@ if "optree" in sys.modules:
 
     def test_treespec_equality(self):
         self.assertEqual(
-            python_pytree.LeafSpec(),
-            python_pytree.LeafSpec(),
+            python_pytree.treespec_leaf(),
+            python_pytree.treespec_leaf(),
         )
         self.assertEqual(
             python_pytree.TreeSpec(list, None, []),
             python_pytree.TreeSpec(list, None, []),
         )
         self.assertEqual(
-            python_pytree.TreeSpec(list, None, [python_pytree.LeafSpec()]),
-            python_pytree.TreeSpec(list, None, [python_pytree.LeafSpec()]),
+            python_pytree.TreeSpec(list, None, [python_pytree.treespec_leaf()]),
+            python_pytree.TreeSpec(list, None, [python_pytree.treespec_leaf()]),
         )
         self.assertFalse(
             python_pytree.TreeSpec(tuple, None, [])
@@ -892,24 +950,32 @@ if "optree" in sys.modules:
             # python_pytree.tree_structure({})
             python_pytree.TreeSpec(dict, [], []),
             # python_pytree.tree_structure([0])
-            python_pytree.TreeSpec(list, None, [python_leafspec]),
+            python_pytree.TreeSpec(list, None, [python_pytree.treespec_leaf()]),
             # python_pytree.tree_structure([0, 1])
             python_pytree.TreeSpec(
                 list,
                 None,
-                [python_leafspec, python_leafspec],
+                [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
             ),
             # python_pytree.tree_structure((0, 1, 2))
             python_pytree.TreeSpec(
                 tuple,
                 None,
-                [python_leafspec, python_leafspec, python_leafspec],
+                [
+                    python_pytree.treespec_leaf(),
+                    python_pytree.treespec_leaf(),
+                    python_pytree.treespec_leaf(),
+                ],
             ),
             # python_pytree.tree_structure({"a": 0, "b": 1, "c": 2})
             python_pytree.TreeSpec(
                 dict,
                 ["a", "b", "c"],
-                [python_leafspec, python_leafspec, python_leafspec],
+                [
+                    python_pytree.treespec_leaf(),
+                    python_pytree.treespec_leaf(),
+                    python_pytree.treespec_leaf(),
+                ],
             ),
             # python_pytree.tree_structure(OrderedDict([("a", (0, 1)), ("b", 2), ("c", {"a": 3, "b": 4, "c": 5})])
             python_pytree.TreeSpec(
@@ -919,13 +985,17 @@ if "optree" in sys.modules:
                     python_pytree.TreeSpec(
                         tuple,
                         None,
-                        [python_leafspec, python_leafspec],
+                        [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
                     ),
-                    python_leafspec,
+                    python_pytree.treespec_leaf(),
                     python_pytree.TreeSpec(
                         dict,
                         ["a", "b", "c"],
-                        [python_leafspec, python_leafspec, python_leafspec],
+                        [
+                            python_pytree.treespec_leaf(),
+                            python_pytree.treespec_leaf(),
+                            python_pytree.treespec_leaf(),
+                        ],
                     ),
                 ],
             ),
@@ -938,12 +1008,15 @@ if "optree" in sys.modules:
                         tuple,
                         None,
                         [
-                            python_leafspec,
-                            python_leafspec,
+                            python_pytree.treespec_leaf(),
+                            python_pytree.treespec_leaf(),
                             python_pytree.TreeSpec(
                                 list,
                                 None,
-                                [python_leafspec, python_leafspec],
+                                [
+                                    python_pytree.treespec_leaf(),
+                                    python_pytree.treespec_leaf(),
+                                ],
                             ),
                         ],
                     ),
@@ -957,12 +1030,12 @@ if "optree" in sys.modules:
                     python_pytree.TreeSpec(
                         list,
                         None,
-                        [python_leafspec, python_leafspec],
+                        [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
                     ),
                     python_pytree.TreeSpec(
                         list,
                         None,
-                        [python_leafspec, python_leafspec],
+                        [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
                     ),
                     python_pytree.TreeSpec(dict, [], []),
                 ],
@@ -991,7 +1064,7 @@ if "optree" in sys.modules:
                     list,
                     None,
                     [
-                        python_leafspec,
+                        python_pytree.treespec_leaf(),
                     ],
                 ),
             ],
@@ -1000,7 +1073,7 @@ if "optree" in sys.modules:
         self.assertIsInstance(serialized_spec, str)
 
     def test_pytree_serialize_enum(self):
-        spec = python_pytree.TreeSpec(dict, TestEnum.A, [python_leafspec])
+        spec = python_pytree.TreeSpec(dict, TestEnum.A, [python_pytree.treespec_leaf()])
 
         serialized_spec = python_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
@@ -1163,12 +1236,20 @@ if "optree" in sys.modules:
             OrderedDict,
             [1, 2, 3],
             [
-                python_pytree.TreeSpec(tuple, None, [python_leafspec, python_leafspec]),
-                python_leafspec,
+                python_pytree.TreeSpec(
+                    tuple,
+                    None,
+                    [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
+                ),
+                python_pytree.treespec_leaf(),
                 python_pytree.TreeSpec(
                     dict,
                     [4, 5, 6],
-                    [python_leafspec, python_leafspec, python_leafspec],
+                    [
+                        python_pytree.treespec_leaf(),
+                        python_pytree.treespec_leaf(),
+                        python_pytree.treespec_leaf(),
+                    ],
                 ),
             ],
         )
@@ -1209,7 +1290,7 @@ if "optree" in sys.modules:
         class Data:
             a: torch.Tensor
             b: str = "moo"
-            c: Optional[str] = None
+            c: str | None = None
             d: str = field(init=False, default="")
 
         python_pytree.register_dataclass(Data)
@@ -1251,10 +1332,13 @@ if "optree" in sys.modules:
             python_pytree.register_dataclass(CustomClass)
 
         python_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
-        c = CustomClass(torch.tensor(0), torch.tensor(1))
-        mapped = python_pytree.tree_map(lambda x: x + 1, c)
-        self.assertEqual(mapped.x, torch.tensor(1))
-        self.assertEqual(mapped.y, torch.tensor(2))
+        try:
+            c = CustomClass(torch.tensor(0), torch.tensor(1))
+            mapped = python_pytree.tree_map(lambda x: x + 1, c)
+            self.assertEqual(mapped.x, torch.tensor(1))
+            self.assertEqual(mapped.y, torch.tensor(2))
+        finally:
+            python_pytree._deregister_pytree_node(CustomClass)
 
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
@@ -1449,11 +1533,31 @@ if "optree" in sys.modules:
 
 class TestCxxPytree(TestCase):
     def setUp(self):
+        super().setUp()
         if IS_FBCODE:
             raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
 
+    def assertEqual(self, x, y, *args, **kwargs):
+        x_typename, y_typename = type(x).__name__, type(y).__name__
+        if not ("treespec" in x_typename.lower() or "treespec" in y_typename.lower()):
+            super().assertEqual(x, y, *args, **kwargs)
+
+        # The Dynamo polyfill returns a polyfilled Python class for C++ PyTreeSpec instead of the
+        # C++ class. So we compare the type names and reprs instead because the types themselves
+        # won't be equal.
+        super().assertEqual(x_typename, y_typename, *args, **kwargs)
+        if not TEST_WITH_TORCHDYNAMO or type(x) is type(y):
+            super().assertEqual(x, y, *args, **kwargs)
+        else:
+            super().assertEqual(
+                x.unflatten(range(x.num_leaves)),
+                y.unflatten(range(y.num_leaves)),
+                *args,
+                **kwargs,
+            )
+
     def test_treespec_equality(self):
-        self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
+        self.assertEqual(cxx_pytree.treespec_leaf(), cxx_pytree.treespec_leaf())
 
     def test_treespec_repr(self):
         # Check that it looks sane
@@ -1492,7 +1596,9 @@ class TestCxxPytree(TestCase):
 
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
-        self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
+
+        roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
+        self.assertEqual(roundtrip_spec, spec)
 
     def test_pytree_serialize_namedtuple(self):
         python_pytree._register_namedtuple(
@@ -1524,6 +1630,14 @@ class TestCxxPytree(TestCase):
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
+
+            def __eq__(self, other):
+                if not isinstance(other, LocalDummyType):
+                    return NotImplemented
+                return self.x == other.x and self.y == other.y
+
+            def __hash__(self):
+                return hash((self.x, self.y))
 
         cxx_pytree.register_pytree_node(
             LocalDummyType,

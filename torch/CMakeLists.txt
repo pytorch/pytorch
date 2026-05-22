@@ -81,7 +81,6 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 set(TORCH_PYTHON_LINK_LIBRARIES
     Python::Module
     pybind::pybind11
-    opentelemetry::api
     httplib
     nlohmann
     moodycamel
@@ -173,7 +172,6 @@ endif()
 if(USE_XPU)
     include(${TORCH_ROOT}/cmake/public/xpu.cmake)
     append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
-
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 
@@ -235,9 +233,9 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
 
-file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
-file(GLOB_RECURSE pyi_python "${TOOLS_PATH}/pyi/*.py")
+file(GLOB_RECURSE torchgen_python CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+file(GLOB_RECURSE autograd_python CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE pyi_python CONFIGURE_DEPENDS "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -263,7 +261,7 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
-file(GLOB_RECURSE datapipe_files "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
+file(GLOB_RECURSE datapipe_files CONFIGURE_DEPENDS "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
@@ -307,11 +305,6 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-endif()
-
-if(NOT MSVC)
-  # cudaProfilerInitialize must go away
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
 endif()
 
 # coreml
@@ -487,10 +480,11 @@ endif()
 
 add_custom_target(
   gen_torch_version ALL
-  "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+  "${Python_EXECUTABLE}" -m tools.generate_torch_version
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
-    --hip-version=${HIP_VERSION}
+    --hip-version=${HIP_VERSION_CLEAN}
+    --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
   COMMENT "Regenerating version file..."

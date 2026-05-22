@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import logging
 import os
 import unittest
@@ -13,6 +12,7 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import try_import_ck_lib
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -32,20 +32,8 @@ if HAS_CUDA_AND_TRITON:
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
-
-
-_test_env = {
-    "PATH": _get_path_without_sccache(),
-    "DISABLE_SCCACHE": "1",
-}
+# patch env for tests if needed
+_test_env = {}
 
 
 @instantiate_parametrized_tests
@@ -61,13 +49,10 @@ class TestCKBackend(TestCase):
         )
 
         torch.random.manual_seed(1234)
-        try:
-            import ck4inductor  # @manual
 
-            self.ck_dir = os.path.dirname(ck4inductor.__file__)
-            os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
-        except ImportError as e:
-            raise unittest.SkipTest("Composable Kernel library not installed") from e
+        self.ck_dir, _, _, _ = try_import_ck_lib()
+        if not self.ck_dir:
+            raise unittest.SkipTest("Composable Kernel library is not installed")
 
         try:
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
@@ -79,7 +64,15 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "CKTILE", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "CKTILE", "ATen,CK"),
+        name_fn=lambda b: {
+            "CK": "standalone_ck",
+            "CKTILE": "standalone_cktile",
+            "ATen,CK": "fallback",
+        }[b],
+    )
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
@@ -97,7 +90,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -131,7 +125,11 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK",))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     @parametrize("autotune_in_subproc", (True,))
     def test_max_autotune_precompile_matmul_dynamic(
         self, max_autotune_gemm_backends, autotune_in_subproc
@@ -147,7 +145,8 @@ class TestCKBackend(TestCase):
 
         torch._dynamo.mark_dynamic(a, 0)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -179,7 +178,11 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
         End to end test for picking preselected ck instances
@@ -193,7 +196,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(2048, 256, **tensor_options).transpose(0, 1)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -225,7 +229,8 @@ class TestCKBackend(TestCase):
         a = torch.empty_strided((50257, 32768), (1, 50304), **tensor_options)
         b = torch.empty_strided((32768, 768), (768, 1), **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -252,18 +257,32 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
-    @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
-    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
+    @parametrize(
+        "x_shape",
+        ([4096, 2048], [2048], [4096, 1]),
+        name_fn=lambda x_shape: f"x_shape_{'x'.join(map(str, x_shape))}",
+    )
+    @parametrize(
+        "dtype",
+        (torch.float16, torch.bfloat16),
+        name_fn=lambda d: {torch.float16: "float16", torch.bfloat16: "bfloat16"}[d],
+    )
+    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
-        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        tensor_options = {"device": "cuda", "dtype": dtype}
         x = torch.ones(x_shape, **tensor_options)
         a = torch.randn(m, k, **tensor_options)
         b = torch.randn(k, n, **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -288,9 +307,16 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager)
 
+    @unittest.skip(
+        "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
+    )
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
@@ -331,7 +357,8 @@ class TestCKBackend(TestCase):
         # quantize input x
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
@@ -382,7 +409,11 @@ class TestCKBackend(TestCase):
         os.environ,
         {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
     )
-    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
+    @parametrize(
+        "max_autotune_conv_backends",
+        ("CK", "ATEN,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
         tensor_options = {"device": "cuda", "dtype": torch.float32}
 
@@ -391,7 +422,8 @@ class TestCKBackend(TestCase):
         x_cl = x.to(memory_format=torch.channels_last)
         w_cl = w.to(memory_format=torch.channels_last)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -418,7 +450,11 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize(
+        "max_autotune_gemm_backends",
+        ("CK", "ATen,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
     def test_max_autotune_precompile_bmm(
         self,
         max_autotune_gemm_backends,
@@ -435,7 +471,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(16, 2240, 256, **tensor_options)
         b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(

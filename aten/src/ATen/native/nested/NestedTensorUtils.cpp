@@ -37,7 +37,7 @@ std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(
   if (sizes.dim() == 0) {
     return {};
   }
-  const auto sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto sizes_ptr = sizes.const_data_ptr<int64_t>();
   const auto sizes_size_0 = sizes.sizes()[0];
   const auto sizes_size_1 = sizes.sizes()[1];
   TORCH_INTERNAL_ASSERT(sizes_size_1 > 0);
@@ -88,14 +88,14 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  const int64_t *offsets_ptr = offsets.const_data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);
   for (const auto split_idx : c10::irange(chunks)) {
       auto new_sizes = sizes.clone();
       auto new_strides = strides.clone();
-      // This copys offsets so we are safe to move
+      // This copies offsets so we are safe to move
       auto new_offsets = offsets.clone();
       int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
       int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
@@ -143,7 +143,7 @@ std::vector<Tensor> split_with_sizes_nested(
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  const int64_t *offsets_ptr = offsets.const_data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);

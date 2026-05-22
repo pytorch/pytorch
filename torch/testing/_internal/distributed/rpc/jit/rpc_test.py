@@ -85,7 +85,7 @@ class RRefAPITest:
         ):
             rref_local_value(rref)
 
-        ret = ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
+        ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
         self.assertEqual(ret, torch.add(torch.ones(2, 2), 1))
 
     @dist_init
@@ -508,7 +508,7 @@ def two_args_two_kwargs(
 
 @torch.jit.script
 def assorted_types_args_kwargs(
-    tensor_arg: Tensor,  # noqa: E999
+    tensor_arg: Tensor,
     str_arg: str,
     int_arg: int,
     tensor_kwarg: Tensor = torch.tensor([2, 2]),
@@ -684,7 +684,7 @@ class JitRpcOpTest:
 
             @torch.jit.script
             def script_rpc_async_call_with_less_args(
-                dst_worker_name: str,  # noqa: E999
+                dst_worker_name: str,
             ):
                 args = (torch.tensor([1, 1]),)
                 kwargs = {}
@@ -729,7 +729,7 @@ class JitRpcOpTest:
         # Notice, kwargs matching happens during execution.
         @torch.jit.script
         def script_rpc_async_call_with_unexpected_kwarg(
-            dst_worker_name: str,  # noqa: E999
+            dst_worker_name: str,
         ):
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {"third_kwarg": torch.tensor([1, 1])}
@@ -1021,11 +1021,13 @@ class JitRpcTest(
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_var = rpc_return_rref(worker_name(dst_rank))
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
+        with (
+            TemporaryFileName() as fname,
+            self.assertRaisesRegex(
                 RuntimeError, "RRef jit pickling is only allowed inside RPC calls"
-            ):
-                save_rref(rref_var, fname)
+            ),
+        ):
+            save_rref(rref_var, fname)
 
     @dist_init
     def test_remote_script_throw(self):
@@ -1294,9 +1296,8 @@ class JitRpcTest(
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
-        with _profile() as prof:
-            with torch.autograd.profiler.record_function("foo") as rf:
-                call_fork_with_profiling(rf.record)
+        with _profile() as prof, torch.autograd.profiler.record_function("foo") as rf:
+            call_fork_with_profiling(rf.record)
 
         events = prof.function_events
         function_event = get_function_event(events, "foo")

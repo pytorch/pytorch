@@ -29,14 +29,20 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
-#else
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if (__builtin_amdgcn_processor_is("gfx942") ||
+        __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
-#endif
+  #else
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+  #endif
   }
 };
 static ReduceAdd reduce_add;
@@ -155,13 +161,47 @@ struct _cuda_scatter_gather_internal_kernel {
         return;
       }
     }
+
+#if !defined(USE_ROCM)
+    if constexpr (is_scatter_like && std::is_same_v<func_t, ReduceAdd> &&
+        (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double> ||
+         std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
+      constexpr size_t element_size = sizeof(scalar_t);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_add_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto self_stride_bytes = index_stride * element_size;
+        auto src_stride_bytes = iter.strides(1)[1];
+        if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
+          at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr),
+              num_ind, static_cast<int>(iter.shape()[0]), index_size,
+              self_stride_bytes, src_stride_bytes);
+          return;
+        }
+#endif
+        at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
+            reinterpret_cast<scalar_t*>(self_ptr),
+            reinterpret_cast<const scalar_t*>(src_ptr),
+            reinterpret_cast<index_t*>(index_ptr),
+            num_ind, slice_size, index_size,
+            self_stride_bytes, src_stride_bytes);
+        return;
+      }
+    }
+#endif
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(index_t*)(index_ptr + offsets[2]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "scatter gather kernel index out of bounds");
+      CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
+        && "scatter gather kernel index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -406,9 +446,8 @@ struct _cuda_scatter_fill_internal_kernel {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(index_t*)(index_ptr + offsets[1]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "index out of bounds"
-      );
+      CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -537,9 +576,6 @@ void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& ind
 }
 
 void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", reduce_add);
@@ -568,7 +604,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
                                     const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
   case ReductionType::SUM :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_sum_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_sum_", reduce_add);
     break;
@@ -586,7 +621,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
             "scatter_reduce_cuda_amin_", reduce_minimum);
     break;
   case ReductionType::MEAN :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_mean_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_mean_", reduce_mean);
     break;

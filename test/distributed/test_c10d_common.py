@@ -3,6 +3,7 @@
 import copy
 import os
 import pickle
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,8 +14,8 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
+from pathlib import Path
 from sys import platform
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
@@ -54,7 +56,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -63,6 +65,8 @@ else:
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -70,8 +74,9 @@ def gpus_for_rank(world_size):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // world_size
+    device_count = torch.accelerator.device_count()
+    visible_devices = list(range(device_count))
+    gpus_per_process = device_count // world_size
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
@@ -103,14 +108,13 @@ class AbstractTimeoutTest:
             c2p.append(e)
 
     def _init_methods(self):
-        f = tempfile.NamedTemporaryFile(delete=False)
-        if sys.platform == "win32":
-            yield "file:///{}".format(f.name.replace("\\", "/"))
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             f.close()
-        else:
-            yield f"file://{f.name}"
-            f.close()
-            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
+            if sys.platform == "win32":
+                yield "file:///{}".format(f.name.replace("\\", "/"))
+            else:
+                yield f"file://{f.name}"
+                yield f"tcp://127.0.0.1:{common.find_free_port():d}"
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -136,7 +140,8 @@ class AbstractTimeoutTest:
 class TimeoutTest(TestCase):
     @retry_on_connect_failures
     def test_store_based_barrier(self):
-        f = tempfile.NamedTemporaryFile(delete=False)
+        f = tempfile.NamedTemporaryFile(delete=False)  # noqa: SIM115
+        f.close()
         port = common.find_free_port()
 
         def thread_work(timeout, init_type, world_size, rank, error_list):
@@ -401,7 +406,7 @@ class CommonDistributedDataParallelTest:
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
 
-        input = torch.randn(global_batch_size, 2).cuda(devices[0])
+        input = torch.randn(global_batch_size, 2).to(devices[0])
         target = torch.randn(global_batch_size, 4)
 
         return model, ddp_model, input, target
@@ -435,10 +440,10 @@ class CommonDistributedDataParallelTest:
         allow_none_grads=False,
     ):
         # to reproduce the same training results
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         torch.manual_seed(31415)
-        model = copy.deepcopy(input_model).cuda()
-        ddp_model = copy.deepcopy(input_model).cuda()
+        model = copy.deepcopy(input_model).to(device_type)
+        ddp_model = copy.deepcopy(input_model).to(device_type)
         ddp_model = nn.parallel.DistributedDataParallel(
             ddp_model,
             bucket_cap_mb=1,
@@ -554,8 +559,8 @@ class CommonDistributedDataParallelTest:
     def _prepare_dummy_data(self):
         ddp_bs = 16
         bs = ddp_bs * self.world_size
-        input = torch.rand((bs, 20), device="cuda", requires_grad=True)
-        target = torch.randn((bs, 20), device="cuda")
+        input = torch.rand((bs, 20), device=device_type, requires_grad=True)
+        target = torch.randn((bs, 20), device=device_type)
         offset = self.rank * ddp_bs
         ddp_input = input[offset : offset + ddp_bs]
         ddp_target = target[offset : offset + ddp_bs]
@@ -715,7 +720,7 @@ class CommonDistributedDataParallelTest:
         Test that checkpointing with weight sharing works.
         """
         process_group = self._get_process_group()
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         for use_bucket_view, static_graph in product((False, True), (False, True)):
             torch.manual_seed(31415)
             l1 = nn.Linear(20, 20)
@@ -738,7 +743,7 @@ class CommonDistributedDataParallelTest:
         same layer twice and having weights shared across layers.
         """
         process_group = self._get_process_group()
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         for use_bucket_view in (True, False):
             self._test_ddp_checkpointing(
                 self.CheckpointTwiceModuleWeightSharing(),
@@ -990,9 +995,32 @@ class CommonDistributedDataParallelTest:
 
         self._test_not_nan(model, x)
 
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_buffer_sync_multi_forward_with_batchnorm(self):
+        pg = self._get_process_group()
+
+        model = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.BatchNorm1d(10),
+        ).to(device=self.rank)
+
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+            broadcast_buffers=True,
+        )
+
+        x = torch.randn(4, 10, device=self.rank)
+
+        model.zero_grad()
+        out1 = model(x)
+        out2 = model(x)
+        (out1.mean() + out2.mean()).backward()
+
     @dataclass
     class CustomOutput:
-        o1: Optional[torch.Tensor]
+        o1: torch.Tensor | None
         o2: dict[str, torch.Tensor]
 
     class DataclassOutputModule(nn.Module):
@@ -1150,7 +1178,11 @@ class AbstractCommTest:
             ranks=ranks,
             backend="gloo",
         )
-        assert dist.get_world_size(process_group) == dist.get_world_size(verify_pg)
+        if dist.get_world_size(process_group) != dist.get_world_size(verify_pg):
+            raise AssertionError(
+                f"World sizes mismatch: {dist.get_world_size(process_group)} "
+                f"vs {dist.get_world_size(verify_pg)}"
+            )
 
         initial_num = (
             self._verify_sequence_number_across_pg(
@@ -1162,7 +1194,7 @@ class AbstractCommTest:
 
         # Verify sequence numbers are appropriately incremented
         for i in range(10):
-            t = torch.ones(1, device=torch.cuda.current_device())
+            t = torch.ones(1, device=device_type)
             dist.all_reduce(t, group=process_group)
             if not c10d._rank_not_in_group(process_group):
                 seq_num = self._verify_sequence_number_across_pg(
@@ -1185,15 +1217,13 @@ class AbstractCommTest:
                 self.assertEqual(len(set(rank_to_seq_num.values())), 2)
                 self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
                 expected_same = {
-                    rank_to_seq_num[i]
-                    for i in rank_to_seq_num.keys()
-                    if i not in [0, 2]
+                    rank_to_seq_num[i] for i in rank_to_seq_num if i not in [0, 2]
                 }
                 self.assertEqual(len(expected_same), 1)
                 self.assertEqual(rank_to_seq_num[0] + 1, rank_to_seq_num[1])
 
     def _test_sequence_num_incremented_default_group(self, backend_name):
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
@@ -1207,7 +1237,7 @@ class AbstractCommTest:
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend_name,
@@ -1262,8 +1292,8 @@ class AbstractCommTest:
         in_group_ranks = list(filter(lambda x: x % 2 == 0, range(self.world_size)))
         group = dist.new_group(in_group_ranks)
 
-        x = torch.zeros(2, 2).cuda(self.rank)
-        xs = [torch.zeros(2, 2).cuda(self.rank) for _ in range(len(in_group_ranks))]
+        x = torch.zeros(2, 2).to(self.rank)
+        xs = [torch.zeros(2, 2).to(self.rank) for _ in range(len(in_group_ranks))]
         if self.rank not in in_group_ranks:
             msg = ".*{}.*does not belong to.*"
             with self.assertWarnsOnceRegex(UserWarning, msg.format("all_gather")):
@@ -1392,7 +1422,7 @@ class AbstractCommTest:
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         # test alltoall_base
         tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
         zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
@@ -1518,6 +1548,42 @@ class AbstractLargeCommTest:
             ]
             self.assertEqual(output_tensor_list, expected)
 
+    def _test_new_group_ordered(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # Reverse-order ranks: group rank 0 = highest global rank
+        reversed_ranks = list(range(self.world_size - 1, -1, -1))
+        new_pg = dist.new_group(ranks=reversed_ranks, sort_ranks=False)
+
+        # Verify that the group rank assignment follows the user-provided order
+        expected_group_rank = reversed_ranks.index(rank)
+        self.assertEqual(dist.get_group_rank(new_pg, rank), expected_group_rank)
+        self.assertEqual(
+            dist.get_process_group_ranks(new_pg),
+            reversed_ranks,
+        )
+
+        # Verify that all_gather results follow the custom rank order
+        input_tensor = torch.tensor([rank], device=self.device)
+        output_tensor_list = [
+            torch.tensor([-1], device=self.device) for _ in range(self.world_size)
+        ]
+        dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+        # Group rank i holds global rank reversed_ranks[i]
+        expected = [
+            torch.tensor([reversed_ranks[i]], device=self.device)
+            for i in range(self.world_size)
+        ]
+        self.assertEqual(output_tensor_list, expected)
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -1554,7 +1620,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
-        for mode in mapping.keys():
+        for mode in mapping:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
             dist.set_debug_level_from_env()
             set_debug_mode = dist.get_debug_level()
@@ -1574,8 +1640,8 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
 class DummyWork(dist._Work):
     def wait(self, timeout=5.0):
-        if torch.cuda.is_available():
-            torch.cuda.current_stream().synchronize()
+        if torch.accelerator.is_available():
+            torch.accelerator.current_stream().synchronize()
         return True
 
 
@@ -1790,6 +1856,18 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
         ]
 
+        if TEST_XPU:
+            # Override backend_config_strings_and_expected_values for Intel GPU.
+            backend_config_strings_and_expected_values[4:10] = [
+                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+                ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+                ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+                ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
+            ]
+
         for config_str, expected_value in backend_config_strings_and_expected_values:
             with self.subTest(config_str):
                 # ensures these configs strings are valid and no ValueError is raised
@@ -1800,11 +1878,44 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         invalid_backend_config_strings = [
             "cpu:gloo,cuda:nccl,",  # trailing comma
             "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
+            "cpu:gloo,xpu:xccl,",  # trailing comma
+            "cpu:gloo,xpu:xccl,cpu:dummy",  # duplicate device
         ]
         for config_str in invalid_backend_config_strings:
             with self.subTest(config_str):
                 with self.assertRaises(ValueError):
                     dist.BackendConfig(config_str)
+
+    def test_parse_backend_string(self):
+        from torch.distributed.distributed_c10d import _parse_backend_string
+
+        # Simple form maps to device(s) where the backend is the registered default.
+        self.assertEqual(_parse_backend_string("nccl"), {"cuda": "nccl"})
+        self.assertEqual(_parse_backend_string("NCCL"), {"cuda": "nccl"})
+        # gloo is the default for both cpu and mps in default_device_backend_map.
+        self.assertEqual(_parse_backend_string("gloo"), {"cpu": "gloo", "mps": "gloo"})
+
+        # Merged form returns exactly what was named, no synthesized defaults.
+        self.assertEqual(
+            _parse_backend_string("cpu:gloo,cuda:nccl"),
+            {"cpu": "gloo", "cuda": "nccl"},
+        )
+        self.assertEqual(
+            _parse_backend_string("CPU:GLOO , CUDA:NCCL"),
+            {"cpu": "gloo", "cuda": "nccl"},
+        )
+        # Unknown device types in merged form are accepted (no validation here).
+        self.assertEqual(_parse_backend_string("xpu:nccl"), {"xpu": "nccl"})
+
+        # Errors.
+        with self.assertRaisesRegex(ValueError, "Unknown backend"):
+            _parse_backend_string("definitely_not_a_backend")
+        with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
+            _parse_backend_string("cpu:gloo:extra")
+        with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
+            _parse_backend_string("cpu:gloo,bare")
+        with self.assertRaisesRegex(ValueError, "Duplicate device type"):
+            _parse_backend_string("cpu:gloo,cpu:dummy")
 
     def test_init_process_group_with_multiple_backends(self):
         dist.Backend.register_backend(
@@ -1814,7 +1925,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "6789"
         dist.init_process_group(
-            "cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size
+            "cpu:dummy,cuda:dummy,xpu:dummy", rank=self.rank, world_size=self.world_size
         )
 
         # test all_gather
@@ -1946,6 +2057,61 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         self.assertTrue(pg._aborted)
 
+    def test_new_group_delegates_to_pg(self):
+        """dist.new_group delegates to default_pg.new_group if available."""
+
+        new_group_called = False
+        new_group_ranks = None
+
+        class _DelegatingPG(DummyProcessGroup):
+            def new_group(
+                self,
+                ranks,
+                timeout=None,
+                pg_options=None,
+                group_name=None,
+                group_desc=None,
+            ):
+                nonlocal new_group_called, new_group_ranks
+                new_group_called = True
+                new_group_ranks = list(ranks)
+                my_rank = self.rank()
+                if my_rank not in ranks:
+                    return None
+                return DummyProcessGroup(ranks.index(my_rank), len(ranks))
+
+        dist.Backend.register_backend(
+            "delegating",
+            lambda *args, **kwargs: _DelegatingPG(
+                args[0].group_rank, args[0].group_size
+            ),
+            extended_api=True,
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group(
+            "delegating", rank=self.rank, world_size=self.world_size
+        )
+
+        try:
+            sub_pg = dist.new_group(ranks=[0])
+            self.assertTrue(new_group_called)
+            self.assertEqual(new_group_ranks, [0])
+
+            if self.rank == 0:
+                self.assertIsNotNone(sub_pg)
+                self.assertNotEqual(
+                    sub_pg, dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+                )
+            else:
+                self.assertTrue(
+                    sub_pg is None
+                    or sub_pg == dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+                )
+        finally:
+            dist.destroy_process_group()
+
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
@@ -2053,20 +2219,20 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         # correctly dispatched
 
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
-        if collective == dist.barrier:
+        if collective is dist.barrier:
             collective()
         elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.scatter:
+        elif collective is dist.scatter:
             collective(tensor, [tensor], *args)
         elif collective in (dist.reduce_scatter, dist.all_to_all):
             # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
-                if collective == dist.reduce_scatter:
+                if collective is dist.reduce_scatter:
                     collective(tensor, [tensor], *args)
                 else:
                     collective([tensor], [tensor], *args)
@@ -2119,7 +2285,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         # test alltoall_base
         input_tensor = torch.ones(2, 2, device=torch.device(device))
         output_tensor = torch.zeros(2, 2, device=torch.device(device))
@@ -2148,6 +2314,7 @@ class ReduceOpTest(TestCase):
             self.assertTrue(
                 isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
             )
+            self.assertTrue(isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp))
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
@@ -2250,9 +2417,176 @@ class LocalRankTest(MultiProcessTestCase):
         self.assertEqual(dist.get_node_local_rank(), self.rank)
 
 
-if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
+class RecordCommTest(TestCase):
+    def test_set_get(self):
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+        with dist.record_comm("test_name"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "test_name"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+    def test_nesting(self):
+        with dist.record_comm("outer"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+            with dist.record_comm("inner"):
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_comm_profiling_name(), "inner"
+                )
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+
+# Trivially-destructible types safe for thread_local.
+# Non-trivial destructors (std::string, std::vector, std::map, etc.)
+# register via __cxa_thread_atexit_impl which holds a mutex — if fork()
+# happens while that mutex is held, the child deadlocks.
+_SAFE_TLS_TYPE_RE = re.compile(
+    r"""
+    (?:
+        .*\*\s*$              # any pointer type (T*, const T*, etc.)
+        | bool
+        | u?int(?:8|16|32|64)_t
+        | int
+        | size_t
+        | ssize_t
+        | ptrdiff_t
+        | float
+        | double
+        | char
+        | (?:unsigned|signed)\s+(?:int|long(?:\s+long)?|short|char)
+        | unsigned
+        | signed
+        | long(?:\s+long)?
+        | short
     )
+    """,
+    re.VERBOSE,
+)
+
+# Regex to extract a thread_local declaration.
+# Captures the type portion (group 1) and the variable name (group 2).
+_TLS_DECL_RE = re.compile(
+    r"""
+    (?:^|(?<=\s))               # start of line or preceded by whitespace
+    (?:static\s+)?              # optional leading static
+    thread_local                # the keyword
+    \s+(?:static\s+)?           # optional trailing static
+    (.+?)                       # type (group 1) — non-greedy
+    \s+((?:\w+(?:<[^>]*>)?::)*\w+)  # variable name, possibly qualified (group 2)
+    \s*[=;(]                    # followed by = or ; or (
+    """,
+    re.VERBOSE,
+)
+
+
+class ThreadLocalSafetyLintTest(TestCase):
+    """Lint: every thread_local in c10d must use a trivially-destructible type.
+
+    Non-trivially-destructible thread_local variables (std::string,
+    std::vector, std::map, c10::intrusive_ptr, ...) register destructors
+    via __cxa_thread_atexit_impl, which holds an internal glibc mutex.
+    If fork() happens while that mutex is held the child process inherits
+    a locked mutex and deadlocks on the next TLS access.
+
+    Use raw pointers (T*) with lazy heap-allocation instead.
+    """
+
+    # Pre-existing violations outside this diff's scope.  Each entry is
+    # (relative_path, variable_name).  Remove entries as they get fixed.
+    _KNOWN_VIOLATIONS = {
+        ("ProcessGroup.cpp", "pg"),
+        ("cuda/CUDAEventCache.cpp", "cacheDeviceMap"),
+    }
+
+    @staticmethod
+    def _c10d_src_dir() -> Path:
+        # test file:  caffe2/test/distributed/test_c10d_common.py
+        # source dir: caffe2/torch/csrc/distributed/c10d/
+        return (
+            Path(__file__).resolve().parents[2]
+            / "torch"
+            / "csrc"
+            / "distributed"
+            / "c10d"
+        )
+
+    @staticmethod
+    def _is_safe_type(type_str: str) -> bool:
+        """Return True if *type_str* is trivially destructible."""
+        cleaned = type_str.strip()
+        # Remove const / volatile / mutable qualifiers for matching
+        cleaned = re.sub(r"\b(const|volatile|mutable|inline)\b", "", cleaned).strip()
+        # Pointer types are always safe
+        if cleaned.endswith("*"):
+            return True
+        # Check against known safe scalar types
+        return bool(_SAFE_TLS_TYPE_RE.fullmatch(cleaned))
+
+    def test_no_non_trivial_thread_locals(self):
+        """Scan c10d sources for thread_local with non-trivial destructors."""
+        c10d_dir = self._c10d_src_dir()
+        self.assertTrue(
+            c10d_dir.is_dir(),
+            f"c10d source directory not found: {c10d_dir}",
+        )
+
+        violations = []
+        for ext in ("*.cpp", "*.hpp", "*.h", "*.cc"):
+            for filepath in c10d_dir.rglob(ext):
+                lines = filepath.read_text().splitlines()
+                idx = 0
+                while idx < len(lines):
+                    stripped = lines[idx].strip()
+                    idx += 1
+                    # Skip pure comments and static_assert guards
+                    if (
+                        stripped.startswith(("//", "/*"))
+                        or "static_assert" in stripped
+                        or "thread_local" not in stripped
+                    ):
+                        continue
+                    # Try single-line match first
+                    m = _TLS_DECL_RE.search(stripped)
+                    if not m and idx < len(lines):
+                        # Multi-line declaration (type on one line,
+                        # variable name on the next)
+                        combined = stripped + " " + lines[idx].strip()
+                        m = _TLS_DECL_RE.search(combined)
+                    if not m:
+                        continue
+                    tls_type, var_name = m.group(1), m.group(2)
+                    if self._is_safe_type(tls_type):
+                        continue
+                    rel = str(filepath.relative_to(c10d_dir))
+                    # Strip class qualifiers from var_name for allowlist
+                    # e.g. "Foo<T>::bar" -> "bar"
+                    bare_name = var_name.rsplit("::", 1)[-1]
+                    if (rel, bare_name) in self._KNOWN_VIOLATIONS:
+                        continue
+                    violations.append(
+                        f"  {rel}:{idx}: thread_local {tls_type} {var_name}"
+                    )
+
+        self.assertEqual(
+            violations,
+            [],
+            "Non-trivially-destructible thread_local variable(s) found in c10d.\n"
+            "These cause fork-deadlocks via __cxa_thread_atexit.\n"
+            "Use a raw pointer (T*) with lazy heap-allocation instead.\n\n"
+            "Violations:\n" + "\n".join(violations),
+        )
+
+
+if __name__ == "__main__":
+    if device_type != "cpu":
+        if torch.get_device_module()._initialized:
+            raise AssertionError(
+                f"test_distributed must not have initialized {device_type} context on main process"
+            )
 
     run_tests()

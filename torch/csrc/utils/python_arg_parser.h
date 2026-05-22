@@ -65,7 +65,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
-#include <torch/csrc/utils/six.h>
+#include <torch/csrc/utils/structseq.h>
 
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -89,7 +89,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
   }
 #endif
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
-      torch::is_symint(py::handle(obj)) ||
+      torch::is_symint(py::handle(obj)) || torch::is_dynint(py::handle(obj)) ||
       torch::is_symfloat(py::handle(obj)) || torch::is_symbool(py::handle(obj));
 }
 
@@ -125,8 +125,6 @@ enum class ParameterType {
   DISPATCH_KEY_SET
 };
 
-struct FunctionParameter;
-struct FunctionSignature;
 struct PythonArgs;
 
 // Contains bound Python arguments in declaration order
@@ -135,6 +133,81 @@ struct ParsedArgs {
   ParsedArgs() : args() {}
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   PyObject* args[N];
+};
+
+// FunctionParameter is a single formal parameter of a Python function.
+// It is immutable once constructed.
+struct FunctionParameter {
+  FunctionParameter(const std::string& fmt, bool keyword_only);
+
+  bool check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
+  bool _check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
+  void set_default_str(const std::string& str);
+  TORCH_PYTHON_API std::string type_name() const;
+
+  ParameterType type_;
+  bool optional{false};
+  bool allow_none{false};
+  bool keyword_only;
+  bool allow_numbers_as_tensors = false;
+  int size{0};
+  std::string name;
+  // having this as a raw PyObject * will presumably leak it, but these are only
+  // held by static objects anyway, and Py_Finalize can already be called when
+  // this is destructed.
+  PyObject* python_name;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::SmallVector<PyObject*, 5> numpy_python_names;
+  at::Scalar default_scalar;
+  std::vector<int64_t> default_intlist;
+  std::string default_string;
+  union {
+    bool default_bool;
+    int64_t default_int;
+    double default_double;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    double default_complex[2]; // see Scalar
+    at::ScalarType default_scalartype;
+    at::Layout default_layout;
+  };
+  std::string default_value;
+};
+
+// FunctionSignature represents a single valid signature for a Python function.
+// It is immutable once constructed. The contained data can be concurrently
+// accessed by multiple calls.
+struct FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt, int index);
+
+  bool parse(
+      PyObject* self,
+      PyObject* args,
+      PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      PyObject* dst[],
+      std::vector<PyObject*>& overloaded_args,
+      bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  size_t min_args{0};
+  size_t max_args{0};
+  size_t max_pos_args{0};
+  int index;
+  bool hidden{false};
+  bool deprecated{false};
 };
 
 // A PythonArgParser contains a list of valid signatures. Instances are
@@ -177,35 +250,8 @@ struct PYBIND11_EXPORT PythonArgParser {
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
-  size_t max_args;
+  size_t max_args{0};
   bool traceable;
-};
-
-// FunctionSignature represents a single valid signature for a Python function.
-// It is immutable once constructed. The contained data can be concurrently
-// accessed by multiple calls.
-struct FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt, int index);
-
-  bool parse(
-      PyObject* self,
-      PyObject* args,
-      PyObject* kwargs,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-      PyObject* dst[],
-      std::vector<PyObject*>& overloaded_args,
-      bool raise_exception);
-
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  size_t min_args;
-  size_t max_args;
-  size_t max_pos_args;
-  int index;
-  bool hidden;
-  bool deprecated;
 };
 
 // PythonArgs contains bound Python arguments for an actual invocation
@@ -213,17 +259,20 @@ struct FunctionSignature {
 struct TORCH_PYTHON_API PythonArgs {
   PythonArgs(
       bool traceable,
+      bool skip_torch_function,
       const FunctionSignature& signature,
       PyObject** args,
       std::vector<PyObject*> overloaded_args)
       : idx(signature.index),
         traceable(traceable),
+        skip_torch_function(skip_torch_function),
         signature(signature),
         args(args),
         overloaded_args(std::move(overloaded_args)) {}
 
   int idx;
   bool traceable;
+  bool skip_torch_function;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FunctionSignature& signature;
   PyObject** args;
@@ -311,54 +360,6 @@ struct TORCH_PYTHON_API PythonArgs {
   at::Scalar scalar_slow(PyObject* arg);
 };
 
-// FunctionParameter is a single formal parameter of a Python function.
-// It is immutable once constructed.
-struct FunctionParameter {
-  FunctionParameter(const std::string& fmt, bool keyword_only);
-
-  bool check(
-      PyObject* obj,
-      std::vector<PyObject*>& overloaded_args,
-      int argnum,
-      int64_t* failed_idx = nullptr);
-
-  bool _check(
-      PyObject* obj,
-      std::vector<PyObject*>& overloaded_args,
-      int argnum,
-      int64_t* failed_idx = nullptr);
-
-  void set_default_str(const std::string& str);
-  TORCH_PYTHON_API std::string type_name() const;
-
-  ParameterType type_;
-  bool optional;
-  bool allow_none;
-  bool keyword_only;
-  bool allow_numbers_as_tensors = false;
-  int size;
-  std::string name;
-  // having this as a raw PyObject * will presumably leak it, but these are only
-  // held by static objects anyway, and Py_Finalize can already be called when
-  // this is destructed.
-  PyObject* python_name;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  at::SmallVector<PyObject*, 5> numpy_python_names;
-  at::Scalar default_scalar;
-  std::vector<int64_t> default_intlist;
-  std::string default_string;
-  union {
-    bool default_bool;
-    int64_t default_int;
-    double default_double;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    double default_complex[2]; // see Scalar
-    at::ScalarType default_scalartype;
-    at::Layout default_layout;
-  };
-  std::string default_value;
-};
-
 template <int N>
 inline PythonArgs PythonArgParser::parse(
     PyObject* self,
@@ -388,7 +389,9 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function() {
-  return !overloaded_args.empty() || at::impl::torch_function_mode_enabled();
+  return (
+      !this->skip_torch_function &&
+      (!overloaded_args.empty() || at::impl::torch_function_mode_enabled()));
 }
 
 inline std::string PythonArgs::get_func_name() {
@@ -422,14 +425,14 @@ inline at::Scalar PythonArgs::scalar(int i) {
 inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   if (!args[i])
     return std::vector<at::Scalar>();
-  auto tuple = six::isTuple(args[i]);
-  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto tuple = PyTuple_Check(args[i]);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tuple || PyList_Check(args[i]));
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  auto size = tuple ? PyTuple_GET_SIZE(args[i]) : PyList_GET_SIZE(args[i]);
   std::vector<at::Scalar> res(size);
   for (const auto idx : c10::irange(size)) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
-                          : PyList_GET_ITEM(arg.get(), idx);
+    PyObject* obj =
+        tuple ? PyTuple_GET_ITEM(args[i], idx) : PyList_GET_ITEM(args[i], idx);
     res[idx] = scalar_slow(obj);
   }
   return res;
@@ -452,14 +455,14 @@ inline std::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i])
     return std::vector<at::Tensor>();
-  auto tuple = six::isTuple(args[i]);
-  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto tuple = PyTuple_Check(args[i]);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tuple || PyList_Check(args[i]));
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  auto size = tuple ? PyTuple_GET_SIZE(args[i]) : PyList_GET_SIZE(args[i]);
   std::vector<at::Tensor> res(size);
   for (const auto idx : c10::irange(size)) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
-                          : PyList_GET_ITEM(arg.get(), idx);
+    PyObject* obj =
+        tuple ? PyTuple_GET_ITEM(args[i], idx) : PyList_GET_ITEM(args[i], idx);
     // This is checked by the argument parser so it's safe to cast without
     // checking if this is a tensor first
     res[idx] = THPVariable_Unpack(obj);
@@ -471,15 +474,15 @@ inline torch::List<std::optional<at::Tensor>> PythonArgs::
     list_of_optional_tensors(int i) {
   if (!args[i])
     return torch::List<std::optional<at::Tensor>>();
-  auto tuple = six::isTuple(args[i]);
-  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto tuple = PyTuple_Check(args[i]);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tuple || PyList_Check(args[i]));
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  auto size = tuple ? PyTuple_GET_SIZE(args[i]) : PyList_GET_SIZE(args[i]);
   torch::List<std::optional<at::Tensor>> res;
   res.reserve(size);
   for (const auto idx : c10::irange(size)) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
-                          : PyList_GET_ITEM(arg.get(), idx);
+    PyObject* obj =
+        tuple ? PyTuple_GET_ITEM(args[i], idx) : PyList_GET_ITEM(args[i], idx);
     // This is checked by the argument parser so it's safe to cast without
     // checking if this is a tensor first
     res.push_back(THPVariable_Unpack(obj));
@@ -492,18 +495,18 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   auto res = std::array<at::Tensor, N>();
   if (!args[i])
     return res;
-  auto tuple = six::isTuple(args[i]);
-  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto tuple = PyTuple_Check(args[i]);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tuple || PyList_Check(args[i]));
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  auto size = tuple ? PyTuple_GET_SIZE(args[i]) : PyList_GET_SIZE(args[i]);
   if (size != N) {
     TORCH_CHECK_TYPE(
         false,
         fmt::format("expected tuple of {} elements but got {}", N, size));
   }
   for (const auto idx : c10::irange(size)) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
-                          : PyList_GET_ITEM(arg.get(), idx);
+    PyObject* obj =
+        tuple ? PyTuple_GET_ITEM(args[i], idx) : PyList_GET_ITEM(args[i], idx);
     // This is checked by the argument parser so it's safe to cast without
     // checking if this is a tensor first
     res[idx] = THPVariable_Unpack(obj);
@@ -565,8 +568,16 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
+  if (size1 > 0 && THPVariable_Check(args[i])) {
+    return std::vector<c10::SymInt>(
+        size1, THPVariable_Unpack(args[i]).item().toSymInt());
+  }
+
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<c10::SymInt> res;
@@ -612,6 +623,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         try {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
+          } else if (is_dynint(py::handle(obj))) {
+            res.emplace_back(py::handle(obj).cast<int>());
           } else {
             res.emplace_back(THPUtils_unpackIndex(obj));
           }
@@ -640,7 +653,16 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         size1,
         py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
   }
+  if (size1 > 0 && torch::is_dynint(py::handle(arg))) {
+    return std::vector<int64_t>(size1, py::handle(arg).cast<int>());
+  }
+  if (size1 > 0 && THPVariable_Check(arg)) {
+    return std::vector<int64_t>(size1, THPVariable_Unpack(arg).item<int64_t>());
+  }
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<int64_t> res(size2);
@@ -672,6 +694,8 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
       } else if (torch::is_symint(py::handle(obj))) {
         res[idx] = py::cast<c10::SymInt>(py::handle(obj))
                        .guard_int(__FILE__, __LINE__);
+      } else if (torch::is_dynint(py::handle(obj))) {
+        res[idx] = py::handle(obj).cast<int>();
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
@@ -709,6 +733,9 @@ inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<double> res(size);
@@ -846,6 +873,10 @@ inline at::Device toDevice(PyObject* obj) {
         py::cast<c10::SymInt>(py::handle(obj)).guard_int(__FILE__, __LINE__);
     return deviceFromLong(device_index);
   }
+  if (torch::is_dynint(py::handle(obj))) {
+    auto device_index = py::cast<int>(py::handle(obj));
+    return deviceFromLong(device_index);
+  }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
 }
@@ -878,6 +909,9 @@ inline at::Dimname PythonArgs::dimname(int i) {
 
 inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
@@ -982,6 +1016,9 @@ inline int64_t PythonArgs::toInt64(int i) {
     return py::cast<c10::SymInt>(py::handle(args[i]))
         .guard_int(__FILE__, __LINE__);
   }
+  if (torch::is_dynint(py::handle(args[i]))) {
+    return py::cast<int>(py::handle(args[i]));
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
@@ -1055,6 +1092,9 @@ inline double PythonArgs::toDouble(int i) {
     return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
                                    .guard_int(__FILE__, __LINE__));
   }
+  if (torch::is_dynint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<int>(py::handle(args[i])));
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
@@ -1062,10 +1102,10 @@ inline bool PythonArgs::toBool(int i) {
   if (!args[i]) {
     return signature.params[i].default_bool;
   }
-  if (args[i] == Py_True) {
+  if (Py_IsTrue(args[i])) {
     return true;
   }
-  if (args[i] == Py_False) {
+  if (Py_IsFalse(args[i])) {
     return false;
   }
   if (torch::is_symbool(py::handle(args[i]))) {
@@ -1247,6 +1287,18 @@ auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
     const char* func_name,
     PyObject* torch_api_function,
     const char* module_name,
+    TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
+    -> PyObject*;
+
+auto handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<PyObject*> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    const c10::OperatorHandle* opt_op,
+    torch::jit::Stack* opt_stack,
     TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
     -> PyObject*;
 

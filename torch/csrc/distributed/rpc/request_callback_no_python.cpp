@@ -72,9 +72,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
 
     auto retFuture = rrefsReadyFuture->thenAsync(
         [this,
-         // std::function must be copyable, hence hae to cast the unique_ptr to
+         // std::function must be copyable, hence has to cast the unique_ptr to
          // a shared_ptr here.
-         rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
+         rpc = std::shared_ptr<RpcCommandBase>(std::move(rpc)),
          messageType = request.type(),
          streams = std::move(streams)](JitFuture& /* unused */) mutable {
           // The cost of pre-request check is minimal thanks to
@@ -367,7 +367,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
       autogradMetadata.autogradContextId);
 
   // Lookup the appropriate 'send' function to enqueue.
-  std::shared_ptr<SendRpcBackward> sendFunction =
+  c10::intrusive_ptr<SendRpcBackward> sendFunction =
       autogradContext->retrieveSendFunction(autogradMetadata.autogradMessageId);
 
   // Attach the gradients to the send function.

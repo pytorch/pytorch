@@ -11,13 +11,22 @@ import torch
 from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, toleranceOverride, tol, skipMeta)
+    instantiate_device_type_tests, onlyCPU, onlyOn, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
 from unittest.mock import patch, call
 
+
+if TEST_WITH_ROCM:
+    import os
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
@@ -139,7 +148,7 @@ class TestModule(TestCase):
                 m.train(training)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @modules(module_db)
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
@@ -172,11 +181,11 @@ class TestModule(TestCase):
                 self._assert_module_parameters_and_buffer_are(m, "cpu", dtype)
 
                 # === Move back to GPU and forward pass ===
-                m.cuda()
+                m.to(device_type)
                 m(*input_device_args, **input_device_kwargs)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
-                if torch.cuda.device_count() >= 2:
+                if torch.accelerator.device_count() >= 2:
                     # === test cross-GPU transfer works
                     def _to_device1(objs):
                         if isinstance(objs, (tuple, list)):
@@ -184,16 +193,16 @@ class TestModule(TestCase):
                         elif isinstance(objs, dict):
                             return {name: _to_device1(item) for name, item in objs.items()}
                         elif isinstance(objs, torch.Tensor):
-                            return objs.cuda(1)
+                            return objs.to(1)
                         else:
                             return objs
                     input_device_1_args = _to_device1(input_device_args)
                     input_device_1_kwargs = _to_device1(input_device_kwargs)
 
-                    m.cuda(1)
-                    with torch.cuda.device(1):
+                    m.to(1)
+                    with torch.accelerator.device_index(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
-                    self._assert_module_parameters_and_buffer_are(m, torch.device("cuda:1"), dtype)
+                    self._assert_module_parameters_and_buffer_are(m, torch.device(f"{device_type}:1"), dtype)
 
     @modules(module_db)
     def test_repr(self, device, dtype, module_info, training):
@@ -322,7 +331,7 @@ class TestModule(TestCase):
 
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
-        # non-leafs are present in the graph.
+        # non-leaves are present in the graph.
         def inner_retain_grad(obj):
             if obj.requires_grad:
                 obj.retain_grad()
@@ -439,9 +448,11 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
+        if "xpu" in device and module_info.name == "nn.MultiheadAttention":
+            self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
-        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or device_type == "xpu":
             gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
@@ -528,7 +539,7 @@ class TestModule(TestCase):
     def test_gradgrad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
@@ -878,8 +889,8 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if torch.cuda.is_available():
-            devices += ['cuda']
+        if torch.cuda.is_available() or torch.xpu.is_available():
+            devices += [device_type]
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -1001,7 +1012,214 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
-instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
+class TestJitReplaceSubmodule(TestCase):
+    def test_jit_replace_submodule(self):
+        from torch.jit._recursive import wrap_cpp_module
+
+        class SubA(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class SubB(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) * 2
+
+        class Parent(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = SubA()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Parent())
+        new_child = torch.jit.script(SubB())
+
+        inp = torch.randn(2, 4)
+        out_before = root(inp)
+
+        root = wrap_cpp_module(
+            torch._C._jit_replace_submodule(root._c, "child", new_child._c)
+        )
+
+        out_after = root(inp)
+        self.assertFalse(torch.equal(out_before, out_after))
+        self.assertEqual(
+            root.child._c._type().name(),
+            new_child._c._type().name(),
+        )
+
+    def test_jit_replace_submodule_nested(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self, scale: float) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, x):
+                return x * self.scale
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf(1.0)
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid = Mid()
+
+            def forward(self, x):
+                return self.mid(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf(3.0))
+
+        inp = torch.randn(2, 4)
+        root = torch.jit._recursive.wrap_cpp_module(
+            torch._C._jit_replace_submodule(root._c, "mid.leaf", new_leaf._c)
+        )
+
+        out_after = root(inp)
+        self.assertEqual(out_after, inp * 3.0)
+
+    def test_jit_replace_submodule_empty_qualified_name(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "non-empty qualified_name"):
+            torch._C._jit_replace_submodule(root._c, "", new_child._c)
+
+    def test_jit_replace_submodule_missing_segment(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "could not find submodule path segment 'missing'"):
+            torch._C._jit_replace_submodule(root._c, "missing.leaf", new_child._c)
+
+        with self.assertRaisesRegex(RuntimeError, "could not find submodule path segment 'missing'"):
+            torch._C._jit_replace_submodule(root._c, "missing", new_child._c)
+
+    def test_jit_replace_submodule_non_module_attribute(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Root(torch.nn.Module):
+            scalar: int
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Leaf()
+                self.scalar = 7
+
+            def forward(self, x):
+                return self.child(x) + self.scalar
+
+        root = torch.jit.script(Root())
+        new_child = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "'scalar'.*is not a submodule"):
+            torch._C._jit_replace_submodule(root._c, "scalar", new_child._c)
+
+        with self.assertRaisesRegex(RuntimeError, "'scalar'.*is not a submodule"):
+            torch._C._jit_replace_submodule(root._c, "scalar.nested", new_child._c)
+
+    def test_jit_replace_submodule_shared_parent_type(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self, scale: float) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, x):
+                return x * self.scale
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf(1.0)
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid_a = Mid()
+                self.mid_b = Mid()
+
+            def forward(self, x):
+                return self.mid_a(x) + self.mid_b(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf(2.0))
+
+        with self.assertRaisesRegex(Exception, "unique parent types"):
+            torch._C._jit_replace_submodule(root._c, "mid_a.leaf", new_leaf._c)
+
+    def test_jit_replace_submodule_empty_path_segment(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Mid(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.mid = Mid()
+
+            def forward(self, x):
+                return self.mid(x)
+
+        root = torch.jit.script(Root())
+        new_leaf = torch.jit.script(Leaf())
+
+        with self.assertRaisesRegex(RuntimeError, "empty path segments"):
+            torch._C._jit_replace_submodule(root._c, "mid..leaf", new_leaf._c)
+
+
+instantiate_device_type_tests(TestModule, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

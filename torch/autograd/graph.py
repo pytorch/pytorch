@@ -1,21 +1,28 @@
 import abc
 import contextlib
+import contextvars
 import functools
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import Generator, Iterable, Iterator, MutableMapping, Sequence
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
 from typing import (
     Any,
-    Callable,
     cast,
     Literal,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
+    TypeAlias,
     Union,
 )
-from typing_extensions import TypeAlias
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import torch
@@ -38,6 +45,8 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "set_warn_on_accumulate_grad_stream_mismatch",
+    "set_override_stale_capture_stream",
 ]
 
 
@@ -68,6 +77,10 @@ class Node(abc.ABC):
     @abc.abstractmethod
     def metadata(self) -> dict:
         r"""Return the metadata."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def _sequence_nr(self) -> int:
         raise NotImplementedError
 
     @property
@@ -181,7 +194,8 @@ def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
             node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
         node = t.grad_fn
-    assert node is not None
+    if node is None:
+        raise AssertionError("Expected gradient function to be set")
     return node
 
 
@@ -196,7 +210,7 @@ class GradientEdge(NamedTuple):
     output_nr: int
     # This token can be used to ensure the graph stays alive when it cannot be
     # done via the node field
-    ownership_token: Optional[Node] = None
+    ownership_token: Node | None = None
 
 
 def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
@@ -223,10 +237,11 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
+    # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
-def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
+def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -342,9 +357,18 @@ class save_on_cpu(saved_tensors_hooks):
     Use this context-manager to trade compute for GPU memory usage (e.g.
     when your model doesn't fit in GPU memory during training).
 
+    .. warning::
+
+        When ``pin_memory=True``, the GPU to CPU copy during packing is
+        asynchronous. Accessing saved tensors on CPU (e.g. via
+        ``grad_fn._saved_self``) before the CUDA stream has finished may
+        yield incorrect data. Call :func:`torch.cuda.synchronize` first
+        if you need to read them.
+
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
-                           during packing and copied to GPU asynchronously during unpacking.
+                           during packing and copied to GPU asynchronously during both
+                           packing and unpacking.
                            Defaults to ``False``.
                            Also see :ref:`cuda-memory-pinning`.
 
@@ -378,13 +402,14 @@ class save_on_cpu(saved_tensors_hooks):
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
+            is_pinnable = device_module.is_available() and not tensor.is_sparse
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+                pin_memory=is_pinnable,
             )
-            packed.copy_(tensor)
+            packed.copy_(tensor, non_blocking=is_pinnable)
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:
@@ -403,7 +428,7 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
     Args:
         error_message (str): When saved tensors default hooks are used when they
-                             have been are disabled, a RuntimeError with this
+                             have been disabled, a RuntimeError with this
                              error message gets raised.
 
     Example::
@@ -430,6 +455,43 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
+def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
+    """Whether to warn when the AccumulateGrad node's stream does not match the stream
+    of the node that produced the incoming gradient.
+    """
+    return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
+
+
+def set_override_stale_capture_stream(enabled: bool) -> None:
+    """Control behavior when autograd detects a stale non-capturing stream during
+    CUDA graph capture.
+
+    During CUDA graph capture, autograd nodes may reference a stale stream
+    that is not part of the capture. With the flag disabled (the
+    process-initial state), autograd raises a ``RuntimeError`` when the stale
+    stream is the default stream (stream 0), because this case always
+    invalidates the capture: ``cudaStreamWaitEvent`` on the default stream
+    pulls a non-capturing stream into the graph. For non-default stale streams
+    the stream reference is left unchanged; the capture will succeed if the
+    user has joined the stream into the capture (e.g. via
+    ``capture_stream.wait_stream(stale_stream)``) and will otherwise fail with
+    a CUDA runtime error.
+
+    When ``enabled=True``, any stale non-capturing stream (default or
+    non-default) is automatically overridden with the producer's capturing
+    stream, allowing the capture to proceed. This is a process-global setting
+    and is not thread-local.
+
+    Args:
+        enabled (bool): If ``True``, override stale non-capturing streams with
+            the producer's capturing stream during CUDA graph capture. If
+            ``False`` (the process-initial state), raise an error only when the
+            stale stream is the default stream (stream 0); other stale streams
+            are left unchanged.
+    """
+    return torch._C._set_override_stale_capture_stream(enabled)
+
+
 class _MultiHandle(RemovableHandle):
     handles: tuple[RemovableHandle, ...]
 
@@ -449,10 +511,8 @@ class _MultiHandle(RemovableHandle):
 
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
-    fn: Union[
-        Callable[[Sequence[Optional[torch.Tensor]]], None],
-        Callable[[torch.Tensor], None],
-    ],
+    fn: Callable[[Sequence[torch.Tensor | None]], None]
+    | Callable[[torch.Tensor], None],
     *,
     mode: Literal["all", "any"] = "all",
 ) -> RemovableHandle:
@@ -512,7 +572,7 @@ def register_multi_grad_hook(
     if mode == "all":
         count: dict[int, int] = {}
         nb_calls = None
-        buffer: dict[int, list[Optional[torch.Tensor]]] = {}
+        buffer: dict[int, list[torch.Tensor | None]] = {}
 
         grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
         len_tensors = len(tensors)
@@ -521,10 +581,12 @@ def register_multi_grad_hook(
             def inner_hook(grad: torch.Tensor) -> None:
                 nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
-                assert id != -1, (
-                    "expected this hook to be called inside a backward call"
-                )
+                if id == -1:
+                    raise AssertionError(
+                        "expected this hook to be called inside a backward call"
+                    )
                 count[id] = count.get(id, 0)
+                # pyrefly: ignore [unsupported-operation]
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
                 with lock:
@@ -538,9 +600,10 @@ def register_multi_grad_hook(
 
                 buffer[id][idx] = grad
 
-                assert nb_calls is not None
+                if nb_calls is None:
+                    raise AssertionError("Expected nb_calls to be set")
                 if curr_count == nb_calls - 1:
-                    fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
+                    fn = cast(Callable[[Sequence[torch.Tensor | None]], None], fn)
                     fn(buffer[id])
                     del count[id]
                     del buffer[id]
@@ -558,7 +621,10 @@ def register_multi_grad_hook(
         def wrapped_fn(grad: torch.Tensor) -> None:
             nonlocal ran_hook
             id = torch._C._current_graph_task_id()
-            assert id != -1, "expected this hook to be called inside a backward call"
+            if id == -1:
+                raise AssertionError(
+                    "expected this hook to be called inside a backward call"
+                )
             with lock:
                 prev, ran_hook[id] = ran_hook[id], True
             if prev:
@@ -634,7 +700,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             tid = _get_tid(tensor)
             sid = _get_sid(tensor)
             # Tensors saved for backward have an entry in _tid_to_weakhandle
-            handle: Optional[_Handle] = None
+            handle: _Handle | None = None
 
             # Save aliasing information
             ctx.sid_to_tid[sid].add(tid)
@@ -654,11 +720,13 @@ class _swap_with_cloned(saved_tensors_hooks):
                 "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
                 "in which the graph was originally recorded."
             )
-            assert _allow_mutation_on_saved_tensors_enabled, error_msg
+            if not _allow_mutation_on_saved_tensors_enabled:
+                raise AssertionError(error_msg)
             if handle in ctx.cloned:
                 res = ctx.cloned[handle]
             else:
-                assert handle in ctx.original, error_msg
+                if handle not in ctx.original:
+                    raise AssertionError(error_msg)
                 res = ctx.original[handle]
             return res
 
@@ -674,7 +742,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         func: "OpOverload",
         types: Iterable[type],
         args: tuple[Any, ...] = (),
-        kwargs: Optional[dict[Any, Any]] = None,
+        kwargs: dict[Any, Any] | None = None,
     ) -> Any:
         kwargs = kwargs or {}
 
@@ -782,7 +850,7 @@ def allow_mutation_on_saved_tensors() -> Generator[
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -806,7 +874,7 @@ def _register_logging_hooks_on_whole_graph(
 
             yield node
 
-    def fmt(t: Optional[torch.Tensor]) -> str:
+    def fmt(t: torch.Tensor | None) -> str:
         # Avoid circular import
         from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -814,7 +882,7 @@ def _register_logging_hooks_on_whole_graph(
             return "None"
         return f"{dtype_abbrs[t.dtype]}[{', '.join(map(str, t.shape))}]"
 
-    def prehook(grad_outputs: Sequence[Optional[torch.Tensor]]) -> None:
+    def prehook(grad_outputs: Sequence[torch.Tensor | None]) -> None:
         node = torch._C._current_autograd_node()
         grad_outputs_str = f"[{','.join(fmt(t) for t in grad_outputs)}]"
         log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
@@ -830,13 +898,17 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, ...]:
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+
+    # Need to save the context so compiler config will be visible in device threads
+    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
+
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
@@ -844,3 +916,4 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
+        torch._C._stash_obj_in_tls("context", None)

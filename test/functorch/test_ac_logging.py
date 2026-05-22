@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestAcLogging(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.graph: MagicMock = MagicMock(spec=Graph)
         self.node1: MagicMock = MagicMock(spec=Node)
         self.node2: MagicMock = MagicMock(spec=Node)
@@ -37,8 +38,15 @@ class TestAcLogging(TestCase):
         self.recomputable_node_idxs: list[int] = []
         self.expected_runtime: int = 100
         self.memories_banned_nodes: list[int] = [50]
+        self.normalized_memories_banned_nodes: list[float] = [0.10344827586206896]
         self.runtimes_banned_nodes: list[int] = [10]
         self.min_cut_saved_values: list[Node] = [self.node1]
+        self.memory_budget: float = 0.5
+        self.min_act_size: float = 0.001
+        self.max_act_size: float = 0.01
+        self.saved_values_act_size: float = 0.005
+        self.more_aggressive_saved_values_mem_ratio: float = 0.9
+        self.aggressive_recomputation_saved_values_mem_ratio: float = 0.8
 
     def test_create_joint_graph_node_information(self) -> None:
         recomputable_node_info: dict[str, int] = {"node1": 0}
@@ -93,21 +101,35 @@ class TestAcLogging(TestCase):
             "Expected Runtime": self.expected_runtime,
             "Knapsack Saved Nodes": self.saved_node_idxs,
             "Knapsack Recomputed Nodes": self.recomputable_node_idxs,
-            "Knapsack Input Memories": self.memories_banned_nodes,
+            "Knapsack Input Memories": self.normalized_memories_banned_nodes,
+            "Absolute Memories": self.memories_banned_nodes,
             "Knapsack Input Runtimes": self.runtimes_banned_nodes,
             "Min Cut Solution Saved Values": ["node1"],
+            "Memory Budget": self.memory_budget,
+            "Min Activation Size (GB)": self.min_act_size,
+            "Max Activation Size (GB)": self.max_act_size,
+            "Saved Values Activation Size (GB)": self.saved_values_act_size,
+            "More Aggressive Saved Values Mem Ratio": self.more_aggressive_saved_values_mem_ratio,
+            "Aggressive Recomputation Saved Values Mem Ratio": self.aggressive_recomputation_saved_values_mem_ratio,
         }
         result = create_activation_checkpointing_logging_structure_payload(
-            self.graph,
-            input_joint_graph_node_information,
-            joint_graph_edges,
-            self.all_recomputable_banned_nodes,
-            self.expected_runtime,
-            self.saved_node_idxs,
-            self.recomputable_node_idxs,
-            self.memories_banned_nodes,
-            self.runtimes_banned_nodes,
-            self.min_cut_saved_values,
+            joint_graph=self.graph,
+            joint_graph_node_information=input_joint_graph_node_information,
+            joint_graph_edges=joint_graph_edges,
+            all_recomputable_banned_nodes=self.all_recomputable_banned_nodes,
+            expected_runtime=self.expected_runtime,
+            saved_node_idxs=self.saved_node_idxs,
+            recomputable_node_idxs=self.recomputable_node_idxs,
+            memories_banned_nodes=self.memories_banned_nodes,
+            normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
+            runtimes_banned_nodes=self.runtimes_banned_nodes,
+            min_cut_saved_values=self.min_cut_saved_values,
+            memory_budget=self.memory_budget,
+            min_act_size=self.min_act_size,
+            max_act_size=self.max_act_size,
+            saved_values_act_size=self.saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=self.more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=self.aggressive_recomputation_saved_values_mem_ratio,
         )
         self.assertEqual(result, expected_payload)
 
@@ -119,14 +141,21 @@ class TestAcLogging(TestCase):
         self, mock_json_dumps: MagicMock, mock_trace_structured: MagicMock
     ) -> None:
         create_structured_trace_for_min_cut_info(
-            self.graph,
-            self.all_recomputable_banned_nodes,
-            self.saved_node_idxs,
-            self.recomputable_node_idxs,
-            self.expected_runtime,
-            self.memories_banned_nodes,
-            self.runtimes_banned_nodes,
-            self.min_cut_saved_values,
+            joint_graph=self.graph,
+            all_recomputable_banned_nodes=self.all_recomputable_banned_nodes,
+            saved_node_idxs=self.saved_node_idxs,
+            recomputable_node_idxs=self.recomputable_node_idxs,
+            expected_runtime=self.expected_runtime,
+            memories_banned_nodes=self.memories_banned_nodes,
+            normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
+            runtimes_banned_nodes=self.runtimes_banned_nodes,
+            min_cut_saved_values=self.min_cut_saved_values,
+            memory_budget=self.memory_budget,
+            min_act_size=self.min_act_size,
+            max_act_size=self.max_act_size,
+            saved_values_act_size=self.saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=self.more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=self.aggressive_recomputation_saved_values_mem_ratio,
         )
 
         self.assertEqual(mock_trace_structured.call_count, 1)

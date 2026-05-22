@@ -1,7 +1,7 @@
-from torch._C import (  # type: ignore[attr-defined]
+from torch._C import (
     _add_docstr,
-    _linalg,
-    _LinAlgError as LinAlgError,
+    _linalg,  # pyrefly: ignore [missing-module-attribute]
+    _LinAlgError as LinAlgError,  # pyrefly: ignore  # missing-module-attribute
 )
 
 
@@ -921,7 +921,7 @@ Computes a compact representation of the LDL factorization of a Hermitian or sym
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
 or symmetric (:attr:`hermitian`\ `= False`).
 
-The factorization is of the form the form :math:`A = L D L^T`.
+The factorization is of the form :math:`A = L D L^T`.
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
 :math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``LD``.
@@ -1353,7 +1353,7 @@ Examples::
 norm = _add_docstr(
     _linalg.linalg_norm,
     r"""
-linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
+linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
 Computes a vector or matrix norm.
 
@@ -1364,8 +1364,8 @@ Whether this function computes a vector or matrix norm is determined as follows:
 - If :attr:`dim` is an `int`, the vector norm will be computed.
 - If :attr:`dim` is a `2`-`tuple`, the matrix norm will be computed.
 - If :attr:`dim`\ `= None` and :attr:`ord`\ `= None`,
-  :attr:`A` will be flattened to 1D and the `2`-norm of the resulting vector will be computed.
-- If :attr:`dim`\ `= None` and :attr:`ord` `!= None`, :attr:`A` must be 1D or 2D.
+  :attr:`input` will be flattened to 1D and the `2`-norm of the resulting vector will be computed.
+- If :attr:`dim`\ `= None` and :attr:`ord` `!= None`, :attr:`input` must be 1D or 2D.
 
 :attr:`ord` defines the norm that is computed. The following norms are supported:
 
@@ -1394,12 +1394,12 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
         :func:`torch.linalg.matrix_norm` computes a matrix norm.
 
         The above functions are often clearer and more flexible than using :func:`torch.linalg.norm`.
-        For example, `torch.linalg.norm(A, ord=1, dim=(0, 1))` always
-        computes a matrix norm, but with `torch.linalg.vector_norm(A, ord=1, dim=(0, 1))` it is possible
+        For example, `torch.linalg.norm(input, ord=1, dim=(0, 1))` always
+        computes a matrix norm, but with `torch.linalg.vector_norm(input, ord=1, dim=(0, 1))` it is possible
         to compute a vector norm over the two dimensions.
 
 Args:
-    A (Tensor): tensor of shape `(*, n)` or `(*, m, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n)` or `(*, m, n)` where `*` is zero or more batch dimensions
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `None`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the vector or matrix norm. See above for the behavior when :attr:`dim`\ `= None`.
@@ -1414,7 +1414,7 @@ Keyword args:
         will be :attr:`dtype`. Default: `None`
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`input` is complex.
 
 Examples::
 
@@ -3012,5 +3012,47 @@ Examples::
     tensor([ 0.3223,  0.2815, -0.1944])
     >>> torch.vdot(v1[0], v2[0])
     tensor(0.3223)
+""",
+)
+
+_powsum = _add_docstr(
+    _linalg.linalg__powsum,
+    r"""
+linalg._powsum(x, ord, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes the sum of the absolute values raised to the power ``ord``.
+
+This function computes ``sum(abs(x)**ord)`` without applying the final root,
+which is useful for distributed computing where the root should only be applied
+once after reducing across all ranks.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+Args:
+    x (Tensor): tensor, flattened by default, or optionally over dimension(s)
+                specified by :attr:`dim`.
+    ord (int, float): the exponent value. Can be any real number.
+
+Keyword args:
+    dim (int, Tuple[int], optional): dimension(s) to reduce over.
+                                     Default: ``None`` (all dimensions).
+    keepdim (bool, optional): whether the output has :attr:`dim` retained. Default: ``False``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
+          is performed. Default: ``None``.
+    out (Tensor, optional): output tensor. Ignored if ``None``. Default: ``None``.
+
+Returns:
+    A real-valued tensor, even when :attr:`x` is complex.
+
+Example::
+
+    >>> x = torch.tensor([1., 2., 3.])
+    >>> torch.linalg._powsum(x, 2)
+    tensor(14.)
+    >>> torch.linalg.vector_norm(x, 2)
+    tensor(3.7417)
+    >>> torch.linalg._powsum(x, 2) ** 0.5  # equivalent to vector_norm
+    tensor(3.7417)
 """,
 )

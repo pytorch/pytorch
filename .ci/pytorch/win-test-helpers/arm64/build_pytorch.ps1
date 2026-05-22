@@ -24,6 +24,7 @@ $env:CMAKE_BUILD_TYPE = $env:BUILD_TYPE
 $env:CMAKE_C_COMPILER_LAUNCHER = "sccache"
 $env:CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
 $env:libuv_ROOT = Join-Path $env:DEPENDENCIES_DIR "libuv\install"
+$env:INSTALL_TEST = "0"
 $env:MSSdk = "1"
 
 if ($env:PYTORCH_BUILD_VERSION) {
@@ -46,7 +47,7 @@ if ($env:ENABLE_APL -eq "1") {
 Set-Location $env:PYTORCH_ROOT
 
 # Copy libuv.dll
-Copy-Item -Path (Join-Path $env:libuv_ROOT "lib\Release\uv.dll") -Destination "torch\lib\uv.dll" -Force
+Copy-Item -Path (Join-Path $env:libuv_ROOT "bin\uv.dll") -Destination "torch\lib\uv.dll" -Force
 
 # Create virtual environment
 python -m venv .venv
@@ -70,7 +71,7 @@ sccache --zero-stats
 sccache --show-stats
 
 # Build the wheel
-python setup.py bdist_wheel
+python -m build --wheel --no-isolation
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # Install the wheel locally

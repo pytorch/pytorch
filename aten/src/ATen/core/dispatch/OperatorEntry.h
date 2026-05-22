@@ -105,7 +105,7 @@ class TORCH_API OperatorEntry final {
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
   void registerSchema(
-      FunctionSchema&&,
+      FunctionSchema&& /*schema*/,
       std::string&& debug,
       std::vector<at::Tag> tags = {});
   void deregisterSchema();
@@ -224,9 +224,8 @@ class TORCH_API OperatorEntry final {
   void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback);
 
   template <typename F>
-  PyObject* getPythonOp(PyInterpreter* self_interpreter, F slow_accessor)
-      const {
-    return py_cache_.ptr_or(self_interpreter, slow_accessor);
+  PyObject* getPythonOp(F slow_accessor) const {
+    return py_cache_.ptr_or(slow_accessor);
   }
 
  private:

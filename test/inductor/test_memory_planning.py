@@ -3,7 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -13,7 +13,7 @@ if IS_WINDOWS and IS_CI:
     )
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 import torch
 from torch._C import FileCheck
@@ -82,7 +82,6 @@ class TestMemoryPlanning(TestCase):
         ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)
@@ -92,13 +91,13 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_0[] = {24L + align(12L*s77), };"
+            "int64_t int_array_0[] = {24L + align(12L*s6), };"
         ).check_next("int64_t int_array_1[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
             "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
         ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
-            "int64_t int_array_2[] = {s77, 3L};"
+            "int64_t int_array_2[] = {s6, 3L};"
         ).check_next("int64_t int_array_3[] = {3L, 1L};").check_next(
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
@@ -135,7 +134,10 @@ class TestMemoryPlanning(TestCase):
 
         # check allocation is done after the unbacked symint is computed
         FileCheck().check("auto u0 = u0_raw;").check(
-            "const int64_t int_array_2[] = {10L, 8L*u0, 32L};"
+            # Shows up as one of the following:
+            #   const int64_t int_array_2[] = {10L, 8L*u0, 32L};
+            #   const int64_t int_array_3[] = {10L, 8L*u0, 32L};
+            "[] = {10L, 8L*u0, 32L};"
         ).check("AtenTensorHandle pool0_handle;").check(
             "aoti_torch_empty_strided(3, int_array_2, int_array_3"
         ).run(code)
@@ -147,9 +149,9 @@ class TestMemoryPlanning(TestCase):
         ).check_count("aoti_torch__alloc_from_pool(pool0", 1, exactly=True).run(code)
 
         FileCheck().check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"  # noqa: B950
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"  # noqa: B950
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_1);").run(code)
 
 

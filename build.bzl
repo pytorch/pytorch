@@ -118,6 +118,9 @@ def define_targets(rules):
             ":LazyNonNativeIr.h",
             ":RegisterDispatchDefinitions.ini",
             ":RegisterDispatchKey.cpp",
+            ":ViewMetaClassesPythonBinding.cpp",
+            ":ViewMetaClasses.cpp",
+            ":ViewMetaClasses.h",
             ":native_functions.yaml",
             ":shape_inference.h",
             ":tags.yaml",
@@ -139,18 +142,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
-    rules.genrule(
-        name = "version_h",
-        srcs = [
-            ":torch/csrc/api/include/torch/version.h.in",
-            ":version.txt",
-        ],
-        outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
-              "--version-path $(location :version.txt) --output-path $@ ",
-        tools = ["//tools/setup_helpers:gen_version_header"],
-    )
 
 #
 # ATen generated code
@@ -170,6 +161,7 @@ GENERATED_H = [
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
+    "ViewMetaClasses.h",
     "VmapGeneratedPlumbing.h",
 ]
 
@@ -194,7 +186,6 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
-    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -246,6 +237,7 @@ GENERATED_CPP = [
     "RegisterFunctionalization_1.cpp",
     "RegisterFunctionalization_2.cpp",
     "RegisterFunctionalization_3.cpp",
+    "ViewMetaClasses.cpp",
 ]
 
 GENERATED_CPP_CORE = [
@@ -307,6 +299,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
+    "torch/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp"
 ]
 
 GENERATED_AUTOGRAD_PYTHON = _GENERATED_AUTOGRAD_PYTHON_HEADERS + _GENERATED_AUTOGRAD_PYTHON_CPP
@@ -318,12 +311,22 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/VariableType_2.cpp",
     "torch/csrc/autograd/generated/VariableType_3.cpp",
     "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/VariableType_5.cpp",
+    "torch/csrc/autograd/generated/VariableType_6.cpp",
+    "torch/csrc/autograd/generated/VariableType_7.cpp",
+    "torch/csrc/autograd/generated/VariableType_8.cpp",
+    "torch/csrc/autograd/generated/VariableType_9.cpp",
     "torch/csrc/autograd/generated/ViewFuncs.cpp",
     "torch/csrc/autograd/generated/TraceType_0.cpp",
     "torch/csrc/autograd/generated/TraceType_1.cpp",
     "torch/csrc/autograd/generated/TraceType_2.cpp",
     "torch/csrc/autograd/generated/TraceType_3.cpp",
     "torch/csrc/autograd/generated/TraceType_4.cpp",
+    "torch/csrc/autograd/generated/TraceType_5.cpp",
+    "torch/csrc/autograd/generated/TraceType_6.cpp",
+    "torch/csrc/autograd/generated/TraceType_7.cpp",
+    "torch/csrc/autograd/generated/TraceType_8.cpp",
+    "torch/csrc/autograd/generated/TraceType_9.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
@@ -333,6 +336,7 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
 ]
 
 GENERATED_AOTI_CUDA_CPP = [

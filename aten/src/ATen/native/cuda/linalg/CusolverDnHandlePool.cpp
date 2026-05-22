@@ -1,7 +1,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
-
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
+#include <c10/macros/Export.h>
 
 namespace at::cuda {
 namespace {
@@ -47,6 +46,8 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   return handle;
 }
 
-} // namespace at::cuda
+extern "C" C10_EXPORT void* at_cuda_getCurrentCUDASolverDnHandle() {
+  return getCurrentCUDASolverDnHandle();
+}
 
-#endif // CUDART_VERSION
+} // namespace at::cuda

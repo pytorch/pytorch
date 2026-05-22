@@ -79,6 +79,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setCurrentCUDAStream(cs);
     return old_stream.unwrap();
   }
+  void* getStreamNativeHandle(const Stream s) const override {
+    CUDAStream stream{s};
+    return reinterpret_cast<void*>(stream.stream());
+  }
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
   }
@@ -207,6 +211,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void synchronizeStream(const Stream& stream) const override {
     CUDAStream cuda_stream{stream};
     cuda_stream.synchronize();
+  }
+
+  bool isStreamCapturing(const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    return cuda_stream.is_capturing();
   }
 
   void synchronizeEvent(void* event) const override {

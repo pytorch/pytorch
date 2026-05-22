@@ -330,8 +330,9 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
       _pair_int(*pad),
       _pair_int(*dilation),
       groups->toInt());
-#endif
+#else
   return false;
+#endif
 }
 
 bool isConv2d(const Node* node) {
@@ -795,7 +796,7 @@ static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
-  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), '\n');
   int64_t random_tr_seed = randomTransformsRequested();
   if (random_tr_seed) {
     if (random_tr_seed == -1)
@@ -939,7 +940,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   StmtPtr stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
-  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), '\n');
   return stmt;
 }
 
@@ -1275,7 +1276,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate the equivalent indices in the
+  // and we can calculate the equivalent indices in the
   // output tensor strides by iteratively computing the index of
   // the biggest stride:
   // absolute = ...
@@ -1482,7 +1483,7 @@ std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
       remaining_interm_bufs.push_back(buf);
       continue;
     }
-    auto bp = (void*)malloc(size);
+    auto bp = malloc(size);
     if (!bp) {
       remaining_interm_bufs.push_back(buf);
       continue;

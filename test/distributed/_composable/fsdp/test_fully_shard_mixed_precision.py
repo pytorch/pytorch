@@ -3,12 +3,13 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional, Union
+from typing import Any, NamedTuple
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
@@ -29,10 +30,13 @@ from torch.testing._internal.common_fsdp import (
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     run_tests,
+    skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
+from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
@@ -45,9 +49,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     def _init_models_and_optims(
         self,
-        reshard_after_forward: Union[bool, int],
-        param_dtype: Optional[torch.dtype],
-        reduce_dtype: Optional[torch.dtype],
+        reshard_after_forward: bool | int,
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype | None,
         use_shard_placement_fn,
     ):
         torch.manual_seed(42)
@@ -55,14 +59,17 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
             largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, got {largest_dim} for {param.shape}"
+                )
             return Shard(largest_dim)
 
         mp_policy = MixedPrecisionPolicy(
@@ -109,7 +116,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         use_shard_placement_fn: bool,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -193,7 +200,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
 
     def _test_reduce_dtype_fp32_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
         if (
             self.world_size > 2
@@ -248,7 +255,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     def _test_reduce_dtype_bf16_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -388,6 +395,261 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ):
                 ref_param_compute.detach().copy_(ref_param)
 
+    def _reduce_1d_partial_grads(
+        self, module: nn.Module, group: dist.ProcessGroup | None = None
+    ) -> None:
+        # The reference model is replicated and sees the full global batch, so
+        # its gradients are already the global sum. Dividing by world_size
+        # simulates the average that FSDP's all-reduce produces.
+        group = group or dist.distributed_c10d._get_default_group()
+        for param in module.parameters():
+            if param.grad is not None:
+                param.grad.div_(group.size())
+
+    @skip_if_lt_x_gpu(2)
+    def test_structured_input_output(self):
+        """
+        Tests numeric parity between FSDP and a reference model when using
+        structured (dataclass, nested dataclass, NamedTuple) activations
+        between FSDP-wrapped modules, with and without mixed precision.
+        """
+        self.run_subtests(
+            {
+                "container_type": ["dataclass", "nested_dataclass", "namedtuple"],
+                "mp_config": [
+                    (None, None),  # fp32
+                    (torch.bfloat16, torch.bfloat16),  # bf16 compute + reduce
+                    (torch.bfloat16, torch.float32),  # bf16 compute, fp32 reduce
+                ],
+            },
+            self._test_structured_input_output,
+        )
+
+    def _test_structured_input_output(
+        self,
+        container_type: str,
+        mp_config: tuple[torch.dtype | None, torch.dtype | None],
+    ):
+        param_dtype, reduce_dtype = mp_config
+
+        @dataclasses.dataclass
+        class DC:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Inner:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            z: torch.Tensor
+
+        class TensorPair(NamedTuple):
+            x: torch.Tensor
+            y: torch.Tensor
+
+        class ContainerModule(nn.Module):
+            """Applies a linear layer to each tensor in the container."""
+
+            def __init__(self, ctype: str, dim: int):
+                super().__init__()
+                self.ctype = ctype
+                self._layer = nn.Linear(dim, dim)
+
+            def forward(self, inp: Any) -> Any:
+                if self.ctype == "dataclass":
+                    return DC(x=self._layer(inp.x), y=self._layer(inp.y))
+                elif self.ctype == "nested_dataclass":
+                    return Outer(
+                        inner=Inner(
+                            x=self._layer(inp.inner.x),
+                            y=self._layer(inp.inner.y),
+                        ),
+                        z=self._layer(inp.z),
+                    )
+                else:  # namedtuple
+                    return TensorPair(x=self._layer(inp.x), y=self._layer(inp.y))
+
+        class ToContainer(nn.Module):
+            """Converts a plain tensor into a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, x: torch.Tensor) -> Any:
+                # clone() so each field has an independent autograd path
+                if self.ctype == "dataclass":
+                    return DC(x=x, y=x.clone())
+                elif self.ctype == "nested_dataclass":
+                    return Outer(inner=Inner(x=x, y=x.clone()), z=x.clone())
+                else:  # namedtuple
+                    return TensorPair(x=x, y=x.clone())
+
+        class FromContainer(nn.Module):
+            """Extracts and sums tensors from a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, inp: Any) -> torch.Tensor:
+                if self.ctype == "nested_dataclass":
+                    return inp.inner.x + inp.inner.y + inp.z
+                else:
+                    return inp.x + inp.y
+
+        torch.manual_seed(42)
+        dim = 16
+        local_batch_size = 2
+        global_batch_size = self.world_size * local_batch_size
+
+        model = nn.Sequential(
+            ToContainer(container_type),
+            ContainerModule(container_type, dim),
+            ContainerModule(container_type, dim),
+            FromContainer(container_type),
+        )
+        ref_model = copy.deepcopy(model).to(device_type)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for module in model:
+            fully_shard(module, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        if param_dtype is not None:
+            # Maintain a bf16 copy for compute, fp32 copy for optimizer
+            ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(1)  # same on all ranks
+        for iter_idx in range(10):
+            global_inp = torch.rand((global_batch_size, dim), device=device_type.type)
+            local_inp = global_inp[
+                self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+            ].detach()
+
+            # FSDP forward/backward
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            fsdp_loss = model(local_inp).sum()
+            fsdp_loss.backward()
+            optim.step()
+
+            # Ref forward/backward
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            if param_dtype is not None:
+                ref_loss = ref_model_compute(global_inp.to(param_dtype)).sum()
+                ref_loss.backward()
+                # Simulate gradient reduction matching FSDP's behavior
+                if reduce_dtype is not None and reduce_dtype != param_dtype:
+                    # Cast grads to reduce_dtype, all-reduce, divide
+                    for p in ref_model_compute.parameters():
+                        p.grad.data = p.grad.to(reduce_dtype)
+                        dist.all_reduce(p.grad)
+                        p.grad.div_(self.world_size)
+                else:
+                    self._reduce_1d_partial_grads(ref_model_compute)
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_fp32.grad = p_compute.grad.to(p_fp32.dtype)
+                    p_compute.grad = None
+                ref_optim.step()
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_compute.detach().copy_(p_fp32)
+            else:
+                ref_loss = ref_model(global_inp).sum()
+                ref_loss.backward()
+                self._reduce_1d_partial_grads(ref_model)
+                ref_optim.step()
+
+            dist.all_reduce(fsdp_loss)  # partial -> replicated
+            self.assertEqual(fsdp_loss, ref_loss)
+            # bf16 gradient accumulation introduces drift beyond default
+            # fp32 tolerances, so only check full param/grad parity for fp32.
+            if param_dtype is None:
+                check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardMixedPrecisionJVP(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_no_warmup_jvp_reshard_after_forward_false(self):
+        dtype = torch.bfloat16
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size,),
+            mesh_dim_names=("fsdp",),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=dtype,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=True,
+        )
+
+        with torch.device("meta"):
+            enc = nn.Linear(128, 256, bias=False)
+            dec = nn.Linear(256, 320, bias=False)
+
+        for module in (enc, dec):
+            fully_shard(
+                module,
+                mesh=mesh,
+                mp_policy=mp_policy,
+                reshard_after_forward=False,
+            )
+
+        gen = torch.Generator(device_type.type)
+        for idx, module in enumerate((enc, dec)):
+            module.to_empty(device=device_type.type)
+            with torch.no_grad():
+                module.weight.normal_(
+                    std=module.in_features**-0.5,
+                    generator=gen.manual_seed(42 + idx),
+                )
+
+        x = torch.randn(
+            (128,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(0),
+        )
+        primal = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(1),
+            requires_grad=True,
+        )
+        tangent = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(2),
+        )
+        e = enc(x)
+
+        def fn(unused: torch.Tensor) -> torch.Tensor:
+            return dec(e)
+
+        output, tangent_output = torch.func.jvp(fn, (primal,), (tangent,))
+
+        self.assertEqual(output.shape, (320,))
+        self.assertEqual(output.dtype, dtype)
+        self.assertEqual(tangent_output, torch.zeros_like(output))
+
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @property
@@ -503,12 +765,95 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_forward_inputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="input",
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_outputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="output",
+        )
+
+    def _test_checkpoint_recompute_casts(self, recompute_cast: str):
+        class RecordingLinear(nn.Linear):
+            def __init__(self) -> None:
+                super().__init__(1, 1)
+                self.input_dtypes: list[torch.dtype] = []
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.input_dtypes.append(x.dtype)
+                return super().forward(x)
+
+        class Model(nn.Module):
+            def __init__(self, checkpoint_input_dtype: torch.dtype) -> None:
+                super().__init__()
+                self.linear1 = RecordingLinear()
+                self.checkpoint_input_dtype = checkpoint_input_dtype
+                self.linear1_output_dtypes: list[torch.dtype] = []
+
+            def checkpointed_linear1(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.linear1(x)
+                self.linear1_output_dtypes.append(x.dtype)
+                return x
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.to(dtype=self.checkpoint_input_dtype)
+                x = checkpoint(
+                    self.checkpointed_linear1,
+                    x,
+                    use_reentrant=False,
+                    early_stop=False,
+                )
+                return x.float().sum()
+
+        if recompute_cast == "input":
+            checkpoint_input_dtype = torch.float32
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+            )
+        elif recompute_cast == "output":
+            checkpoint_input_dtype = torch.bfloat16
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+                output_dtype=torch.float32,
+                cast_forward_inputs=False,
+            )
+        else:
+            raise AssertionError(f"Unknown recompute_cast: {recompute_cast}")
+
+        torch.manual_seed(42)
+        model = Model(checkpoint_input_dtype).to(device_type)
+        fully_shard(model.linear1, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        inp = torch.randn(8, 1, device=device_type.type)
+        model(inp).backward()
+        if recompute_cast == "input":
+            self.assertEqual(
+                model.linear1.input_dtypes,
+                [torch.bfloat16, torch.bfloat16],
+            )
+        else:
+            self.assertEqual(
+                model.linear1_output_dtypes,
+                [torch.float32, torch.float32],
+            )
+
+    @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_norm_modules_bf16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         self._test_norm_modules(mp_policy)
 
     @skip_if_lt_x_gpu(1)
+    @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
     def test_norm_modules_fp16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
         self._test_norm_modules(mp_policy)
@@ -595,30 +940,6 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
-
-    @skip_if_lt_x_gpu(1)
-    def test_dataclass_input(self):
-        @dataclasses.dataclass
-        class Input:
-            x: torch.Tensor
-
-        class Model(nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                self._layer = nn.Linear(10, 10)
-
-            def forward(self, input: Input):
-                return self._layer(input.x)
-
-        mp_policy = MixedPrecisionPolicy(
-            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
-        )
-        model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
-
-        fully_shard(model, mp_policy=mp_policy)
-        loss = model(inp).sum()
-        loss.backward()
 
 
 if __name__ == "__main__":

@@ -354,19 +354,13 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 } // namespace utils
                 } // namespace ck
 
-                const std::vector<std::size_t>& HostTensorDescriptor::GetLengths() const { return mLens; }
-                const std::vector<std::size_t>& HostTensorDescriptor::GetStrides() const { return mStrides; }
-                std::size_t HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
-                void HostTensorDescriptor::CalculateStrides() {
-                    mStrides.clear();
-                    mStrides.resize(mLens.size(), 0);
-                    if(mStrides.empty())
-                        return;
-
-                    mStrides.back() = 1;
-                    std::partial_sum(
-                        mLens.rbegin(), mLens.rend() - 1, mStrides.rbegin() + 1, std::multiplies<std::size_t>());
-                }
+                // NOTE: HostTensorDescriptor methods are declared in CK headers but defined
+                // in CK's utility library. For architectural reasons, generated code doesn't
+                // link with this library, so we provide local definitions here.
+                // CalculateStrides is omitted as it became a template method in CK 4266f867.
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetLengths() const { return mLens; }
+                const std::vector<std::size_t>& ck::HostTensorDescriptor::GetStrides() const { return mStrides; }
+                std::size_t ck::HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
             """
         )
         return res
@@ -466,6 +460,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         # disable 1x1 and odd-channels conv specializations for now
         if "Default" not in op.conv_forward_specialization:
             return None
+        if self.is_blocked_by_tf32_setting(op):
+            return None
         return op
 
     def gen_ops(self):
@@ -513,9 +509,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
@@ -528,7 +526,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
         **kwargs,
     ) -> str:
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         X, W = self.input_nodes[0], self.input_nodes[1]

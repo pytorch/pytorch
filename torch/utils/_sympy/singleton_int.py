@@ -17,7 +17,7 @@ class SingletonInt(sympy.AtomicExpr):
 
     # The semantics of this class should match that of NestedIntSymNodeImpl in
     # c10/core/NestedIntSymNodeImpl.h
-    def __init__(self, val, *, coeff=1):
+    def __init__(self, val, *, coeff=1) -> None:
         self._val = val
         self._coeff = coeff
         super().__init__()
@@ -80,14 +80,14 @@ def _eval_is_ge(a, b):
 
 
 @dispatch(SingletonInt, sympy.Integer)  # type: ignore[no-redef]
-def _eval_is_ge(a, b):  # noqa: F811
+def _eval_is_ge(a, b):
     if b <= 2:
         return sympy.true
     raise ValueError("Symbolic SingletonInt: Relation is indeterminate")
 
 
 @dispatch(SingletonInt, SingletonInt)  # type: ignore[no-redef]
-def _eval_is_ge(a, b):  # noqa: F811
+def _eval_is_ge(a, b):
     if a._val == b._val:
         if a._coeff >= b._coeff:
             return sympy.true

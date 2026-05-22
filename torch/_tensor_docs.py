@@ -1516,11 +1516,36 @@ In-place version of :meth:`~Tensor.cumsum`
 )
 
 add_docstr_all(
+    "const_data_ptr",
+    r"""
+const_data_ptr() -> int
+
+Returns the address of the first element of :attr:`self` tensor.
+
+Unlike :meth:`data_ptr`, this is guaranteed to be a read-only access
+that will not trigger copy-on-write materialization. For regular
+(non-COW) tensors, the return value is identical to :meth:`data_ptr`.
+
+.. warning::
+
+    The returned pointer must not be used to mutate the tensor data.
+    Use :meth:`data_ptr` when write access is needed.
+""",
+)
+
+add_docstr_all(
     "data_ptr",
     r"""
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+
+.. note::
+
+    If the tensor is a copy-on-write tensor (e.g. created via
+    :meth:`_lazy_clone`), calling this method will materialize the
+    copy. Use :meth:`const_data_ptr` if you only need read-only access
+    to the data pointer.
 """,
 )
 
@@ -3644,7 +3669,7 @@ Keyword args:
         than the total number of non-zero elements. Default is `-1` to represent
         invalid index.
 
-Example:
+Example::
 
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
@@ -3753,7 +3778,17 @@ add_docstr_all(
     r"""
 permute(*dims) -> Tensor
 
-See :func:`torch.permute`
+Returns a view of the tensor with its dimensions permuted.
+
+Args:
+    dims (torch.Size, int..., tuple of int or list of int): the desired ordering of dimensions.
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
 """,
 )
 
@@ -6266,7 +6301,7 @@ Args:
 add_docstr_all(
     "expand",
     r"""
-expand(*sizes) -> Tensor
+expand(*size) -> Tensor
 
 Returns a new view of the :attr:`self` tensor with singleton dimensions expanded
 to a larger size.
@@ -6285,7 +6320,7 @@ of size 1 can be expanded to an arbitrary value without allocating new
 memory.
 
 Args:
-    *sizes (torch.Size or int...): the desired expanded size
+    *size (torch.Size or int...): the desired expanded size
 
 .. warning::
 
@@ -6625,6 +6660,36 @@ The attribute will then contain the gradients computed and future calls to
 )
 
 add_docstr_all(
+    "grad_dtype",
+    r"""
+The allowed dtype of :attr:``grad`` for this tensor.
+
+:attr:``grad_dtype`` can be set to a specific dtype or ``None``. By default,
+``t.grad_dtype == t.dtype``. When not None, the autograd engine casts
+incoming gradients to this dtype. This attribute is only accessible and
+settable for leaf tensors.
+
+.. warning::
+    Use with caution. Diverging the dtypes of a tensor and its gradient may
+    break downstream systems that assume they match.
+
+Example::
+
+    >>> x = torch.tensor([1.0, 2.0], requires_grad=True)
+    >>> x.grad_dtype
+    torch.float32
+
+    >>> x.grad_dtype = torch.float16
+    >>> x.grad_dtype
+    torch.float16
+
+    >>> # Allow any gradient dtype
+    >>> x.grad_dtype = None
+    >>> x.grad_dtype
+""",
+)
+
+add_docstr_all(
     "retain_grad",
     r"""
 retain_grad() -> None
@@ -6879,7 +6944,7 @@ add_docstr_all(
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor.
 
 Example::
 

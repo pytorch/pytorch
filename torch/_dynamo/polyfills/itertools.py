@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import itertools
 import operator
-import sys
-from typing import Callable, Optional, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -26,6 +25,9 @@ __all__ = [
     "dropwhile",
     "filterfalse",
     "islice",
+    "pairwise",
+    "starmap",
+    "takewhile",
     "tee",
     "zip_longest",
 ]
@@ -49,9 +51,9 @@ def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.accumulate, is_embedded_type=True)  # type: ignore[arg-type]
 def accumulate(
     iterable: Iterable[_T],
-    func: Optional[Callable[[_T, _T], _T]] = None,
+    func: Callable[[_T, _T], _T] | None = None,
     *,
-    initial: Optional[_T] = None,
+    initial: _T | None = None,
 ) -> Iterator[_T]:
     # call iter outside of the generator to match cypthon behavior
     iterator = iter(iterable)
@@ -98,6 +100,7 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
     iterator = iter(iterable)
 
     def _cycle(iterator: Iterator[_T]) -> Iterator[_T]:
+        # pyrefly: ignore [implicit-any]
         saved = []
         for element in iterable:
             yield element
@@ -114,6 +117,8 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.dropwhile, is_embedded_type=True)  # type: ignore[arg-type]
 def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
     # dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]) -> 6 3 8
+    if not callable(predicate):
+        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
 
     iterator = iter(iterable)
     for x in iterator:
@@ -122,6 +127,63 @@ def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[
             break
 
     yield from iterator
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.takewhile
+@substitute_in_graph(itertools.takewhile, is_embedded_type=True)  # type: ignore[arg-type]
+def takewhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    # takewhile(lambda x: x<5, [1,4,6,3,8]) → 1 4
+    if not callable(predicate):
+        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+
+    for x in iterable:
+        if not predicate(x):
+            break
+        yield x
+
+
+@overload
+def starmap(
+    function: Callable[[], _U],
+    iterable: Iterable[tuple[()]],
+    /,
+) -> itertools.starmap[_U]: ...
+
+
+@overload
+def starmap(
+    function: Callable[[_T], _U],
+    iterable: Iterable[tuple[_T]],
+    /,
+) -> itertools.starmap[_U]: ...
+
+
+@overload
+def starmap(
+    function: Callable[[_T, _T1], _U],
+    iterable: Iterable[tuple[_T, _T1]],
+    /,
+) -> itertools.starmap[_U]: ...
+
+
+@overload
+def starmap(
+    function: Callable[[_T, _T1, _T2], _U],
+    iterable: Iterable[tuple[_T, _T1, _T2]],
+    /,
+) -> itertools.starmap[_U]: ...
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.starmap
+@substitute_in_graph(itertools.starmap, is_embedded_type=True)  # type: ignore[arg-type]
+# pyrefly: ignore [implicit-any]
+def starmap(function: Callable[..., _T], iterable: Iterable, /) -> Iterable[_T]:
+    # starmap(pow, [(2,5), (3,2), (10,3)]) → 32 9 1000
+    if not callable(function):
+        raise TypeError(f"'{type(function).__name__}' object is not callable")
+
+    for args in iterable:
+        yield function(*args)
 
 
 @substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]
@@ -163,20 +225,16 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
-if sys.version_info >= (3, 10):
-
-    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
-    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-        a = None
-        first = True
-        for b in iterable:
-            if first:
-                first = False
-            else:
-                yield a, b  # type: ignore[misc]
-            a = b
-
-    __all__ += ["pairwise"]
+@substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
+def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+    a = None
+    first = True
+    for b in iterable:
+        if first:
+            first = False
+        else:
+            yield a, b  # type: ignore[misc]
+        a = b
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
@@ -200,6 +258,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     /,
@@ -209,6 +268,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -217,6 +277,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -227,6 +288,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
@@ -237,6 +299,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -172,7 +173,7 @@ bool InputOutputEncoder::isSupportedScalarList(
   return true;
 }
 
-// This function returns a lambda which is is a custom-iterator-like getter.
+// This function returns a lambda which is a custom-iterator-like getter.
 // Each invocation of the lambda returns input values for one op.
 //
 // io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.
@@ -397,7 +398,9 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = c10::getApproximateTime();
   event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision("cuda", "matmul") == "tf32";
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::TF32;
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -454,7 +457,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     auto& second = (++it)->basic_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+        first.name_.starts_with("autograd::engine::evaluate_function: ")) {
       first.sequence_number_ = second.sequence_number_;
       first.forward_tid_ = second.forward_tid_;
     }
@@ -766,7 +769,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
-  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+  return ((tid << 48) | (seqNr & (((uint64_t)1 << 48) - 1)));
 }
 
 void generateForwardBackwardLink(
@@ -913,7 +916,7 @@ void passEventsToKineto(
       // on-demand Kineto activity handling. Enabling this path
       // for Profiler API could cause side effects as much has changed since.
       // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path framentation, which has been snowballing in complexity
+      // vs API path fragmentation, which has been snowballing in complexity
       // and thus flakiness.
       if (config.global()) {
         e->kineto_activity_ = activity;
@@ -961,8 +964,9 @@ class TransferEvents {
  public:
   TransferEvents(
       std::vector<std::shared_ptr<Result>>& results,
-      trace_ptr_t& trace)
-      : results_{results} {
+      trace_ptr_t& trace,
+      const ProfilerConfig& config)
+      : results_{results}, config_{config} {
     auto* trace_activities_ptr = trace->get()->activities();
     TORCH_INTERNAL_ASSERT(trace_activities_ptr != nullptr);
     trace_activities_ = *trace_activities_ptr;
@@ -1092,13 +1096,58 @@ class TransferEvents {
   void extractEventsFromTrace() {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
-      const auto* linked_activity = activity->linkedActivity();
-      if (e && linked_activity) {
+      if (e) {
+        // Flow data for Kineto events is already set during
+        // resultFromActivity(). TorchOp events need it copied here because
+        // their Result is created during RecordFunction callbacks, before
+        // flow data exists on the GenericTraceActivity.
         e->visit(c10::overloaded(
-            [&](ExtraFields<EventType::Kineto>& i) {
-              i.linked_activity_ = toResult(linked_activity);
+            [&](ExtraFields<EventType::TorchOp>& i) {
+              i.flow = {
+                  /*id=*/static_cast<uint32_t>(activity->flowId()),
+                  /*type=*/static_cast<uint32_t>(activity->flowType()),
+                  /*start=*/activity->flowStart()};
             },
-            [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+            [](auto&) {}));
+        if (config_.experimental_config.expose_kineto_event_metadata) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [](auto&) { return; }));
+          // Parse metadataJson() into extra_meta_ so events() exposes
+          // Kineto metadata as typed fields without export_chrome_trace().
+          // Python schemas (profiler_util.py) are the single SOT for
+          // which keys to expose and how to type-convert them.
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                auto json_str = activity->metadataJson();
+                if (!json_str.empty()) {
+                  auto j = nlohmann::json::parse(
+                      "{" + json_str + "}", nullptr, false);
+                  if (!j.is_discarded()) {
+                    for (auto& [key, val] : j.items()) {
+                      i.extra_meta_.emplace(
+                          key,
+                          val.is_string() ? val.get<std::string>()
+                                          : val.dump());
+                    }
+                  }
+                }
+              },
+              [](auto&) {}));
+        }
+        const auto* linked_activity = activity->linkedActivity();
+        if (linked_activity) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.linked_activity_ = toResult(linked_activity);
+              },
+              [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+        }
       }
     }
   }
@@ -1175,6 +1224,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
+  const ProfilerConfig& config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1182,7 +1232,7 @@ class TransferEvents {
 class TransferEvents {
  public:
   template <class... Args>
-  TransferEvents(Args&&...) {}
+  TransferEvents(Args&&... /*unused*/) {}
 };
 #endif
 
@@ -1201,7 +1251,7 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace};
+  TransferEvents transfer{results, trace, config};
   return trace;
 }
 

@@ -204,7 +204,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -522,7 +522,7 @@ class TestFuseFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_fuse_conv_bn_add_relu_lowering(self):
         """ Test fusion and lowering of Conv2d - (bn -) ReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -826,7 +826,7 @@ class TestFuseFx(QuantizationTestCase):
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
-            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
+            if node.op == "call_module" and type(named_modules[node.target]) is torch.nn.Conv2d:
                 self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
@@ -917,7 +917,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
-            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+            if n.op == 'call_module' and type(modules[n.target]) is nn.ReLU:
                 self.assertTrue(_is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):
@@ -1221,7 +1221,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1484,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1569,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -3157,7 +3157,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_float(cls, float_module):
-                assert hasattr(float_module, 'qconfig')
+                if not hasattr(float_module, 'qconfig'):
+                    raise AssertionError(f"float_module missing 'qconfig': {type(float_module)}")
                 observed = cls(float_module.linear)
                 observed.qconfig = float_module.qconfig
                 return observed
@@ -3172,8 +3173,10 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_observed(cls, observed_module):
-                assert hasattr(observed_module, 'qconfig')
-                assert hasattr(observed_module, 'activation_post_process')
+                if not hasattr(observed_module, 'qconfig'):
+                    raise AssertionError(f"observed_module missing 'qconfig': {type(observed_module)}")
+                if not hasattr(observed_module, 'activation_post_process'):
+                    raise AssertionError(f"observed_module missing 'activation_post_process': {type(observed_module)}")
                 observed_module.linear.activation_post_process = \
                     observed_module.activation_post_process
                 quantized = cls(nnq.Linear.from_float(observed_module.linear))
@@ -3189,7 +3192,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_observed(cls, observed_module):
-                assert hasattr(observed_module, 'qconfig')
+                if not hasattr(observed_module, 'qconfig'):
+                    raise AssertionError(f"observed_module missing 'qconfig': {type(observed_module)}")
                 observed_module.linear.qconfig = observed_module.qconfig
                 quantized = cls(nnqd.Linear.from_float(observed_module.linear))
                 return quantized
@@ -3327,7 +3331,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_float(cls, float_module):
-                assert hasattr(float_module, 'qconfig')
+                if not hasattr(float_module, 'qconfig'):
+                    raise AssertionError(f"float_module missing 'qconfig': {type(float_module)}")
                 observed = cls(float_module.linear)
                 observed.qconfig = float_module.qconfig
                 return observed
@@ -3342,8 +3347,10 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_observed(cls, observed_module):
-                assert hasattr(observed_module, 'qconfig')
-                assert hasattr(observed_module, 'activation_post_process')
+                if not hasattr(observed_module, 'qconfig'):
+                    raise AssertionError(f"observed_module missing 'qconfig': {type(observed_module)}")
+                if not hasattr(observed_module, 'activation_post_process'):
+                    raise AssertionError(f"observed_module missing 'activation_post_process': {type(observed_module)}")
                 observed_module.linear.activation_post_process = \
                     observed_module.activation_post_process
                 quantized = cls(nnq.Linear.from_float(observed_module.linear))
@@ -3411,7 +3418,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_float(cls, float_module):
-                assert hasattr(float_module, 'qconfig')
+                if not hasattr(float_module, 'qconfig'):
+                    raise AssertionError(f"float_module missing 'qconfig': {type(float_module)}")
                 observed = cls(float_module.linear)
                 observed.qconfig = float_module.qconfig
                 return observed
@@ -3426,8 +3434,10 @@ class TestQuantizeFx(QuantizationTestCase):
 
             @classmethod
             def from_observed(cls, observed_module):
-                assert hasattr(observed_module, 'qconfig')
-                assert hasattr(observed_module, 'activation_post_process')
+                if not hasattr(observed_module, 'qconfig'):
+                    raise AssertionError(f"observed_module missing 'qconfig': {type(observed_module)}")
+                if not hasattr(observed_module, 'activation_post_process'):
+                    raise AssertionError(f"observed_module missing 'activation_post_process': {type(observed_module)}")
                 observed_module.linear.activation_post_process = \
                     observed_module.activation_post_process
                 quantized = cls(nnq.Linear.from_float(observed_module.linear))
@@ -3475,7 +3485,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_non_traceable_module(self):
         class NonTraceable(torch.nn.Module):
             def forward(self, x):
-                for k in x.keys():
+                for k in x:
                     print(x[k])
                 return x
 
@@ -3811,9 +3821,12 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
         m(*example_inputs)
         m = convert_fx(m)
-        assert hasattr(m, "mods1_0_packed_weight_0")
-        assert hasattr(m, "mods1_1_packed_weight_0")
-        assert hasattr(m, "mods2_packed_weight_0")
+        if not hasattr(m, "mods1_0_packed_weight_0"):
+            raise AssertionError(f"m missing 'mods1_0_packed_weight_0', attrs: {list(m.__dict__.keys())}")
+        if not hasattr(m, "mods1_1_packed_weight_0"):
+            raise AssertionError(f"m missing 'mods1_1_packed_weight_0', attrs: {list(m.__dict__.keys())}")
+        if not hasattr(m, "mods2_packed_weight_0"):
+            raise AssertionError(f"m missing 'mods2_packed_weight_0', attrs: {list(m.__dict__.keys())}")
 
     @skipIfNoFBGEMM
     def test_mul_add_fp16_config(self):
@@ -4672,13 +4685,13 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for name, module in m.named_modules(remove_duplicate=False):
+            for module in m.modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
 
             actpp_module_count = 0
-            for name, module in m.named_modules():
+            for module in m.modules():
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 1)
@@ -4915,7 +4928,8 @@ class TestQuantizeFx(QuantizationTestCase):
             """
             @classmethod
             def from_float(cls, float_lstm):
-                assert isinstance(float_lstm, cls._FLOAT_MODULE)
+                if not isinstance(float_lstm, cls._FLOAT_MODULE):
+                    raise AssertionError(f"Expected instance of {cls._FLOAT_MODULE}, got {type(float_lstm)}")
                 # uint16, [-16, 16)
                 linear_output_obs_ctr = FixedQParamsObserver.with_args(scale=2 ** -11, zero_point=2 ** 15, dtype=torch.qint32)
                 # uint16, [0, 1)
@@ -4945,7 +4959,8 @@ class TestQuantizeFx(QuantizationTestCase):
             """
             @classmethod
             def from_observed(cls, observed_lstm):
-                assert isinstance(observed_lstm, cls._FLOAT_MODULE)
+                if not isinstance(observed_lstm, cls._FLOAT_MODULE):
+                    raise AssertionError(f"Expected instance of {cls._FLOAT_MODULE}, got {type(observed_lstm)}")
                 return torch.ao.quantization.fx.lstm_utils._get_reference_quantized_lstm_module(
                     observed_lstm=observed_lstm,
                     backend_config=my_backend_config,
@@ -4999,7 +5014,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
             # Match following quantize with the specific qparams and dtypes
             expected_scale, expected_zp, expected_dtype = node_name_to_expected_quantize_args[node.name]
-            for user in node.users.keys():
+            for user in node.users:
                 self.assertEqual(user.target, torch.quantize_per_tensor)
                 if expected_scale is not None:
                     self.assertEqual(getattr(cell, user.args[1].target), expected_scale)
@@ -5374,7 +5389,8 @@ class TestQuantizeFx(QuantizationTestCase):
                               'activation_post_process_6',
                               'activation_post_process_7',
                               'activation_post_process_10']
-        assert name_list == expected_name_list
+        if name_list != expected_name_list:
+            raise AssertionError(f"name_list mismatch: {name_list} != {expected_name_list}")
 
     def test_conv_lowering(self):
         convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
@@ -5692,12 +5708,12 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside untraced module classes",
+            "prepare_qat_fx should not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
+            "prepare_qat_fx should not convert anything inside modules named in untraced_module_names",
         )
 
     def test_qconfig_dict_setup(self):
@@ -5732,7 +5748,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = M().eval()
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
-                for name, mod in m.named_modules():
+                for mod in m.modules():
                     if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
@@ -5776,7 +5792,7 @@ class TestQuantizeFx(QuantizationTestCase):
             qconfig: QConfig,
             backend_config: BackendConfig,
             satisfies_constraints: bool,
-            qconfig_name: Optional[str] = None):
+            qconfig_name: str | None = None):
         """
         Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
         """
@@ -5835,7 +5851,7 @@ class TestQuantizeFx(QuantizationTestCase):
         )
         backend_config = BackendConfig() \
             .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
-                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
                 .add_dtype_config(dtype_config)
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
@@ -5887,7 +5903,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         backend_config = BackendConfig() \
             .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
-                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
                 .add_dtype_config(dtype_config)
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
@@ -6260,7 +6276,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             backend_pattern_configs.append(
                 BackendPatternConfig()
-                ._set_pattern_complex_format((torch.reshape, torch.transpose, MatchAllNode))  # noqa: E131
+                ._set_pattern_complex_format((torch.reshape, torch.transpose, MatchAllNode))
                 .set_observation_type(observation_type)
                 .set_dtype_configs(dtype_configs)
                 ._set_root_node_getter(root_node_getter)
@@ -6314,7 +6330,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_leaky_relu_lowering(self):
         """ Test fusion and lowering of Linear - (bn -) LeakyReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -6333,7 +6349,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_tanh_lowering(self):
         """ Test fusion and lowering of Linear - Tanh
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -8806,7 +8822,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         # check it works in None and static qconfig
         for qconfig in [None, default_qconfig]:
-            qconfig_dict = {"": default_qconfig}
+            qconfig_dict = {"": qconfig}
             m = M().eval()
             m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
             self.checkGraphModuleNodes(m, expected_node_occurrence={
@@ -9430,12 +9446,13 @@ class TestQuantizeFxModels(QuantizationTestCase):
                      nprocs=world_size,  # noqa: F821
                      join=True)
         elif mode == 'qat':
-            assert prepared.training, 'prepared must be in training mode for qat'
+            if not prepared.training:
+                raise AssertionError("prepared must be in training mode for qat")
             optimizer = torch.optim.SGD(prepared.parameters(), lr=0.0001)
             criterion = nn.CrossEntropyLoss()
             train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
         else:
-            for i in range(10):
+            for _ in range(10):
                 prepared(input_value)
 
         # print('after observation root:', prepared.root)
@@ -9452,7 +9469,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         if is_not_tuple_out:
             diff_of_quant[mode][name] = (original_out - qgraph_out).abs().max()
-            assert torch.allclose(qgraph_out, qgraph_script), 'graph, scripted graph'
+            if not torch.allclose(qgraph_out, qgraph_script):
+                raise AssertionError("graph, scripted graph")
         else:
             print('tuple output')
 
@@ -9476,11 +9494,12 @@ class TestQuantizeFxModels(QuantizationTestCase):
                          nprocs=world_size,  # noqa: F821
                          join=True)
             elif mode == 'qat':
-                assert qeager.training, 'qeager should be in training mode for qat'
+                if not qeager.training:
+                    raise AssertionError("qeager should be in training mode for qat")
                 optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                 train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
-                for i in range(10):
+                for _ in range(10):
                     qeager(input_value)
 
             # print('ref after observation:', qeager)
@@ -9515,7 +9534,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
             data = self.img_data_2d
             is_qat = False
         else:
-            assert quant_type == QuantType.QAT
+            if quant_type != QuantType.QAT:
+                raise AssertionError(f"Expected QuantType.QAT, got {quant_type}")
             qconfig = default_qat_qconfig
             eager_prepare = prepare_qat
             graph_prepare = prepare_qat_fx
@@ -9645,14 +9665,19 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @override_qengines
     def test_qat_embeddingbag_linear(self):
         for device in get_supported_device_types():
+            # Quantization backends (qnnpack, fbgemm, onednn) only support CPU tensors
+            # Skip other device for quantization tests (e.g. CUDA)
+            if device != 'cpu':
+                continue
+
             class EmbeddingBagLinear(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
                     self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
                     self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
 
-                def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
-                            per_sample_weights: Optional[torch.Tensor] = None):
+                def forward(self, input: torch.Tensor, offsets: torch.Tensor | None = None,
+                            per_sample_weights: torch.Tensor | None = None):
                     x = self.emb(input, offsets, per_sample_weights)
                     x = self.linear(x)
                     return x
@@ -9662,10 +9687,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 .set_global(get_default_qat_qconfig(qengine)) \
                 .set_object_type(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)
 
-            train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
-            eval_output = [[torch.randint(0, 10, (12, 1))]]
+            train_indices = [[torch.randint(0, 10, (12, 12), device=device), torch.randn((12, 1), device=device)] for _ in range(2)]
+            eval_output = [[torch.randint(0, 10, (12, 1), device=device)]]
 
-            model = EmbeddingBagLinear().train()
+            model = EmbeddingBagLinear().to(device).train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,

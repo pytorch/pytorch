@@ -69,13 +69,17 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 namespace at::native {
 
 static bool use_mkldnn_bf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16 &&
       mkldnn_bf16_device_check();
 }
 
 static bool use_mkldnn_tf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "tf32" &&
+#if defined(__x86_64__) || defined(_M_X64)
+    return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32 &&
       cpuinfo_has_x86_amx_fp16();
+#else
+  return false;  // TF32 not supported on power system
+#endif
 }
 
 Tensor mkldnn_linear(
@@ -199,7 +203,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   if (output_mask[1] || output_mask[2]) {
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 Tensor mkldnn_linear_pointwise(
@@ -434,12 +438,12 @@ Tensor mkl_linear(
     auto K = origin_weight_t.size(1);
     auto N = origin_weight_t.size(0);
     const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
-    auto in_ptr = self_.data_ptr<float>();
+    auto in_ptr = self_.const_data_ptr<float>();
     auto weight_ptr = (float*)(w.get_data_handle());
     auto out_ptr = output.data_ptr<float>();
     if (bias.defined()) {
       auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
-      auto bias_ptr = bias_.data_ptr<float>();
+      const auto bias_ptr = bias_.const_data_ptr<float>();
       at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
         for (const auto d : c10::irange(begin, end)) {
           memcpy(out_ptr + d * N, bias_ptr, sizeof(float) * N);
@@ -531,7 +535,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
-  float output_scale = float(1.0);
+  float output_scale = 1.0f;
   if (scale_result.has_value() &&
       (*out_dtype == ScalarType::Float8_e4m3fn ||
        *out_dtype == ScalarType::Float8_e5m2)) {

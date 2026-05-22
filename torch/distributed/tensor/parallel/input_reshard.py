@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor.placement_types import _is_shard_like
 
 
 __all__ = [
@@ -14,7 +15,7 @@ __all__ = [
 def input_reshard(
     module: torch.nn.Module,
     tp_device_mesh: DeviceMesh,
-    input_reshard_dim: Optional[int] = None,
+    input_reshard_dim: int | None = None,
 ) -> torch.nn.Module:
     """
     Register hooks to an nn.Module for input resharding, enabling sharding and restoration during backward computation.
@@ -42,7 +43,7 @@ def input_reshard(
     if input_reshard_dim is None:
         return module
 
-    cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
+    cx: torch.autograd.graph.saved_tensors_hooks | None = None
 
     def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: tuple[Any, ...]) -> None:
         saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
@@ -64,7 +65,7 @@ def input_reshard(
     return module
 
 
-def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:  # noqa: D401
+def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:
     """Hook function called after FWD to shard input."""
     if isinstance(x, DTensor) and all(p.is_replicate() for p in x._spec.placements):
         return x.redistribute(device_mesh=mesh, placements=[Shard(input_reshard_dim)])
@@ -82,12 +83,12 @@ def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> 
         return x
 
 
-def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.Tensor:  # noqa: D401
+def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.Tensor:
     """Hook function called before activation recomputing in BWD to restore input."""
     if (
         isinstance(x, DTensor)
         and len(x._spec.placements) == 1
-        and x._spec.placements[0].is_shard()
+        and _is_shard_like(x._spec.placements[0])
     ):
         return x.redistribute(device_mesh=mesh, placements=[Replicate()])
     elif (

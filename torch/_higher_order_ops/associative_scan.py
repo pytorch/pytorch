@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -17,8 +18,8 @@ from torch._higher_order_ops.utils import (
     first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -36,9 +37,10 @@ aten = torch._ops.ops.aten
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
-    assert len(args) == 2 * num_leaves, (
-        f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
-    )
+    if len(args) != 2 * num_leaves:
+        raise AssertionError(
+            f"Combine_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+        )
     lhs = pytree.tree_unflatten(args[:num_leaves], spec)
     rhs = pytree.tree_unflatten(args[num_leaves:], spec)
     return combine_fn(lhs, rhs)
@@ -56,6 +58,7 @@ def _interleave(a, b, dim=0):
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    # pyrefly: ignore [unbound-name]
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
         interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
@@ -84,17 +87,20 @@ class AssociativeScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(additional_inputs, (tuple, list)), (
-            "additional_inputs must be a tuple."
-        )
+        if not isinstance(additional_inputs, (tuple, list)):
+            raise AssertionError(
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+            )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, xs, additional_inputs)
 
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -105,24 +111,14 @@ class AssociativeScanOp(HigherOrderOperator):
         xs_slice2 = [first_slice_copy(x) for x in xs]
         all_inputs = tuple(xs_slice1 + xs_slice2 + list(additional_inputs))
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
-
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
         (
             _,
             _,
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For associative_scan, combine_fn cannot have in-place mutations but found "
@@ -162,7 +158,8 @@ def associative_scan(
     Performs an inclusive scan with an associative combine function.
 
     .. warning::
-        `torch.associative_scan` is a prototype feature in PyTorch. It currently
+
+        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -206,18 +203,18 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError("Combine_fn must be a callable, but got {cfn}")
+            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
+        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
             raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA"
+                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )
 
         # Checks for xs
@@ -429,15 +426,21 @@ def trace_associative_scan(
     outputs = None
     for node in combine_graph.graph.nodes:
         if node.op == "output":
-            assert outputs is None
-            assert len(node.args) == 1
+            if outputs is not None:
+                raise AssertionError("found multiple output nodes in combine_graph")
+            if len(node.args) != 1:
+                raise AssertionError(
+                    f"expected output node to have 1 arg, got {len(node.args)}"
+                )
             outputs = node.args[0]
 
-    assert outputs is not None
+    if outputs is None:
+        raise AssertionError("no output node found in combine_graph")
     outputs = pytree.tree_leaves(outputs)
-    assert len(outputs) == len(xs), (
-        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
-    )
+    if len(outputs) != len(xs):
+        raise AssertionError(
+            f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+        )
 
     xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         first_slice_copy(x) for x in xs
@@ -657,6 +660,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         combine_fn,
@@ -682,7 +686,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             # 1.) Compute the forward output of the associative_scan
             ys = associative_scan_op(combine_fn, xs, additional_inputs)
-            save_tensors_and_symints_for_backward(ctx, list(operands) + list(ys))
+            save_values_for_backward(ctx, list(operands) + list(ys))
 
         return (*ys,)
 
@@ -704,7 +708,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         num_additional_inputs = ctx._num_additional_inputs
 
         # Extract the inputs to the forward path and outputs from the forward path
-        flat_args = saved_tensors_and_symints(ctx)
+        flat_args = saved_values(ctx)
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
@@ -739,6 +743,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # vmap joint graph over scan dimension to compute the individual
         # gradients for each time slice ``t`` in parallel.
         # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
+        # pyrefly: ignore [bad-argument-type]
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
 
         # 4.) Compute the single step bw (instantaneous gradients) at every step ``t``

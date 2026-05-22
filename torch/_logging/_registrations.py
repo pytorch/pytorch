@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -47,6 +46,7 @@ register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
+register_log("native_dsl", "torch._native")
 register_log(
     "export",
     [
@@ -161,6 +161,11 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "side_effects",
+    "Prints all side effects that Dynamo codegenerates, including mutations to variables, attributes, cells, and globals. Useful for debugging side effect handling",
+    visible=True,
+)
+register_artifact(
     "not_implemented",
     "Prints log messages whenever we return NotImplemented in a multi-dispatch, letting you trace through each object we attempted to dispatch to",
 )
@@ -201,8 +206,19 @@ register_artifact(
 )
 
 register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
+    off_by_default=True,
+)
+register_artifact(
+    "overlap_scheduling",
+    "Detailed Inductor overlap scheduling pass information",
     off_by_default=True,
 )
 register_artifact(
@@ -226,6 +242,16 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
+    off_by_default=True,
+)
+register_artifact(
+    "node_runtime_estimation",
+    "Node runtime estimation for compile-time optimization decisions.",
+    off_by_default=True,
+)
+register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
     off_by_default=True,
@@ -246,4 +272,14 @@ register_artifact(
     "Logs debug info for hierarchical compilation",
     off_by_default=True,
 )
+register_artifact(
+    "annotation",
+    "Logs detailed steps of the creating annotation on graph nodes",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)

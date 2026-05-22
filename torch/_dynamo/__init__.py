@@ -12,6 +12,7 @@ import torch
 
 from . import (
     aot_compile,
+    bytecode_debugger,
     config,
     convert_frame,
     eval_frame,
@@ -23,23 +24,29 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
+    allow_c_hash,
     allow_in_graph,
     assume_constant_result,
     disable,
+    disable_nested_graph_breaks,
     disallow_in_graph,
     dont_skip_tracing,
     error_on_graph_break,
     forbid_in_graph,
     graph_break,
+    is_dynamo_disable_recursive,
     mark_dynamic,
     mark_static,
     mark_static_address,
     maybe_mark_dynamic,
     nonstrict_trace,
+    override_cudagraphs,
+    override_optimization_hint,
     patch_dynamo_config,
     run,
     set_stance,
     skip_frame,
+    step_unsupported,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -53,6 +60,8 @@ from .eval_frame import (
     OptimizedModule,
     reset_code,
 )
+
+# pyrefly: ignore [deprecated]
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
@@ -63,18 +72,22 @@ from .utils import (
     orig_code_map,
     register_hook_for_recompile_user_context,
     reset_frame_count,
+    reset_recompile_user_contexts,
 )
 
 
 # Register polyfill functions
-from .polyfills import loader as _  # usort: skip # noqa: F401
+from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
+    "allow_c_hash",
     "allow_in_graph",
     "assume_constant_result",
+    "bytecode_debugger",
     "config",
     "disable",
+    "disable_nested_graph_breaks",
     "disallow_in_graph",
     "dont_skip_tracing",
     "export",
@@ -82,6 +95,7 @@ __all__ = [
     "forbid_in_graph",
     "graph_break",
     "is_compiling",
+    "is_dynamo_disable_recursive",
     "list_backends",
     "lookup_backend",
     "mark_dynamic",
@@ -89,6 +103,7 @@ __all__ = [
     "mark_static",
     "mark_static_address",
     "nonstrict_trace",
+    "override_optimization_hint",
     "optimize",
     "optimize_assert",
     "OptimizedModule",
@@ -96,10 +111,14 @@ __all__ = [
     "register_backend",
     "replay",
     "reset",
+    "reset_recompile_user_contexts",
     "run",
+    "override_cudagraphs",
     "error_on_graph_break",
+    "set_recursion_limit",
     "set_stance",
     "skip_frame",
+    "step_unsupported",
     "substitute_in_graph",
 ]
 
@@ -149,8 +168,20 @@ def reset() -> None:
         GenerationTracker.clear()
         TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
-        torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
+
+        # Reset cudagraph trees unconditionally since they are global state
+        # not tied to a specific backend instance
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._higher_order_ops.wrap import inductor_code_side_table
+
+        kernel_side_table.reset_table()
+        inductor_code_side_table.reset_table()
+
+        if torch.cuda.is_available():
+            from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+
+            reset_cudagraph_trees()
 
 
 def reset_code_caches() -> None:
@@ -174,3 +205,33 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+
+
+def get_recursion_limit() -> int:
+    """
+    Returns the internal dynamo recursion limit set by `torch._dynamo.set_recursion_limit`.
+
+    Returns -1 if no c recursion limit has been set.
+    """
+    return torch._C._dynamo.eval_frame.get_c_recursion_limit()
+
+
+def set_recursion_limit(limit: int) -> None:
+    """
+    Sets an internal dynamo recursion limit. The limit must be >= 1, or -1 to reset
+    to the default (unset) state.
+
+    This is possibly needed in Python 3.12-3.13 since there is a separate C recursion limit
+    that is not visible at the Python level. If you are getting RecursionErrors during
+    Dynamo compilation and `sys.setrecursionlimit()` doesn't help, this function may alleviate
+    the issue.
+
+    NOTE: this function does NOT call `sys.setrecursionlimit()` - the user is expected to manually
+        call this if required. This is because the 2 recursion limits are not sync'd up - e.g. in
+        Python 3.12, functions can be inline-evaluated, which apparently doesn't use up the C stack.
+
+    WARNING: increasing the recursion limit to an arbitrary large value may cause segfaults
+        due to stack overflows! You can try also try to manually increase the stack size, e.g.
+        with `$ ulimit -s ...`
+    """
+    torch._C._dynamo.eval_frame.set_c_recursion_limit(limit)

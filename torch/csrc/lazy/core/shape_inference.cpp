@@ -85,7 +85,7 @@ static std::vector<int64_t> expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
+       << "dimensions, but got " << param_name << '=' << list_param;
     TORCH_CHECK(false, ss.str());
   } else {
     return list_param.vec();
@@ -104,7 +104,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
 
   AT_DISPATCH_ALL_TYPES_AND(
       c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
-        // Note: acc_type further defines an accumulataion type depending on the
+        // Note: acc_type further defines an accumulation type depending on the
         // scalar_t and whether its on cuda vs cpu.
         using accscalar_t = at::acc_type<scalar_t, false>;
 
@@ -225,7 +225,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
-        new_dim > 0,
+        new_dim >= 0,
         "The input size ",
         input_sizes[l_diff + i],
         ", plus negative padding ",

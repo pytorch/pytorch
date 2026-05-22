@@ -1,7 +1,8 @@
 import json
 import os
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -56,11 +57,11 @@ class AutoHeuristic:
         self,
         fallback: Callable[[], Choice],
         choices: list[Choice],
-        feedback: Optional[LocalFeedback],
+        feedback: LocalFeedback | None,
         context: AHContext,
         name: str,
-        augment_context: Optional[list[AHOperation]] = None,
-        precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
+        augment_context: list[AHOperation] | None = None,
+        precondition: Callable[[AHMetadata, AHContext], bool] | None = None,
     ) -> None:
         """
         Initializes an instance of the AutoHeuristic class.
@@ -84,7 +85,7 @@ class AutoHeuristic:
         self.augment_context = augment_context
         self.metadata = AHMetadata(
             get_gpu_shared_memory(),
-            torch.cuda.get_device_capability(),
+            torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0),
             self.choices,
             self.name,
         )
@@ -135,8 +136,8 @@ class AutoHeuristic:
         return self.fallback()
 
     def get_top_k_choices(
-        self, top_k: int, always_included: Optional[list[str]] = None
-    ) -> Optional[list[Choice]]:
+        self, top_k: int, always_included: list[str] | None = None
+    ) -> list[Choice] | None:
         if not self.satisfies_precondition():
             return None
         if torch._inductor.config.use_autoheuristic(self.name):
@@ -165,8 +166,10 @@ class AutoHeuristic:
         # we store the collected data per GPU model and learn a heuristic per GPU model
 
         # TODO(AlnisM): just using the device name for now, but the same GPU model can have different names
-        device_name = torch.cuda.get_device_name().replace(" ", "_")
-        return device_name
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name().replace(" ", "_")
+            return device_name
+        return "non_cuda_device"
 
     def get_default_log_path(self) -> str:
         device_name = self.get_device_identifier()
@@ -222,13 +225,13 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
 
     def __init__(
         self,
-        fallback: Callable[[], Optional[ChoiceCaller]],
+        fallback: Callable[[], ChoiceCaller | None],
         choices: list[ChoiceCaller],
         input_nodes: list[Any],
         context: AHContext,
         name: str,
-        augment_context: Optional[list[AHOperation]] = None,
-        precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
+        augment_context: list[AHOperation] | None = None,
+        precondition: Callable[[AHMetadata, AHContext], bool] | None = None,
     ) -> None:
         """
         The arguments choices, input_nodes and name have to match the ones used in the call to
@@ -285,6 +288,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             name: str,
             input_nodes: list[Any],
             choices: list[ChoiceCaller],
+            profiled_time: Callable[[], dict[ChoiceCaller, float]],
+            precompile_times: dict[ChoiceCaller, float],
         ) -> None:
             current_inputs_key = create_inputs_key(input_nodes)
             if current_inputs_key != ah_inputs_key:
@@ -302,13 +307,13 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         feedback_saver = partial(store_global_feedback, inputs_key, precompile_key)
         add_feedback_saver(feedback_saver)
 
-    def get_choice_caller(self) -> Optional[ChoiceCaller]:
+    def get_choice_caller(self) -> ChoiceCaller | None:
         choice = self.get_choice()
         return self.choicestr2choice.get(choice, None)
 
     def get_top_k_choices_caller(
-        self, top_k: int, always_included: Optional[list[str]] = None
-    ) -> Optional[list[ChoiceCaller]]:
+        self, top_k: int, always_included: list[str] | None = None
+    ) -> list[ChoiceCaller] | None:
         choices = self.get_top_k_choices(top_k, always_included)
         if choices is None:
             return None

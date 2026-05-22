@@ -1,34 +1,37 @@
-import abc
-import builtins
+import dataclasses
 import importlib
 import inspect
+import io
 import logging
+import os
 import pickle
+import tempfile
 import types
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.convert_frame import GraphRuntimeEnv
+from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
+from .aot_compile_types import (
+    BundledAOTAutogradSerializableCallable,
+    SerializableCallable,
+)
 from .hooks import Hooks
 
 
+if TYPE_CHECKING:
+    from .guards import GuardManagerWrapper
+    from .package import SerializedCode, SourceInfo
+
+
 log = logging.getLogger(__name__)
-
-
-class SerializableCallable(abc.ABC):
-    @classmethod
-    @abc.abstractmethod
-    def serialize_compile_artifacts(cls, fn: Any) -> bytes:
-        pass
-
-    @classmethod
-    @abc.abstractmethod
-    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        pass
 
 
 def bind_locals(
@@ -42,145 +45,270 @@ def bind_locals(
 @dataclass
 class CompileArtifacts:
     signature: inspect.Signature
-    bytecode: types.CodeType
-    guard_manager: Optional[torch._dynamo.guards.GuardManagerWrapper]
+    guard_manager: Optional["GuardManagerWrapper"]
     guards_state: bytes
-    import_sources: dict[str, str]
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
-    closure: Optional[tuple[Any, ...]]
+    runtime_env: GraphRuntimeEnv
+    source_info: "SourceInfo"
+    device_type: str
+    backend_name: str
+    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+
+    def check_compatibility(self) -> None:
+        current_system = SystemInfo.current()
+        current_system.check_compatibility(self.system_info, self.device_type)
+
+
+class AOTCompilePickler(pickle.Pickler):
+    def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
+        super().__init__(buf)
+        self.external_data = external_data
+        self.id_map: dict[int, str] = {
+            id(value): key for key, value in external_data.items()
+        }
+        self.errors = {}
+
+    def persistent_id(self, obj: object) -> int | str | None:
+        if id(obj) in self.id_map:
+            return self.id_map[id(obj)]
+        elif isinstance(obj, torch.nn.Module):
+            self.errors[id(obj)] = obj
+            return id(obj)
+        else:
+            return None
+
+    @classmethod
+    def _unpickle_cell(cls, val: object) -> object:
+        def _() -> object:
+            return val
+
+        if _.__closure__ is None:
+            raise AssertionError("closure must not be None")
+        return _.__closure__[0]
+
+    @classmethod
+    # pyrefly: ignore [implicit-any]
+    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: "SerializedCode") -> types.CodeType:
+        from torch._dynamo.package import SerializedCode
+
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_nested_function(
+        cls,
+        code: types.CodeType,
+        module: str,
+        qualname: str,
+        argdefs: tuple[object, ...] | None,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        f_globals = importlib.import_module(module).__dict__
+        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+            return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif inspect.iscode(obj):
+            from torch._dynamo.package import SerializedCode
+
+            return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
+
+        elif inspect.ismodule(obj):
+            return type(self)._unpickle_module, (obj.__name__,)
+        elif inspect.ismethod(obj):
+            """
+            By default, pickle will call getattr() directly on the self object
+            for pickling bounded methods, this is not what we want, instead we
+            always want to serialize the original function and the self object
+            in their original form.
+            """
+            func = obj.__func__
+            method_self = obj.__self__
+            inner_func = getattr(method_self, func.__name__)
+            if inspect.ismethod(inner_func):
+                inner_func = inner_func.__func__
+            if func is not inner_func:
+                return type(self)._unpickle_bound_method, (func, method_self)
+        elif inspect.isfunction(obj):
+            if "<locals>" in obj.__qualname__:
+                return type(self)._unpickle_nested_function, (
+                    obj.__code__,
+                    obj.__module__,
+                    obj.__qualname__,
+                    obj.__defaults__,
+                    obj.__closure__,
+                )
+
+        return NotImplemented
+
+
+class AOTCompileUnpickler(pickle.Unpickler):
+    def __init__(self, external_data: dict[str, object], file: io.BytesIO) -> object:
+        super().__init__(file)
+        self.external_data = external_data
+
+    def persistent_load(self, key: str) -> object:
+        if key not in self.external_data:
+            raise RuntimeError(
+                f"Missing required external reference to data: {key}. "
+                "Please load AOT compiled function with "
+                "`external_data=<external data dictionary>`"
+                f"{self.external_data}"
+            )
+        return self.external_data[key]
+
+
+@dataclass
+class AOTCompileSaveResult:
+    serialized_data: bytes
+
+
+def atomic_write_binary(file_path: str, data: bytes):
+    dir_name = os.path.dirname(file_path) or "."
+
+    with tempfile.NamedTemporaryFile(
+        dir=dir_name, delete=False, mode="wb"
+    ) as temp_file:
+        temp_path = temp_file.name
+        temp_file.write(data)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+
+    os.replace(temp_path, file_path)
 
 
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
+    _guard_check_enabled: bool = True
+    _extra_globals: dict[str, object] | None = None
+
+    def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
+        f_locals: dict[str, object] = {}
+        env = self._artifacts.runtime_env
+        if env.closure:
+            if not env.bytecode.co_freevars or len(env.closure) != len(
+                env.bytecode.co_freevars
+            ):
+                raise AssertionError("closure length must match co_freevars length")
+            f_locals = {
+                name: cell.cell_contents
+                for name, cell in zip(env.bytecode.co_freevars, env.closure)
+            }
+        f_locals.update(bind_locals(self._artifacts.signature, *args, **kwargs))
+        return f_locals
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
-        f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
-        assert self._artifacts.guard_manager is not None
+        f_locals = self.prepare_f_locals(*args, **kwargs)
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
-        import_sources = {
-            alias: importlib.import_module(module_name)
-            for alias, module_name in self._artifacts.import_sources.items()
-        }
-        f_globals = {
-            **import_sources,
-            self._artifacts.backend_id: self._artifacts.compiled_fn,
-        }
-        self.fn = types.FunctionType(
-            self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
+        from .package import load_guard_manager, load_guards_state
+
+        self._artifacts.check_compatibility()
+
+        self.fn = self._artifacts.runtime_env.forward_callable(
+            self._artifacts.backend_id,
+            self._artifacts.compiled_fn,
+            extra_globals=self._extra_globals,
         )
 
         if self._artifacts.guard_manager is None:
-            guards_state = pickle.loads(self._artifacts.guards_state)
-            self._artifacts.guard_manager = torch._dynamo.guards.CheckFunctionManager(
+            guards_state = load_guards_state(self._artifacts.guards_state)
+            self._artifacts.guard_manager = load_guard_manager(
+                guards_state,
                 self._artifacts.original_code,
-                guards_state.output_graph,
-                shape_code_parts=guards_state.shape_code_parts,
-                runtime_global_scope=f_globals,
-            ).guard_manager
+                self.fn.__globals__,
+            )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        assert self._artifacts.guard_manager is not None
-        if not self.guard_check(*args, **kwargs):
-            f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
+        if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
+            f_locals = self.prepare_f_locals(*args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
         return self.fn(*args, **kwargs)
 
-    def save_compiled_function(self, path: str) -> None:
-        with open(path, "wb") as f:
-            f.write(type(self).serialize(self))
+    def source_info(self) -> "SourceInfo":
+        return self._artifacts.source_info
+
+    def save_compiled_function(
+        self, path: str, external_data: dict[str, Any] | None = None
+    ) -> AOTCompileSaveResult:
+        result = type(self).serialize(self, external_data)
+        atomic_write_binary(path, result.serialized_data)
+        return result
 
     @classmethod
-    def serialize(cls, fn: "AOTCompiledFunction") -> bytes:
+    def serialize(
+        cls, fn: "AOTCompiledFunction", external_data: dict[str, Any] | None = None
+    ) -> AOTCompileSaveResult:
         from torch._dynamo.package import SerializedCode
 
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
-        state["bytecode"] = SerializedCode.from_code_object(state["bytecode"])
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
+        )
         compiled_fn = state["compiled_fn"]
         state["compiled_fn"] = (
             type(compiled_fn).deserialize_compile_artifacts,
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
-        return pickle.dumps(state)
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler(external_data or {}, buf)
+        pickler.dump(state)
+        if pickler.errors:
+            raise RuntimeError(
+                f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
+                "Please mark these as external data by using `external_data={'key': ...}`"
+            )
+        return AOTCompileSaveResult(serialized_data=buf.getvalue())
 
     @classmethod
-    def deserialize(cls, data: bytes) -> "AOTCompiledFunction":
+    def deserialize(
+        cls,
+        data: bytes,
+        f_globals: dict[str, object] | None = None,
+        external_closure_data: dict[str, Any] | None = None,
+    ) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
 
-        state = pickle.loads(data)
-        state["bytecode"] = SerializedCode.to_code_object(state["bytecode"])
+        f = io.BytesIO(data)
+        f.seek(0)
+        unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
+        state = unpickler.load()
+        f.close()
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.to_code_object(state["runtime_env"].bytecode),
+        )
         deserializer, compiled_fn_state = state["compiled_fn"]
-        state["compiled_fn"] = deserializer(compiled_fn_state)
+        with torch._inductor.config.patch(enable_autograd_for_aot=True):
+            state["compiled_fn"] = deserializer(compiled_fn_state)
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts)
+        return cls(artifacts, _extra_globals=f_globals)
 
-
-class BundledAOTAutogradSerializableCallable(SerializableCallable):
-    """
-    Represents a serializable callable generated by compile_fx.
-    This class wraps around the compiled function generated by AOTAutograd.
-
-    TODO: Instead of using PrecompileContext to grab it from AOTAutograd,
-    this object should be what's *returned* by aot_module_simplified.
-    We'll do that refactor in a later PR.
-    """
-
-    def __init__(self, artifact: Any) -> None:
-        """
-        Takes in a BundledAOTAutogradCacheArtifact, which is the serialized form
-        of a compiled function generated by AOTAutograd.
-        """
-
-        self.compiled_fn = artifact.after_deserialization()
-        self.data = artifact.content
-
-    def __getattr__(self, attr: Any) -> Any:
-        if hasattr(self, attr):
-            return getattr(super(), attr)
-        else:
-            return getattr(self.compiled_fn, attr)
-
-    @classmethod
-    def from_backend_id(
-        cls, backend_id: str
-    ) -> "BundledAOTAutogradSerializableCallable":
-        """
-        Takes in a backend_id, and returns a BundledAOTAutogradSerializableCallable
-        that wraps around the compiled function generated by AOTAutograd.
-        """
-        artifact = PrecompileContext.serialize_artifact_by_key(backend_id)
-        if artifact is None:
-            raise RuntimeError("No artifact found for backend_id: " + backend_id)
-        return cls(artifact)
-
-    @classmethod
-    def serialize_compile_artifacts(
-        cls, fn: "BundledAOTAutogradSerializableCallable"
-    ) -> bytes:
-        return fn.data
-
-    @classmethod
-    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._functorch._aot_autograd.autograd_cache import (
-            BundledAOTAutogradCacheArtifact,
-        )
-
-        # The key in the artifact is not important here since we're not populating a cache,
-        # we just want to grab the callable back out of the serialized entry
-        artifact = BundledAOTAutogradCacheArtifact("", data)
-        return cls(artifact)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.compiled_fn(*args, **kwargs)
+    def disable_guard_check(self) -> None:
+        self._guard_check_enabled = False
 
 
 def aot_compile_fullgraph(
@@ -188,53 +316,42 @@ def aot_compile_fullgraph(
     example_inputs: tuple[tuple[Any, ...], dict[str, Any]],
     hooks: Hooks,
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
+    dynamic: bool | None = None,
 ) -> AOTCompiledFunction:
     from torch._dynamo.guards import CheckFunctionManager
+    from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
-    from torch._guards import compile_context, CompileContext, TracingContext
+    from torch._dynamo.variables.torch_function import (
+        torch_function_mode_stack_state_mgr,
+    )
+    from torch._guards import TracingContext
 
     args, kwargs = example_inputs
-    if hasattr(model, "__self__"):
-        fn = model.__func__
-        args = (model.__self__,) + args
-    elif inspect.isfunction(model):
-        fn = model
-    else:
-        raise RuntimeError(f"Unsupported model code type {model}")
 
-    signature = inspect.signature(fn)
-    f_locals = bind_locals(signature, *args, **kwargs)
-    if fn.__code__.co_freevars or fn.__closure__:
-        assert len(fn.__closure__) == len(fn.__code__.co_freevars)
-        f_locals.update(
-            {
-                name: cell.cell_contents
-                for name, cell in zip(fn.__code__.co_freevars, fn.__closure__)
-            }
-        )
+    dynamic_ctx = nullcontext()
+    if dynamic is not None:
+        from torch._dynamo.eval_frame import set_enable_dynamic
+
+        dynamic_ctx = set_enable_dynamic(dynamic)
 
     with (
-        compile_context(CompileContext(convert_frame.get_compile_id({}))),
         get_metrics_context(),
         dynamo_timed("fullgraph_capture"),
+        torch._functorch.config.patch(strict_autograd_cache=True),
+        dynamic_ctx,
+        torch_function_mode_stack_state_mgr,
     ):
-        capture_output = convert_frame.fullgraph_capture(
-            convert_frame.FrameInfo(
-                fn.__code__,
-                fn.__globals__,
-                f_locals,
-                builtins.__dict__,
-                closure=fn.__closure__ or (),  # type: ignore[arg-type]
-            )
-        )
-        dynamo_output = capture_output.dynamo_output
+        capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
+        graph_capture_output = capture_output.graph_capture_output
+        if graph_capture_output.output_graph is None:
+            raise AssertionError("output_graph must not be None")
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
 
             def new_guard_filter_fn(
-                guard_entries: list[GuardFilterEntry],
-            ) -> list[bool]:
+                guard_entries: Sequence[GuardFilterEntry],
+            ) -> Sequence[bool]:
                 return [
                     (
                         not (
@@ -248,50 +365,186 @@ def aot_compile_fullgraph(
 
             hooks.guard_filter_fn = new_guard_filter_fn
 
-        check_fn = dynamo_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
+        fn, _ = convert_frame.get_traced_fn(model)
+
+        backend_input = capture_output.backend_input
+        if backend_input is None:
+            raise AssertionError("backend_input must not be None")
+        backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
+        device_type = _graph_device_type(backend_input.graph_module.graph)
+        if (
+            backend_input.fake_mode.shape_env
+            is not graph_capture_output.output_graph.shape_env
+        ):
+            raise AssertionError(
+                "fake_mode.shape_env must be the same as output_graph.shape_env"
+            )
+        tracing_context = TracingContext(backend_input.fake_mode)
+        tracing_context.tensor_to_context = backend_input.tensor_to_context
+        with (
+            torch._guards.tracing(tracing_context),
+            torch._functorch.config.patch(
+                {
+                    "strict_autograd_cache": True,
+                    "bypass_autograd_cache_key": True,
+                    "bundled_autograd_cache": True,
+                    "force_non_lazy_backward_lowering": True,
+                    "force_autograd_cache": True,
+                }
+            ),
+        ):
+            compiled_fn = backend(
+                backend_input.graph_module, backend_input.example_inputs
+            )
+            # If Inductor backend or AOTAutograd-based backend is used,
+            # wrap the compiled_fn for serialization.
+            # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
+            if (
+                isinstance(backend, torch._TorchCompileInductorWrapper)
+                or (
+                    hasattr(backend, "compiler_fn")
+                    and isinstance(
+                        backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
+                    )
+                )
+                or (
+                    hasattr(compiled_fn, "serialize")
+                    and compiled_fn.serialize is not None
+                )
+            ):
+                compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
+
+        if not isinstance(compiled_fn, SerializableCallable):
+            if hasattr(backend, "compiler_fn"):
+                compiler_fn = backend.compiler_fn
+            else:
+                compiler_fn = backend
+            raise RuntimeError(
+                f"Compiled function type {type(compiled_fn)} (produced "
+                + f"from backend {compiler_fn}) does not implement SerializableCallable."
+            )
+
+        # Temporarily restore the mode stack so guard expressions that
+        # reference modes can evaluate, matching the compile_inner path.
+        build_guards_ctx = ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with build_guards_ctx:
+            check_fn = graph_capture_output.build_guards(
+                fn.__code__, hooks=hooks, save=True, strict_error=True
+            )
+
+        if check_fn.guards_state is None:
+            raise AssertionError("guards_state must not be None")
+
+        source_info = SourceInfo(inlined_sources=set())
+        for traced_code in graph_capture_output.traced_code:
+            source_info.add_code(traced_code)
+
+        artifacts = CompileArtifacts(
+            signature=convert_frame._get_signature(fn),
+            guard_manager=check_fn.guard_manager,
+            guards_state=check_fn.guards_state,
+            backend_id=backend_input.backend_id,
+            compiled_fn=compiled_fn,
+            original_code=fn.__code__,
+            runtime_env=graph_capture_output.get_runtime_env(),
+            source_info=source_info,
+            device_type=device_type,
+            backend_name=getattr(backend, "compiler_name", "unknown"),
+        )
+        aot_compiled_fn = AOTCompiledFunction(
+            _artifacts=artifacts, _extra_globals=fn.__globals__
         )
 
-        assert check_fn.guards_state is not None
-
-    backend_input = capture_output.backend_input
-    backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-    output_graph = dynamo_output.tracer_output.output_graph
-    assert output_graph is not None
-    import_sources = output_graph.import_sources
-    with (
-        torch._guards.tracing(TracingContext(backend_input.fake_mode)),
-        torch._functorch.config.patch("bundled_autograd_cache", True),
-    ):
-        compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
-
-    # If Inductor backend is used, grab the compiled_fn from PrecompileContext
-    # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-    if isinstance(backend, torch._TorchCompileInductorWrapper):
-        compiled_fn = BundledAOTAutogradSerializableCallable.from_backend_id(
-            backend_input.backend_id
-        )
-
-    if not isinstance(compiled_fn, SerializableCallable):
-        if hasattr(backend, "compiler_fn"):
-            compiler_fn = backend.compiler_fn
-        else:
-            compiler_fn = backend
-        raise RuntimeError(
-            f"Compiled function type {type(compiled_fn)} (produced "
-            + f"from backend {compiler_fn}) does not implement SerializableCallable."
-        )
-
-    artifacts = CompileArtifacts(
-        signature=signature,
-        bytecode=dynamo_output.bytecode,
-        guard_manager=check_fn.guard_manager,
-        guards_state=check_fn.guards_state,
-        import_sources=import_sources,
-        backend_id=backend_input.backend_id,
-        compiled_fn=compiled_fn,
-        original_code=fn.__code__,
-        closure=fn.__closure__,
-    )
-    aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
     return aot_compiled_fn
+
+
+@dataclass
+class ModelInput:
+    """
+    WIP type: represents a single model input
+    Which consists of a tuple of arguments and a set of contexts in which to run the model.
+
+    For each ModelInput, we'll compile one full graph of the model, and then use the guards generated
+    to dispatch between the compiled graphs.
+
+
+    """
+
+    args: tuple[Any]
+    kwargs: dict[str, Any]
+    contexts: list[AbstractContextManager[Any]]
+
+
+@dataclass
+class AOTCompiledModel:
+    # Represents a single forward function of a model along with dispatch
+    # compiled_results is serializable. We require the model to deserialize again.
+    model: torch.nn.Module
+    compiled_results: list[AOTCompiledFunction]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        for result in self.compiled_results:
+            if result.guard_check(self.model, *args, **kwargs):
+                return result(self.model, *args, **kwargs)
+        # All guards failed, just run one of them and throw the guard check error.
+        return self.compiled_results[0](self.model, *args, **kwargs)
+
+    def serialize(self) -> bytes:
+        data: list[bytes] = []
+        for result in self.compiled_results:
+            data.append(AOTCompiledFunction.serialize(result).serialized_data)
+        return pickle.dumps(data)
+
+    @classmethod
+    def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
+        from torch._dynamo.utils import get_metrics_context
+        from torch._guards import compile_context, CompileContext
+
+        results: list[bytes] = pickle.loads(data)
+        compiled_results = []
+        for result in results:
+            with (
+                compile_context(CompileContext(convert_frame.get_compile_id({}))),
+                get_metrics_context(),
+            ):
+                compiled_results.append(AOTCompiledFunction.deserialize(result))
+        return cls(model, compiled_results)
+
+
+def aot_compile_module(
+    model: torch.nn.Module,
+    inputs: list[ModelInput],
+    hooks: Hooks,
+    backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
+) -> AOTCompiledModel:
+    """
+    Compiles a single nn.Module with any number of inputs, and returns a compiled forward function.
+    """
+
+    def compile_single_graph(model_input: ModelInput) -> AOTCompiledFunction:
+        example_inputs = (model_input.args, model_input.kwargs)
+        orig_forward = model.forward
+        with ExitStack() as stack:
+            for ctx in model_input.contexts:
+                stack.enter_context(ctx)
+            return aot_compile_fullgraph(
+                orig_forward,
+                example_inputs,
+                hooks=hooks,
+                backend=backend,
+            )
+
+    # pyrefly: ignore [implicit-any]
+    compiled_results = []
+    for model_input in inputs:
+        log.info("Compiling input %s..", model_input)
+        compiled_results.append(compile_single_graph(model_input))
+
+    if len(compiled_results) == 0:
+        raise AssertionError("Expected at least one compiled result")
+
+    return AOTCompiledModel(model, compiled_results)

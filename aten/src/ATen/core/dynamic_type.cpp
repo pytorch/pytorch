@@ -177,7 +177,7 @@ bool DynamicType::equals(const Type& rhs) const {
   return equals(*create(rhs));
 }
 
-bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
+bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream* /*why_not*/) const {
   auto other = create(rhs);
   if (tag_ == other->tag_) {
     if (equals(*other)) {
@@ -226,8 +226,7 @@ TypeKind DynamicType::dynamicKind() const {
     // resolve to integers
 #undef CASE_TYPE
     default:
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-      return TypeKind::AnyType;
+      TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(TypeKind::AnyType);
   }
 }
 
@@ -310,8 +309,7 @@ TypePtr DynamicType::fallback() const {
     case Tag::Any:
       return AnyType::get();
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-  return nullptr;
+  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
 }
 
 bool DynamicType::LabeledDynamicType::isSubtypeOf(
@@ -371,9 +369,8 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
-    const Type&) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
-  return nullptr;
+    const Type& /*unused*/) {
+  TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(nullptr);
 }
 
 TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(

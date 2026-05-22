@@ -3,6 +3,7 @@
 #include <ATen/functorch/Macros.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/util/Exception.h>
 #include <optional>
 #include <bitset>
 #include <utility>
@@ -87,7 +88,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 // >>> VmapInterpreterPtr(&interpreter).batchSize()
 //
 // Finally, Interpreter::process switches on the type of the interpreter
-// and calls one of {Transform}Intepreter::processImpl under the hood.
+// and calls one of {Transform}Interpreter::processImpl under the hood.
 // Same for Interpreter::sendToNextInterpreter :)
 
 struct VmapInterpreterMeta {
@@ -106,9 +107,10 @@ struct VmapInterpreterMeta {
 
   template <typename T>
   friend void to_json(T& json_j, const VmapInterpreterMeta& json_t) {
-    if (json_t.batchSize_.is_heap_allocated()) {
-      throw std::runtime_error("Serialization for heap-allocated SymInt is not implemented yet");
-    }
+    TORCH_CHECK(
+      !json_t.batchSize_.is_heap_allocated(),
+      "Serialization for heap-allocated SymInt is not implemented yet"
+    );
     json_j["batchSize"] = json_t.batchSize_.as_int_unchecked();
     json_j["randomness"] = static_cast<int64_t>(json_t.randomness_);
   }
@@ -121,7 +123,8 @@ struct VmapInterpreterMeta {
 };
 
 struct GradInterpreterMeta {
-  explicit GradInterpreterMeta(bool prevGradMode): prevGradMode_(prevGradMode) {}
+  explicit GradInterpreterMeta(bool prevGradMode, bool prevInferenceMode = false)
+    : prevGradMode_(prevGradMode), prevInferenceMode_(prevInferenceMode) {}
   GradInterpreterMeta() = default;
   GradInterpreterMeta(const GradInterpreterMeta&) = default;
   GradInterpreterMeta(GradInterpreterMeta&&) = default;
@@ -130,19 +133,23 @@ struct GradInterpreterMeta {
   ~GradInterpreterMeta() = default;
 
   bool prevGradMode_;
+  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const GradInterpreterMeta& json_t) {
     json_j["prevGradMode"] = json_t.prevGradMode_;
+    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, GradInterpreterMeta& json_t) {
     json_t.prevGradMode_ = json_j["prevGradMode"];
+    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
 struct JvpInterpreterMeta {
-  explicit JvpInterpreterMeta(bool prevFwdGradMode) : prevFwdGradMode_(prevFwdGradMode) {}
+  explicit JvpInterpreterMeta(bool prevFwdGradMode, bool prevInferenceMode = false)
+    : prevFwdGradMode_(prevFwdGradMode), prevInferenceMode_(prevInferenceMode) {}
   JvpInterpreterMeta() = default;
   JvpInterpreterMeta(const JvpInterpreterMeta&) = default;
   JvpInterpreterMeta(JvpInterpreterMeta&&) = default;
@@ -151,14 +158,17 @@ struct JvpInterpreterMeta {
   ~JvpInterpreterMeta() = default;
 
   bool prevFwdGradMode_;
+  bool prevInferenceMode_;
   template <typename T>
   friend void to_json(T& json_j, const JvpInterpreterMeta& json_t) {
     json_j["prevFwdGradMode"] = json_t.prevFwdGradMode_;
+    json_j["prevInferenceMode"] = json_t.prevInferenceMode_;
   }
 
   template <typename T>
   friend void from_json(const T& json_j, JvpInterpreterMeta& json_t) {
     json_t.prevFwdGradMode_ = json_j["prevFwdGradMode"];
+    json_t.prevInferenceMode_ = json_j.value("prevInferenceMode", false);
   }
 };
 
@@ -198,11 +208,11 @@ struct Interpreter {
   static Interpreter Vmap(int64_t level, c10::SymInt batchSize, RandomnessType randomness) {
     return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(std::move(batchSize), randomness));
   }
-  static Interpreter Grad(int64_t level, bool prevGradMode) {
-    return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode));
+  static Interpreter Grad(int64_t level, bool prevGradMode, bool prevInferenceMode = false) {
+    return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode, prevInferenceMode));
   }
-  static Interpreter Jvp(int64_t level, bool prevFwdGradMode) {
-    return Interpreter(TransformType::Jvp, level, JvpInterpreterMeta(prevFwdGradMode));
+  static Interpreter Jvp(int64_t level, bool prevFwdGradMode, bool prevInferenceMode = false) {
+    return Interpreter(TransformType::Jvp, level, JvpInterpreterMeta(prevFwdGradMode, prevInferenceMode));
   }
   static Interpreter Functionalize(int64_t level, bool functionalizeAddBackViews) {
     return Interpreter(TransformType::Functionalize, level, FunctionalizeInterpreterMeta(functionalizeAddBackViews));
@@ -302,7 +312,7 @@ struct Interpreter {
     } else if (meta.contains("Functionalize")) {
       json_t.meta_.emplace<FunctionalizeInterpreterMeta>(meta["Functionalize"].template get<FunctionalizeInterpreterMeta>());
     } else {
-      throw std::runtime_error("unknown interpreter metadata type");
+      TORCH_CHECK(false, "unknown interpreter metadata type");
     }
   }
 

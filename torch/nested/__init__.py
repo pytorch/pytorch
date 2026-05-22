@@ -25,9 +25,9 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
-    dtype: Optional[DType] = None,
-    device: Optional[Device] = None,
+    ts: Tensor | list[Tensor] | tuple[Tensor, ...],
+    dtype: DType | None = None,
+    device: Device | None = None,
     layout=None,
 ) -> Tensor:
     r"""
@@ -113,7 +113,10 @@ def as_nested_tensor(
                 *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
             )
         else:
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
@@ -139,7 +142,10 @@ def as_nested_tensor(
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
             return nt
     else:
@@ -281,8 +287,8 @@ def nested_tensor(
 def narrow(
     tensor: Tensor,
     dim: int,
-    start: Union[int, Tensor],
-    length: Union[int, Tensor],
+    start: int | Tensor,
+    length: int | Tensor,
     layout=torch.strided,
 ) -> Tensor:
     r"""
@@ -358,11 +364,11 @@ def narrow(
 
 def nested_tensor_from_jagged(
     values: Tensor,
-    offsets: Optional[Tensor] = None,
-    lengths: Optional[Tensor] = None,
-    jagged_dim: Optional[int] = None,
-    min_seqlen: Optional[int] = None,
-    max_seqlen: Optional[int] = None,
+    offsets: Tensor | None = None,
+    lengths: Tensor | None = None,
+    jagged_dim: int | None = None,
+    min_seqlen: int | None = None,
+    max_seqlen: int | None = None,
 ) -> Tensor:
     r"""
     Constructs a jagged layout nested tensor from the given jagged components. The jagged layout

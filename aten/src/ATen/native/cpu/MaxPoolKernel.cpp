@@ -30,7 +30,7 @@ vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
   return vec.isnan();
 }
 
-// TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
+// TODO: use is_integral/is_same to check the scalar_t and simplify the implementation
 // currently it does not work
 template <>
 vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {

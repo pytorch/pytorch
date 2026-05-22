@@ -144,7 +144,7 @@ struct CacheKey {
         std::memcmp(key, other.key, key_size) == 0;
   }
 
-  size_t hash() const {
+  size_t hash() const noexcept {
     // don't bother hashing the key data, common case 1 cache entry per node
     return std::hash<std::type_index>()(node_type) ^ key_size;
   }
@@ -155,7 +155,7 @@ struct CacheKey {
 };
 
 struct NodeCall {
-  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+  NodeCall(uint32_t id_, c10::intrusive_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
@@ -163,7 +163,7 @@ struct NodeCall {
   }
 
   uint32_t id;
-  std::shared_ptr<Node> node;
+  c10::intrusive_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
@@ -174,10 +174,10 @@ struct NodeCall {
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
-  NodeCall& lookup(const std::shared_ptr<Node>& function) {
-    auto it = find(function.get());
-    if (it == end()) {
-      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+  NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
+    auto [it, inserted] = try_emplace(function.get(), _next_id, function);
+    if (inserted) {
+      ++_next_id;
       nodes.emplace_back(function.get());
     }
     return it->second;
@@ -254,7 +254,9 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+  TensorArg& add(
+      const SavedVariable& sv,
+      const c10::intrusive_ptr<Node>& node) {
     // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
@@ -365,8 +367,10 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+  // pynode -> backward idx, backward state idx, opaque object indices
+  std::unordered_map<
+      const Node*,
+      std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>>
       pynode_objs;
 };
 
@@ -550,7 +554,7 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const std::shared_ptr<Node>& t) {
+  void collect(const c10::intrusive_ptr<Node>& t) {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
@@ -642,14 +646,20 @@ class CompiledNodeArgs {
   void collect_pynode_objs(
       const Node* pynode,
       c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
+      std::optional<c10::SafePyObject>&& bwd_state,
+      std::vector<c10::SafePyObject>&& opaque_objs) {
     size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
     std::optional<size_t> bwd_state_idx;
     if (auto state = std::move(bwd_state); state.has_value()) {
       bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
     }
+    std::vector<size_t> opaque_indices(opaque_objs.size());
+    for (size_t i = 0; i < opaque_objs.size(); i += 1) {
+      opaque_indices[i] = _compiler.emplace_hook(std::move(opaque_objs[i]));
+    }
     _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+        pynode,
+        std::make_tuple(bwd_idx, bwd_state_idx, std::move(opaque_indices)));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -785,8 +795,8 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
+  std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>
+  retrieve_pynode_objs(Node* pynode) const {
     auto it = compiler.pynode_objs.find(pynode);
     TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
     return it->second;
@@ -1050,7 +1060,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
@@ -1458,24 +1468,30 @@ struct IValuePacker<InputMetadata> {
     auto tuple = std::make_tuple(
         pack_TensorOptions(t.options()),
         t.shape_as_dim_vector().vec(),
-        t.is_tensor_subclass());
+        t.is_tensor_subclass(),
+        t.grad_dtype());
     return tuple;
   }
   static InputMetadata unpack(const at::IValue& t) {
-    auto tuple = t.to<
-        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+    auto tuple = t.to<std::tuple<
+        packed_tensoroptions_t,
+        std::vector<at::SymInt>,
+        bool,
+        std::optional<c10::ScalarType>>>();
 
     return InputMetadata(
         unpack_TensorOptions(std::get<0>(tuple)),
         SymIntSmallVec(std::get<1>(tuple)),
         std::get<2>(tuple),
-        false);
+        false,
+        std::get<3>(tuple));
   }
   static at::TypePtr packed_type() {
     return at::TupleType::create(
         {IValuePacker<at::TensorOptions>::packed_type(),
          IValuePacker<std::vector<at::SymInt>>::packed_type(),
-         at::BoolType::get()});
+         at::BoolType::get(),
+         IValuePacker<std::optional<at::ScalarType>>::packed_type()});
   }
 };
 
@@ -1549,7 +1565,7 @@ struct PackedArgs {
 
 template <>
 struct std::hash<torch::dynamo::autograd::CacheKey> {
-  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const {
+  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const noexcept {
     return k.hash();
   }
 };

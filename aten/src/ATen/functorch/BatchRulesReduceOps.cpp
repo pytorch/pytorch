@@ -6,7 +6,6 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <utility>
@@ -76,6 +75,14 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
+static Tensor count_nonzero_decomp(
+  const Tensor& self, std::optional<int64_t> dim) {
+if (dim.has_value()) {
+  return at::count_nonzero(self, IntArrayRef{*dim});
+}
+return at::count_nonzero(self, range(0, self.dim()));
+}
+
 enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
@@ -135,7 +142,7 @@ static void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();
     if (dims.empty()) {
-      auto all_dims = range(0, std::max((int64_t)1, logical_dim));
+      auto all_dims = range(0, std::max(static_cast<int64_t>(1), logical_dim));
       dims = std::vector<int64_t>(all_dims.begin(), all_dims.end());
     }
   } else if (arguments[dim_arg_pos].isInt()) {
@@ -282,7 +289,7 @@ static std::tuple<Tensor, std::optional<int64_t>> _softmax_backward_batch_rule(
 
   dim = getPhysicalDim(output_, /*has_batch_dim*/true, dim);
 
-  // Not sure why output_ needs to be marked as .contiguous(). Someting must
+  // Not sure why output_ needs to be marked as .contiguous(). Something must
   // have changed in PyTorch (and output of softmax is probably always contiguous)
   return std::make_tuple(at::_softmax_backward_data(grad_output_, output_.contiguous(), dim, input_dtype), 0);
 }
@@ -465,6 +472,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
   m.impl("bucketize.Scalar", bucketize_decomp_Scalar);
+  m.impl("count_nonzero", count_nonzero_decomp);
   REDUCTION_BOXED_ARGS(count_nonzero.dim_IntList, 1, KEEPDIM_CASE_FALSE, -1);
   REDUCTION_NO_KEEPDIM_ARG(cummax);
   REDUCTION_NO_KEEPDIM_ARG(cummin);

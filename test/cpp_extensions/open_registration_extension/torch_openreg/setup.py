@@ -28,6 +28,12 @@ def make_relative_rpath_args(path):
 
 
 def get_pytorch_dir():
+    # Disable autoload of the accelerator
+
+    # We must do this for two reasons:
+    # We only need to get the PyTorch installation directory, so whether the accelerator is loaded or not is irrelevant
+    # If the accelerator has been previously built and not uninstalled, importing torch will cause a circular import error
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
 
     return os.path.dirname(os.path.realpath(torch.__file__))
@@ -127,6 +133,7 @@ def main():
         ]
     }
 
+    # LITERALINCLUDE START: SETUP
     setup(
         packages=find_packages(),
         package_data=package_data,
@@ -135,7 +142,13 @@ def main():
             "clean": BuildClean,  # type: ignore[misc]
         },
         include_package_data=False,
+        entry_points={
+            "torch.backends": [
+                "torch_openreg = torch_openreg:_autoload",
+            ],
+        },
     )
+    # LITERALINCLUDE END: SETUP
 
 
 if __name__ == "__main__":

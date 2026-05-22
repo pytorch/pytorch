@@ -1,6 +1,5 @@
 import contextlib
 import os
-from typing import Union
 
 from torch._dynamo.test_case import (
     run_tests as dynamo_run_tests,
@@ -11,7 +10,7 @@ from torch._inductor import config
 from torch._inductor.utils import fresh_cache
 
 
-def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
+def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     dynamo_run_tests(needs)
 
 
@@ -32,7 +31,10 @@ class TestCase(DynamoTestCase):
             )
         )
 
-        if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+        if (
+            "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ
+            and "TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT" not in os.environ
+        ):
             self._inductor_test_stack.enter_context(
                 config.patch({"fx_graph_cache": True})
             )

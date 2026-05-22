@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from contextlib import contextmanager
 from itertools import chain
 from unittest.mock import patch
 
@@ -25,22 +24,25 @@ from torch.distributed.tensor._op_schema import (
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.utils import (
-    register_op_strategy,
-    replicate_op_strategy,
-)
+from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
+from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
+    op_strategy_context,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 try:
@@ -205,6 +207,25 @@ class TestCostModel(DTensorOpTestBase):
         # shard to partial
         cost = redistribute_cost(shard_spec, partial_spec)
         self.assertEqual(cost, float("inf"))
+
+    def test_redistribute_cost_strided_shard(self):
+        """_StridedShard specs get inf cost (shard_order is None bail-out)."""
+        mesh_1d = self.build_device_mesh()
+
+        global_tensor_meta = extract_tensor_meta(torch.randn(10, 10))
+
+        strided_shard_spec = DTensorSpec(
+            mesh_1d, (_StridedShard(0, split_factor=2),), global_tensor_meta
+        )
+        replica_spec = DTensorSpec(mesh_1d, (Replicate(),), global_tensor_meta)
+
+        # _StridedShard as source: shard_order is None → inf
+        self.assertEqual(
+            redistribute_cost(strided_shard_spec, replica_spec), float("inf")
+        )
+        # Replicate as source: is_replicated() short-circuits to 0 before
+        # reaching the shard_order check
+        self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
     def test_redistribute_cost_latency(self):
         # test cost model on addmm op
@@ -377,6 +398,94 @@ class TestCostModel(DTensorOpTestBase):
             )
             self.assertFalse(output_sharding.needs_redistribute)
 
+    def test_redistribute_cost_partial_to_different_partial_is_infinite(self):
+        """Test that redistributing from Partial("sum") to Partial("avg") has infinite cost.
+
+        Converting between different Partial types (e.g., sum -> avg) is not supported,
+        so the redistribute cost should be infinite to prevent this strategy from being chosen.
+        """
+        mesh_1d = self.build_device_mesh()
+        global_tensor = torch.randn(10, 10)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        partial_sum_spec = DTensorSpec(mesh_1d, (Partial("sum"),), global_tensor_meta)
+        partial_avg_spec = DTensorSpec(mesh_1d, (Partial("avg"),), global_tensor_meta)
+
+        # Cost should be infinite since converting between different Partial types is unsupported
+        cost = redistribute_cost(partial_sum_spec, partial_avg_spec)
+        self.assertEqual(cost, float("inf"))
+
+    def test_redistribute_cost_with_order(self):
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+
+        # Source: Shard on dim 0 across all three mesh dimensions
+        source_placement = (Shard(0), Shard(0))
+
+        # Target: Replicate on first mesh dimension, shard on others
+        # This requires 2 allgathers, one on dim=0 and one on dim=1
+        replicate_mesh_dim0 = (Replicate(), Shard(0))
+
+        # Target: Replicate on second mesh dimension, shard on others
+        # This requires 1 allgather on dim=1
+        replicate_mesh_dim1 = (Shard(0), Replicate())
+
+        global_tensor = torch.randn(4, 4)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        source_spec = DTensorSpec(mesh_2d, source_placement, global_tensor_meta)
+        target_spec_dim0 = DTensorSpec(mesh_2d, replicate_mesh_dim0, global_tensor_meta)
+        target_spec_dim1 = DTensorSpec(mesh_2d, replicate_mesh_dim1, global_tensor_meta)
+
+        # Calculate costs for allgather on each mesh dimension
+        cost_mesh_dim0 = redistribute_cost(source_spec, target_spec_dim0)
+        cost_mesh_dim1 = redistribute_cost(source_spec, target_spec_dim1)
+
+        # Cost increases with earlier mesh dimensions due to the way
+        # mesh dimensions are ordered (outer to inner in device hierarchy)
+        self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
+
+
+class TestReductionStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, mesh: DeviceMesh, placements):
+        tensor_meta = TensorMeta(
+            shape=torch.Size([8, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        return DTensorSpec(mesh, tuple(placements), tensor_meta)
+
+    def test_common_reduction_strategy_uses_per_strategy_linearity(self):
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(2, 2))
+        partial_avg_spec = self._make_spec(mesh, (Partial("avg"), Replicate()))
+        sharded_spec = self._make_spec(mesh, (Shard(0), Shard(1)))
+
+        reduction_strategy = common_reduction_strategy(
+            OpStrategy([OpSpec(partial_avg_spec), OpSpec(sharded_spec)]),
+            [0],
+            reduction_op="sum",
+        )
+
+        sharded_reduction_spec = reduction_strategy.strategies[1]
+        self.assertEqual(
+            sharded_reduction_spec.input_specs[0].placements, (Shard(0), Shard(1))
+        )
+        self.assertEqual(
+            sharded_reduction_spec.output_spec.placements,
+            (Partial("sum"), Shard(0)),
+        )
+
 
 # -------------Test op strategy registration-------------
 # custom op without List[Tensor] as input
@@ -442,45 +551,6 @@ torch.library.register_autograd(
 )
 
 
-@contextmanager
-def op_strategy_context(op_overload, strategy_func, schema_info=None):
-    """
-    Context manager for setting and clearing op strategies.
-    Args:
-        op_overload: The operator overload to set or clear the strategy for.
-        strategy_func: The strategy function to set for the operator overload.
-        schema_info: Optional schema information for the operator overload.
-    Yields:
-        None
-    """
-    propagator = DTensor._op_dispatcher.sharding_propagator
-    _origin_op_strategy_funcs = None
-    _origin_op_strategy_schema = None
-    try:
-        # register the op strategy
-        if op_overload in propagator.op_strategy_funcs:
-            _origin_op_strategy_funcs = propagator.op_strategy_funcs[op_overload]
-            del propagator.op_strategy_funcs[op_overload]
-        if op_overload in propagator.op_to_schema_info:
-            _origin_op_strategy_schema = propagator.op_to_schema_info[op_overload]
-            del propagator.op_to_schema_info[op_overload]
-        register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
-        yield
-    finally:
-        # clear this op strategy cache
-        if _origin_op_strategy_funcs is None:
-            if op_overload in propagator.op_strategy_funcs:
-                del propagator.op_strategy_funcs[op_overload]
-        else:
-            propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
-        if _origin_op_strategy_schema is None:
-            if op_overload in propagator.op_to_schema_info:
-                del propagator.op_to_schema_info[op_overload]
-        else:
-            propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        propagator.propagate_op_sharding.cache.cache_clear()
-
-
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
     """
     Given sample input args, detect if identical OpSpecs exists under the same
@@ -530,9 +600,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
 
 class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     @with_comms
-    @patch(
-        "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
-    )
+    @patch("torch.distributed.tensor._sharding_prop._select_min_cost_strategy")
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 
@@ -545,9 +613,8 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
 
             op_spec_costs: list[float] = []
             for op_spec in strategy.strategies:
-                assert op_spec.redistribute_cost is not None, (
-                    "must set redistribute cost each OpSpec!"
-                )
+                if op_spec.redistribute_cost is None:
+                    raise AssertionError("must set redistribute cost each OpSpec!")
                 costs_from__select_strategy.append(op_spec.redistribute_cost)
                 redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
                 op_spec_costs.append(redistribute_cost)
@@ -576,7 +643,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
                 self.assertEqual(
                     comm_mode.get_comm_counts(),
                     {
-                        torch.ops.c10d_functional.all_gather_into_tensor: 4,
+                        torch.ops.c10d_functional.all_gather_into_tensor: self.world_size,
                     },
                 )
                 expected_cost = [
@@ -642,6 +709,782 @@ class TestStrategyHashing(DTensorTestBase):
         with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
+
+
+class TestStrategyOperation(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    def test_cache_clean(self):
+        mesh = self.build_device_mesh()
+        test_op = torch.ops.mylib.numpy_sin
+        x = torch.randn(2, device=self.device_type)
+        y = torch.randn(2, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+        with op_strategy_context(test_op.default, replicate_op_strategy):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            f"Operator {test_op.default} does not have a sharding strategy registered",
+        ):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
+
+
+DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
+    create_local_tensor_test_class(
+        DistTensorReplicateStrategyRegistrationTest,
+    )
+)
+
+TestStrategyHashingWithLocalTensor = create_local_tensor_test_class(
+    TestStrategyHashing,
+)
+
+
+class TestOpSchemaMetaProperties(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def test_args_meta_mixed_opstrategy_and_tuplestrategy(self):
+        """Test args_meta with both OpStrategy and TupleStrategy"""
+        # Create a simple mesh
+        mesh = DeviceMesh("cpu", torch.arange(4))
+
+        # Create tensor metadata
+        tensor_meta1 = TensorMeta(
+            shape=torch.Size([10, 20]),
+            stride=(20, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta2 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta3 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta4 = TensorMeta(
+            shape=torch.Size([20, 30]),
+            stride=(30, 1),
+            dtype=torch.float32,
+        )
+
+        # Create OpStrategies
+        op_strategy1 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(0),), tensor_meta1))]
+        )
+        op_strategy2 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta2))]
+        )
+        op_strategy3 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Replicate(),), tensor_meta3))]
+        )
+        op_strategy4 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta4))]
+        )
+
+        # Create TupleStrategy
+        tuple_strategy = TupleStrategy([op_strategy2, op_strategy3])
+
+        # Create OpSchema: (OpStrategy, TupleStrategy, OpStrategy)
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema=(op_strategy1, tuple_strategy, op_strategy4),
+            kwargs_schema={},
+        )
+
+        # Test args_meta
+        args_meta = op_schema.args_meta
+        self.assertEqual(len(args_meta), 3)
+        # First arg should be TensorMeta
+        self.assertIsInstance(args_meta[0], TensorMeta)
+        self.assertEqual(args_meta[0].shape, torch.Size([10, 20]))
+        # Second arg should be tuple of TensorMeta
+        self.assertIsInstance(args_meta[1], tuple)
+        self.assertEqual(len(args_meta[1]), 2)
+        self.assertIsInstance(args_meta[1][0], TensorMeta)
+        self.assertIsInstance(args_meta[1][1], TensorMeta)
+        self.assertEqual(args_meta[1][0].shape, torch.Size([5, 10]))
+        self.assertEqual(args_meta[1][1].shape, torch.Size([5, 10]))
+        # Third arg should be TensorMeta
+        self.assertIsInstance(args_meta[2], TensorMeta)
+        self.assertEqual(args_meta[2].shape, torch.Size([20, 30]))
+
+    def test_kwargs_meta_mixed(self):
+        """Test kwargs_meta with mixed types"""
+        # Create a simple mesh
+        mesh = DeviceMesh("cpu", torch.arange(4))
+
+        # Create tensor metadata
+        tensor_meta1 = TensorMeta(
+            shape=torch.Size([10, 20]),
+            stride=(20, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta2 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta3 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+
+        # Create OpStrategies
+        op_strategy1 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(0),), tensor_meta1))]
+        )
+        op_strategy2 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta2))]
+        )
+        op_strategy3 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Replicate(),), tensor_meta3))]
+        )
+
+        # Create TupleStrategy
+        tuple_strategy = TupleStrategy([op_strategy2, op_strategy3])
+
+        # Create OpSchema with mixed kwargs
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema=(),
+            kwargs_schema={
+                "input": op_strategy1,
+                "tensors": tuple_strategy,
+                "dim": 0,
+                "alpha": 1.0,
+            },
+        )
+
+        # Test kwargs_meta
+        kwargs_meta = op_schema.kwargs_meta
+        self.assertEqual(len(kwargs_meta), 4)
+        self.assertIsInstance(kwargs_meta["input"], TensorMeta)
+        self.assertIsInstance(kwargs_meta["tensors"], tuple)
+        self.assertEqual(len(kwargs_meta["tensors"]), 2)
+        self.assertEqual(kwargs_meta["dim"], 0)
+        self.assertEqual(kwargs_meta["alpha"], 1.0)
+
+    def test_max_min_dim_single_dim_strategy(self):
+        """max.dim/min.dim only allow sharding on non-reduction dims."""
+        from torch.distributed.tensor._ops._math_ops import (
+            max_min_dim_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # reduce along dim=1: only dim 0 should be shardable
+        strategies = max_min_dim_single_dim_strategy(
+            torch.ops.aten.max.dim, (input_meta, 1), {}
+        )
+        # Should have exactly 1 strategy: shard on dim 0
+        self.assertEqual(len(strategies), 1)
+        values_plc, indices_plc, input_plc = strategies[0]
+        self.assertEqual(values_plc.dim, 0)
+        self.assertEqual(indices_plc.dim, 0)
+        self.assertEqual(input_plc.dim, 0)
+
+        # reduce along dim=0: only dim 1 should be shardable,
+        # output dim maps to 0 (since reduction collapses dim 0)
+        strategies = max_min_dim_single_dim_strategy(
+            torch.ops.aten.min.dim, (input_meta, 0), {}
+        )
+        self.assertEqual(len(strategies), 1)
+        values_plc, indices_plc, input_plc = strategies[0]
+        self.assertEqual(values_plc.dim, 0)
+        self.assertEqual(indices_plc.dim, 0)
+        self.assertEqual(input_plc.dim, 1)
+
+    def test_layer_norm_fwd_single_dim_strategy(self):
+        """layer_norm produces sharding rules for each outer dim."""
+        from torch.distributed.tensor._ops._math_ops import (
+            layer_norm_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+        bias_meta = TensorMeta(shape=torch.Size([8]), stride=(1,), dtype=torch.float32)
+
+        # normalized_shape=[8] => axis=1, only dim 0 is shardable
+        strategies = layer_norm_single_dim_strategy(
+            torch.ops.aten.native_layer_norm.default,
+            (input_meta, [8], weight_meta, bias_meta, 1e-5),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        # [out, mean, rstd, input, weight, bias]
+        out, mean, rstd, inp, w, b = strategies[0]
+        self.assertEqual(out.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertIsInstance(w, Replicate)
+        self.assertIsInstance(b, Replicate)
+
+        # Without bias: 5 elements per rule
+        strategies = layer_norm_single_dim_strategy(
+            torch.ops.aten.native_layer_norm.default,
+            (input_meta, [8], weight_meta, None, 1e-5),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 5)
+
+        # normalized_shape=[4, 8] => axis=0, no shardable dims
+        strategies = layer_norm_single_dim_strategy(
+            torch.ops.aten.native_layer_norm.default,
+            (input_meta, [4, 8], weight_meta, bias_meta, 1e-5),
+            {},
+        )
+        self.assertEqual(len(strategies), 0)
+
+    def test_rms_norm_fwd_single_dim_strategy(self):
+        """rms_norm produces sharding rules for each outer dim."""
+        from torch.distributed.tensor._ops._math_ops import rms_norm_single_dim_strategy
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = rms_norm_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm.default,
+            (input_meta, [8], weight_meta, 1e-5),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        # [out, rrms, input, weight]
+        out, rrms, inp, w = strategies[0]
+        self.assertEqual(out.dim, 0)
+        self.assertEqual(rrms.dim, 0)
+        self.assertEqual(inp.dim, 0)
+        self.assertIsInstance(w, Replicate)
+
+        # Without weight: 3 elements per rule
+        strategies = rms_norm_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm.default,
+            (input_meta, [8], None, 1e-5),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        self.assertEqual(len(strategies[0]), 3)
+
+    def test_layer_norm_bwd_single_dim_strategy(self):
+        """layer_norm backward produces correct output/input placements."""
+        from torch.distributed.tensor._ops._math_ops import (
+            layer_norm_bwd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        stat_meta = TensorMeta(shape=torch.Size([4]), stride=(1,), dtype=torch.float32)
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        # With weight and bias
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                weight_meta,
+                weight_meta,
+                [True, True, True],
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        # outputs: [d_input, d_weight, d_bias] + inputs: [grad_out, input, mean, rstd, weight, bias]
+        self.assertEqual(len(rule), 9)
+        d_input, d_weight, d_bias = rule[0], rule[1], rule[2]
+        self.assertEqual(d_input.dim, 0)  # sharded
+        self.assertIsInstance(d_weight, Partial)  # reduced
+        self.assertIsInstance(d_bias, Partial)  # reduced
+
+        # Without weight/bias: d_weight=None, d_bias=None
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                None,
+                None,
+                [True, False, False],
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        # outputs: [d_input, None, None] + inputs: [grad_out, input, mean, rstd]
+        self.assertEqual(len(rule), 7)
+        self.assertIsNone(rule[1])  # d_weight
+        self.assertIsNone(rule[2])  # d_bias
+
+    def test_rms_norm_bwd_single_dim_strategy(self):
+        """rms_norm backward produces correct output/input placements."""
+        from torch.distributed.tensor._ops._math_ops import (
+            rms_norm_bwd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        stat_meta = TensorMeta(shape=torch.Size([4]), stride=(1,), dtype=torch.float32)
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        # With weight
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (
+                input_meta,  # grad_out
+                input_meta,  # input
+                [8],  # normalized_shape
+                stat_meta,  # rstd
+                weight_meta,  # weight
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        # outputs: [d_input, d_weight] + inputs: [grad_out, input, rstd, weight]
+        self.assertEqual(len(rule), 6)
+        self.assertEqual(rule[0].dim, 0)  # d_input sharded
+        self.assertIsInstance(rule[1], Partial)  # d_weight reduced
+        self.assertIsInstance(rule[5], Replicate)  # weight replicated
+
+        # Without weight: d_weight=None
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (input_meta, input_meta, [8], stat_meta, None),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        # outputs: [d_input, None] + inputs: [grad_out, input, rstd]
+        self.assertEqual(len(rule), 5)
+        self.assertIsNone(rule[1])  # d_weight
+
+    def test_constant_pad_nd_allows_shard_on_non_padded_dim(self):
+        """constant_pad_nd should allow sharding on non-padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1: [1, 1] means pad last dim by 1 on each side
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        # Should include a strategy that shards on dim 0
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertIn(0, shard_dims)
+
+    def test_constant_pad_nd_bans_shard_on_padded_dim(self):
+        """constant_pad_nd should ban sharding on padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertNotIn(1, shard_dims, "Should not shard on padded dim")
+
+
+class TestOpSpecMesh(TestCase):
+    """Tests for OpSpec.mesh property handling of None specs."""
+
+    def setUp(self):
+        super().setUp()
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=4, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, placements):
+        mesh = DeviceMesh("cpu", torch.arange(4))
+        tm = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+        return DTensorSpec(mesh, placements, tm)
+
+    def test_mesh_from_single_output_spec(self):
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=spec, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs(self):
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(spec, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_tuple_output_specs_with_leading_none(self):
+        """When the first output spec is None, mesh should come from the
+        next non-None entry."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=(None, spec), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_output_is_none(self):
+        """When output_specs is None, mesh should come from input_specs."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=None, input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_with_leading_none(self):
+        """When output_specs is None and input_specs has leading None entries,
+        mesh should come from the first non-None input spec."""
+        spec = self._make_spec((Replicate(),))
+        op_spec = OpSpec(output_specs=None, input_specs=(None, spec))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_from_input_specs_when_tuple_output_all_none(self):
+        """When output_specs is a tuple of all None, mesh should fall through
+        to input_specs — same behavior as output_specs=None."""
+        spec = self._make_spec((Shard(0),))
+        op_spec = OpSpec(output_specs=(None, None), input_specs=(spec,))
+        self.assertEqual(op_spec.mesh.shape, (4,))
+
+    def test_mesh_raises_when_all_specs_none(self):
+        """When both output_specs and all input_specs are None, mesh should
+        raise AssertionError."""
+        op_spec = OpSpec(output_specs=None, input_specs=(None, None))
+        with self.assertRaisesRegex(AssertionError, "Cannot determine mesh"):
+            _ = op_spec.mesh
+
+    def test_op_strategy_str_handles_all_specs_none(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/182370."""
+        op_strategy = OpStrategy([OpSpec(output_specs=None, input_specs=(None,))])
+
+        self.assertEqual(str(op_strategy), "OpStrategy[(None) -> None]")
+
+
+class TestExpandToFullMeshOpStrategy(TestCase):
+    """Tests for expand_to_full_mesh_op_strategy function.
+
+    These tests verify that tensor_meta is correctly assigned to input/output specs,
+    especially when the placement list contains None entries (e.g., optional outputs
+    like grad_bias in SDPA backward when attn_bias is not used).
+    """
+
+    def setUp(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        super().setUp()
+        self.world_size = 4
+        self.fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=self.fake_store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _create_op_strategy_with_tensor_meta(
+        self, mesh: DeviceMesh, shape: tuple, dtype: torch.dtype
+    ) -> OpStrategy:
+        """Create an OpStrategy with tensor_meta for testing."""
+        placements = tuple(Replicate() for _ in range(mesh.ndim))
+        strides = []
+        stride = 1
+        for s in reversed(shape):
+            strides.append(stride)
+            stride *= s
+        strides = tuple(reversed(strides))
+
+        tensor_meta = TensorMeta(shape=torch.Size(shape), stride=strides, dtype=dtype)
+        spec = DTensorSpec(mesh=mesh, placements=placements, tensor_meta=tensor_meta)
+        op_spec = OpSpec(
+            output_specs=spec, input_specs=(spec,), redistribute_cost=[[0.0]]
+        )
+        return OpStrategy([op_spec])
+
+    def test_expand_strategy_with_none_in_outputs(self):
+        """Test that None entries in outputs don't shift input tensor_meta assignment.
+
+        This test simulates SDPA backward where grad_bias output is None when
+        attn_bias is not used. The bug was that the None entry caused subsequent
+        input specs to get wrong tensor_meta (shifted by one position).
+        """
+        from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        # Simulate MLA-style attention with different dimensions for q/k vs v
+        batch, heads, seq_len = 2, 8, 64
+        d_qk = 192  # query/key head dimension
+        d_v = 128  # value head dimension (different!)
+
+        # Create input OpStrategy objects with distinct shapes
+        grad_out_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (batch, heads, seq_len, d_v), torch.float32
+        )
+        query_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (batch, heads, seq_len, d_qk), torch.float32
+        )
+        key_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (batch, heads, seq_len, d_qk), torch.float32
+        )
+        value_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (batch, heads, seq_len, d_v), torch.float32
+        )
+
+        # Build OpSchema (attn_bias is None at position 4)
+        args_schema = (
+            grad_out_strategy,
+            query_strategy,
+            key_strategy,
+            value_strategy,
+        )
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,  # dummy op for testing
+            args_schema,
+            {},
+            RuntimeSchemaInfo(needs_pytree=False),
+        )
+
+        # Placement list with None at position 3 (simulating grad_bias = None)
+        # Structure: [out0, out1, out2, None, in0, in1, in2, in3]
+        single_mesh_dim_strategies = [
+            [
+                Replicate(),  # output 0
+                Replicate(),  # output 1
+                Replicate(),  # output 2
+                None,  # output 3 (None, like grad_bias when attn_bias is None)
+                Replicate(),  # input 0: grad_out
+                Replicate(),  # input 1: query
+                Replicate(),  # input 2: key
+                Replicate(),  # input 3: value
+            ]
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            input_index=4,  # 4 outputs (including the None)
+        )
+
+        # Verify the input specs have correct tensor_meta
+        strategy = result.strategies[0]
+        input_specs = strategy.input_specs
+
+        self.assertEqual(len(input_specs), 4)
+
+        # Check that each input got the correct tensor_meta shape
+        # Before the fix, these would be shifted by one position
+        self.assertEqual(input_specs[0].tensor_meta.shape[-1], d_v)  # grad_out
+        self.assertEqual(input_specs[1].tensor_meta.shape[-1], d_qk)  # query
+        self.assertEqual(input_specs[2].tensor_meta.shape[-1], d_qk)  # key
+        self.assertEqual(input_specs[3].tensor_meta.shape[-1], d_v)  # value
+
+    def test_expand_strategy_without_none_in_outputs(self):
+        """Test that expand_to_full_mesh_op_strategy works correctly without None entries."""
+        from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        # Create input OpStrategy objects
+        input1_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (10, 20), torch.float32
+        )
+        input2_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (10, 30), torch.float32
+        )
+
+        args_schema = (input1_strategy, input2_strategy)
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema,
+            {},
+            RuntimeSchemaInfo(needs_pytree=False),
+        )
+
+        # Placement list without any None entries
+        single_mesh_dim_strategies = [
+            [
+                Replicate(),  # output
+                Replicate(),  # input 0
+                Replicate(),  # input 1
+            ]
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            input_index=1,
+        )
+
+        strategy = result.strategies[0]
+        input_specs = strategy.input_specs
+
+        self.assertEqual(len(input_specs), 2)
+        self.assertEqual(input_specs[0].tensor_meta.shape, torch.Size([10, 20]))
+        self.assertEqual(input_specs[1].tensor_meta.shape, torch.Size([10, 30]))
+
+    def test_expand_strategy_with_multiple_nones_in_outputs(self):
+        """Test handling of multiple None entries in outputs."""
+        from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        input1_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (5, 10), torch.float32
+        )
+        input2_strategy = self._create_op_strategy_with_tensor_meta(
+            mesh, (5, 20), torch.float32
+        )
+
+        args_schema = (input1_strategy, input2_strategy)
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema,
+            {},
+            RuntimeSchemaInfo(needs_pytree=False),
+        )
+
+        # Placement list with multiple None entries in outputs
+        single_mesh_dim_strategies = [
+            [
+                Replicate(),  # output 0 (non-None)
+                None,  # output 1 (None)
+                Replicate(),  # output 2 (non-None)
+                None,  # output 3 (None)
+                Replicate(),  # input 0
+                Replicate(),  # input 1
+            ]
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            input_index=4,  # 4 outputs (2 None, 2 non-None)
+        )
+
+        strategy = result.strategies[0]
+        input_specs = strategy.input_specs
+
+        self.assertEqual(len(input_specs), 2)
+        # Verify correct tensor_meta assignment despite multiple Nones
+        self.assertEqual(input_specs[0].tensor_meta.shape, torch.Size([5, 10]))
+        self.assertEqual(input_specs[1].tensor_meta.shape, torch.Size([5, 20]))
+
+
+# Define a dummy op for testing unsupported DTensor ops
+@torch.library.custom_op("testlib::unsupported_add", mutates_args=())
+def unsupported_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """A dummy op that has no DTensor sharding strategy registered."""
+    return x + y
+
+
+@unsupported_add.register_fake
+def _unsupported_add_fake(x, y):
+    return torch.empty_like(x)
+
+
+# Define a dummy op similar to torch.cat that takes a list of tensors
+@torch.library.custom_op("testlib::unsupported_cat", mutates_args=())
+def unsupported_cat(tensors: list[torch.Tensor], dim: int = 0) -> torch.Tensor:
+    """A dummy cat-like op that has no DTensor sharding strategy registered."""
+    return torch.cat(tensors, dim=dim)
+
+
+@unsupported_cat.register_fake
+def _unsupported_cat_fake(tensors, dim=0):
+    # Return a tensor with concatenated shape
+    if len(tensors) == 0:
+        raise ValueError("Expected at least one tensor")
+    first = tensors[0]
+    shape = list(first.shape)
+    shape[dim] = sum(t.shape[dim] for t in tensors)
+    return torch.empty(shape, dtype=first.dtype, device=first.device)
+
+
+class TestUnsupportedDTensorOp(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def test_unsupported_op_error(self):
+        """Test that running an unsupported op on DTensor raises NotImplementedError with appropriate message."""
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = torch.randn(8, 16)
+        y = torch.randn(8, 16)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Operator.*testlib\.unsupported_add.*does not have a sharding strategy registered",
+        ):
+            _ = torch.ops.testlib.unsupported_add(x_dt, y_dt)
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Operator.*testlib\.unsupported_cat.*does not have a sharding strategy registered",
+        ):
+            _ = torch.ops.testlib.unsupported_cat([x_dt, y_dt], dim=0)
 
 
 if __name__ == "__main__":

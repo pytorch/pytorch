@@ -44,11 +44,12 @@ struct alignas(1) Float8_e4m3fn {
 
   Float8_e4m3fn() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t)
+  constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t /*unused*/)
       : x(bits) {}
   inline C10_HOST_DEVICE Float8_e4m3fn(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
+  inline C10_HOST_DEVICE bool isinf() const;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value) {
@@ -203,8 +204,13 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   f_bits ^= sign;
 
   if (f_bits >= fp8_max) {
-    // NaN - all exponent and mantissa bits set to 1
-    result = 0x7f;
+    if (f_bits > UINT32_C(0x7F800000)) {
+      // NaN input → NaN output
+      result = 0x7f;
+    } else {
+      // Finite overflow or inf → saturate to max finite value
+      result = 0x7e;
+    }
   } else {
     if (f_bits < (UINT32_C(121) << 23)) {
       // Input number is smaller than 2^(-6), which is the smallest
@@ -224,6 +230,11 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
 
       // take the bits!
       result = static_cast<uint8_t>(f_bits >> 20);
+
+      // Rounding may carry into the NaN bit pattern (0x7f); saturate to max
+      if (result == 0x7f) {
+        result = 0x7e;
+      }
     }
   }
 
@@ -254,6 +265,11 @@ inline C10_HOST_DEVICE Float8_e4m3fn::operator float() const {
 
 inline C10_HOST_DEVICE bool Float8_e4m3fn::isnan() const {
   return (x & 0b01111111) == 0b01111111;
+}
+
+inline C10_HOST_DEVICE bool Float8_e4m3fn::isinf() const {
+  // Note: fp8e4m3fn does not have infinity, so this always returns false.
+  return false;
 }
 
 /// Arithmetic
@@ -463,7 +479,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::Float8_e4m3fn;
 using c10::operator<<;
 using c10::operator+;
@@ -474,7 +490,7 @@ using c10::operator+=;
 using c10::operator-=;
 using c10::operator*=;
 using c10::operator/=;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor_conversion.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -77,11 +78,11 @@ void convert_handles_to_inputs(
 
 template <typename T>
 void assert_numel(const ArrayRefTensor<T>& tensor, uint64_t numel) {
-  if (tensor.numel() != numel) {
-    std::stringstream err;
-    err << "incorrect numel for input tensor. expected " << numel << ", got "
-        << tensor.numel();
-    throw std::runtime_error(err.str());
-  }
+  TORCH_CHECK(
+      tensor.numel() == numel,
+      "incorrect numel for input tensor. expected ",
+      numel,
+      ", got ",
+      tensor.numel());
 }
 } // namespace torch::aot_inductor

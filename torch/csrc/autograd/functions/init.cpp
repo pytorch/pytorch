@@ -49,7 +49,7 @@ struct UndefinedGradCtor {
 
 struct NoCtor {
   Node* operator()(PyObject* args) {
-    throw std::runtime_error("Cannot construct");
+    TORCH_CHECK(false, "Cannot construct");
   }
 };
 

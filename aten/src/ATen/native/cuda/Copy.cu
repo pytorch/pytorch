@@ -1,11 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
-#include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
@@ -19,13 +19,26 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-// TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
-#ifdef AT_USE_NV_CVT_INTRINSICS
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
 #include <cuda_fp8.h>
 #endif
 
 namespace at::native {
+
+namespace {
+
+// Initial pool size for CUDA events per device.
+constexpr size_t kInitialEventPoolSize = 8;
+
+at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx) {
+  // Pre-populate the pool with events to avoid stalls in creating events
+  static auto* event_pool = new at::cuda::CUDAEventPool(kInitialEventPoolSize);
+  return event_pool->get(device_idx);
+}
+
+} // namespace
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
@@ -42,25 +55,66 @@ void bfloat16_copy_kernel_cuda(TensorIteratorBase &iter) {
     });
 }
 
+#ifdef USE_ROCM
+void bfloat16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(at::BFloat16 value) {
+        return static_cast<float>(value);
+    });
+}
+void float16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(at::Half value) {
+        return static_cast<float>(value);
+    });
+}
+#endif
+
+template <typename SrcT>
+struct ConvertToFloat8E4M3fnOp {
+  __device__ __forceinline__ Float8_e4m3fn operator()(SrcT value) const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13000 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    __nv_fp8_storage_t x;
+    if constexpr (std::is_same_v<SrcT, float>) {
+      x = __nv_cvt_float_to_fp8(value, __NV_SATFINITE, __NV_E4M3);
+    } else if constexpr (std::is_same_v<SrcT, Half>) {
+      x = __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_SATFINITE, __NV_E4M3);
+    } else if constexpr (std::is_same_v<SrcT, BFloat16>) {
+      x = __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_SATFINITE, __NV_E4M3);
+    } else {
+      x = __nv_cvt_float_to_fp8(static_cast<float>(value), __NV_SATFINITE, __NV_E4M3);
+    }
+    return Float8_e4m3fn(x, Float8_e4m3fn::from_bits());
+#else
+    return Float8_e4m3fn(value);
+#endif
+  }
+};
+
+// e5m2 intrinsics are correct but slower; only used for float on Blackwell
+// to work around the ptxas subnormal codegen bug.
+struct ConvertFloatToFloat8E5M2Op {
+  __device__ __forceinline__ Float8_e5m2 operator()(float value) const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13020 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+    auto x = __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
+    return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+    return Float8_e5m2(value);
+#endif
+  }
+};
+
 void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   ScalarType other_dtype = iter.dtype(1);
   if (dtype == kFloat8_e4m3fn) {
     switch (other_dtype) {
       case kFloat:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<float>{});
          break;
       case kHalf:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<Half>{});
          break;
       case kBFloat16:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<BFloat16>{});
          break;
       default:
         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
@@ -69,33 +123,16 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   } else if (dtype == kFloat8_e5m2) {
     switch (other_dtype) {
       case kFloat:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
-             return Float8_e5m2(value);
-#endif
-         });
+         gpu_kernel_nocast(iter, ConvertFloatToFloat8E5M2Op{});
          break;
       case kHalf:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
              return Float8_e5m2(value);
-#endif
          });
          break;
       case kBFloat16:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
              return Float8_e5m2(value);
-#endif
          });
          break;
       default:
@@ -167,7 +204,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
          break;
     }
   } else {
-    TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
+    TORCH_CHECK(false, "This supposed to be called only for Float8 types");
   }
 }
 
@@ -187,12 +224,26 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
      } else {
        float16_copy_kernel_cuda(iter);
      }
-  } else if (isBitsType(dtype)) {
+  }
+#ifdef USE_ROCM
+  else if ((iter.dtype(1) == kBFloat16 || iter.dtype(1) == kHalf) && dtype == kFloat) {
+    if (iter.dtype(1) == kBFloat16) {
+      bfloat16tofloat32_copy_kernel_cuda(iter);
+    } else {
+      float16tofloat32_copy_kernel_cuda(iter);
+    }
+  }
+#endif
+  else if (isBitsType(dtype)) {
     TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
       "bits types to different bits types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
     AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else if (dtype == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
+      "Float4_e2m1fn_x2 to different types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(Float4_e2m1fn_x2 x) { return x; });
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
@@ -240,12 +291,14 @@ void copy_device_to_device(TensorIterator& iter,
     // write-after-read dependencies on the destination side are handled, so
     // that no one is operating on the dst memory when we perform the copy.
     // src waits on dst barrier (src already waits on src)
-    CUDAEvent dst_ready;
+
+    // Use event pool for better performance instead of creating new events
+    auto dst_ready = getEventFromPool(dst_device.index());
     device_guard.set_device(dst_device);
-    dst_ready.record(getCurrentCUDAStream(dst_device.index()));
+    dst_ready->record(getCurrentCUDAStream(dst_device.index()));
 
     device_guard.set_device(src_device);
-    dst_ready.block(copy_stream);
+    dst_ready->block(copy_stream);
   }
 
   if (memcpy_eligible) {
@@ -284,11 +337,11 @@ void copy_device_to_device(TensorIterator& iter,
     // operate on dst's copy until the copy is complete.
 
     // Still on src_device, record stream event
-    CUDAEvent src_ready;
-    src_ready.record(copy_stream);
+    auto src_ready = getEventFromPool(src_device.index());
+    src_ready->record(copy_stream);
 
     device_guard.set_device(dst_device);
-    src_ready.block(getCurrentCUDAStream(dst_device.index()));
+    src_ready->block(getCurrentCUDAStream(dst_device.index()));
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -384,14 +437,26 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Copy between CPU and GPU
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
+  const Tensor* host_tensor = nullptr;
   if (dst_device.is_cuda() && src_device.is_cpu()) {
     device_guard.set_device(dst_device);
     kind = cudaMemcpyHostToDevice;
+    host_tensor = &iter.tensor(1);
   } else if (dst_device.is_cpu() && src_device.is_cuda()) {
     device_guard.set_device(src_device);
     kind = cudaMemcpyDeviceToHost;
+    host_tensor = &iter.tensor(0);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
+  }
+
+  // Check for unpinned CPU memory during CUDA graph capture
+  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    TORCH_CHECK(
+        host_tensor->is_pinned(),
+        "Cannot copy between CPU and CUDA tensors during CUDA graph capture ",
+        "unless the CPU tensor is pinned. Please use tensor.pin_memory() or ",
+        "allocate the tensor with pin_memory=True.");
   }
 
   void* dst = iter.data_ptr(0);

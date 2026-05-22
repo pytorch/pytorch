@@ -5,7 +5,6 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 flex_attention_cp.py
 
 import os
 from functools import lru_cache
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -27,8 +26,8 @@ def get_device_type() -> str:
 @lru_cache
 def create_block_mask_cached(
     score_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
+    B: int | None,
+    H: int | None,
     M: int,
     N: int,
     device: str = "cuda",
@@ -40,7 +39,8 @@ def create_block_mask_cached(
 def flex_attn_example(world_size: int, rank: int) -> None:
     device_type = get_device_type()
     device_handle = getattr(torch, device_type, None)
-    assert device_handle is not None, f"Unsupported device type: {device_type}"
+    if device_handle is None:
+        raise AssertionError(f"Unsupported device type: {device_type}")
     num_devices_per_host = device_handle.device_count()
     device_handle.set_device(rank % num_devices_per_host)
     torch._dynamo.config.cache_size_limit = 1000
@@ -97,7 +97,8 @@ def flex_attn_example(world_size: int, rank: int) -> None:
 
     q, k, v = qkv
     out = compiled_flex_attention(q, k, v, score_mod=None, block_mask=block_mask)
-    assert isinstance(out, torch.Tensor)
+    if not isinstance(out, torch.Tensor):
+        raise AssertionError
     expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
     torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
 
@@ -138,7 +139,8 @@ def flex_attn_example(world_size: int, rank: int) -> None:
         score_mod=None,
         block_mask=cp_block_mask,
     )
-    assert isinstance(cp_out, torch.Tensor)
+    if not isinstance(cp_out, torch.Tensor):
+        raise AssertionError
 
     # wrap the local output into a DTensor
     cp_out_dist = DTensor.from_local(cp_out, device_mesh, [Shard(seq_dim)])
@@ -172,7 +174,8 @@ def flex_attn_example(world_size: int, rank: int) -> None:
     cp_out.backward(grad_out_dist.to_local())
 
     for cp_flex_grad_dist, expect_grad in zip([t.grad for t in qkv_dist], grad2):
-        assert isinstance(cp_flex_grad_dist, DTensor)
+        if not isinstance(cp_flex_grad_dist, DTensor):
+            raise AssertionError
         torch.testing.assert_close(
             cp_flex_grad_dist.full_tensor(), expect_grad, atol=1e-1, rtol=1e-2
         )

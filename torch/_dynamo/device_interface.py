@@ -18,14 +18,15 @@ specialized implementations for each hardware backend's unique features.
 import inspect
 import time
 from collections import namedtuple
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Literal
 
 import torch
+from torch.utils._pallas import has_torch_tpu
 
 
-get_cuda_stream: Optional[Callable[[int], int]]
+get_cuda_stream: Callable[[int], int] | None
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 else:
@@ -181,7 +182,7 @@ class DeviceGuard:
     """
 
     def __init__(
-        self, device_interface: type[DeviceInterface], index: Optional[int]
+        self, device_interface: type[DeviceInterface], index: int | None
     ) -> None:
         self.device_interface = device_interface
         self.idx = index
@@ -205,6 +206,7 @@ class CudaInterface(DeviceInterface):
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
 
+    # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
         def set_device(device: int) -> None:
@@ -221,7 +223,10 @@ class CudaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "cuda"
+                    if device.type != "cuda":
+                        raise AssertionError(
+                            f"Expected device type 'cuda', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -257,7 +262,7 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def get_compute_capability(device: torch.types.Device = None) -> Union[int, str]:
+    def get_compute_capability(device: torch.types.Device = None) -> int | str:
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
             return major * 10 + min
@@ -288,7 +293,7 @@ class CudaInterface(DeviceInterface):
             raise RuntimeError("triton not built with the 'nvidia' backend")
 
 
-get_mtia_stream: Optional[Callable[[int], int]]
+get_mtia_stream: Callable[[int], int] | None
 if torch.mtia._is_compiled():
     from torch._C import _mtia_getCurrentRawStream as get_mtia_stream
 else:
@@ -300,6 +305,7 @@ class MtiaInterface(DeviceInterface):
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
 
+    # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
         def set_device(device: int) -> None:
@@ -316,7 +322,10 @@ class MtiaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "mtia"
+                    if device.type != "mtia":
+                        raise AssertionError(
+                            f"Expected device type 'mtia', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -341,8 +350,8 @@ class MtiaInterface(DeviceInterface):
     synchronize = staticmethod(torch.mtia.synchronize)
     get_device_properties = staticmethod(torch.mtia.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type]
-    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
     is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]
 
@@ -362,14 +371,14 @@ class MtiaInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def raise_if_triton_unavailable(evice: torch.types.Device = None) -> None:
+    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
         if "mtia" not in triton.backends.backends:
             raise RuntimeError("triton not built with the 'mtia' backend")
 
 
-get_xpu_stream: Optional[Callable[[int], int]]
+get_xpu_stream: Callable[[int], int] | None
 if torch.xpu._is_compiled():
     from torch._C import _xpu_getCurrentRawStream as get_xpu_stream
 else:
@@ -381,6 +390,7 @@ class XpuInterface(DeviceInterface):
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
 
+    # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
         def set_device(device: int) -> None:
@@ -397,7 +407,10 @@ class XpuInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    assert device.type == "xpu"
+                    if device.type != "xpu":
+                        raise AssertionError(
+                            f"Expected device type 'xpu', got '{device.type}'"
+                        )
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -414,7 +427,7 @@ class XpuInterface(DeviceInterface):
 
     current_device = staticmethod(torch.xpu.current_device)
     set_device = staticmethod(torch.xpu.set_device)
-    device_count = staticmethod(torch.xpu.device_count)
+    device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
@@ -422,8 +435,8 @@ class XpuInterface(DeviceInterface):
     synchronize = staticmethod(torch.xpu.synchronize)
     get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type]
-    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
 
     # Can be mock patched by @patch decorator.
@@ -458,16 +471,18 @@ class CpuDeviceProperties:
 
 
 class CpuInterface(DeviceInterface):
+    # pyrefly: ignore [bad-override]
     class Event(torch.Event):
         def __init__(self, enable_timing: bool = True) -> None:
             self.time = 0.0
 
-        def elapsed_time(self, end_event: Any) -> float:
-            return (end_event.time - self.time) * 1000
+        def elapsed_time(self, other: Any) -> float:
+            return (other.time - self.time) * 1000
 
         def record(self, stream: Any = None) -> None:
             self.time = time.perf_counter()
 
+    # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
         def get_device_properties(
@@ -517,7 +532,7 @@ class CpuInterface(DeviceInterface):
 class MpsInterface(DeviceInterface):
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return torch.backends.mps.is_macos_or_newer(14, 0)
+        return True
 
     @classmethod
     def is_dtype_supported(
@@ -525,7 +540,7 @@ class MpsInterface(DeviceInterface):
     ) -> bool:
         if dtype in [torch.float64, torch.complex128]:
             return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+        return True
 
     @staticmethod
     def is_available() -> bool:
@@ -543,6 +558,7 @@ class MpsInterface(DeviceInterface):
     def synchronize(device: torch.types.Device = None) -> None:
         torch.mps.synchronize()
 
+    # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
         def get_device_properties(device: torch.types.Device = None) -> Any:
@@ -555,19 +571,61 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
+class TpuInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return True
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        return dtype not in (
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.half,
+        )
+
+    @staticmethod
+    def is_available() -> bool:
+        return has_torch_tpu()
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> str:
+        return ""
+
+    # pyrefly: ignore [bad-override]
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            return namedtuple("TPUProperties", ["multi_processor_count"])(
+                1  # type: ignore[arg-type]
+            )
+
+        @staticmethod
+        def current_device() -> int:
+            return 0
+
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
 def register_interface_for_device(
-    device: Union[str, torch.device], device_interface: type[DeviceInterface]
+    device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: Union[str, torch.device]) -> type[DeviceInterface]:
+def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_initialized:
@@ -599,5 +657,6 @@ def init_device_reg() -> None:
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
+    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True

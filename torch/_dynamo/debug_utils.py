@@ -34,7 +34,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -47,11 +47,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
-from .utils import clone_inputs, get_debug_dir
+from .utils import clone_inputs, get_debug_dir, warn_once
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.hub import tqdm
     from torch.storage import UntypedStorage
@@ -69,6 +69,7 @@ if use_buck:
     import libfb.py.build_info
 
 
+# pyrefly: ignore [implicit-any]
 extra_deps = []
 extra_imports = ""
 cur_target = ""
@@ -221,7 +222,11 @@ class NNModuleToString:
             if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
                 from torch._tensor_str import PRINT_OPTS
 
-                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                    raise AssertionError(
+                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                    )
                 tensor_str = repr(buffer)
             elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
@@ -262,10 +267,13 @@ def _cuda_system_info_comment() -> str:
 
     model_str = "# CUDA Info: \n"
     try:
-        cuda_version_out = subprocess.check_output(["nvcc", "--version"])
-        cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
-        model_str += f"{comment}\n"
+        if torch.version.hip is None:
+            cuda_version_out = subprocess.check_output(["nvcc", "--version"])
+            cuda_version_lines = cuda_version_out.decode().split("\n")
+            comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
+            model_str += f"{comment}\n"
+        else:
+            model_str += "# Not searching for nvcc on ROCM setup\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
@@ -294,7 +302,7 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         return any(string in key for string in allow_list) and key not in skip_list
 
     config_lines = [
-        f"os.environ['{key}'] = '{value}'"
+        f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
@@ -341,7 +349,7 @@ def helper_for_dump_minify(contents: str) -> None:
 
     except OSError as e:
         log.exception("")
-        raise NotImplementedError("Could not write to {minified_repro_path}") from e
+        raise NotImplementedError(f"Could not write to {minified_repro_path}") from e
 
 
 class AccuracyError(Exception):
@@ -455,9 +463,12 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.prims.convert_element_type.default
+            and node.target is torch.ops.prims.convert_element_type.default
         ):
-            assert len(node.args) == 2
+            if len(node.args) != 2:
+                raise AssertionError(
+                    f"Expected node to have 2 args, got {len(node.args)}"
+                )
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
         if node.op == "call_function":
@@ -540,14 +551,14 @@ def backend_accuracy_fails(
 
 
 def _stride_or_default(
-    stride: Optional[torch._prims_common.StrideType],
+    stride: torch._prims_common.StrideType | None,
     *,
     shape: torch._prims_common.ShapeType,
 ) -> torch._prims_common.StrideType:
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 
-def _mk_defaulter(d: T) -> Callable[[Optional[T]], T]:
+def _mk_defaulter(d: T) -> Callable[[T | None], T]:
     return lambda x: x if x is not None else d
 
 
@@ -564,25 +575,39 @@ class NopInputReader:
 
     def storage(
         self,
-        storage_hash: Optional[str],
+        storage_hash: str | None,
         nbytes: int,
         *,
-        device: Optional[torch._prims_common.DeviceLikeType] = None,
-        dtype_hint: Optional[torch.dtype] = None,
+        device: torch._prims_common.DeviceLikeType | None = None,
+        dtype_hint: torch.dtype | None = None,
     ) -> None:
         self.total += 1
 
-    def tensor(self, *args: Any, **kwargs: Any) -> Optional[torch.Tensor]:
+    def tensor(self, *args: Any, **kwargs: Any) -> torch.Tensor | None:
         pass
 
-    def symint(self, *args: Any, **kwargs: Any) -> Optional[int]:
+    def symint(self, *args: Any, **kwargs: Any) -> int | None:
         pass
+
+    def const(self, name: str) -> None:
+        pass
+
+    def unsupported(self, name: str) -> None:
+        pass
+
+    def generator(self, device_type: str, device_index: int) -> None:
+        pass
+
+    def opaque(self, script_class_name: str) -> None:
+        self.total += 1
 
 
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir: Optional[str] = None, *, pbar: Optional[tqdm] = None):
+    def __init__(
+        self, save_dir: str | None = None, *, pbar: tqdm | None = None
+    ) -> None:
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem
@@ -595,11 +620,11 @@ class InputReader:
 
     def storage(
         self,
-        storage_hash: Optional[str],
+        storage_hash: str | None,
         nbytes: int,
         *,
-        device: Optional[torch._prims_common.DeviceLikeType] = None,
-        dtype_hint: Optional[torch.dtype] = None,
+        device: torch._prims_common.DeviceLikeType | None = None,
+        dtype_hint: torch.dtype | None = None,
     ) -> UntypedStorage:
         if self.pbar is not None:
             self.pbar.update(1)
@@ -617,7 +642,7 @@ class InputReader:
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warn_once(f"could not load {storage_hash}, generating random data instead")
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
@@ -626,12 +651,12 @@ class InputReader:
         self,
         storage: UntypedStorage,
         shape: torch._prims_common.ShapeType,
-        stride: Optional[torch._prims_common.StrideType] = None,
+        stride: torch._prims_common.StrideType | None = None,
         *,
-        storage_offset: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
-        requires_grad: Optional[bool] = None,
-        is_leaf: Optional[bool] = None,
+        storage_offset: int | None = None,
+        dtype: torch.dtype | None = None,
+        requires_grad: bool | None = None,
+        is_leaf: bool | None = None,
         **metadata: Any,
     ) -> torch.Tensor:
         stride = _stride_or_default(stride, shape=shape)
@@ -650,14 +675,37 @@ class InputReader:
                 t = t.clone(memory_format=torch.preserve_format)
             with torch.no_grad():
                 t.set_(storage, storage_offset, shape, stride)
-        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
+        if torch._subclasses.meta_utils.safe_is_leaf(t) != is_leaf:
+            raise AssertionError(
+                f"Tensor leaf status mismatch: safe_is_leaf(t) = "
+                f"{torch._subclasses.meta_utils.safe_is_leaf(t)}, expected {is_leaf}"
+            )
         torch._utils.set_tensor_metadata(t, metadata)
         self.args.append(t)
         return t  # for BC
 
-    def symint(self, val: Any) -> Any:
+    def symint(self, val: Any, *, expr: str | None = None) -> Any:
         self.args.append(val)
+        if expr is not None:
+            if not hasattr(self, "symint_exprs"):
+                self.symint_exprs: dict[int, str] = {}
+            self.symint_exprs[len(self.args) - 1] = expr
         return val  # for BC
+
+    def const(self, name: str) -> None:
+        self.args.append(None)
+
+    def unsupported(self, name: str) -> None:
+        self.args.append(None)
+
+    def generator(self, device_type: str, device_index: int) -> Any:
+        device = torch.device(device_type, device_index)
+        gen = torch.Generator(device=device)
+        self.args.append(gen)
+        return gen
+
+    def opaque(self, script_class_name: str) -> None:
+        self.args.append(None)
 
 
 # Here is our writer strategy:
@@ -673,7 +721,7 @@ class InputReader:
 
 
 class InputWriter:
-    def __init__(self, save_dir: Optional[str], *, stable_hash: bool = False) -> None:
+    def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
         self._lines: list[str] = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
@@ -704,8 +752,8 @@ class InputWriter:
         self,
         untyped_storage: UntypedStorage,
         *,
-        device_hint: Optional[torch._prims_common.DeviceLikeType] = None,
-        dtype_hint: Optional[torch.dtype] = None,
+        device_hint: torch._prims_common.DeviceLikeType | None = None,
+        dtype_hint: torch.dtype | None = None,
     ) -> str:
         ws = StorageWeakRef(untyped_storage)
         v = self.seen_storages.get(ws)
@@ -720,7 +768,10 @@ class InputWriter:
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
-            assert device_hint is not None
+            if device_hint is None:
+                raise AssertionError(
+                    "device_hint must be provided when storage device is 'meta'"
+                )
             device = device_hint  # type: ignore[assignment]
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
@@ -768,7 +819,9 @@ class InputWriter:
 
     def unsupported(self, name: str, arg: Any) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
-        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        self._lines.append(
+            f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
+        )
         # Best effort dump as much useful stuff we can lol, in case you want
         # to repair the repro
         if isinstance(arg, (list, tuple)):
@@ -792,15 +845,27 @@ class InputWriter:
     # TODO: this doesn't actually symint atm
     def symint(self, name: str, val: Any) -> None:
         if isinstance(val, torch.SymInt):
-            val = val.node.hint
-        self._lines.append(f"reader.symint({val!r})  # {name}")
+            expr_str = str(val.node.expr)
+            hint = val.node.hint
+            self._lines.append(f"reader.symint({hint!r}, expr={expr_str!r})  # {name}")
+        else:
+            self._lines.append(f"reader.symint({val!r})  # {name}")
+
+    def generator(self, name: str, arg: torch._C.Generator) -> None:
+        device = arg.device
+        self._lines.append(
+            f"reader.generator({device.type!r}, {device.index!r})  # {name}"
+        )
+
+    def opaque(self, name: str, script_class_name: str) -> None:
+        self._lines.append(f"reader.opaque({script_class_name!r})  # {name}")
 
 
 def aot_graph_input_parser(
     func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
-    sym_shapes: Optional[dict[str, int]] = None,
-    default_sym_shape: Optional[int] = None,
+    sym_shapes: dict[str, int] | None = None,
+    default_sym_shape: int | None = None,
 ) -> dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
@@ -879,6 +944,7 @@ def aot_graph_input_parser(
             data_type, shape_str = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore [bad-argument-type]
             kwargs[param] = gen_tensor(shape, dtype)
 
         match = re.search(sym_shape_regex, annotation)
@@ -892,6 +958,7 @@ def aot_graph_input_parser(
             attr_name, data_type, shape_str, _ = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore [bad-argument-type]
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs

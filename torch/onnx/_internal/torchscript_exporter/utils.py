@@ -62,7 +62,7 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast
+from typing import Any, cast
 from typing_extensions import deprecated
 
 import torch
@@ -80,7 +80,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Collection, Mapping, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -121,7 +121,8 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
                     "You are exporting the model in training mode with onnx opset "
                     f"version {GLOBALS.export_onnx_opset_version}. "
                     "Opset versions lower than opset 12 will not be able to export "
-                    "nodes such as Dropout and BatchNorm correctly."
+                    "nodes such as Dropout and BatchNorm correctly.",
+                    stacklevel=2,
                 )
         else:
             GLOBALS.export_training = False
@@ -136,7 +137,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     try:
         yield
     finally:
-        if hasattr(model, "training") and not mode == _C_onnx.TrainingMode.PRESERVE:
+        if hasattr(model, "training") and mode != _C_onnx.TrainingMode.PRESERVE:
             model.train(originally_training)
 
 
@@ -343,13 +344,8 @@ def export(
                 `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
                 this instructs the runtime to use PyTorch's implementation of these ops.
 
-                .. warning::
-
-                    Models exported this way are probably runnable only by Caffe2.
-
-                    This may be useful if the numeric differences in implementations of operators are
-                    causing large differences in behavior between PyTorch and Caffe2 (which is more
-                    common on untrained models).
+                Note: Caffe2 support has been removed as of PyTorch 2.9. This export type
+                    is primarily intended for debugging ATen operator execution.
 
             * ``OperatorExportTypes.ONNX_ATEN_FALLBACK``: Try to export each ATen op
                 (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
@@ -378,7 +374,7 @@ def export(
 
                 .. warning::
 
-                    Models exported this way are probably runnable only by Caffe2.
+                    Note: Caffe2 support has been removed as of PyTorch 2.9.
 
         opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
@@ -532,6 +528,7 @@ def export(
         warnings.warn(
             "Setting `operator_export_type` to something other than default is deprecated. "
             "The option will be removed in a future release.",
+            stacklevel=2,
             category=DeprecationWarning,
         )
     if training == _C_onnx.TrainingMode.TRAINING:
@@ -539,6 +536,7 @@ def export(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
             "before exporting the model.",
+            stacklevel=2,
             category=DeprecationWarning,
         )
 
@@ -568,7 +566,7 @@ def export(
     return None
 
 
-def _is_constant_tensor_list(node):
+def _is_constant_tensor_list(node) -> bool | None:
     if node.kind() != "prim::Constant":
         return False
     output_type = node.output().type()
@@ -582,7 +580,7 @@ def _is_constant_tensor_list(node):
 # get generated in constant prop. So we split them back into prim::ListConstructs
 
 
-def _split_tensor_list_constants(g, block):
+def _split_tensor_list_constants(g, block) -> None:
     for node in block.nodes():
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
@@ -719,7 +717,7 @@ def _optimize_graph(
     return graph
 
 
-def warn_on_static_input_change(input_states):
+def warn_on_static_input_change(input_states) -> None:
     """Warns that changes to input dictionaries and strings won't take effect in the traced ONNX graph.
 
     We accept dictionaries and strings as ONNX inputs, but they should be only for
@@ -738,14 +736,14 @@ def warn_on_static_input_change(input_states):
                     "for configuration use. "
                     "Also note that the order and values of the keys must remain the same. "
                 )
-                warnings.warn(warning)
+                warnings.warn(warning, stacklevel=2)
         elif isinstance(input, str):
             if input != traced_input:
                 warning = (
                     "The model seems to have string inputs/outputs. "
                     "Note that strings will not appear as inputs/outputs of the ONNX graph. "
                 )
-                warnings.warn(warning)
+                warnings.warn(warning, stacklevel=2)
 
 
 def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
@@ -782,7 +780,8 @@ def _decide_keep_init_as_input(
                 "8 or lower would lead to an invalid ONNX graph. Therefore, "
                 "'keep_initializers_as_inputs=False' is ignored during export."
                 "Exported model will have initializers as graph inputs (compliant "
-                " to ONNX IR v3)."
+                " to ONNX IR v3).",
+                stacklevel=2,
             )
         return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
     val_keep_init_as_ip = (
@@ -815,7 +814,8 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
             "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
             "learnable model parameters may not translate correctly in the exported ONNX model "
             "because constant folding mutates model parameters. Please consider "
-            "turning off constant folding or setting the training=TrainingMode.EVAL."
+            "turning off constant folding or setting the training=TrainingMode.EVAL.",
+            stacklevel=2,
         )
     return do_constant_folding
 
@@ -831,7 +831,7 @@ def _decide_input_format(model, args):
     try:
         sig = _signature(model)
     except ValueError as e:
-        warnings.warn(f"{e}, skipping _decide_input_format")
+        warnings.warn(f"{e}, skipping _decide_input_format", stacklevel=2)
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
@@ -859,9 +859,9 @@ def _decide_input_format(model, args):
         args = args_list if isinstance(args, list) else tuple(args_list)
     # Cases of models with no input args
     except IndexError:
-        warnings.warn("No input args, skipping _decide_input_format")
+        warnings.warn("No input args, skipping _decide_input_format", stacklevel=2)
     except Exception as e:
-        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
+        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}", stacklevel=2)
     return args
 
 
@@ -927,7 +927,7 @@ def _get_param_count_list(method_graph, args_params):
     return param_count_list
 
 
-def _check_flatten_did_not_remove(original, jit_flattened):
+def _check_flatten_did_not_remove(original, jit_flattened) -> None:
     """torch.jit._flatten removes None. Check if it did so in this case."""
 
     def flatten(x):
@@ -942,7 +942,8 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
     flattened_with_none = list(flatten(original))
     num_none = len(flattened_with_none) - len(jit_flattened)
-    assert num_none >= 0
+    if num_none < 0:
+        raise AssertionError(f"num_none must be >= 0, got {num_none}")
     if num_none:
         raise ValueError(
             f"args contained {num_none} None's after flattening. "
@@ -1281,13 +1282,13 @@ def _setup_trace_module_map(
     model: torch.nn.Module | torch.jit.ScriptModule,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]],
 ) -> set[str]:
-    def __register_attribute_hook():
+    def __register_attribute_hook() -> None:
         attr_name = "_onnx_attrs"
 
-        def _track_module_attributes_forward_pre_hook(module, input):
+        def _track_module_attributes_forward_pre_hook(module, input) -> None:
             setattr(module, attr_name, _get_module_attributes(module))
 
-        def _track_module_attributes_forward_hook(module, input, output):
+        def _track_module_attributes_forward_hook(module, input, output) -> None:
             tracing_state = _C._get_tracing_state()
             if not tracing_state:
                 return
@@ -1354,7 +1355,7 @@ def _setup_trace_module_map(
     return module_typenames
 
 
-def _reset_trace_module_map():
+def _reset_trace_module_map() -> None:
     torch.jit._trace._trace_module_map = None
     _C._jit_pass_onnx_clear_scope_records()
 
@@ -1383,7 +1384,7 @@ def _get_module_attributes(module):
     return attrs
 
 
-def _trigger_symbolic_function_registration():
+def _trigger_symbolic_function_registration() -> None:
     """Trigger the registration of symbolic functions for all supported opsets."""
 
     from torch.onnx._internal.torchscript_exporter import (  # noqa: F401
@@ -1426,7 +1427,8 @@ def _export(
     export_modules_as_functions: Any = False,
     autograd_inlining=True,
 ):
-    assert GLOBALS.in_onnx_export is False
+    if GLOBALS.in_onnx_export is not False:
+        raise AssertionError("GLOBALS.in_onnx_export must be False")
 
     _trigger_symbolic_function_registration()
 
@@ -1449,6 +1451,7 @@ def _export(
             f"by 'torch.onnx.export()'. "
             f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
             f"To use a newer opset version, consider 'torch.onnx.export(..., dynamo=True)'. ",
+            stacklevel=2,
             category=errors.OnnxExporterWarning,
         )
 
@@ -1585,7 +1588,8 @@ def _export(
                 _C._jit_onnx_log("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_map)
     finally:
-        assert GLOBALS.in_onnx_export
+        if not GLOBALS.in_onnx_export:
+            raise AssertionError("GLOBALS.in_onnx_export must be True")
         GLOBALS.in_onnx_export = False
         GLOBALS.autograd_inlining = _autograd_inlining_previous
         _reset_trace_module_map()
@@ -1593,7 +1597,7 @@ def _export(
     return torch_out
 
 
-def _apply_friendly_debug_names(graph, params):
+def _apply_friendly_debug_names(graph, params) -> None:
     for n in graph.nodes():
         for v in n.inputs():
             old_name = v.debugName()
@@ -1605,8 +1609,8 @@ def _apply_friendly_debug_names(graph, params):
                 params[new_name] = params.pop(old_name)
 
 
-def _set_input_and_output_names(graph, input_names, output_names):
-    def set_names(node_list, name_list, descriptor):
+def _set_input_and_output_names(graph, input_names, output_names) -> None:
+    def set_names(node_list, name_list, descriptor) -> None:
         if name_list is None:
             return
         if len(name_list) > len(node_list):
@@ -1675,7 +1679,7 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
-):
+) -> bool:
     # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
     #   an aten::ATen operator is created regardless of symbolics existence
 
@@ -1695,7 +1699,7 @@ def _should_aten_fallback(
 
 
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    # Returns `overload_name` attribute to ATen ops
     schema = n.schema()
     if not schema.startswith("aten::"):
         return ""
@@ -1797,7 +1801,7 @@ def _run_symbolic_function(
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            # Emit ATen op when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
@@ -1816,7 +1820,7 @@ def _run_symbolic_function(
         raise
 
 
-def _verify_custom_op_name(symbolic_name: str):
+def _verify_custom_op_name(symbolic_name: str) -> None:
     if not re.match(r"^[a-zA-Z0-9-_]+::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
         raise errors.OnnxExporterError(
             f"Failed to register operator {symbolic_name}. "
@@ -1836,7 +1840,7 @@ def register_custom_op_symbolic(
     symbolic_name: str,
     symbolic_fn: Callable,
     opset_version: int,
-):
+) -> None:
     """Registers a symbolic function for a custom operator.
 
     When the user registers symbolic for custom/contrib ops,
@@ -1862,7 +1866,7 @@ def register_custom_op_symbolic(
     registration.custom_onnx_symbolic(symbolic_name, opset_version)(symbolic_fn)
 
 
-def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
+def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> None:
     """Unregisters ``symbolic_name``.
 
     See "Custom Operators" in the module documentation for an example usage.
@@ -1880,7 +1884,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     registration.registry.unregister(symbolic_name, opset_version)
 
 
-def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
+def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names) -> None:
     """Ensures dynamic axes argument is follows the expected format."""
     if len(dynamic_axes) == 0:
         return
@@ -1901,12 +1905,14 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     for key, value in dynamic_axes.items():
         if key not in valid_names:
             warnings.warn(
-                f"Provided key {key} for dynamic axes is not a valid input/output name"
+                f"Provided key {key} for dynamic axes is not a valid input/output name",
+                stacklevel=2,
             )
         if isinstance(value, list):
             warnings.warn(
                 "No names were found for specified dynamic axes of provided input."
-                f"Automatically generated names will be applied to each dynamic axes of input {key}"
+                f"Automatically generated names will be applied to each dynamic axes of input {key}",
+                stacklevel=2,
             )
 
             value_dict = {}
@@ -1917,7 +1923,8 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     )
                 if x in value_dict:
                     warnings.warn(
-                        f"Duplicate dynamic axis index {x} was provided for input {key}."
+                        f"Duplicate dynamic axis index {x} was provided for input {key}.",
+                        stacklevel=2,
                     )
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)

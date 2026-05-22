@@ -55,6 +55,10 @@ class TensorMeta {
     return sizes_.size();
   }
 
+  bool hasSymbolicShape() const {
+    return hasSymbolicShape_;
+  }
+
   int64_t numel() const {
     TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
     return numel_;
@@ -62,6 +66,11 @@ class TensorMeta {
 
   c10::Device device() const {
     return device_;
+  }
+
+  // override device according to placement
+  void setDevice(c10::Device device) {
+    device_ = device;
   }
 
   c10::TensorOptions asTensorOptions() const {

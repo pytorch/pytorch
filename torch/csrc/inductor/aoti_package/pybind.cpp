@@ -1,7 +1,5 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
@@ -9,7 +7,7 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
-#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch::inductor {
 
@@ -74,18 +72,33 @@ void initAOTIPackageBindings(PyObject* module) {
       .def(
           "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)
       .def(
+          "get_custom_objs",
+          [](AOTIModelPackageLoaderPybind& self) {
+            py::dict result;
+            for (auto& [name, ivalue] : self.get_custom_objs()) {
+              result[py::str(name)] = torch::jit::toPyObject(ivalue);
+            }
+            return result;
+          })
+      .def(
           "load_constants",
           &AOTIModelPackageLoaderPybind::load_constants,
           py::arg("constants_map"),
           py::arg("use_inactive"),
           py::arg("check_full_update"),
-          py::arg("user_managed") = false)
+          py::arg("user_managed") = false,
+          py::arg("allow_h2d_copy") = false)
       .def(
           "update_constant_buffer",
           &AOTIModelPackageLoaderPybind::update_constant_buffer,
           py::arg("tensor_map"),
           py::arg("use_inactive"),
           py::arg("validate_full_updates"),
-          py::arg("user_managed") = false);
+          py::arg("user_managed") = false)
+      .def_static(
+          "load_metadata_from_package",
+          &AOTIModelPackageLoaderPybind::load_metadata_from_package,
+          py::arg("model_package_path"),
+          py::arg("model_name"));
 }
 } // namespace torch::inductor

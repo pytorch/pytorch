@@ -6,6 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 
 
 namespace at::native {
@@ -13,14 +14,13 @@ namespace at::native {
 namespace {
 
 void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_V2(iter.dtype(), "where_cuda", [&] {
-      gpu_kernel(
+  AT_DISPATCH_V2(opaqueScalarType(iter.dtype()), "where_cuda", [&] {
+      gpu_kernel_opaque(
         iter,
         [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  },
-  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
+  }, AT_EXPAND(AT_OPAQUE_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase &iter) {
@@ -44,16 +44,13 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
-      // Propagate nan, which doesn't propagate automatically for ROCm
-      if (at::_isnan(v)) {
-        return v;
-      } if (at::_isnan(lower)) {
-        return lower;
-      } if (at::_isnan(upper)) {
-        return upper;
-      } else {
-        return ::min(::max(v, lower), upper);
-      }
+      scalar_t result = ::min(::max(v, lower), upper);
+
+      result = at::_isnan(upper) ? upper : result;
+      result = at::_isnan(lower) ? lower : result;
+      result = at::_isnan(v) ? v : result;
+
+      return result;
     });
   });
 }

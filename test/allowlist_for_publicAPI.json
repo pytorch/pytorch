@@ -658,13 +658,6 @@
     "Iterable",
     "Optional"
   ],
-  "torch.onnx": [
-    "Dict",
-    "OperatorExportTypes",
-    "Optional",
-    "TensorProtoDataType",
-    "TrainingMode"
-  ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
@@ -1779,9 +1772,7 @@
     "Optional",
     "Union"
   ],
-  "torch.fx.experimental.migrate_gradual_types.constraint": [
-    "TensorType"
-  ],
+  "torch.fx.experimental.migrate_gradual_types.constraint": [],
   "torch.fx.experimental.migrate_gradual_types.constraint_generator": [
     "ApplyBroadcasting",
     "BatchNorm2d",
@@ -1837,6 +1828,7 @@
     "IndexSelect",
     "List",
     "Prod",
+    "Sequence",
     "T",
     "TGreatestUpperBound",
     "TVar",
@@ -1851,6 +1843,7 @@
     "BinConstraintD",
     "BinConstraintT",
     "Conj",
+    "Constraint",
     "ConstraintGenerator",
     "D",
     "DVar",
@@ -2016,7 +2009,7 @@
     "fx_placeholder_targets",
     "fx_placeholder_vals",
     "guard_bool",
-    "has_hint",
+    "has_guarding_hint",
     "is_symbolic",
     "parallel_and",
     "parallel_or",
@@ -2206,21 +2199,6 @@
     "Iterable",
     "Tuple",
     "abstractmethod"
-  ],
-  "torch.onnx.verification": [
-    "Any",
-    "Callable",
-    "Collection",
-    "Dict",
-    "FrozenSet",
-    "List",
-    "Mapping",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
   ],
   "torch.quantization.fx": [
     "convert",
@@ -2684,35 +2662,6 @@
   "torch.mtia": [
     "DeferredMtiaCallError",
     "StreamContext"
-  ],
-  "torch.onnx.symbolic_helper": [
-    "Any",
-    "Callable",
-    "List",
-    "Literal",
-    "NoReturn",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
-  "torch.onnx.symbolic_opset18": [
-    "amax",
-    "amin",
-    "aminmax",
-    "embedding_bag",
-    "linalg_vector_norm",
-    "max",
-    "maximum",
-    "min",
-    "minimum"
-  ],
-  "torch.onnx.symbolic_opset20": [
-    "_affine_grid_generator",
-    "_grid_sampler",
-    "convert_grid_sample_mode"
   ],
   "torch.utils.data.datapipes.dataframe.dataframe_wrapper": [
     "Any",

@@ -21,10 +21,9 @@ import itertools
 import sys
 import types
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING
 
-from ..utils._backport_slots import dataclass_slots
 from . import config
 from .bytecode_analysis import (
     get_indexof,
@@ -39,8 +38,7 @@ if TYPE_CHECKING:
     from .output_graph import DynamoTracerOutput
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class InstructionExnTabEntry:
     start: "Instruction"
     end: "Instruction"
@@ -68,23 +66,23 @@ class InstructionExnTabEntry:
         )
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Instruction:
     """A mutable version of dis.Instruction"""
 
     opcode: int
     opname: str
-    arg: Optional[int]
+    arg: int | None
     argval: Any
-    offset: Optional[int] = None
-    starts_line: Optional[int] = None
+    offset: int | None = None
+    starts_line: int | None = None
     is_jump_target: bool = False
+
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
-    exn_tab_entry: Optional[InstructionExnTabEntry] = None
-    argrepr: Optional[str] = None
+    exn_tab_entry: InstructionExnTabEntry | None = None
+    argrepr: str | None = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -160,16 +158,16 @@ elif sys.version_info >= (3, 11):
 
 else:
 
-    def inst_has_op_bits(name: str):
+    def inst_has_op_bits(name: str) -> bool:
         return False
 
 
 def create_instruction(
     name: str,
     *,
-    arg: Optional[int] = None,
-    argval: Optional[Any] = _NotProvided,
-    target: Optional[Instruction] = None,
+    arg: int | None = None,
+    argval: Any | None = _NotProvided,
+    target: Instruction | None = None,
 ) -> Instruction:
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
@@ -223,8 +221,27 @@ def create_load_const(val: Any, checked: bool = True) -> Instruction:
     mutable objects. In such cases, use `checked=False`.
     """
     if checked:
-        assert is_safe_constant(val), f"unsafe constant {val}"
+        if not is_safe_constant(val):
+            raise AssertionError(f"unsafe constant {val}")
     return create_instruction("LOAD_CONST", argval=val)
+
+
+def create_breakpoint() -> list[Instruction]:
+    """
+    Create instructions that trigger the bytecode debugger to stop.
+
+    Usage:
+        codegen.extend_output(create_breakpoint())
+
+    When the bytecode debugger is active, execution will pause at this point.
+    At runtime, these instructions have no effect on program state.
+    """
+    from .bytecode_debugger import BREAKPOINT_MARKER
+
+    return [
+        create_instruction("LOAD_CONST", argval=BREAKPOINT_MARKER),
+        create_instruction("POP_TOP"),
+    ]
 
 
 def create_dup_top() -> Instruction:
@@ -251,29 +268,13 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ROT_N does not exist in Python <= 3.9, but we can simulate it
-    if sys.version_info < (3, 10) and n >= 5:
-        """
-        0 1 2 3 4
-        [0 1 2 3 4]
-        4 3 2 1 0
-        4 [3 2 1 0]
-        4 0 1 2 3
-        """
-        return [
-            create_instruction("BUILD_TUPLE", arg=n),
-            create_instruction("UNPACK_SEQUENCE", arg=n),
-            create_instruction("BUILD_TUPLE", arg=n - 1),
-            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
-        ]
-
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
     return [create_instruction("ROT_N", arg=n)]
 
 
 def add_push_null(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """
     Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
@@ -292,15 +293,20 @@ def add_push_null(
     if isinstance(inst_or_insts, Instruction):
         insts: list[Instruction] = [inst_or_insts]
     else:
-        assert isinstance(inst_or_insts, list)
+        if not isinstance(inst_or_insts, list):
+            raise AssertionError(
+                f"expected inst_or_insts to be a list, got {type(inst_or_insts)}"
+            )
         insts = inst_or_insts
 
     def inst_has_bit_set(idx: int) -> bool:
-        assert insts[idx].arg is not None
+        if insts[idx].arg is None:
+            raise AssertionError(f"expected insts[{idx}].arg to be not None")
         return insts[idx].arg & 1 == 1  # type: ignore[operator]
 
     def set_inst_bit(idx: int) -> None:
-        assert insts[idx].arg is not None
+        if insts[idx].arg is None:
+            raise AssertionError(f"expected insts[{idx}].arg to be not None")
         insts[idx].arg |= 1  # type: ignore[operator]
 
     if sys.version_info >= (3, 13):
@@ -332,7 +338,7 @@ def add_push_null(
 
 
 def add_push_null_call_function_ex(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
     is not set, due to an expected CALL_FUNCTION_EX instruction.
@@ -340,7 +346,10 @@ def add_push_null_call_function_ex(
     if isinstance(inst_or_insts, Instruction):
         insts: list[Instruction] = [inst_or_insts]
     else:
-        assert isinstance(inst_or_insts, list)
+        if not isinstance(inst_or_insts, list):
+            raise AssertionError(
+                f"expected inst_or_insts to be a list, got {type(inst_or_insts)}"
+            )
         insts = inst_or_insts
 
     if sys.version_info < (3, 11):
@@ -348,7 +357,10 @@ def add_push_null_call_function_ex(
 
     idx = -1 if sys.version_info >= (3, 13) else 0
     if insts[idx].opname == "LOAD_GLOBAL":
-        assert insts[idx].arg is not None
+        if insts[idx].arg is None:
+            raise AssertionError(
+                f"expected insts[{idx}].arg to be not None for LOAD_GLOBAL"
+            )
         if insts[idx].arg & 1 == 0:  # type: ignore[operator]
             insts[idx].arg |= 1  # type: ignore[operator]
             return insts
@@ -416,6 +428,40 @@ def create_call_function(nargs: int, push_null: bool) -> list[Instruction]:
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
+def create_call_function_ex(
+    has_kwargs: bool, push_null: bool, ignore_314_kwargs_push: bool = False
+) -> list[Instruction]:
+    """
+    Assumes that in 3.14+, if has_kwargs=False, there is NOT a NULL
+    on the TOS for the kwargs. This utility function will add a PUSH_NULL.
+
+    If the caller has already pushed a NULL for the kwargs, then set ignore_314_kwargs_push=True
+    so we don't push another NULL for the kwargs.
+    """
+    if sys.version_info >= (3, 11):
+        output = []
+        if (
+            sys.version_info >= (3, 14)
+            and not has_kwargs
+            and not ignore_314_kwargs_push
+        ):
+            output.append(create_instruction("PUSH_NULL"))
+            has_kwargs = True
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            # 3.13 swapped NULL and callable
+            # if flags == 1, 2 values popped - otherwise if flags == 0, 1 value
+            rots = (
+                int(has_kwargs) + 2
+                if sys.version_info >= (3, 13)
+                else int(has_kwargs) + 3
+            )
+            output.extend(create_rot_n(rots))
+        output.append(create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs)))
+        return output
+    return [create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs))]
+
+
 def create_call_method(nargs: int) -> list[Instruction]:
     if sys.version_info >= (3, 12):
         return [create_instruction("CALL", arg=nargs)]
@@ -471,7 +517,7 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("BUILD_LIST", arg=n - 1),
         create_instruction("DUP_TOP"),
         create_instruction("LOAD_CONST", argval=-1),
-        create_instruction("BINARY_SUBSCR"),
+        create_binary_subscr(),
         create_instruction("ROT_THREE"),
         create_instruction("DUP_TOP"),
         create_instruction("ROT_THREE"),
@@ -486,12 +532,20 @@ def create_swap(n: int) -> list[Instruction]:
 
 
 def create_binary_slice(
-    start: Optional[int], end: Optional[int], store: bool = False
+    start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
     """
     BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
     """
-    if sys.version_info >= (3, 12):
+    if sys.version_info >= (3, 14):
+        subscr_inst = (
+            create_instruction("STORE_SUBSCR") if store else create_binary_subscr()
+        )
+        return [
+            create_load_const(slice(start, end)),
+            subscr_inst,
+        ]
+    elif sys.version_info >= (3, 12):
         inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
         return [
             create_load_const(start),
@@ -511,6 +565,8 @@ def create_binary_slice(
 def create_copy(i: int) -> list[Instruction]:
     if sys.version_info >= (3, 11):
         return [create_instruction("COPY", arg=i)]
+    if i == 1:
+        return [create_instruction("DUP_TOP")]
     # COPY 4
     # 0 1 2 3
     # 3 1 2 0
@@ -545,31 +601,20 @@ def create_print_value(value: Any) -> list[Instruction]:
     ]
 
 
-def lnotab_writer(
-    lineno: int, byteno: int = 0
-) -> tuple[list[int], Callable[[int, int], None]]:
-    """
-    Used to create typing.CodeType.co_lnotab
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    This is the internal format of the line number table if Python < 3.10
-    """
-    assert sys.version_info < (3, 10)
-    lnotab: list[int] = []
-
-    def update(lineno_new: int, byteno_new: int) -> None:
-        nonlocal byteno, lineno
-        while byteno_new != byteno or lineno_new != lineno:
-            byte_offset = max(0, min(byteno_new - byteno, 255))
-            line_offset = max(-128, min(lineno_new - lineno, 127))
-            assert byte_offset != 0 or line_offset != 0
-            byteno += byte_offset
-            lineno += line_offset
-            lnotab.extend((byte_offset, line_offset & 0xFF))
-
-    return lnotab, update
+def create_binary_subscr() -> Instruction:
+    if sys.version_info < (3, 14):
+        return create_instruction("BINARY_SUBSCR")
+    # https://github.com/python/cpython/blob/0e46c0499413bc5f9f8336fe76e2e67cf93f64d8/Include/opcode.h#L36
+    return create_instruction("BINARY_OP", arg=26)
 
 
-def linetable_310_writer(
+def create_build_tuple(n: int) -> Instruction:
+    if sys.version_info >= (3, 14) and n == 0:
+        return create_load_const(())
+    return create_instruction("BUILD_TUPLE", arg=n)
+
+
+def linetable_writer(
     first_lineno: int,
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
@@ -577,7 +622,10 @@ def linetable_310_writer(
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
+    if sys.version_info[:2] != (3, 10):
+        raise AssertionError(
+            f"linetable_writer requires Python 3.10, got {sys.version_info[:2]}"
+        )
     linetable: list[int] = []
     lineno = first_lineno
     lineno_delta = 0
@@ -587,7 +635,8 @@ def linetable_310_writer(
         while byteno_delta != 0 or lineno_delta != 0:
             byte_offset = max(0, min(byteno_delta, 254))
             line_offset = max(-127, min(lineno_delta, 127))
-            assert byte_offset != 0 or line_offset != 0
+            if byte_offset == 0 and line_offset == 0:
+                raise AssertionError("byte_offset and line_offset cannot both be 0")
             byteno_delta -= byte_offset
             lineno_delta -= line_offset
             linetable.extend((byte_offset, line_offset & 0xFF))
@@ -611,7 +660,8 @@ def encode_varint(n: int) -> list[int]:
     6-bit chunk encoding of an unsigned integer
     See https://github.com/python/cpython/blob/3.11/Objects/locations.md
     """
-    assert n >= 0
+    if n < 0:
+        raise AssertionError(f"encode_varint requires non-negative n, got {n}")
     b = [n & 63]
     n >>= 6
     while n > 0:
@@ -621,69 +671,74 @@ def encode_varint(n: int) -> list[int]:
     return b
 
 
-def linetable_311_writer(
-    first_lineno: int,
-) -> tuple[list[int], Callable[[Optional["dis.Positions"], int], None]]:
-    """
-    Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
-    This is the internal format of the line number table for Python 3.11
-    """
-    assert sys.version_info >= (3, 11)
-    linetable = []
-    lineno = first_lineno
+if sys.version_info >= (3, 11):
 
-    def update(positions: Optional["dis.Positions"], inst_size: int) -> None:
-        nonlocal lineno
-        lineno_new = positions.lineno if positions else None
+    def linetable_311_writer(
+        first_lineno: int,
+    ) -> tuple[list[int], Callable[[dis.Positions | None, int], None]]:
+        """
+        Used to create typing.CodeType.co_linetable
+        See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+        This is the internal format of the line number table for Python 3.11
+        """
+        if sys.version_info < (3, 11):
+            raise AssertionError(
+                f"linetable_311_writer requires Python 3.11+, got {sys.version_info}"
+            )
+        linetable = []
+        lineno = first_lineno
 
-        def _update(delta: int, size: int) -> None:
-            assert 0 < size <= 8
-            # first byte - use 13 (no column info) is positions is
-            # malformed, otherwise use 14 (long form)
-            other_varints: tuple[int, ...] = ()
-            if (
-                positions
-                and positions.lineno is not None
-                and positions.end_lineno is not None
-                and positions.col_offset is not None
-                and positions.end_col_offset is not None
-            ):
-                linetable.append(0b1_1110_000 + size - 1)
-                # for whatever reason, column offset needs `+ 1`
-                # https://github.com/python/cpython/blob/1931c2a438c50e6250725c84dff94fc760b9b951/Python/compile.c#L7603
-                other_varints = (
-                    positions.end_lineno - positions.lineno,
-                    positions.col_offset + 1,
-                    positions.end_col_offset + 1,
-                )
+        def update(positions: dis.Positions | None, inst_size: int) -> None:
+            nonlocal lineno
+            lineno_new = positions.lineno if positions else None
+
+            def _update(delta: int, size: int) -> None:
+                if not (0 < size <= 8):
+                    raise AssertionError(f"size must be in range (0, 8], got {size}")
+                # first byte - use 13 (no column info) is positions is
+                # malformed, otherwise use 14 (long form)
+                other_varints: tuple[int, ...] = ()
+                if (
+                    positions
+                    and positions.lineno is not None
+                    and positions.end_lineno is not None
+                    and positions.col_offset is not None
+                    and positions.end_col_offset is not None
+                ):
+                    linetable.append(0b1_1110_000 + size - 1)
+                    # for whatever reason, column offset needs `+ 1`
+                    # https://github.com/python/cpython/blob/1931c2a438c50e6250725c84dff94fc760b9b951/Python/compile.c#L7603
+                    other_varints = (
+                        positions.end_lineno - positions.lineno,
+                        positions.col_offset + 1,
+                        positions.end_col_offset + 1,
+                    )
+                else:
+                    linetable.append(0b1_1101_000 + size - 1)
+                # encode signed int
+                if delta < 0:
+                    delta = ((-delta) << 1) | 1
+                else:
+                    delta <<= 1
+                # encode unsigned int
+                linetable.extend(encode_varint(delta))
+                for n in other_varints:
+                    linetable.extend(encode_varint(n))
+
+            if lineno_new is None:
+                lineno_delta = 0
             else:
-                linetable.append(0b1_1101_000 + size - 1)
-            # encode signed int
-            if delta < 0:
-                delta = ((-delta) << 1) | 1
-            else:
-                delta <<= 1
-            # encode unsigned int
-            linetable.extend(encode_varint(delta))
-            for n in other_varints:
-                linetable.extend(encode_varint(n))
+                lineno_delta = lineno_new - lineno
+                lineno = lineno_new
+            while inst_size > 8:
+                _update(lineno_delta, 8)
+                inst_size -= 8
+            _update(lineno_delta, inst_size)
 
-        if lineno_new is None:
-            lineno_delta = 0
-        else:
-            lineno_delta = lineno_new - lineno
-            lineno = lineno_new
-        while inst_size > 8:
-            _update(lineno_delta, 8)
-            inst_size -= 8
-        _update(lineno_delta, inst_size)
-
-    return linetable, update
+        return linetable, update
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class ExceptionTableEntry:
     start: int
     end: int
@@ -696,7 +751,10 @@ def encode_exception_table_varint(n: int) -> list[int]:
     """
     Similar to `encode_varint`, but the 6-bit chunks are ordered in reverse.
     """
-    assert n >= 0
+    if n < 0:
+        raise AssertionError(
+            f"encode_exception_table_varint requires non-negative n, got {n}"
+        )
     b = [n & 63]
     n >>= 6
     while n > 0:
@@ -727,11 +785,16 @@ def check_exception_table(tab: list[ExceptionTableEntry]) -> None:
     jump table: entries are non-empty, sorted, and do not overlap.
     """
     for i in range(len(tab) - 1):
-        assert (
+        if not (
             tab[i].start <= tab[i].end
             and tab[i].end < tab[i + 1].start
             and tab[i + 1].start <= tab[i + 1].end
-        )
+        ):
+            raise AssertionError(
+                f"exception table entries are not well-formed at index {i}: "
+                f"entry[{i}]=(start={tab[i].start}, end={tab[i].end}), "
+                f"entry[{i + 1}]=(start={tab[i + 1].start}, end={tab[i + 1].end})"
+            )
 
 
 def parse_exception_table(exntab: bytes) -> list[ExceptionTableEntry]:
@@ -799,10 +862,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
     else:
-        if sys.version_info < (3, 10):
-            lnotab, update_lineno = lnotab_writer(firstlineno)
-        else:
-            lnotab, update_lineno, end = linetable_310_writer(firstlineno)
+        lnotab, update_lineno, end = linetable_writer(firstlineno)
 
         for inst in instructions:
             if inst.starts_line is not None:
@@ -810,15 +870,14 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             arg = inst.arg or 0
             code.extend((inst.opcode, arg & 0xFF))
 
-        if sys.version_info >= (3, 10):
-            end(len(code))
+        end(len(code))
 
     return bytes(code), bytes(lnotab)
 
 
 def _get_instruction_by_offset(
     offset_to_inst: dict[int, Instruction], offset: int
-) -> Optional[Instruction]:
+) -> Instruction | None:
     """
     Get the instruction located at a given offset, accounting for EXTENDED_ARGs
     """
@@ -852,7 +911,10 @@ def flip_jump_direction(instruction: Instruction) -> None:
     else:
         raise AttributeError("Instruction is not a forward or backward jump")
     instruction.opcode = dis.opmap[instruction.opname]
-    assert instruction.opcode in _REL_JUMPS
+    if instruction.opcode not in _REL_JUMPS:
+        raise AssertionError(
+            f"expected {instruction.opname} to be a relative jump instruction"
+        )
 
 
 def _get_instruction_front(instructions: list[Instruction], idx: int) -> Instruction:
@@ -877,11 +939,16 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
     for inst in instructions:
         if inst.opcode in jumps:
             if inst.opcode not in dis.hasjabs:
-                assert (
-                    inst.target is not None
-                    and inst.target.offset is not None
-                    and inst.offset is not None
-                )
+                if inst.target is None:
+                    raise AssertionError(
+                        f"jump instruction {inst.opname} has no target"
+                    )
+                if inst.target.offset is None:
+                    raise AssertionError(f"jump target for {inst.opname} has no offset")
+                if inst.offset is None:
+                    raise AssertionError(
+                        f"jump instruction {inst.opname} has no offset"
+                    )
                 if inst.target.offset < inst.offset:
                     if sys.version_info < (3, 11):
                         raise RuntimeError("Got negative jump offset for Python < 3.11")
@@ -900,26 +967,31 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
     # compute jump instruction arg
     for inst in instructions:
         if inst.opcode in jumps:
-            assert inst.target is not None
+            if inst.target is None:
+                raise AssertionError(f"jump instruction {inst.opname} has no target")
             target = _get_instruction_front(instructions, indexof[inst.target])
             if inst.opcode in dis.hasjabs:
-                if sys.version_info < (3, 10):
-                    inst.arg = target.offset
-                elif sys.version_info < (3, 11):
+                if sys.version_info < (3, 11):
                     # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
                     # Divide since bytecode is 2 bytes large.
+                    if target.offset is None:
+                        raise AssertionError("absolute jump target has no offset")
                     inst.arg = int(target.offset / 2)
                 else:
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                assert target.offset is not None and inst.offset is not None
+                if target.offset is None:
+                    raise AssertionError("relative jump target has no offset")
+                if inst.offset is None:
+                    raise AssertionError(
+                        f"relative jump instruction {inst.opname} has no offset"
+                    )
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                if sys.version_info >= (3, 10):
-                    # see bytecode size comment in the absolute jump case above
-                    inst.arg //= 2
+                # pyrefly: ignore [unsupported-operation]
+                inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -946,7 +1018,10 @@ def virtualize_exception_table(
                 end_offset_idx < len(offsets) and offsets[end_offset_idx] <= entry.end
             ):
                 end_offset_idx += 1
-            assert end_offset_idx > 0
+            if end_offset_idx <= 0:
+                raise AssertionError(
+                    "end_offset_idx must be positive in exception table virtualization"
+                )
             end_offset = offsets[end_offset_idx - 1]
             inst_entry = InstructionExnTabEntry(
                 _get_instruction_by_offset(offset_to_inst, entry.start),  # type: ignore[arg-type]
@@ -959,7 +1034,11 @@ def virtualize_exception_table(
 
         entry, inst_entry = step()
         for inst in instructions:
-            assert inst.offset is not None
+            if inst.offset is None:
+                raise AssertionError(
+                    f"instruction {inst.opname} has no offset during exception "
+                    "table virtualization"
+                )
             while inst.offset > entry.end:
                 entry, inst_entry = step()
             if inst.offset >= entry.start:
@@ -981,22 +1060,35 @@ def compute_exception_table(
             start = _get_instruction_front(
                 instructions, indexof[inst.exn_tab_entry.start]
             ).offset
-            assert start is not None
+            if start is None:
+                raise AssertionError(
+                    "exception table entry start instruction has no offset"
+                )
             # point to the last 2 bytes of the end instruction
             end = (
                 cast(int, inst.exn_tab_entry.end.offset)
                 + instruction_size(inst.exn_tab_entry.end)
                 - 2
             )
-            assert end is not None
+            if end is None:
+                raise AssertionError(
+                    "exception table entry end instruction has no offset"
+                )
             target = _get_instruction_front(
                 instructions, indexof[inst.exn_tab_entry.target]
             ).offset
-            assert target is not None
+            if target is None:
+                raise AssertionError(
+                    "exception table entry target instruction has no offset"
+                )
             key = (start, end)
             val = (target, inst.exn_tab_entry.depth, inst.exn_tab_entry.lasti)
             if key in exn_dict:
-                assert exn_dict[key] == val
+                if exn_dict[key] != val:
+                    raise AssertionError(
+                        f"conflicting exception table entries for range "
+                        f"{key}: {exn_dict[key]} vs {val}"
+                    )
             exn_dict[key] = val
 
     # Dynamo may construct nested exception table entries for convenience,
@@ -1031,7 +1123,11 @@ def compute_exception_table(
             pop()
         if key_stack:
             # create an entry covering to the current key, if possible
-            assert key_stack[-1][0] <= key[0] <= key[1] <= key_stack[-1][1]
+            if not (key_stack[-1][0] <= key[0] <= key[1] <= key_stack[-1][1]):
+                raise AssertionError(
+                    f"exception table key {key} is not properly nested within "
+                    f"parent {key_stack[-1]}"
+                )
             left = max(nexti, key_stack[-1][0])
             if left < key[0]:
                 exn_tab.append(
@@ -1060,7 +1156,11 @@ def check_inst_exn_tab_entries_nested(
         while entry_stack and entry_stack[-1][1] < key[0]:
             entry_stack.pop()
         if entry_stack:
-            assert entry_stack[-1][0] <= key[0] <= key[1] <= entry_stack[-1][1]
+            if not (entry_stack[-1][0] <= key[0] <= key[1] <= entry_stack[-1][1]):
+                raise AssertionError(
+                    f"exception table entry {key} is not properly nested "
+                    f"within parent {entry_stack[-1]}"
+                )
         entry_stack.append(key)
 
 
@@ -1078,7 +1178,10 @@ def propagate_inst_exn_table_entries(instructions: list[Instruction]) -> None:
                 indexof[inst.exn_tab_entry.end],
             )
             if key in entries:
-                assert inst.exn_tab_entry == entries[key]
+                if inst.exn_tab_entry != entries[key]:
+                    raise AssertionError(
+                        f"conflicting exn_tab_entry for instruction at key {key}"
+                    )
             entries[key] = inst.exn_tab_entry
     sorted_entries = [
         entries[key] for key in sorted(entries.keys(), key=lambda t: (t[0], -t[1]))
@@ -1105,14 +1208,31 @@ def check_inst_exn_tab_entries_valid(instructions: list[Instruction]) -> None:
     exn_tab_entry_set = set()
     for i, inst in enumerate(instructions):
         if inst.exn_tab_entry:
-            assert sys.version_info >= (3, 11)
-            assert id(inst.exn_tab_entry) not in exn_tab_entry_set
+            if sys.version_info < (3, 11):
+                raise AssertionError("exn_tab_entry is only supported in Python 3.11+")
+            if id(inst.exn_tab_entry) in exn_tab_entry_set:
+                raise AssertionError(
+                    f"duplicate exn_tab_entry at instruction index {i}"
+                )
             exn_tab_entry_set.add(id(inst.exn_tab_entry))
             entry = inst.exn_tab_entry
-            assert entry.start in indexof
-            assert entry.end in indexof
-            assert entry.target in indexof
-            assert indexof[entry.start] <= i <= indexof[entry.end]
+            if entry.start not in indexof:
+                raise AssertionError(
+                    "exn_tab_entry start instruction not found in instructions"
+                )
+            if entry.end not in indexof:
+                raise AssertionError(
+                    "exn_tab_entry end instruction not found in instructions"
+                )
+            if entry.target not in indexof:
+                raise AssertionError(
+                    "exn_tab_entry target instruction not found in instructions"
+                )
+            if not (indexof[entry.start] <= i <= indexof[entry.end]):
+                raise AssertionError(
+                    f"instruction at index {i} is outside its exn_tab_entry "
+                    f"range [{indexof[entry.start]}, {indexof[entry.end]}]"
+                )
 
 
 def strip_extended_args(instructions: list[Instruction]) -> None:
@@ -1149,7 +1269,10 @@ def overwrite_instruction(
 
 def remove_load_call_method(instructions: list[Instruction]) -> list[Instruction]:
     """LOAD_METHOD puts a NULL on the stack which causes issues, so remove it"""
-    assert sys.version_info < (3, 11)
+    if sys.version_info >= (3, 11):
+        raise AssertionError(
+            "remove_load_call_method should not be called on Python 3.11+"
+        )
     rewrites = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
     for inst in instructions:
         if inst.opname in rewrites:
@@ -1195,7 +1318,10 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
         new_insts.append(inst)
         if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
             # new instruction
-            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if sys.version_info >= (3, 14) and inst.opname == "BINARY_SLICE":
+                subscr_inst = create_binary_subscr()
+            else:
+                subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
                 inst.exn_tab_entry.end = subscr_inst
             subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
@@ -1211,6 +1337,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
 
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
+    "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
     "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
     "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
 }
@@ -1251,7 +1378,7 @@ def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> Non
 
 def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> None:
     new_insts = []
-    for inst, next_inst in zip(instructions, instructions[1:]):
+    for inst, next_inst in itertools.pairwise(instructions):
         if (
             inst.opname == "NOP"
             and inst.argval == "GRAPH_BREAK_IF_LEAF"
@@ -1296,7 +1423,10 @@ def explicit_super(code: types.CodeType, instructions: list[Instruction]) -> Non
                 )
                 or (sys.version_info < (3, 11) and nexti.opname == "CALL_FUNCTION")
             ):
-                assert "__class__" in cell_and_free
+                if "__class__" not in cell_and_free:
+                    raise AssertionError(
+                        "__class__ not found in cell_and_free for super() call"
+                    )
                 output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
@@ -1342,7 +1472,11 @@ def fix_extended_args(instructions: list[Instruction]) -> int:
         output.append(inst)
 
     added = len(output) - len(instructions)
-    assert added >= 0
+    if added < 0:
+        raise AssertionError(
+            f"fix_extended_args removed instructions (added={added}), "
+            "expected non-negative"
+        )
     instructions[:] = output
     return added
 
@@ -1358,7 +1492,10 @@ def instruction_size(inst: Instruction) -> int:
 def check_offsets(instructions: Sequence[Instruction]) -> None:
     offset = 0
     for inst in instructions:
-        assert inst.offset == offset
+        if inst.offset != offset:
+            raise AssertionError(
+                f"instruction {inst.opname} has offset {inst.offset}, expected {offset}"
+            )
         offset += instruction_size(inst)
 
 
@@ -1366,6 +1503,7 @@ def update_offsets(instructions: Sequence[Instruction]) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
+
         offset += instruction_size(inst)
 
 
@@ -1384,8 +1522,13 @@ def debug_bytes(*args: bytes) -> str:
 def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
     dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
-    assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
-    assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
+    if code.co_code != dode.co_code:
+        raise AssertionError(debug_bytes(code.co_code, dode.co_code))
+    # TODO: reenable after better understanding how to handle sourceless
+    # (None) codes
+    # assert list(code.co_lines()) == list(dode.co_lines()), (
+    #     "line table mismatch via co_lines()"
+    # )
 
 
 HAS_LOCAL = set(dis.haslocal)
@@ -1409,7 +1552,7 @@ def get_const_index(code_options: dict[str, Any], val: Any) -> int:
 def fix_vars(
     instructions: list[Instruction],
     code_options: dict[str, Any],
-    varname_from_oparg: Optional[Callable[..., Any]] = None,
+    varname_from_oparg: Callable[..., Any] | None = None,
 ) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
@@ -1421,11 +1564,16 @@ def fix_vars(
             # Add a missing item to co_names
             idx = names[name] = len(names)
             code_options["co_names"] = (*code_options["co_names"], name)
-            assert len(code_options["co_names"]) == len(names)
+            if len(code_options["co_names"]) != len(names):
+                raise AssertionError(
+                    f"co_names length {len(code_options['co_names'])} does not "
+                    f"match names dict length {len(names)}"
+                ) from None
         return idx
 
     if sys.version_info < (3, 11):
-        assert varname_from_oparg is None
+        if varname_from_oparg is not None:
+            raise AssertionError("varname_from_oparg should be None for Python < 3.11")
         varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
         freenames = {
             name: idx
@@ -1434,7 +1582,8 @@ def fix_vars(
             )
         }
     else:
-        assert callable(varname_from_oparg)
+        if not callable(varname_from_oparg):
+            raise AssertionError("varname_from_oparg must be callable for Python 3.11+")
         allnames = {}
         for idx in itertools.count():
             try:
@@ -1455,9 +1604,13 @@ def fix_vars(
 
         if instructions[i].opname == "LOAD_GLOBAL":
             # 3.11 LOAD_GLOBAL requires both arg and argval - see create_instruction
-            assert instructions[i].argval is not _NotProvided
+            if instructions[i].argval is _NotProvided:
+                raise AssertionError("LOAD_GLOBAL instruction must have argval set")
             if sys.version_info >= (3, 11):
-                assert instructions[i].arg is not None
+                if instructions[i].arg is None:
+                    raise AssertionError(
+                        "LOAD_GLOBAL instruction must have arg set in Python 3.11+"
+                    )
                 instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
@@ -1465,17 +1618,23 @@ def fix_vars(
                 instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opname == "LOAD_ATTR":
             # 3.12 LOAD_ATTR requires both arg and argval, like LOAD_GLOBAL
-            assert instructions[i].argval is not _NotProvided
+            if instructions[i].argval is _NotProvided:
+                raise AssertionError("LOAD_ATTR instruction must have argval set")
             if sys.version_info >= (3, 12):
-                assert instructions[i].arg is not None
+                if instructions[i].arg is None:
+                    raise AssertionError(
+                        "LOAD_ATTR instruction must have arg set in Python 3.12+"
+                    )
                 instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
             else:
                 instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opname == "LOAD_SUPER_ATTR":
-            assert instructions[i].arg is not None
-            assert instructions[i].argval is not _NotProvided
+            if instructions[i].arg is None:
+                raise AssertionError("LOAD_SUPER_ATTR instruction must have arg set")
+            if instructions[i].argval is _NotProvided:
+                raise AssertionError("LOAD_SUPER_ATTR instruction must have argval set")
             # Copy low bit, force second bit on for explicit super (the "+ 2")
             instructions[i].arg = (
                 (get_name_index(instructions[i].argval) << 2)
@@ -1483,9 +1642,20 @@ def fix_vars(
                 + 2
             )
         elif instructions[i].opname in FUSED_INSTS:
-            assert sys.version_info >= (3, 13)
-            assert isinstance(instructions[i].argval, tuple)
-            assert len(instructions[i].argval) == 2
+            if sys.version_info < (3, 13):
+                raise AssertionError(
+                    f"fused instruction {instructions[i].opname} requires Python 3.13+"
+                )
+            if not isinstance(instructions[i].argval, tuple):
+                raise AssertionError(
+                    f"fused instruction {instructions[i].opname} argval must be a tuple, "
+                    f"got {type(instructions[i].argval)}"
+                )
+            if len(instructions[i].argval) != 2:
+                raise AssertionError(
+                    f"fused instruction {instructions[i].opname} argval must have "
+                    f"length 2, got {len(instructions[i].argval)}"
+                )
             arg_tuple = tuple(
                 varnames[name] if name in varnames else freenames[name]
                 for name in instructions[i].argval
@@ -1513,7 +1683,10 @@ def fix_vars(
             if instructions[i].arg is None:
                 # cannot use a dictionary since consts may not be hashable
                 idx = get_const_index(code_options, instructions[i].argval)
-                assert idx >= 0
+                if idx < 0:
+                    raise AssertionError(
+                        f"failed to find constant index for {instructions[i].argval}"
+                    )
                 instructions[i].arg = idx
 
 
@@ -1558,10 +1731,7 @@ def get_code_keys() -> list[str]:
     if sys.version_info >= (3, 11):
         keys.append("co_qualname")
     keys.append("co_firstlineno")
-    if sys.version_info >= (3, 10):
-        keys.append("co_linetable")
-    else:
-        keys.append("co_lnotab")
+    keys.append("co_linetable")
     if sys.version_info >= (3, 11):
         # not documented, but introduced in https://github.com/python/cpython/issues/84403
         keys.append("co_exceptiontable")
@@ -1583,7 +1753,11 @@ def transform_code_object(
 ) -> tuple[types.CodeType, Optional["DynamoTracerOutput"]]:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
+    if len(code_options["co_varnames"]) != code_options["co_nlocals"]:
+        raise AssertionError(
+            f"co_varnames length {len(code_options['co_varnames'])} does not "
+            f"match co_nlocals {code_options['co_nlocals']}"
+        )
 
     instructions = cleaned_instructions(code, safe)
     # propagate line nums again for added instructions
@@ -1618,16 +1792,17 @@ def clean_and_assemble_instructions(
 
     remove_extra_line_nums(instructions)
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
-    if sys.version_info < (3, 10):
-        code_options["co_lnotab"] = lnotab
-    else:
-        code_options["co_linetable"] = lnotab
 
+    code_options["co_linetable"] = lnotab
     code_options["co_code"] = bytecode
     code_options["co_stacksize"] = stacksize_analysis(instructions)
-    assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
+    if set(keys) - {"co_posonlyargcount"} != set(code_options.keys()) - {
         "co_posonlyargcount"
-    }
+    }:
+        raise AssertionError(
+            f"code_options keys mismatch: expected {set(keys) - {'co_posonlyargcount'}}, "
+            f"got {set(code_options.keys()) - {'co_posonlyargcount'}}"
+        )
     if sys.version_info >= (3, 11):
         code_options["co_exceptiontable"] = assemble_exception_table(
             compute_exception_table(instructions)
@@ -1738,7 +1913,7 @@ def is_generator(code: types.CodeType) -> bool:
 
 def bytecode_from_template(
     fn: Callable[..., Any],
-    varname_map: Optional[Mapping[Any, Any]] = None,
+    varname_map: Mapping[Any, Any] | None = None,
     noreturn: bool = True,
     noprefix: bool = True,
 ) -> list[Instruction]:
@@ -1807,6 +1982,7 @@ def bytecode_from_template(
                     new_insts.append(inst)
             insts = new_insts
 
+        # pyrefly: ignore [implicit-any]
         returns = []
         for inst in insts:
             if inst.opname == "RETURN_VALUE":

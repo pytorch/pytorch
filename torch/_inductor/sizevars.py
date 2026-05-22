@@ -1,23 +1,34 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast
 
 import sympy
 from sympy import Expr
 
+from torch import SymInt
+from torch.fx.experimental._size_hinting import (
+    _guarding_hint_or_throw_base,
+    _maybe_realize_expr,
+    _optimization_hint_base,
+)
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
-    has_free_unbacked_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
     ShapeEnv,
+    SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
+from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
+from . import config
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,
@@ -32,14 +43,184 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+Width = int | IntInfinity
+
+
+@dataclasses.dataclass(frozen=True)
+class LaneContiguity:
+    """How an index expression varies across lanes.
+
+    This describes only the per-lane relationship, not full memory safety.
+    Callers still need to prove the relevant tensor dimension, stride, and base
+    alignment make a vector load valid. ``int_oo`` means the expression does not
+    impose a finite limit on that width.
+    """
+
+    contiguous_width: Width | None = None
+    uniform_width: Width | None = None
+    stride: int | Expr | None = None
+    unknown: bool = False
+
+    @property
+    def uniform(self) -> bool:
+        return self.uniform_width is not None
+
+    def is_contiguous_for(self, width: int) -> bool:
+        return _width_covers(self.contiguous_width, width)
+
+    def is_uniform_for(self, width: int) -> bool:
+        return _width_covers(self.uniform_width, width)
+
+
+def _width_covers(max_width: Width | None, width: int) -> bool:
+    return max_width is not None and (max_width == int_oo or max_width >= width)
+
+
+def _min_width(lhs: Width | None, rhs: Width | None) -> Width | None:
+    if lhs is None or rhs is None:
+        return None
+    if lhs == int_oo:
+        return rhs
+    if rhs == int_oo:
+        return lhs
+    return min(lhs, rhs)
+
+
+def _largest_power_of_2_factor(n: int) -> int:
+    return n & -n
+
+
+# Symbols created by CppTemplateKernel.slice_nd → parse_expr_with_index_symbols
+# and are internal to C++ GEMM codegen (not tracked by ShapeEnv).
+_GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
+    [
+        "m_start",
+        "m_end",
+        "n_start",
+        "n_end",
+        "k_start",
+        "k_end",
+        "m_size",
+        "n_size",
+        "m_offset",
+        "m_start_unsliced",
+        "m_end_unsliced",
+        "m_size_unsliced",
+    ]
+)
+
+
+# Threshold above which we skip sympy reasoning that scales poorly in the
+# number of symbols. Past this point, polynomial-domain conversions inside
+# sympy (e.g. gcd, Mod) dominate compile time on wide concat/sum expressions
+# (see https://github.com/sympy/sympy/issues/28200). Chosen empirically from
+# AOT-partitioned bwd graphs with ~60-variable shape expressions.
+_MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
+
+
+@functools.lru_cache
+def stride_at(index: sympy.Expr, var: sympy.Symbol):
+    if not index.has(var):
+        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
+        # in this case, there is no dependencies between index and var.
+        return sympy.S.Zero
+    replacement = {var: var + 1}
+    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
+    return sympy.simplify(new_index - index)
+
+
+@functools.lru_cache
+def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
+    """
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
+
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
+    """
+
+    div_freevar_id = 0
+    mod_freevar_id = 0
+
+    def visit_indexing_div(divisor):
+        nonlocal div_freevar_id
+        result = FloorDiv(var, divisor)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
+            div_freevar_id += 1
+        return result
+
+    def visit_modular_indexing(divisor, modulus):
+        nonlocal mod_freevar_id
+        result = ModularIndexing(var, divisor, modulus)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        return result
+
+    original_index = index
+
+    div = sympy.Wild("divisor", integer=True)
+    if index.has(FloorDiv):
+        index = index.replace(FloorDiv(var, div), visit_indexing_div)
+
+    mod = sympy.Wild("modulus", integer=True)
+    if index.has(ModularIndexing):
+        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
+
+    index = sympy.simplify(index)
+    if index != original_index:
+        return simplify_index_in_vec_range(index, var, vec_length)
+
+    return index
+
+
+@functools.lru_cache
+def stride_at_vec_range(
+    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
+):
+    if vec_length:
+        index = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index, var)
+
+
 def statically_known_true(
     shape_env: ShapeEnv,
-    expr: Union[sympy.Basic, bool],
-    axioms: Optional[tuple[sympy.Expr]] = None,
-    var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
+    expr: sympy.Basic | bool,
+    axioms: tuple[sympy.Expr] | None = None,
+    var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[Any]]] | None = None,
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
+
+    # Hint fast-path: if the current concrete hints make `expr` evaluate to
+    # False, it cannot be universally True, so bail out without running the
+    # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
+    # us conclude universal truth, so we still fall through in that case.)
+    try:
+        hinted = expr.xreplace(shape_env.backed_var_to_val)
+        if hinted is sympy.S.false:
+            return False
+    except Exception:
+        pass
 
     try:
         simplified = shape_env._maybe_evaluate_static(
@@ -70,12 +251,15 @@ class SizeVarAllocator:
 
     def __init__(self, shape_env=None) -> None:
         super().__init__()
+        # Note: this can lead to bugs. Reasoning APIs depends on existing information in
+        # in the shape_env. For example! var_to_ranges can't be empty!
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.var_to_val = self.shape_env.var_to_val
+        self.backed_var_to_val = self.shape_env.backed_var_to_val
+        self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
-        self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
+        self.unbacked_replacements: dict[Expr, Expr] | None = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
         # f(s0), we may choose to precompute it on the host and then replace
@@ -109,7 +293,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (expr, *var_ranges.items())
-            result = cache.get(key, None)
+            result = cache.get(key)
             if result is None:
                 result = self._simplify_with_ranges(expr, var_ranges)
                 cache[key] = result
@@ -133,7 +317,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (*index_vars, *sizes, *index_formulas)
-            result = cache.get(key, None)
+            result = cache.get(key)
             if result is None:
                 result = self._simplify_loops_impl(index_vars, sizes, index_formulas)
                 cache[key] = result
@@ -177,6 +361,7 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
+                # pyrefly: ignore [bad-argument-type]
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
@@ -187,21 +372,28 @@ class SizeVarAllocator:
             if not statically_known(base >= 0):
                 return base
 
+            from torch.utils._sympy.functions import safe_gcd
+
             for v in base.free_symbols:
                 if v in var_ranges:
-                    # var smaller than divisor can be removed
-                    # if the rest is guaranteed to be multiple of divisor
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
-                        gcd = sympy.gcd(m[rest], divisor)
-                        if gcd == divisor:
-                            if statically_known(v < divisor):
-                                base = m[rest]
+                        gcd = safe_gcd(m[rest], divisor)
+                        if statically_known(v < gcd):
+                            base = m[rest]
             return base
 
         def visit_indexing_div(base, divisor):
-            return FloorDiv(remove_zero_terms(base, divisor), divisor)
+            base = remove_zero_terms(base, divisor)
+            if statically_known(base >= 0) and statically_known(base < divisor):
+                return sympy.S.Zero
+            # FloorDiv(ModularIndexing(b, d1, m), d2) = ModularIndexing(b, d1*d2, m//d2)
+            if isinstance(base, ModularIndexing) and isinstance(divisor, sympy.Integer):
+                b, d1, m = base.args
+                if m % divisor == 0:
+                    return ModularIndexing(b, d1 * divisor, FloorDiv(m, divisor))
+            return FloorDiv(base, divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -321,16 +513,14 @@ class SizeVarAllocator:
     # asked questions can be answered without guarding otherwise they return False.
     # Those are similar to statically_known_true in symbolic_shapes.py but operate on sympy
     # expressions instead of symnodes.
-    def statically_known_true(self, expr: Union[sympy.Basic, bool]) -> bool:
+    def statically_known_true(self, expr: sympy.Basic | bool) -> bool:
         """
         Returns true if an expression is always true (symbolically or via guards),
         false otherwise. Never add guards, or throw data dependent errors.
         """
         return statically_known_true(self.shape_env, expr)
 
-    def statically_known_equals(
-        self, left: Union[Expr, int], right: Union[Expr, int]
-    ) -> bool:
+    def statically_known_equals(self, left: Expr | int, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
@@ -346,51 +536,109 @@ class SizeVarAllocator:
             self.statically_known_equals(l, r) for l, r in zip(left, right)
         )
 
-    def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_leq(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
         expr = left <= right
         return self.statically_known_true(expr)
 
-    def statically_known_geq(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_geq(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than or equal to right.
         """
         expr = left >= right
         return self.statically_known_true(expr)
 
-    def statically_known_lt(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_lt(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
         expr = left < right
         return self.statically_known_true(expr)
 
-    def statically_known_gt(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_gt(self, left: Expr, right: Expr | int) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than right.
         """
         expr = left > right
         return self.statically_known_true(expr)
 
+    def _is_multiple_of(self, numerator: Expr, denominator: int) -> bool:
+        """
+        Structural divisibility check: returns True only if numerator is
+        provably a multiple of denominator.  Recurses over sympy expression
+        structure before falling back to statically_known_true.
+        """
+        # Rule 1 — concrete value
+        if isinstance(numerator, (int, sympy.Integer)):
+            return int(numerator) % denominator == 0
+
+        # Rule 2 — product: any factor divisible → product divisible
+        if isinstance(numerator, sympy.Mul):
+            for factor in numerator.args:
+                if self._is_multiple_of(factor, denominator):
+                    return True
+            const = 1
+            for factor in numerator.args:
+                if isinstance(factor, (int, sympy.Integer)):
+                    const *= int(factor)
+            if const != 1 and const % denominator == 0:
+                return True
+
+        # Rule 3 — sum: all terms divisible → sum divisible
+        if isinstance(numerator, sympy.Add):
+            if all(self._is_multiple_of(term, denominator) for term in numerator.args):
+                return True
+
+        # Rule 4 — FloorDiv(a, b): if a is multiple of b*n
+        if isinstance(numerator, FloorDiv):
+            a, b = numerator.args
+            if isinstance(b, (int, sympy.Integer)):
+                if self._is_multiple_of(a, int(b) * denominator):
+                    return True
+
+        # Rule 5 — Mod(a, b): Mod(a,b) = a - b*floor(a/b), so if both a and b
+        # are multiples of n, then Mod(a,b) is too.
+        if isinstance(numerator, (Mod, sympy.Mod)):
+            a, b = numerator.args
+            if self._is_multiple_of(a, denominator) and self._is_multiple_of(
+                b, denominator
+            ):
+                return True
+
+        # Rule 6 — cheap gcd check before expensive sympy fallback.
+        from torch.utils._sympy.functions import simple_floordiv_gcd
+
+        gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
+        if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
+            return True
+
+        # Rule 7 — full sympy fallback (expensive on many-variable exprs).
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
+        return self.statically_known_true(expr)
+
     def statically_known_multiple_of(
-        self, numerator: Expr, denominator: Union[Expr, int]
+        self, numerator: Expr, denominator: Expr | int
     ) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
-        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
-            denominator
-        ):
-            return False
+        # Use cheap structural equality, not statically_known_equals —
+        # the latter constructs sympy.Eq(wide, wide) which has measurable
+        # overhead (~30s on 64-variable expressions).
+        if numerator is denominator or numerator == denominator:
+            return True
 
-        if len(free_symbols(numerator)) > 20:
-            return False
+        if isinstance(denominator, (int, sympy.Integer)):
+            return self._is_multiple_of(numerator, int(denominator))
 
-        expr = sympy.Eq(numerator % denominator, 0)
+        # Symbolic denominator: only the sympy fallback can prove this.
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
@@ -398,6 +646,163 @@ class SizeVarAllocator:
         Returns a bool indicating if x is known to be a power of 2.
         """
         return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
+
+    def analyze_lane_contiguity(
+        self, expr: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Analyze whether `expr` is uniform or contiguous over vector lanes.
+
+        The analysis is conservative: unknown cases must fall back to scalar or
+        gather-style lowering. It only describes the lane pattern of the index
+        expression; callers must still prove tensor stride, offset, dtype, and
+        alignment before emitting a vector memory load.
+        """
+        expr = self.simplify(expr)
+        if lane_var not in expr.free_symbols:
+            return LaneContiguity(stride=0, uniform_width=int_oo)
+        stride = stride_at(expr, lane_var)
+        match expr:
+            case _ if self.statically_known_equals(stride, 1):
+                return LaneContiguity(contiguous_width=int_oo, stride=1)
+            case _ if self.statically_known_equals(stride, 0):
+                return LaneContiguity(stride=0, uniform_width=int_oo)
+            case sympy.Add():
+                return self._analyze_lane_contiguity_add(expr.args, lane_var)
+            case sympy.Mul():
+                return self._analyze_lane_contiguity_mul(expr.args, lane_var)
+            case FloorDiv():
+                return self._analyze_lane_contiguity_floor_div(
+                    expr.args[0], expr.args[1], lane_var
+                )
+            case ModularIndexing():
+                return self._analyze_lane_contiguity_modular_indexing(expr, lane_var)
+            case _ if isinstance(expr, (Mod, sympy.Mod)):
+                return self._analyze_lane_contiguity_mod(
+                    expr.args[0], expr.args[1], lane_var
+                )
+            case _:
+                return LaneContiguity(unknown=True)
+
+    def _analyze_lane_contiguity_add(
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Combine additive terms when at most one term varies across lanes."""
+        uniform_width: Width | None = int_oo
+        varying_result: LaneContiguity | None = None
+        for arg in args:
+            arg_result = self.analyze_lane_contiguity(arg, lane_var)
+            if arg_result.unknown:
+                return LaneContiguity(unknown=True)
+            if arg_result.uniform:
+                uniform_width = _min_width(uniform_width, arg_result.uniform_width)
+            elif varying_result is None:
+                varying_result = arg_result
+            else:
+                return LaneContiguity(unknown=True)
+        if varying_result is None:
+            return LaneContiguity(stride=0, uniform_width=uniform_width)
+        return LaneContiguity(
+            contiguous_width=_min_width(varying_result.contiguous_width, uniform_width),
+            stride=varying_result.stride,
+        )
+
+    def _analyze_lane_contiguity_mul(
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Propagate lane stride through lane-uniform multiplication."""
+        uniform_factor: Expr = sympy.S.One
+        lane_factors = []
+        for arg in args:
+            if lane_var in arg.free_symbols:
+                lane_factors.append(arg)
+            else:
+                uniform_factor *= arg
+        if len(lane_factors) != 1:
+            return LaneContiguity(unknown=True)
+        child_result = self.analyze_lane_contiguity(lane_factors[0], lane_var)
+        if child_result.unknown or child_result.stride is None:
+            return LaneContiguity(unknown=True)
+        stride = self.simplify(uniform_factor * child_result.stride)
+        if self.statically_known_equals(stride, 0):
+            return LaneContiguity(
+                stride=0,
+                uniform_width=child_result.uniform_width,
+            )
+        return LaneContiguity(
+            contiguous_width=child_result.contiguous_width
+            if self.statically_known_equals(stride, 1)
+            else None,
+            stride=stride,
+        )
+
+    def _analyze_lane_contiguity_modular_indexing(
+        self, expr: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Analyze ModularIndexing(base, divisor, modulus)."""
+        base, divisor, modulus = expr.args
+        if not isinstance(divisor, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        if int(divisor) != 1:
+            return self._analyze_lane_contiguity_floor_div(base, divisor, lane_var)
+        return self._analyze_lane_contiguity_mod(base, modulus, lane_var)
+
+    def _analyze_lane_contiguity_floor_div(
+        self, base: Expr, divisor: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Return the largest width where ``base // divisor`` is lane-uniform."""
+        if not isinstance(divisor, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        divisor_int = int(divisor)
+        if divisor_int <= 0:
+            return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
+        group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(divisor_int),
+        )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
+                return LaneContiguity(stride=0, uniform_width=width)
+            width //= 2
+        return LaneContiguity(unknown=True)
+
+    def _analyze_lane_contiguity_mod(
+        self,
+        base: Expr,
+        modulus: Expr,
+        lane_var: sympy.Symbol,
+    ) -> LaneContiguity:
+        """Return the largest aligned no-wrap modulo span.
+
+        `base % modulus` is contiguous for a vector group only when both the
+        group start and modulus are multiples of the chosen width. For example,
+        lanes 0..3 under `% 4` are contiguous, but lanes 2..5 wrap to 2,3,0,1.
+        """
+        if not isinstance(modulus, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        modulus_int = int(modulus)
+        if modulus_int <= 0:
+            return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
+        group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(modulus_int),
+        )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
+                return LaneContiguity(contiguous_width=width, stride=1)
+            width //= 2
+        return LaneContiguity(unknown=True)
 
     # The expect/check functions require you to ALREADY KNOW that a particular
     # condition holds. They are similar to expect_true in symbolic_shapes.py and
@@ -450,9 +855,23 @@ class SizeVarAllocator:
     # Similar to the functions guard_or_false/guard_or_true in symbolic_shapes.py
     # but operates on sympy expressions instead of symnodes. see Note [guard_or_].
     def guard_or_false(self, left):
+        import torch.fx.experimental._config as exp_config
+
+        if exp_config.backed_size_oblivious:
+            static_val = self.shape_env._maybe_evaluate_static(left)
+            if static_val is not None:
+                return static_val
+            return False
         return self.evaluate_expr(left, fallback_value=False)
 
     def guard_or_true(self, left):
+        import torch.fx.experimental._config as exp_config
+
+        if exp_config.backed_size_oblivious:
+            static_val = self.shape_env._maybe_evaluate_static(left)
+            if static_val is not None:
+                return static_val
+            return True
         return self.evaluate_expr(left, fallback_value=True)
 
     # The evaluate functions evaluate some symbolic sympy expression
@@ -465,9 +884,9 @@ class SizeVarAllocator:
     # which does the wrong thing if a or b is a sympy expression
     def evaluate_expr(
         self,
-        left: Union[Expr, sympy.logic.boolalg.Boolean],
+        left: Expr | sympy.logic.boolalg.Boolean,
         size_oblivious: bool = False,
-        fallback_value: Optional[bool] = None,
+        fallback_value: bool | None = None,
     ) -> bool:
         assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
         return self.shape_env.evaluate_expr(
@@ -484,42 +903,57 @@ class SizeVarAllocator:
         return self.guard_or_false(sympy.Eq(size, 1))
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
-        """return the smaller of left and right, and guard on that choice"""
+        """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        try:
-            lv = self.size_hint_or_throw(left)
-            rv = self.size_hint_or_throw(right)
-        except TypeError:  # unbacked symints
-            if left == right or self.statically_known_leq(left, right):
-                return left
-            if self.statically_known_leq(right, left):
-                return right
-            gcd = sympy.gcd(left, right)
-            if left == gcd:  # handle `min(10*u0, u0)` etc
-                return left
-            if right == gcd:
-                return right
-            raise TypeError(
-                f"evaluate_min({left}, {right}) with unbacked symints"
-            ) from None
-        if lv <= rv:
-            self.check_leq(left, right)
+        if self.guard_or_false(sympy.Le(left, right)):
             return left
-        else:
-            self.check_leq(right, left)
+        if self.guard_or_false(sympy.Le(right, left)):
             return right
 
+        # GCD fallback: if gcd(a, b) == a then a divides b, implying a <= b.
+        #
+        # TODO: This is NOT always sound for unbacked symints.  It can
+        # produce wrong results when:
+        #   - inputs can be negative: gcd(u0, 10*u0) = u0, returns u0,
+        #     but if u0 < 0 then u0 > 10*u0 (e.g. u0=-1: min(-1,-10) = -10)
+        #   - a factor can be zero: gcd(u0, u0*u1) = u0, returns u0,
+        #     but if u1=0 then u0*u1=0 < u0 (e.g. u0=5,u1=0: min(5,0) = 0)
+        # TODO shall we add a runtime assertion at least.
+        gcd = sympy.gcd(left, right)
+        if left == gcd:
+            return left
+        if right == gcd:
+            return right
+
+        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
+        # sympy doesn't simplify this yet. So, evaluate it here. Same for Max.
+        for lhs, rhs in [(left, right), (right, left)]:
+
+            def le_rhs(a: Expr) -> bool:
+                return self.guard_or_false(sympy.Le(a, rhs))
+
+            # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
+            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+                return lhs
+            # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
+            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+                return lhs
+
+        raise TypeError(
+            f"evaluate_min({left}, {right}) with unbacked symints"
+        ) from None
+
     def evaluate_max(self, left: Expr, right: Expr) -> Expr:
-        """return the larger of left and right, and guard on that choice"""
+        """Return the larger of left and right, and guard on that choice."""
         # Always choose the opposite of eval min for consistency
         # This means min(a, b) and max(a, b) produce the same guards
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def guard_int(self, expr: Union[Expr, int]) -> int:
+    def guard_int(self, expr: Expr | int) -> int:
         """
         Similar to guard_int in symbolic_shapes.py, except this function works with SymPy
         expressions instead of SymNodes. It extracts the value represented by expr from shapeEnv
@@ -528,11 +962,11 @@ class SizeVarAllocator:
         """
         if isinstance(expr, int):
             return expr
-        val = self.size_hint_or_throw(expr)
+        val = self.guarding_hint_or_throw(expr)
         self.check_equals(expr, sympy.Integer(val))
         return int(val)
 
-    def guard_int_seq(self, left: Sequence[Union[Expr, int]]) -> list[int]:
+    def guard_int_seq(self, left: Sequence[Expr | int]) -> list[int]:
         """
         Apply guard_int on a sequence of inputs.
         """
@@ -543,9 +977,18 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(
-        self, expr: Union[Expr, int], hint_override: Optional[int] = None
-    ) -> Union[Expr, int]:
+    def replace_backed_symbols_with_hints(
+        self,
+        expr: Expr | int,
+    ) -> Expr | int:
+        """
+        Replace all backed symbols in an expression with their concrete hint values.
+
+        This function substitutes backed symbolic variables with their known concrete
+        values from the shape environment, while leaving unbacked symbols (data-dependent
+        values) untouched. Not recommended to be used except as last resort!
+        was added for existing usages compatibility.
+        """
         if isinstance(expr, int):
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
@@ -553,73 +996,177 @@ class SizeVarAllocator:
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
+
+        expr = self.remove_precomputed_replacements(expr)
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        if isinstance(expr, Expr):
+            expr = expr.expand(identity=True)
+
         free_symbols = expr.free_symbols
         if not free_symbols:
             try:
-                return int(expr)  # type: ignore[return-value]
+                return int(expr)
             except TypeError:
                 return expr  # inf/nan/I
 
-        if hint_override:
-            return hint_override
+        return expr
 
+    def to_symint_or_int(self, expr: Expr | int) -> SymInt | int:
+        """Convert a sympy expression to SymInt, or return int as is."""
+        if isinstance(expr, int):
+            return expr
+
+        from torch.fx.experimental.sym_node import SymNode
+
+        expr = self.simplify(expr)
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        # Remove precomputed replacements to get canonical form
+        # (consistent with symbolic_hint behavior)
         expr = self.remove_precomputed_replacements(expr)
-        return sympy_subs(expr, self.var_to_val)
-
-    def size_hint(
-        self,
-        expr: Union[Expr, int],
-        *,
-        fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
-    ) -> int:
-        out = self.symbolic_hint(expr, hint_override=hint_override)
-        if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
-            # Use the provided heuristic fallback hint
-            unbacked_sym_vrs = {
-                s: self.shape_env.var_to_range.get(s, None) for s in out.free_symbols
-            }
-            if all(vr is not None for vr in unbacked_sym_vrs.values()):
-                hint_vr = bound_sympy(out, unbacked_sym_vrs)  # type: ignore[arg-type]
-                if isinstance(hint_vr.lower, (int, sympy.Integer)):
-                    fallback = max(fallback, int(hint_vr.lower))
-                if isinstance(hint_vr.upper, (int, sympy.Integer)):
-                    fallback = min(fallback, int(hint_vr.upper))
-            return fallback
 
         try:
-            return int(out)
+            hint = self.guarding_hint_or_throw(expr)
         except Exception:
-            log.debug("failed on: %s", out)
-            raise
+            hint = None
+        node = SymNode(expr, self.shape_env, int, hint)
+        return SymInt(node)
 
-    def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
-        # Like size_hint but there's no fallback for unbacked symints, so it throws.
-        out = self.symbolic_hint(expr)
-        try:
-            return int(out)
-        except Exception:
-            log.debug("failed on: %s", out, exc_info=True)
-            raise
+    def to_symints_or_ints(self, exprs: Sequence[Expr | int]) -> list[SymInt | int]:
+        """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
+        return [self.to_symint_or_int(e) for e in exprs]
 
-    def size_hints(
-        self,
-        exprs: Iterable[Union[Expr, int]],
-        *,
-        fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
-    ) -> tuple[int, ...]:
-        return tuple(
-            self.size_hint(x, fallback=fallback, hint_override=hint_override)
-            for x in exprs
+    def guarding_hint_or_throw(self, expr: Expr | int) -> int:
+        """
+        Return a concrete integer hint for an expression that is safe to use for guarding.
+
+        This method evaluates the expression using only backed-symbols hints. Unlike
+        optimization_hint(), this method does NOT use heuristics or fallback values
+        for unbacked symbols.
+
+        Use this method when you need a hint value that will be used for guarding decision.
+
+        Args:
+            expr: A sympy expression or integer to evaluate.
+
+        Returns:
+            The concrete integer value of the expression based on backed symbol hints.
+
+        Raises:
+            GuardOnDataDependentSymNode: If the expression contains unbacked symbols
+            (data-dependent values) that cannot be resolved to concrete values.
+
+        See Also:
+            optimization_hint: For cases where fallback/heuristic values are acceptable
+                for unbacked symbols.
+        """
+        if isinstance(expr, SymNode):
+            raise TypeError(
+                f"guarding_hint_or_throw expects a sympy Expr or int, not {type(expr)}. "
+                "Use expr.expr to extract the sympy expression from a SymNode."
+            )
+        return _guarding_hint_or_throw_base(
+            self.shape_env, expr, self.inv_precomputed_replacements
         )
 
-    def size_hints_or_throw(
+    def optimization_hint(self, expr: Expr | int, fallback: int | None = None) -> int:
+        """
+        Return a concrete integer hint for an expression.
+
+        This function should be used for non-guarding based optimizations. If you
+        want a hint that you can guard on, use the guarding_hint API instead.
+
+        This function will hint unbacked symbols using user provided optimization
+        hints. If not provided, fallback will be used along with some heuristics
+        that try to maximize consistency with the shape environment.
+
+        Special cases:
+        - Complex numbers (containing sympy.I): raises an error since tensor
+          dimensions cannot be complex.
+        - Infinity (int_oo, sympy.oo): returns sys.maxsize.
+        - NaN (sympy.nan): returns the fallback value.
+        """
+        return _optimization_hint_base(
+            self.shape_env, expr, self.inv_precomputed_replacements, fallback
+        )
+
+    def optimization_hints(
         self,
-        exprs: Iterable[Union[Expr, int]],
+        exprs: Iterable[Expr | int],
+        fallback: int | None = None,
     ) -> tuple[int, ...]:
-        # Like size_hints but there's no fallback for unbacked symints, so it throws.
-        return tuple(self.size_hint_or_throw(x) for x in exprs)
+        """
+        Like optimization_hint but for a sequence of expressions.
+        Returns a tuple of concrete integer hints.
+        """
+        # Read config at call time to respect runtime patches (e.g., in tests)
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
+
+    def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
+        """
+        Return True if every unbacked symbol in *exprs* has an explicit
+        user-provided hint in var_to_hint_override.  If there are no
+        unbacked symbols at all, returns True (vacuously).
+        *exprs* can be a single expression or any iterable accepted by
+        free_unbacked_symbols (list, tuple, etc.).
+        """
+        unbacked = free_unbacked_symbols(exprs)
+        return unbacked.issubset(self.var_to_hint_override.keys())
+
+    def optimization_hint_with_override(
+        self,
+        expr: Expr | int,
+        hint_override: int | None,
+    ) -> int:
+        r"""Return a concrete integer hint for an expression, with optional override.
+        This is used in dynamic dispatch scenarios where callers may want to
+        provide a specific hint value rather than computing one from the expression.
+        The resolution order is:
+        1. If ``expr`` simplifies to a static integer, return that value
+           (``hint_override`` is ignored for static shapes).
+        2. If ``expr`` is dynamic and ``hint_override`` is not ``None``,
+           return ``hint_override``.
+        3. Otherwise, compute a hint via :meth:`optimization_hint`
+        Args:
+            expr (Expr or int): The expression to get a hint for.
+            hint_override (int, optional): If provided and ``expr`` is dynamic,
+                this value is returned instead of computing a hint.
+        Returns:
+            int: A concrete integer hint for the expression.
+        """
+        simplified = _maybe_realize_expr(self.simplify(expr), None)
+
+        if simplified is not None:
+            return simplified
+
+        # Dynamic shape: use hint_override if set,
+        # else return optimization_hint
+        if hint_override is not None:
+            return hint_override
+
+        return self.optimization_hint(expr)
+
+    def optimization_hints_with_override(
+        self,
+        exprs: Iterable[Expr | int],
+        hint_override: int | None,
+    ) -> tuple[int, ...]:
+        """
+        Like optimization_hint_with_override but for a sequence of expressions.
+        Returns a tuple of concrete integer hints.
+        """
+        return tuple(
+            self.optimization_hint_with_override(e, hint_override) for e in exprs
+        )
+
+    def guarding_hints_or_throw(
+        self,
+        exprs: Iterable[Expr | int],
+    ) -> tuple[int, ...]:
+        return tuple(self.guarding_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -645,7 +1192,7 @@ class SizeVarAllocator:
         def stride_vars(
             index: Expr,
             vars: Sequence[sympy.Symbol],
-            support_vars: Optional[Sequence[sympy.Symbol]] = None,
+            support_vars: Sequence[sympy.Symbol] | None = None,
         ) -> list[Expr]:
             if not support_vars:
                 support_vars = vars
@@ -693,92 +1240,25 @@ class SizeVarAllocator:
                 )
         return strides
 
-    def _get_unbacked_replacements(self) -> dict[Expr, Expr]:
-        """
-        This helps with covering unbacked symint cases where you may have two
-        expressions: s0 + u0 and u1. And s0 + u0 is known to be equal to u1
-        via deferred_runtime_asserts.
-
-        For example in atomically_apply_size_hint, it must return the same size
-        hint for both s0 + u0 and u1, but it first needs to know they are equal.
-        Then it can substitute s0 + u0 for u1.
-        """
-        if self.unbacked_replacements is not None:
-            return self.unbacked_replacements
-
-        self.unbacked_replacements = {}
-        for assertions in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertions:
-                if not isinstance(assertion.expr, sympy.Equality):
-                    continue
-
-                lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
-                l2r = lhs.compare(rhs) == 1  # see sympy.Basic.compare
-                src = lhs if l2r else rhs
-                dst = rhs if l2r else lhs
-
-                existing_replacement = self.unbacked_replacements.get(src, None)
-                if existing_replacement and isinstance(
-                    existing_replacement, sympy.Symbol
-                ):
-                    # Prefer to keep replacements with symbols.
-                    continue
-                self.unbacked_replacements[src] = dst
-        return self.unbacked_replacements
-
-    @functools.lru_cache  # noqa: B019
-    def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
-        # it's fine to cache this fn since self is a singleton
-        replacements = self._get_unbacked_replacements()
-        while True:
-            new_expr = expr.subs(replacements)
-            if new_expr == expr:
-                return new_expr
-            expr = sympy.factor(new_expr)
-
-    def atomically_apply_size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
-    ) -> Union[Expr, int]:
-        if isinstance(expr, (int, sympy.Integer)):
-            return int(expr)
-
-        if has_free_unbacked_symbols(expr):
-            # Make sure to substitute with the factored version
-            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            expr = self._sub_unbacked_exprs(sympy.factor(expr))
-
-        # For multiple expressions that depend on an unbacked symint,
-        # we want to compute them consistently for a size hint we have chosen.
-        # So, recursively compute expressions via size hints of contained symbols.
-        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
-        assert isinstance(expr, Expr), type(expr)
-        free_symbols = expr.free_symbols
-        size_dict = {
-            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
-            for symbol in free_symbols
-        }
-        return expr.subs(size_dict)
-
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
+    # Return stride optimizaitons hints,
+    # only used for optimizations.
     def stride_hints(
         self,
         index: Expr,
         vars: Sequence[sympy.Symbol],
-        support_vars: Optional[Sequence[sympy.Symbol]] = None,
+        support_vars: Sequence[sympy.Symbol] | None = None,
     ) -> list[int]:
         for v in index.free_symbols:
             if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
         result = []
         for s in self.stride_vars(index, vars, support_vars):
-            try:
-                result.append(self.size_hint_or_throw(s))
-            except TypeError:
-                result.append(0)
+            result.append(self.optimization_hint(s, fallback=0))
         return result
 
     def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
@@ -804,7 +1284,9 @@ class SizeVarAllocator:
         return self.precomputed_replacements[expr]
 
     def free_symbols(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
+        return OrderedSet(self.backed_var_to_val.keys()) - OrderedSet(
+            self.replacements.keys()
+        )
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """
@@ -849,7 +1331,7 @@ class SizeVarAllocator:
             if not _check_args(x2, div2, mod2, False):
                 return index
 
-            if mod2 % mod != 0:
+            if Mod(mod2, mod) != 0:
                 return index
 
             return ModularIndexing(x2, 1, mod)
@@ -857,8 +1339,10 @@ class SizeVarAllocator:
         return index
 
     def expand_floor_div(
-        self, index: sympy.Expr
-    ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
+        self,
+        index: sympy.Expr,
+        candidate_vars: Iterable[sympy.Symbol] | None = None,
+    ) -> bool | tuple[sympy.Expr, sympy.Expr]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
         be simplified.
@@ -870,10 +1354,73 @@ class SizeVarAllocator:
         '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
         for the numerator!
 
-        Return false if this optimization can be applied;
+        Return false if this optimization cannot be applied;
         Return the new expression and the denominator otherwise.
         The original expression will be equivalent to 'new_expression // denominator'
         """
+        candidate_vars_set = (
+            OrderedSet(candidate_vars) if candidate_vars is not None else None
+        )
+
+        def parse_static_term(
+            term: sympy.Expr,
+        ) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if not isinstance(term, sympy.Mul):
+                return None
+            # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
+            # Without candidate loop vars we cannot tell shape and loop
+            # symbols apart, so preserve the historical conservative path.
+            if len(term.args) != 2:
+                return None
+            factor, var = term.args
+            if not isinstance(factor, sympy.Integer) or not isinstance(
+                var, sympy.Symbol
+            ):
+                return None
+            return factor, var
+
+        def parse_term(term: sympy.Expr) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if candidate_vars_set is None:
+                parsed = parse_static_term(term)
+                if parsed is None:
+                    return None
+                factor, var = parsed
+            else:
+                if isinstance(term, sympy.Symbol):
+                    factor = sympy.S.One
+                    var = term
+                elif isinstance(term, sympy.Mul):
+                    vars_in_term = [
+                        symbol
+                        for symbol in term.free_symbols
+                        if symbol in candidate_vars_set
+                    ]
+                    if len(vars_in_term) == 0:
+                        parsed = parse_static_term(term)
+                        if parsed is None:
+                            return None
+                        factor, var = parsed
+                    elif len(vars_in_term) == 1:
+                        var = vars_in_term[0]
+                        factor = sympy.cancel(term / var)
+                        if factor.has(*candidate_vars_set):
+                            return None
+                        if factor.is_integer is not True:
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+
+                if isinstance(term, sympy.Symbol) and var not in candidate_vars_set:
+                    return None
+
+            # It's easier to reason about the correctness of the transformation
+            # for non-negative integers.
+            if not self.statically_known_geq(var, 0):
+                return None
+            return factor, var
+
         if not isinstance(index, sympy.Add):
             return False
         terms = index.args
@@ -884,25 +1431,10 @@ class SizeVarAllocator:
         varlist = []
         factorlist = []
         for idx, term in enumerate(terms):
-            if isinstance(term, sympy.Mul):
-                # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
-                # - A integer for 2
-                # - A symbol for s1
-                # - A symbol for x1
-                # Skip for now.
-                if len(term.args) != 2:
-                    return False
-                factor, var = term.args
+            if parsed := parse_term(term):
+                factor, var = parsed
                 varlist.append(var)
                 factorlist.append(factor)
-                if not isinstance(factor, sympy.Integer) or not isinstance(
-                    var, sympy.Symbol
-                ):
-                    return False
-                # It's easier to reason about the correceness of the transformation
-                # for non-negative integers.
-                if not self.statically_known_geq(var, 0):
-                    return False
             elif isinstance(term, FloorDiv):
                 var, factor = term.args
                 if not isinstance(factor, sympy.Integer) or not isinstance(

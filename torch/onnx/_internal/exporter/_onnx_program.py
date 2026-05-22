@@ -13,11 +13,11 @@ import os
 import tempfile
 import textwrap
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
 from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
@@ -128,7 +128,7 @@ def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarra
 
 def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
     """Convert a NumPy array to a PyTorch tensor."""
-    import ml_dtypes
+    import ml_dtypes  # type: ignore[import-not-found]
     import numpy as np
 
     if array.dtype == ml_dtypes.bfloat16:
@@ -157,7 +157,8 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             int: np.int64,
             float: np.float32,
         }
-        dtype = dtype_mapping.get(type(input), None)
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
+        dtype = dtype_mapping.get(type(input))
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
     if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
@@ -210,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -243,7 +244,8 @@ ONNXProgram(
         if self._inference_session is None:
             self.initialize_inference_session()
 
-        assert self._inference_session is not None
+        if self._inference_session is None:
+            raise AssertionError("_inference_session must be non-None")
 
         ort_input = {
             k.name: _to_ort_value(v)
@@ -270,7 +272,8 @@ ONNXProgram(
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
         outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
-        assert isinstance(outputs, Sequence)
+        if not isinstance(outputs, Sequence):
+            raise AssertionError(f"Expected Sequence, got {type(outputs)}")
         return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(
@@ -325,7 +328,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,
@@ -449,6 +452,31 @@ ONNXProgram(
         if self._tempdir is not None:
             self._tempdir.cleanup()
             self._tempdir = None
+
+    def rename_axes(self, rename_mapping: dict[str | ir.SymbolicDim, str]) -> None:
+        """Rename axes in a model according to the specified rename mapping.
+
+        Example::
+
+            batch = onnx_program.model.graph.inputs[0].shape[0]
+            seq_len = onnx_program.model.graph.inputs[0].shape[2]
+            rename_mapping = {
+                batch: "batch",
+                seq_len: "seq_len",
+            }
+            onnx_program.rename_axes(rename_mapping)
+
+        Args:
+            rename_mapping: A dictionary mapping old axes to new axis names.
+                Keys can be either:
+
+                * String axis names (e.g., "s1", "s2")
+                * SymbolicDim objects obtained from the model
+                  (e.g., onnx_program.model.graph.inputs[0].shape[0])
+
+                Values must be strings representing the new axis names.
+        """
+        _ir_passes.rename_axis(self.model, rename_mapping)
 
     def _rename_dynamic_axes(
         self,

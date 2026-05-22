@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/headeronly/util/Exception.h>
 
 // This header defines a stable C API for certain ATen functionality in
 // libtorch. The AOTInductor compiled model.so will only refer to this header
@@ -38,9 +39,13 @@
 
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e4m3fnuz.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +68,10 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2fnuz();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fnuz();
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e8m0fnu();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float4_e2m1fn_x2();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -175,6 +184,28 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
+
+// c10::IValue <int64_t> object conversion
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
+
+// c10::IValue <const char** > object conversions
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue);
+
+// c10::IValue <const char* > object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_str_to_ivalue(const char* val, C10IValueHandle* ivalue);
+
+// c10::IValue <at::Tensor> object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_tensor_to_ivalue(AtenTensorHandle val, C10IValueHandle* ivalue);
+
+// Free the c10::IValue object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_c10_value_object(C10IValueHandle handle);
 
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
@@ -579,6 +610,15 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
+// CUDA memory allocation using CUDACachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
+
 #endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
@@ -598,24 +638,24 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)              \
-  if (!(cond)) {                                 \
-    aoti_torch_check(                            \
-        false,                                   \
-        __func__,                                \
-        __FILE__,                                \
-        static_cast<uint32_t>(__LINE__),         \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                  \
+  if (!(cond)) {                                     \
+    aoti_torch_check(                                \
+        false,                                       \
+        __func__,                                    \
+        __FILE__,                                    \
+        static_cast<uint32_t>(__LINE__),             \
+        STD_TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                                   \
-    aoti_torch_check(                              \
-        false,                                     \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                    \
+  if (!(cond)) {                                       \
+    aoti_torch_check(                                  \
+        false,                                         \
+        __func__,                                      \
+        __FILE__,                                      \
+        static_cast<uint32_t>(__LINE__),               \
+        STD_TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
 #endif
 
@@ -647,6 +687,10 @@ int32_t aoti_torch_dtype() = delete;
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2, float8_e5m2)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e4m3fn, float8_e4m3fn)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2fnuz, float8_e5m2fnuz)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e4m3fnuz, float8_e4m3fnuz)
 DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)

@@ -12,6 +12,7 @@ from torch._inductor.codegen.common import get_custom_backend_pass_for_device
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
+    CustomInferenceAwareGraphPass,
     get_hash_for_files,
 )
 from torch._inductor.lowering import lowerings as L
@@ -75,6 +76,19 @@ class ChangeCosCustomPass(CustomGraphPass):
 
     def uuid(self) -> bytes:
         return get_hash_for_files((__file__,))
+
+
+class RecordCustomPass(CustomGraphPass):
+    def __init__(self, name, calls) -> None:
+        super().__init__()
+        self.name = name
+        self.calls = calls
+
+    def __call__(self, g: torch.fx.graph.Graph):
+        self.calls.append(self.name)
+
+    def uuid(self) -> str:
+        return self.name
 
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
@@ -167,6 +181,45 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_list_runs_in_order(self):
+        def f(x):
+            return (x.sin() + 1).relu()
+
+        x = torch.randn(8, dtype=torch.float32)
+        for field in (
+            "post_grad_custom_pre_pass",
+            "post_grad_custom_post_pass",
+            "joint_custom_pre_pass",
+            "joint_custom_post_pass",
+            "pre_grad_custom_pass",
+        ):
+            with self.subTest(field=field):
+                calls = []
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        field: [
+                            RecordCustomPass(f"{field}_first", calls),
+                            RecordCustomPass(f"{field}_second", calls),
+                        ]
+                    }
+                ):
+                    torch.compile(f)(x)
+                self.assertEqual(calls, [f"{field}_first", f"{field}_second"])
+
+        calls = []
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "post_grad_custom_post_pass": (
+                    RecordCustomPass("tuple_first", calls),
+                    RecordCustomPass("tuple_second", calls),
+                )
+            }
+        ):
+            torch.compile(f)(x)
+        self.assertEqual(calls, ["tuple_first", "tuple_second"])
 
     def test_custom_pre_pass(self):
         with config.patch(
@@ -261,7 +314,9 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                     m.target = operator.getitem
                     m.args = (split_vals, idx)
 
-        @config.patch(pre_grad_custom_pass=merge_mm_shared_rhs)
+        @config.patch(
+            pre_grad_custom_pass=merge_mm_shared_rhs, pre_grad_pass_timing="early"
+        )
         def inner_test():
             @torch.compile
             def f(W, nested_seqs):
@@ -274,9 +329,11 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             ]
 
             f(W, nested_seqs)
-            assert saved_graph[0] is not None
+            if saved_graph[0] is None:
+                raise AssertionError("saved_graph[0] is None")
             matmuls = [n for n in saved_graph[0].nodes if n.target == torch.mm]
-            assert len(matmuls) == 1
+            if len(matmuls) != 1:
+                raise AssertionError(f"Expected 1 matmul, got {len(matmuls)}")
 
         inner_test()
 
@@ -308,6 +365,31 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_inference_flag(self):
+        class CustomPass(CustomInferenceAwareGraphPass):
+            def __init__(self):
+                super().__init__()
+                self.is_infer = False
+
+            def __call__(self, g: torch.fx.graph.Graph, is_inference: bool):
+                self.is_infer = is_inference
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_pass = CustomPass()
+        with config.patch(post_grad_custom_post_pass=custom_pass):
+
+            def f(x):
+                return x.abs()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertTrue(custom_pass.is_infer)
+            x.requires_grad_()
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertFalse(custom_pass.is_infer)
 
 
 if __name__ == "__main__":

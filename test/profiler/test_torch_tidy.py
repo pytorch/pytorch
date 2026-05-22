@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -425,7 +425,7 @@ class TestTorchTidyProfiler(TestCase):
             self.assertEqual(state[0][0], "momentum_buffer")
             self.assertEqual(state[0][1].id, weight_momenumtum_id)
 
-        # Check that we handle first step (lazy initalization) and steady state.
+        # Check that we handle first step (lazy initialization) and steady state.
         check(cold_start=True)
         check(cold_start=False)
 

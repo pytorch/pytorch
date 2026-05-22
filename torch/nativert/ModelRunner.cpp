@@ -6,7 +6,6 @@
 
 #include <caffe2/serialize/file_adapter.h>
 #include <torch/csrc/export/pt2_archive_constants.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/nativert/executor/Placement.h>
 #include <torch/nativert/graph/GraphPasses.h>
 #include <torch/nativert/graph/Serialization.h>
@@ -85,6 +84,7 @@ ModelRunner::ModelRunner(
   weights->validateAllWeightsLoaded();
 
   torch::nativert::ExecutorConfig config;
+  config.modelName = modelName;
 
   executor_ = std::make_unique<Executor>(
       config, graph_, std::move(weights), pytorchStreamReader);
