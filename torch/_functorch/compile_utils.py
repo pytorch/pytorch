@@ -10,7 +10,7 @@ import torch.fx as fx
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_iter
 
 
 if TYPE_CHECKING:
@@ -46,26 +46,28 @@ rand_ops = [
     aten.randperm,
 ]
 
+_MISSING = object()
 
-def _storage_refs_from_value(value: Any) -> tuple[set[StorageWeakRef], bool]:
+
+def _storage_refs_from_value(value: object) -> set[StorageWeakRef] | None:
+    # StorageWeakRef gives storage identity/hashing without extending the
+    # lifetime of the underlying storage.
     storage_refs: set[StorageWeakRef] = set()
-    for leaf in tree_flatten(value)[0]:
+    for leaf in tree_iter(value):
         if not isinstance(leaf, torch.Tensor):
             continue
         try:
-            storage_refs.add(StorageWeakRef(leaf.untyped_storage()))
+            storage = leaf.untyped_storage()
         except NotImplementedError:
-            return set(), True
-    return storage_refs, False
+            return None
+        storage_refs.add(StorageWeakRef(storage))
+    return storage_refs
 
 
 def _node_storage_refs(node: fx.Node) -> set[StorageWeakRef] | None:
     if "val" not in node.meta:
         return None
-    storage_refs, has_unavailable_storage = _storage_refs_from_value(node.meta["val"])
-    if has_unavailable_storage:
-        return None
-    return storage_refs
+    return _storage_refs_from_value(node.meta["val"])
 
 
 def _node_has_tensor_storage(node: fx.Node) -> bool:
@@ -83,23 +85,21 @@ def _collect_storage_refs_from_graph_values(
     values: Any,
 ) -> set[StorageWeakRef] | None:
     storage_refs: set[StorageWeakRef] = set()
-    for value in tree_flatten(values)[0]:
+    for value in tree_iter(values):
         if isinstance(value, fx.Node):
             node_storage_refs = _node_storage_refs(value)
             if node_storage_refs is None:
                 return None
             storage_refs.update(node_storage_refs)
         elif isinstance(value, torch.Tensor):
-            value_storage_refs, has_unavailable_storage = _storage_refs_from_value(
-                value
-            )
-            if has_unavailable_storage:
+            value_storage_refs = _storage_refs_from_value(value)
+            if value_storage_refs is None:
                 return None
             storage_refs.update(value_storage_refs)
     return storage_refs
 
 
-def _get_mutated_argument_values(node: fx.Node) -> Any | None:
+def _get_mutated_argument_values(node: fx.Node) -> tuple[Any, ...] | None:
     if (
         not isinstance(node.target, torch._ops.OpOverload)
         or node.target.namespace != "aten"
@@ -109,22 +109,21 @@ def _get_mutated_argument_values(node: fx.Node) -> Any | None:
 
     mutated_values: list[Any] = []
     positional_idx = 0
-    missing = object()
     for schema_arg in node.target._schema.arguments:
         if schema_arg.kwarg_only:
-            arg_value = node.kwargs.get(schema_arg.name, missing)
+            arg_value = node.kwargs.get(schema_arg.name, _MISSING)
         else:
             if positional_idx < len(node.args):
                 arg_value = node.args[positional_idx]
             else:
-                arg_value = node.kwargs.get(schema_arg.name, missing)
-                if arg_value is missing and schema_arg.name == "self":
-                    arg_value = node.kwargs.get("input", missing)
+                arg_value = node.kwargs.get(schema_arg.name, _MISSING)
+                if arg_value is _MISSING and schema_arg.name == "self":
+                    arg_value = node.kwargs.get("input", _MISSING)
             positional_idx += 1
 
         alias_info = schema_arg.alias_info
         if alias_info is not None and alias_info.is_write:
-            if arg_value is missing:
+            if arg_value is _MISSING:
                 return None
             mutated_values.append(arg_value)
 
@@ -132,6 +131,36 @@ def _get_mutated_argument_values(node: fx.Node) -> Any | None:
         return None
 
     return tuple(mutated_values)
+
+
+def _get_mutated_storage_refs(node: fx.Node) -> set[StorageWeakRef] | None:
+    mutated_values = _get_mutated_argument_values(node)
+    if mutated_values is None:
+        return None
+    return _collect_storage_refs_from_graph_values(mutated_values)
+
+
+def _get_possibly_mutated_argument_values(node: fx.Node) -> tuple[Any, ...]:
+    mutated_values = _get_mutated_argument_values(node)
+    if mutated_values is not None:
+        return mutated_values
+    return (node.args, node.kwargs)
+
+
+def _collect_graph_nodes_from_values(values: Any) -> set[fx.Node]:
+    return {value for value in tree_iter(values) if isinstance(value, fx.Node)}
+
+
+def _collect_nodes_and_ancestors(nodes: set[fx.Node]) -> set[fx.Node]:
+    seen: set[fx.Node] = set()
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(node.all_input_nodes)
+    return seen
 
 
 def _can_cse_across_mutation_regions(
@@ -155,13 +184,21 @@ def _can_cse_across_mutation_regions(
     if node.target.namespace != "aten" or node.target._schema.is_mutable:
         return False
     if prev_node.meta["mutation_region_id"] > node.meta["mutation_region_id"]:
-        return False
+        raise AssertionError(
+            "expected previous CSE candidate to precede the current node's "
+            "mutation region"
+        )
 
     input_storage_refs = _collect_storage_refs_from_graph_values(
         (node.args, node.kwargs)
     )
+    node_output_storage_refs = _node_storage_refs(node)
     prev_output_storage_refs = _node_storage_refs(prev_node)
-    if input_storage_refs is None or prev_output_storage_refs is None:
+    if (
+        input_storage_refs is None
+        or node_output_storage_refs is None
+        or prev_output_storage_refs is None
+    ):
         return False
 
     storage_refs_to_protect = input_storage_refs | prev_output_storage_refs
@@ -169,25 +206,20 @@ def _can_cse_across_mutation_regions(
         return True
 
     cur = prev_node.next
-    for _ in range(len(prev_node.graph.nodes)):
-        if cur is node:
-            return True
+    while cur is not node:
         if cur.op == "output":
             return False
         if is_mutation_op_fn(cur):
-            mutated_values = _get_mutated_argument_values(cur)
-            if mutated_values is None:
-                return False
-            mutated_storage_refs = _collect_storage_refs_from_graph_values(
-                mutated_values
-            )
+            mutated_storage_refs = _get_mutated_storage_refs(cur)
+            # A mutable op with no schema-backed, discoverable tensor write is
+            # ambiguous here, so keep the mutation-region barrier.
             if mutated_storage_refs is None or not mutated_storage_refs:
                 return False
-            if mutated_storage_refs & storage_refs_to_protect:
+            if not mutated_storage_refs.isdisjoint(storage_refs_to_protect):
                 return False
         cur = cur.next
 
-    return False
+    return True
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
@@ -231,6 +263,32 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
+    # If a candidate result is mutated later, CSE would redirect that mutation
+    # to the earlier replacement result.  Keep such nodes distinct.
+    mutated_storage_refs: set[StorageWeakRef] = set()
+    nodes_that_alias_mutated_storages: set[fx.Node] = set()
+    for n in fx_g.nodes:
+        if is_mutation_op(n):
+            possibly_mutated_values = _get_possibly_mutated_argument_values(n)
+            nodes_that_alias_mutated_storages.update(
+                _collect_nodes_and_ancestors(
+                    _collect_graph_nodes_from_values(possibly_mutated_values)
+                )
+            )
+            node_mutated_storage_refs = _collect_storage_refs_from_graph_values(
+                possibly_mutated_values
+            )
+            if node_mutated_storage_refs is not None:
+                mutated_storage_refs.update(node_mutated_storage_refs)
+
+    if mutated_storage_refs:
+        for n in fx_g.nodes:
+            node_storage_refs = _node_storage_refs(n)
+            if node_storage_refs is not None and not node_storage_refs.isdisjoint(
+                mutated_storage_refs
+            ):
+                nodes_that_alias_mutated_storages.add(n)
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -244,6 +302,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            or n in nodes_that_alias_mutated_storages
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
@@ -304,14 +363,16 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
                 duplicate_n_prev = hash_env[hash_val]
                 if same_mutation_regions(n, duplicate_n_prev):
                     env[n] = duplicate_n_prev
+                    old_node_for_hash[hash_val] = n
                     continue
                 elif _can_cse_across_mutation_regions(
                     n, old_node_for_hash[hash_val], is_mutation_op
                 ):
                     env[n] = duplicate_n_prev
+                    old_node_for_hash[hash_val] = n
                     continue
                 else:
-                    # any futures duplicates should replace with n, not duplicate_n_prev
+                    # any future duplicates should replace with n, not duplicate_n_prev
                     overwrite_due_to_mutation = True
 
             new_node = new_graph.node_copy(n, lambda x: env[x])

@@ -536,6 +536,40 @@ class CrossMutationRegionCSETestCase(TestCase):
         return graph
 
     @staticmethod
+    def _build_graph_that_mutates_current_duplicate_result():
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            buf_fake = fake_mode.from_tensor(torch.empty(4, 4))
+            src_fake = fake_mode.from_tensor(torch.randn(4, 4))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = x_fake
+            buf = graph.placeholder("buf")
+            buf.meta["val"] = buf_fake
+            src = graph.placeholder("src")
+            src.meta["val"] = src_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            unrelated_mutation = graph.call_function(aten.copy_.default, (buf, src))
+            unrelated_mutation.meta["val"] = buf.meta["val"]
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            cos_2.meta["val"] = aten.cos.default(x_fake)
+            mutation = graph.call_function(aten.copy_.default, (cos_2, src))
+            mutation.meta["val"] = cos_2.meta["val"]
+            cos_3 = graph.call_function(aten.cos.default, (x,))
+            cos_3.meta["val"] = aten.cos.default(x_fake)
+            out = graph.call_function(aten.add.Tensor, (cos_3, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_3.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
+    @staticmethod
     def _build_graph_with_unknown_mutation():
         def unknown_mutation_():
             pass
@@ -558,6 +592,69 @@ class CrossMutationRegionCSETestCase(TestCase):
             cos_2.meta["val"] = aten.cos.default(x_fake)
             out = graph.call_function(aten.add.Tensor, (cos_2, 1.0))
             out.meta["val"] = aten.add.Tensor(cos_2.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
+    @staticmethod
+    def _build_graph_with_unknown_mutation_of_duplicate_result(
+        omit_duplicate_result_meta=False,
+        omit_src_meta=False,
+    ):
+        def unknown_mutation_(dst, src):
+            dst.copy_(src)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            src_fake = fake_mode.from_tensor(torch.randn(4, 4))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = x_fake
+            src = graph.placeholder("src")
+            if not omit_src_meta:
+                src.meta["val"] = src_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            if not omit_duplicate_result_meta:
+                cos_2.meta["val"] = aten.cos.default(x_fake)
+            mutation = graph.call_function(unknown_mutation_, (cos_2, src))
+            mutation.meta["val"] = None
+            out = graph.call_function(aten.add.Tensor, (cos_1, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_1.meta["val"], 1.0)
+            graph.output(out)
+
+        return graph
+
+    @staticmethod
+    def _build_graph_that_mutates_view_of_duplicate_result_with_missing_meta():
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fake_mode:
+            graph = fx.Graph()
+            x_fake = fake_mode.from_tensor(torch.randn(4, 4))
+            src_fake = fake_mode.from_tensor(torch.randn(16))
+
+            x = graph.placeholder("x")
+            x.meta["val"] = x_fake
+            src = graph.placeholder("src")
+            src.meta["val"] = src_fake
+
+            cos_1 = graph.call_function(aten.cos.default, (x,))
+            cos_1.meta["val"] = aten.cos.default(x_fake)
+            cos_2 = graph.call_function(aten.cos.default, (x,))
+            view = graph.call_function(aten.view.default, (cos_2, [16]))
+            view.meta["val"] = aten.view.default(aten.cos.default(x_fake), [16])
+            mutation = graph.call_function(aten.copy_.default, (view, src))
+            mutation.meta["val"] = view.meta["val"]
+            out = graph.call_function(aten.add.Tensor, (cos_1, 1.0))
+            out.meta["val"] = aten.add.Tensor(cos_1.meta["val"], 1.0)
             graph.output(out)
 
         return graph
@@ -598,11 +695,81 @@ class CrossMutationRegionCSETestCase(TestCase):
         src = torch.randn(4, 4)
         self.assertEqual(gm(x, src), new_gm(x, src))
 
+    def test_cse_no_redirect_when_current_duplicate_result_mutated(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_that_mutates_current_duplicate_result()
+        self.assertEqual(self._count_target(graph, aten.cos.default), 3)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        self.assertEqual(
+            gm(x, torch.empty(4, 4), src), new_gm(x, torch.empty(4, 4), src)
+        )
+
     def test_cse_no_dedup_across_unknown_mutation(self):
         aten = torch.ops.aten
         graph = self._build_graph_with_unknown_mutation()
         self.assertEqual(self._count_target(graph, aten.cos.default), 2)
         self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+    def test_cse_no_redirect_through_unknown_mutation_of_duplicate_result(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_with_unknown_mutation_of_duplicate_result()
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        self.assertEqual(gm(x, src), new_gm(x, src))
+
+    def test_cse_no_redirect_through_unknown_mutation_with_missing_meta(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_with_unknown_mutation_of_duplicate_result(
+            omit_duplicate_result_meta=True
+        )
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        self.assertEqual(gm(x, src), new_gm(x, src))
+
+    def test_cse_no_redirect_through_unknown_mutation_with_partial_meta(self):
+        aten = torch.ops.aten
+        graph = self._build_graph_with_unknown_mutation_of_duplicate_result(
+            omit_src_meta=True
+        )
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(4, 4)
+        self.assertEqual(gm(x, src), new_gm(x, src))
+
+    def test_cse_no_redirect_when_view_of_duplicate_result_mutated_with_missing_meta(
+        self,
+    ):
+        aten = torch.ops.aten
+        graph = (
+            self._build_graph_that_mutates_view_of_duplicate_result_with_missing_meta()
+        )
+        self.assertEqual(self._count_target(graph, aten.cos.default), 2)
+        new_graph = self._assert_target_count_after_cse(graph, aten.cos.default, 2)
+
+        gm = fx.GraphModule({}, graph)
+        new_gm = fx.GraphModule({}, new_graph)
+        x = torch.randn(4, 4)
+        src = torch.randn(16)
+        self.assertEqual(gm(x, src), new_gm(x, src))
 
 
 if __name__ == "__main__":
