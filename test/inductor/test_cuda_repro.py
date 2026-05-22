@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfCachingAllocatorDisabled,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -333,9 +334,14 @@ class CudaReproTests(TestCase):
         )[0]
         compiled_out.sum().backward()
 
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_q.grad, eager_q.grad)
-        self.assertEqual(compiled_kv.grad, eager_kv.grad)
+        tol_kwargs = {}
+        if device_type == "xpu":
+            # XPU fp16 SDPA compile-vs-eager can drift ~1% relative.
+            tol_kwargs = {"atol": 1e-4, "rtol": 1e-2}
+
+        self.assertEqual(compiled_out, eager_out, **tol_kwargs)
+        self.assertEqual(compiled_q.grad, eager_q.grad, **tol_kwargs)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad, **tol_kwargs)
 
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -1175,6 +1181,15 @@ class CudaReproTests(TestCase):
         inp = inp.to(torch.float)
         out, code = run_and_get_code(torch.compile(foo), inp)
         FileCheck().check_not("tl_math.exp").check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float32)
+        with config.patch({"eager_numerics.use_pytorch_libdevice": True}):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
         self.assertEqual(foo(inp), out)
 
         def foo(x):
@@ -2109,6 +2124,43 @@ class CudaReproTests(TestCase):
         out2 = compiled_scan(a, b)
         self.assertEqual(out1, out2)
 
+    def test_associative_scan_dynamic_ndim(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def add_combine(a, b):
+            return a + b
+
+        def scan_dim0(x):
+            return associative_scan(add_combine, x, dim=0)
+
+        x1 = torch.randn(7, device=device_type)
+        torch.compiler.reset()
+        compiled_1d = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x1, 0), compiled_1d(x1))
+
+        x2 = torch.randn(4, 8, device=device_type)
+        torch.compiler.reset()
+        compiled_static = torch.compile(scan_dim0)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_static(x2))
+
+        torch.compiler.reset()
+        compiled_dynamic = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_dynamic(x2))
+
+        def mul_combine(a, b):
+            return a * b
+
+        def scan_dim1(x):
+            return associative_scan(mul_combine, x, dim=1)
+
+        x3 = torch.randn(2, 9, 5, device=device_type).clamp(-2, 2)
+        torch.compiler.reset()
+        compiled_3d = torch.compile(scan_dim1, dynamic=True)
+        self.assertEqual(scan_dim1(x3), compiled_3d(x3))
+
     def test_dynamic_persistent_reductions(self):
         @torch.compile(dynamic=True)
         def inner_reduce(x):
@@ -2195,6 +2247,46 @@ class CudaReproTests(TestCase):
         loss = attn_output.mean()
         loss.backward()
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -2214,6 +2306,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(idxs, [0])
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
@@ -2252,6 +2345,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)

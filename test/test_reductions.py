@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -1293,7 +1293,7 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
-    @skipIfMPS
+    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1307,7 +1307,7 @@ class TestReductions(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
-    @skipIfMPS
+    @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
@@ -2298,14 +2298,10 @@ class TestReductions(TestCase):
             torch.int8: torch.int64,
         }
 
-        # prod is not supported for float16 & bfloat16 on CPU
-        if not (self.device_type == 'cpu' and dtype in [torch.float16, torch.bfloat16]):
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.prod().item(), -180)
-            self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
-            self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
-
         x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.prod().item(), -180)
+        self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
+        self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
 
         self.assertEqual(x.min().item(), -1)
         self.assertEqual(x.argmin().item(), 0)

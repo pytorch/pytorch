@@ -968,8 +968,26 @@ class TensorVariable(VariableTracker):
         # after wrap_fx_proxy (which runs get_fake_value internally).
         # We only synchronize when there's a tensor argument, since that's when
         # metadata propagation is relevant.
+
+        # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
+        # and reasoning.
+        from .torch import methods_consuming_unbacked_scalars
+
+        ctx = (
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+            if tx.fake_mode
+            and tx.fake_mode.shape_env
+            and name in methods_consuming_unbacked_scalars
+            and any(
+                isinstance(v, TensorVariable) and v.ndim == 0
+                for v in chain(args, kwargs.values())
+            )
+            else nullcontext
+        )
+
         version_before = self._get_fake_version()
-        result = wrap_fx_proxy(tx, proxy)
+        with ctx():
+            result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(
             tx, version_before, any(arg.is_tensor() for arg in args)
         )
@@ -1624,6 +1642,25 @@ class TensorVariable(VariableTracker):
     def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_positive_impl(tx)
 
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.abs,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___abs__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_absolute_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2175,6 +2212,59 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
+        from .builder import wrap_fx_proxy
+
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        proxy = tx.output.create_proxy(
+            "call_function", operator.add, *proxy_args_kwargs(args, {})
+        )
+        # Tensor dominates: any of Tensor+Tensor, Tensor+SymNode, Tensor+scalar
+        # produces a Tensor.
+        return wrap_fx_proxy(tx=tx, proxy=proxy)
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslator",
@@ -2191,12 +2281,49 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__mul__(x)`` calls — the
+        # ``operator.mul`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
         # (e.g. y = x.add_(1)) hash consistently.
         fake = self.as_proxy().node.meta["example_value"]
         return id(fake), True
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.sub, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
@@ -2341,10 +2468,40 @@ class SymNodeVariable(VariableTracker):
             ),
         )
 
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymInt.__index__ / SymBool.__index__ specialize to a concrete int.
+        if not issubclass(self.python_type(), int):
+            raise AssertionError(
+                f"nb_index_impl called on SymNode with python_type {self.python_type()}; "
+                "SymFloat has no nb_index slot and shouldn't reach here."
+            )
+        return variables.ConstantVariable.create(self.evaluate_expr())
+
     def method___int__(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
+
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.add, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
 
     def nb_or_impl(
         self,
@@ -2358,6 +2515,75 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.sub, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like() and not other.is_python_constant():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
             ),
             sym_num=None,
         )
@@ -2416,6 +2642,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___abs__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
