@@ -1331,7 +1331,7 @@ class LocalTensorMode(TorchDispatchMode):
         if (
             not self._disable
             and func.namespace == "device_mesh"
-            and func.overloadpacket.__name__ == "_runtime_compute_coordinate_on_dim"
+            and func is torch.ops.device_mesh._runtime_compute_coordinate_on_dim.default
         ):
             from torch.fx.operator_schemas import normalize_function
 
@@ -1355,7 +1355,7 @@ class LocalTensorMode(TorchDispatchMode):
                 )
                 mesh_coords = DeviceMesh._compute_coordinates_from_mesh(mesh_tensor, r)
                 if mesh_coords is None:
-                    raise AssertionError(
+                    raise RuntimeError(
                         f"Rank {r} not found in mesh tensor for "
                         "_runtime_compute_coordinate_on_dim"
                     )
