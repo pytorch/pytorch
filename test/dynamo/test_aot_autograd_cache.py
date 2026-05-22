@@ -9,6 +9,8 @@ import operator
 import os
 import pickle
 import shutil
+import subprocess
+import sys
 import unittest
 from collections.abc import Sequence
 from typing import Literal
@@ -283,6 +285,41 @@ class CacheKeyEquivalenceMixin:
     def tearDown(self):
         self._compile_fx_patcher.stop()
         super().tearDown()
+
+
+class AOTAutogradCacheConfigTests(torch._dynamo.test_case.TestCase):
+    def test_autograd_cache_normalize_inputs_default_enabled(self):
+        self.assertTrue(
+            functorch_config._config["autograd_cache_normalize_inputs"].default
+        )
+        self.assertTrue(functorch_config.autograd_cache_normalize_inputs)
+
+    def test_autograd_cache_normalize_inputs_default_enabled_in_fbcode(self):
+        script = """
+import sys
+import torch._environment
+
+if "torch._functorch.config" in sys.modules:
+    raise AssertionError("torch._functorch.config imported too early")
+torch._environment.is_fbcode = lambda: True
+import torch._functorch.config as config
+
+if not config.is_fbcode():
+    raise AssertionError("expected simulated fbcode environment")
+if not config.autograd_cache_normalize_inputs:
+    raise AssertionError("autograd_cache_normalize_inputs should be enabled in fbcode")
+"""
+        repo_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        )
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                cwd=repo_root,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
 
 
 @instantiate_parametrized_tests
