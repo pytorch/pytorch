@@ -3888,6 +3888,146 @@ class SIMDScheduling(BaseScheduling):
         return ranked_tilings
 
     @classmethod
+    def _expensive_pointwise_origin_score(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+    ) -> int:
+        expensive_ops = {
+            "acos": 32,
+            "asin": 32,
+            "atan": 32,
+            "cos": 32,
+            "cosh": 32,
+            "div": 8,
+            "erf": 32,
+            "erfc": 32,
+            "exp": 32,
+            "expm1": 32,
+            "lgamma": 32,
+            "log": 32,
+            "log10": 32,
+            "log1p": 32,
+            "log2": 32,
+            "pow": 16,
+            "reciprocal": 8,
+            "rsqrt": 16,
+            "sin": 32,
+            "sinh": 32,
+            "sqrt": 16,
+            "tan": 32,
+            "tanh": 32,
+            "truediv": 8,
+        }
+
+        score = 0
+        seen_origin_ids: OrderedSet[int] = OrderedSet()
+        for schedule_entry in NodeScheduleMarker.only_nodes(node_schedule):
+            for node in schedule_entry.get_nodes():
+                if not isinstance(node, scheduler.SchedulerNode) or node.node is None:
+                    continue
+                for origin in node.node.get_origins():
+                    origin_id = id(origin)
+                    if origin_id in seen_origin_ids:
+                        continue
+                    seen_origin_ids.add(origin_id)
+                    score += expensive_ops.get(cls._origin_target_name(origin), 0)
+
+        return score
+
+    @staticmethod
+    def _origin_target_name(origin: Any) -> str:
+        target = getattr(origin, "target", None)
+        if target is None:
+            return ""
+        overloadpacket = getattr(target, "overloadpacket", None)
+        if overloadpacket is not None:
+            return str(overloadpacket).rsplit(".", 1)[-1]
+        name = getattr(target, "__name__", None)
+        if name is not None:
+            return name
+        return str(target).rsplit(".", 1)[-1]
+
+    @classmethod
+    def compute_broadcast_reuse_scores(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        pointwise_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+    ) -> dict[sympy.Expr, int]:
+        """
+        Score pointwise splits that expose reuse of expensive broadcast work.
+
+        For a flattened NCHW pointwise kernel, a channel-only expression has an
+        index like `c` and is invariant over the trailing H*W suffix. Splitting
+        after `c` lets Triton evaluate expensive scalar chains as [YBLOCK, 1]
+        and broadcast them across [YBLOCK, XBLOCK].
+        """
+        expensive_op_score = cls._expensive_pointwise_origin_score(node_schedule)
+        if expensive_op_score == 0:
+            return {}
+
+        norm_read_writes = coalesce_analysis.norm_read_writes
+        iter_vars = list(norm_read_writes.index_vars)
+        if len(iter_vars) <= 1:
+            return {}
+
+        sizevars = V.graph.sizevars
+        pointwise_hint = sizevars.optimization_hint(pointwise_numel, fallback=0)
+        if pointwise_hint <= 0:
+            return {}
+
+        scores: Counter[sympy.Expr] = Counter()
+        num_broadcast_reads: Counter[sympy.Expr] = Counter()
+        ranges = norm_read_writes.var_ranges
+        min_suffix_coalesced_score = pointwise_hint * 16
+
+        for read_expr, buf_names in norm_read_writes.reads.items():
+            read_vars = read_expr.free_symbols
+            if any(var in read_vars for var in norm_read_writes.reduce_vars):
+                continue
+
+            read_iter_var_indices = [
+                idx for idx, var in enumerate(iter_vars) if var in read_vars
+            ]
+            if not read_iter_var_indices:
+                continue
+
+            split_idx = max(read_iter_var_indices)
+            if split_idx == len(iter_vars) - 1:
+                continue
+
+            trailing_numel = sympy_product(
+                ranges[var] for var in iter_vars[split_idx + 1 :]
+            )
+            if V.graph.sizevars.statically_known_lt(trailing_numel, 64):
+                continue
+
+            reuse_factor = sizevars.optimization_hint(trailing_numel, fallback=1)
+            if reuse_factor < 64:
+                continue
+
+            suffix_coalesced_score = sum(
+                coalesce_analysis.coalesced_by_var.get(var, 0)
+                for var in iter_vars[split_idx + 1 :]
+            )
+            if suffix_coalesced_score < min_suffix_coalesced_score:
+                continue
+
+            # Treat the saved scalar work as an equivalent score in the same
+            # rough units as memory coalescing. Require multiple broadcast reads
+            # and coalesced suffix traffic so unrelated expensive pointwise ops
+            # do not trigger on a lone broadcast bias.
+            split_var = iter_vars[split_idx]
+            num_reads = len(buf_names)
+            saved_elems = pointwise_hint * (reuse_factor - 1) // reuse_factor
+            scores[split_var] += expensive_op_score * num_reads * saved_elems
+            num_broadcast_reads[split_var] += num_reads
+
+        return {
+            var: score for var, score in scores.items() if num_broadcast_reads[var] >= 2
+        }
+
+    @classmethod
     def compute_tiling_strategy(
         cls,
         node_schedule: list[NodeScheduleEntry],
@@ -3910,6 +4050,13 @@ class SIMDScheduling(BaseScheduling):
 
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
+        broadcast_reuse_scores = (
+            cls.compute_broadcast_reuse_scores(
+                node_schedule, pointwise_numel, coalesce_analysis
+            )
+            if reduction_numel == 1
+            else {}
+        )
 
         # Sometimes dynamic shapes is unable to prove equality without hint
         get_hint = V.graph.sizevars.optimization_hint
@@ -3988,7 +4135,10 @@ class SIMDScheduling(BaseScheduling):
 
                 prod *= v_range
                 splits.append(prod)
-                split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
+                split_scores.append(
+                    coalesce_analysis.coalesced_by_var.get(v, 0)
+                    + (broadcast_reuse_scores.get(v, 0) if is_pointwise else 0)
+                )
                 prod = 1
 
             if prod != 1 or (is_pointwise and len(splits) == 0):
@@ -4027,9 +4177,9 @@ class SIMDScheduling(BaseScheduling):
 
         # TODO, add tests, reduction splits if config.triton.tile_reductions
         # TODO: we should ignore tiny increases in score for extra splits
-        overlapping_iter_vars = (
-            all_iter_vars & coalesce_analysis.coalesced_by_var.keys()
-        )
+        scored_iter_vars = OrderedSet(coalesce_analysis.coalesced_by_var.keys())
+        scored_iter_vars.update(broadcast_reuse_scores.keys())
+        overlapping_iter_vars = all_iter_vars & scored_iter_vars
         for v in overlapping_iter_vars:
             score_split.append(
                 (

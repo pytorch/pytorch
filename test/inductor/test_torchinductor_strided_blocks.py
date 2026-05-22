@@ -1426,6 +1426,92 @@ class CommonTemplate:
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
 
+    @requires_gpu()
+    def test_expensive_broadcast_reuse_tiling(self):
+        def foo(x0, x1, x2, mean0, var0, weight0, bias0, mean1, var1, weight1, bias1):
+            def bn_affine(x, mean, var, weight, bias):
+                scale = torch.reciprocal(torch.sqrt(var + 1e-5))
+                return (x - mean[:, None, None]) * scale[:, None, None] * weight[
+                    :, None, None
+                ] + bias[:, None, None]
+
+            return torch.relu(
+                bn_affine(x0, mean0, var0, weight0, bias0)
+                + bn_affine(x1, mean1, var1, weight1, bias1)
+                + bn_affine(x2, mean0, var0, weight0, bias0)
+            )
+
+        device = torch.device(self.device)
+        n, c, h, w = 4, 32, 8, 8
+        image_args = [
+            torch.randn((n, c, h, w), device=device, dtype=torch.float32)
+            for _ in range(3)
+        ]
+        channel_args = [
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.rand((c,), device=device, dtype=torch.float32) + 0.1,
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.randn((c,), device=device, dtype=torch.float32),
+        ]
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            *image_args,
+            *channel_args,
+            *channel_args,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 2,
+                "triton.prefer_nd_tiling": False,
+            },
+        )
+
+        self._assert_pointwise_ndims(triton_code, 2)
+        self.assertIn("ynumel = 128", triton_code)
+        self.assertIn("xnumel = 64", triton_code)
+
+    @requires_gpu()
+    def test_expensive_broadcast_reuse_tiling_rejects_small_suffix(self):
+        def foo(x0, x1, x2, mean0, var0, weight0, bias0, mean1, var1, weight1, bias1):
+            def bn_affine(x, mean, var, weight, bias):
+                scale = torch.reciprocal(torch.sqrt(var + 1e-5))
+                return (x - mean[:, None, None]) * scale[:, None, None] * weight[
+                    :, None, None
+                ] + bias[:, None, None]
+
+            return torch.relu(
+                bn_affine(x0, mean0, var0, weight0, bias0)
+                + bn_affine(x1, mean1, var1, weight1, bias1)
+                + bn_affine(x2, mean0, var0, weight0, bias0)
+            )
+
+        device = torch.device(self.device)
+        n, c, h, w = 4, 32, 7, 7
+        image_args = [
+            torch.randn((n, c, h, w), device=device, dtype=torch.float32)
+            for _ in range(3)
+        ]
+        channel_args = [
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.rand((c,), device=device, dtype=torch.float32) + 0.1,
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.randn((c,), device=device, dtype=torch.float32),
+        ]
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            *image_args,
+            *channel_args,
+            *channel_args,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 2,
+                "triton.prefer_nd_tiling": False,
+            },
+        )
+
+        self._assert_pointwise_ndims(triton_code, 1)
+
     # Integration test to ensure that matched dims & strides from match_mod_div_expr
     # are unsigned and signed integers respectively. This test case has the following
     # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
