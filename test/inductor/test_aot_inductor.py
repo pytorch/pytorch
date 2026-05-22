@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import itertools
 import logging
 import os
@@ -120,6 +121,16 @@ def caching_allocator_disabled():
             yield
     else:
         yield
+
+
+def requires_autotune_at_compile_time(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest("requires triton.autotune_at_compile_time=True")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 @contextlib.contextmanager
@@ -7745,14 +7756,10 @@ class AOTInductorTestsTemplate:
             )
 
     @runOnRocm
+    @requires_autotune_at_compile_time
     def test_rocm_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y, m):
@@ -7791,14 +7798,10 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
+    @requires_autotune_at_compile_time
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y, m):
@@ -7843,14 +7846,10 @@ class AOTInductorTestsTemplate:
                 f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
+    @requires_autotune_at_compile_time
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         @triton.jit
         def add_one_kernel(X, Y, N):
@@ -7907,14 +7906,10 @@ class AOTInductorTestsTemplate:
             )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         @triton.autotune(
             configs=[
@@ -7957,14 +7952,10 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         @triton.autotune(
             configs=[
@@ -8576,14 +8567,10 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
+    @requires_autotune_at_compile_time
     def test_constant_int_kernel_input(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
-        if config.triton.autotune_at_compile_time is False:
-            raise unittest.SkipTest(
-                "Testing triton.autotune_with_sample_inputs, only works when "
-                "triton.autotune_at_compile_time is True"
-            )
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -8941,6 +8928,9 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
+    # This test forces lazy dual-wrapper mode; torch.cond support for that
+    # mode is covered by AOTInductorTestDualWrapper skips below.
+    "test_cond_symint_input_disable_one_pass": fail_gpu(("cuda", "xpu"), is_skip=True),
 }
 
 MPS_TEST_FAILURES = {

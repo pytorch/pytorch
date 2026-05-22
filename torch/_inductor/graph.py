@@ -2570,28 +2570,41 @@ class GraphLowering(torch.fx.Interpreter):
                 # AOTI with lazy compile: single codegen pass producing
                 # two separate C++ files — JIT (for autotuning) and AOTI
                 # (for packaging) — via DualIndentedBuffer.
-                # wrapper_code is the JIT variant, AOTI variant is in
-                # self.wrapper_code._aot_output.
-                wrapper_code, kernel_code = self.codegen()
-
-                lazy_kernel_names = list(
-                    self.wrapper_code._lazy_kernel_names  # type: ignore[attr-defined]
+                # wrapper_code is the JIT variant; the AOTI variant is
+                # populated into wrapper_codegen._aot_output.
+                from .codegen.cpp_wrapper_gpu import (
+                    CppWrapperGpu,
+                    generate_aoti_kernel_config_header,
                 )
+
+                wrapper_code, kernel_code = self.codegen()
+                assert isinstance(self.wrapper_code, CppWrapperGpu)
+                lazy_kernel_names = list(self.wrapper_code._lazy_kernel_names)
                 if lazy_kernel_names:
-                    self._run_jit_variant_for_autotune(
-                        wrapper_code,
-                        kernel_code,
-                        extract_real_inputs,
-                        lazy_kernel_names,
-                    )
+                    try:
+                        self._run_jit_variant_for_autotune(
+                            wrapper_code,
+                            kernel_code,
+                            extract_real_inputs,
+                            lazy_kernel_names,
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "When autotune_at_compile_time is False, AOTInductor generates"
+                            "both JIT code and AOT code. The JIT code failed to run."
+                        ) from exc
 
                 # Prepend config header with kernel compile results
                 # to the AOTI source for packaging.
-                from .codegen.cpp_wrapper_gpu import generate_aoti_kernel_config_header
-
                 config_header = generate_aoti_kernel_config_header(lazy_kernel_names)
+                aot_output: str | None = self.wrapper_code._aot_output
+                if aot_output is None:
+                    raise RuntimeError(
+                        "When autotune_at_compile_time is False, AOTInductor generates"
+                        "both JIT code and AOT code. The AOT code should not be None."
+                    )
                 aoti_wrapper = ValueWithLineMap(
-                    config_header + "\n" + self.wrapper_code._aot_output,  # type: ignore[attr-defined]
+                    config_header + "\n" + aot_output,
                     wrapper_code.line_map,
                 )
 
