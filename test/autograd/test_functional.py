@@ -714,6 +714,14 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, foo(*inp), inp)
 
     @base_and_logging_tensor
+    def test_jacobian_forward_mode_requires_vectorize(self, ctors):
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError, 'strategy="forward-mode" requires vectorize=True'
+        ):
+            autogradF.jacobian(torch.tanh, inp, strategy="forward-mode")
+
+    @base_and_logging_tensor
     def test_jacobian_err_check_strict(self, ctors):
         def foo(a):
             return a.detach()
@@ -1073,6 +1081,17 @@ class TestAutogradFunctional(TestCase):
 
         res = autogradF.hessian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, inp, inp)
+
+    @base_and_logging_tensor
+    def test_hessian_forward_mode_requires_vectorize(self, ctors):
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError,
+            'outer_jacobian_strategy="forward-mode" requires vectorize=True',
+        ):
+            autogradF.hessian(
+                lambda a: a.sum(), inp, outer_jacobian_strategy="forward-mode"
+            )
 
     @base_and_logging_tensor
     def test_hessian_err_check_strict(self, ctors):
