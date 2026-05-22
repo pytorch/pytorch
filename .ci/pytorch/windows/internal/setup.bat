@@ -18,7 +18,7 @@ IF "%VSDEVCMD_ARGS%" == "" (
 
 pushd %SRC_DIR%
 
-IF NOT exist "setup.py" (
+IF NOT exist "pyproject.toml" (
     cd %MODULE_NAME%
 )
 

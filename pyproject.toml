@@ -2,17 +2,86 @@
 
 [build-system]
 requires = [
-    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
-    "cmake>=3.27",
-    "ninja",
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
+    "scikit-build-core",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+experimental = true
+build-dir = "build"
+
+[tool.scikit-build.cmake]
+# Default to Release. On multi-config generators (Visual Studio), this is
+# passed as --config to cmake --build and cmake --install, ensuring they
+# match. Overrides below handle DEBUG and REL_WITH_DEB_INFO env vars,
+# mirroring the old setup.py behavior.
+build-type = "Release"
+
+[[tool.scikit-build.overrides]]
+if.env.DEBUG = true
+cmake.build-type = "Debug"
+
+[[tool.scikit-build.overrides]]
+if.env.REL_WITH_DEB_INFO = true
+cmake.build-type = "RelWithDebInfo"
+
+[[tool.scikit-build.overrides]]
+# PyTorch CI uses a /opt/conda-installed Python whose sysconfig CC includes
+# "-B <prefix>/compiler_compat" (a too-narrow sysroot). When CC is unset in
+# the parent shell, scikit-build-core's set_environment_for_gen() picks that
+# value up and sets it in the cmake subprocess env, breaking CMake try_compile
+# probes (FindBLAS check_function_exists(sgemm_), FindOpenMP, ...). Passing
+# CMAKE_C/CXX_COMPILER via -D takes precedence over the env-side CC, so cmake
+# uses the bare-named compiler from PATH instead. Defaulting to gcc/g++ when
+# the parent shell didn't pre-set CC/CXX matches what .ci/pytorch/common.sh
+# already does for *gcc* build environments; if a *clang* build environment
+# pre-sets CC=clang/CXX=clang++, the env-backed lookup respects that.
+if.platform-system = "linux"
+if.env.ANACONDA_PYTHON_VERSION = true
+cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "gcc" }
+cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "g++" }
+
+# Other than CMAKE_C/CXX_COMPILER above, cmake.define is intentionally absent
+# -- all BUILD_*/USE_* env vars and additional passthrough variables are
+# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of
+# truth.
+
+[tool.scikit-build.metadata.version]
+# Delegates to tools/generate_torch_version.py which resolves the version from
+# PYTORCH_BUILD_VERSION (release/nightly), PKG-INFO (sdist), or version.txt.
+provider = "version"
+provider-path = "tools/metadata"
+
+[tool.scikit-build.metadata.dependencies]
+# Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS env var (pipe-separated PEP 508
+# strings) to inject CUDA/ROCm/XPU pip package dependencies into the wheel.
+provider = "dependencies"
+provider-path = "tools/metadata"
+
+[tool.scikit-build.install]
+# scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
+# keep symbols (e.g. for torch.utils.cpp_extension, ABI checks in CI).
+strip = false
+
+[tool.scikit-build.wheel]
+# CMake install destinations (lib/, include/, share/cmake/) are relative to
+# CMAKE_INSTALL_PREFIX. This setting places them under torch/ in the wheel,
+# matching the existing layout (e.g., torch/lib/libtorch_cpu.so).
+install-dir = "torch"
+# Python packages to include in the wheel.
+packages = ["torch", "torchgen", "functorch"]
+# license-files is declared once under [project] (PEP 639 canonical location);
+# scikit-build-core honors it directly. Declaring it here too would trigger
+# AssertionError in scikit-build-core >= 0.12.
+
+[tool.scikit-build.editable]
+# Editable installs use redirect mode: Python files are found in the source
+# tree, and CMake-built artifacts are rebuilt on import if stale.
+mode = "redirect"
+rebuild = true
 
 [dependency-groups]
 dev = [
@@ -61,7 +130,8 @@ license-files = [
     "third_party/**/LICENSE",
     "third_party/**/LICENSE.txt",
     "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING.BSD",
+    "third_party/**/COPYING",
+    "third_party/**/COPYING.txt",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -84,12 +154,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-dynamic = [
-    "entry-points",
-    "dependencies",
-    "scripts",
-    "version",
-]
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+torchrun = "torch.distributed.run:main"
+torchfrtrace = "torch.distributed.flight_recorder.fr_trace:main"
+
+[project.entry-points."torchrun.logs_specs"]
+default = "torch.distributed.elastic.multiprocessing:DefaultLogsSpecs"
 
 [project.urls]
 Homepage = "https://pytorch.org"
