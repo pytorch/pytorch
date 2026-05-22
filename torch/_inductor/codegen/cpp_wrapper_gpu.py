@@ -24,6 +24,11 @@ from ..ir import (
     TMADescriptorExperimental,
     TMADescriptorStable,
 )
+from ..runtime.hints import (
+    TRITON_DEFAULT_BLOCK_SIZES,
+    TRITON_DEFAULT_RSPLIT,
+    TRITON_DEFAULT_RSPLIT_SIZE,
+)
 from ..utils import (
     cache_on_self,
     DeferredLineBase,
@@ -79,10 +84,13 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
 
     for kernel_name in kernel_names:
         params = CudaKernelParamCache.get(kernel_name)
-        assert params is not None, (
-            f"CudaKernelParamCache not populated for {kernel_name} "
-            "after first-pass execution"
-        )
+        if params is None:
+            raise RuntimeError(
+                "When autotune_at_compile_time is False, AOTInductor generates"
+                "both JIT code and AOT code. They are expected to have exactly"
+                f"the same kernels. However, AOT code contains kernels, {kernel_names},"
+                "that is not in the JIT code."
+            )
 
         macro_prefix = kernel_name.upper()
         cubin_path = cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()])
@@ -115,17 +123,31 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         # Per-subkernel block sizes for combo kernels, or single-element lists.
         num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
         if num_kernels > 1 and "XBLOCK_0" in config_dict:
-            xblocks = [config_dict.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
-            yblocks = [config_dict.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
-            zblocks = [config_dict.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
-            r0blocks = [config_dict.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+            xblocks = [
+                config_dict.get(f"XBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])
+                for i in range(num_kernels)
+            ]
+            yblocks = [
+                config_dict.get(f"YBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])
+                for i in range(num_kernels)
+            ]
+            zblocks = [
+                config_dict.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+                for i in range(num_kernels)
+            ]
+            r0blocks = [
+                config_dict.get(f"R0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
+                for i in range(num_kernels)
+            ]
         else:
-            xblocks = [config_dict.get("XBLOCK", 128)]
-            yblocks = [config_dict.get("YBLOCK", 1)]
-            zblocks = [config_dict.get("ZBLOCK", 1)]
-            r0blocks = [config_dict.get("R0_BLOCK", 1)]
-        rsplit = config_dict.get("RSPLIT", 1)
-        rsplit_size = config_dict.get("RSPLIT_SIZE", 1)
+            xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
+            yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
+            zblocks = [config_dict.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+            r0blocks = [
+                config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
+            ]
+        rsplit = config_dict.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
+        rsplit_size = config_dict.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)
         ci = config_index if config_index is not None else -1
         gs = params.get("global_scratch", -1) or -1
         ps = params.get("profile_scratch", -1) or -1
@@ -574,6 +596,8 @@ class DeferredTritonCallWrapper:
             f" {kernel_name}_result.shared_mem,"
             f" kernel_args_, stream_"
         )
+        # stream_ comes from the generated wrapper signature on both JIT and
+        # AOTI sides.
         launch_kernel_args = [
             "grid_0",
             "grid_1",
@@ -605,6 +629,8 @@ class DeferredTritonCallWrapper:
                     "kernel_args_",
                     "stream_",
                 ],
+                num_warps=f"{kernel_name}_result.num_warps",
+                shared_mem=f"{kernel_name}_result.shared_mem",
             )
             prefix.splice_aot(aot_profile)
         else:
@@ -847,13 +873,15 @@ class DeferredTritonCallWrapper:
             scratch_spaces=scratch_spaces,
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
+        num_warps = str(params["num_warps"])
+        shared_mem = str(params["shared_mem"])
         launch_kernel_args = [
             kernel_var_name,
             "grid_0",
             "grid_1",
             "grid_2",
-            str(params["num_warps"]),
-            str(params["shared_mem"]),
+            num_warps,
+            shared_mem,
             "kernel_args_",
             "stream_",
         ]
@@ -870,6 +898,8 @@ class DeferredTritonCallWrapper:
                 arg_types,
                 arg_signatures,
                 launch_kernel_args,
+                num_warps=num_warps,
+                shared_mem=shared_mem,
             )
         else:
             prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
@@ -882,9 +912,11 @@ class DeferredTritonCallWrapper:
         arg_types: list[Any],
         arg_signatures: list[str | None],
         launch_kernel_args: list[str],
+        num_warps: str,
+        shared_mem: str,
     ) -> None:
         """Wrap a kernel launch in an AOTI record_function profiling scope."""
-        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
+        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", kernel_var_name)
         prefix.writeline("{")
         with prefix.indent():
             prefix.writelines(
@@ -898,8 +930,8 @@ class DeferredTritonCallWrapper:
                 ("grid_0", "grid_0"),
                 ("grid_1", "grid_1"),
                 ("grid_2", "grid_2"),
-                ("num_warps", launch_kernel_args[4]),
-                ("shared_mem", launch_kernel_args[5]),
+                ("num_warps", num_warps),
+                ("shared_mem", shared_mem),
             ]
             for k, v in record_launch_kernel_args:
                 arg_name = f"{normalized_kernel_name}_{k}"

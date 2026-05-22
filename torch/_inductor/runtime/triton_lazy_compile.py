@@ -18,6 +18,11 @@ import logging
 import re
 from typing import Any
 
+from .hints import (
+    TRITON_DEFAULT_BLOCK_SIZES,
+    TRITON_DEFAULT_RSPLIT,
+    TRITON_DEFAULT_RSPLIT_SIZE,
+)
 from .triton_heuristics import CachingAutotuner
 
 
@@ -190,17 +195,29 @@ def run_triton_kernel_with_autotune(
     # Extract per-subkernel block sizes for combo kernels, or single block sizes.
     num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
     if num_kernels > 1 and "XBLOCK_0" in config:
-        xblocks = [config.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
-        yblocks = [config.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
-        zblocks = [config.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
-        r0blocks = [config.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+        xblocks = [
+            config.get(f"XBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])
+            for i in range(num_kernels)
+        ]
+        yblocks = [
+            config.get(f"YBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])
+            for i in range(num_kernels)
+        ]
+        zblocks = [
+            config.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+            for i in range(num_kernels)
+        ]
+        r0blocks = [
+            config.get(f"R0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
+            for i in range(num_kernels)
+        ]
     else:
-        xblocks = [config.get("XBLOCK", 128)]
-        yblocks = [config.get("YBLOCK", 1)]
-        zblocks = [config.get("ZBLOCK", 1)]
-        r0blocks = [config.get("R0_BLOCK", 1)]
-    rsplit = config.get("RSPLIT", 1)
-    rsplit_size = config.get("RSPLIT_SIZE", 1)
+        xblocks = [config.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
+        yblocks = [config.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
+        zblocks = [config.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+        r0blocks = [config.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])]
+    rsplit = config.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
+    rsplit_size = config.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)
 
     config_index = None
     grid_type = inductor_meta.get("grid_type") if inductor_meta else None
