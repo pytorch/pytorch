@@ -40,10 +40,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _collect_transitive_node_users(start: fx.Node) -> list[fx.Node]:
+def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
     """BFS collecting nodes whose inputs are all within the chain."""
-    chain: list[fx.Node] = [start]
-    chain_set: OrderedSet[fx.Node] = OrderedSet([start])
+    chain: list[fx.Node] = [node]
+    chain_set: OrderedSet[fx.Node] = OrderedSet([node])
     i = 0
     while i < len(chain):
         for user in chain[i].users:
@@ -56,22 +56,22 @@ def _collect_transitive_node_users(start: fx.Node) -> list[fx.Node]:
     return chain
 
 
-def _collect_node_producers(
-    target: fx.Node, node_positions: dict[fx.Node, int]
+def _collect_nodes_must_be_before(
+    node: fx.Node, node_positions: dict[fx.Node, int]
 ) -> list[fx.Node]:
-    """Collect the minimal set of non-placeholder nodes needed to produce target.
+    """Collect the minimal set of non-placeholder nodes needed to produce node.
 
-    BFS backward from target, stopping at placeholders.
+    BFS backward from node, stopping at placeholders.
     Returns them sorted by graph position (topological order).
     """
     visited: OrderedSet[fx.Node] = OrderedSet()
-    queue = [target]
+    queue = [node]
     while queue:
-        node = queue.pop()
-        if node in visited or node.op == "placeholder":
+        cur = queue.pop()
+        if cur in visited or cur.op == "placeholder":
             continue
-        visited.add(node)
-        queue.extend(node.all_input_nodes)
+        visited.add(cur)
+        queue.extend(cur.all_input_nodes)
     return sorted(visited, key=lambda n: node_positions[n])
 
 
@@ -80,13 +80,6 @@ def _move_overlap_nodes(
     overlap_deps: dict[fx.Node, OrderedSet[fx.Node]],
     bucketed_node_types: dict[fx.Node, str],
 ) -> None:
-    """Directly move AG/RS chain nodes to satisfy overlap_deps.
-
-    Instead of re-sorting the graph, moves only the specific chains:
-    - AG start chains are moved earlier (before the anchor wait node)
-    - RS wait chains are moved later (after the latest RS start)
-    No-op when overlap_deps is empty.
-    """
     if not overlap_deps:
         return
 
@@ -103,27 +96,27 @@ def _move_overlap_nodes(
 
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
-    # RS defer: move each wait+unpack chain after the latest RS start
     for rs_wait, rs_starts in rs_defer.items():
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
-        chain = _collect_transitive_node_users(rs_wait)
+        # rs_wait and its transitive users must be after latest_rs_start
+        nodes = _collect_nodes_must_be_after(rs_wait)
         node_insert_after = latest_rs_start
-        for node in chain:
+        for node in nodes:
             node_insert_after.append(node)
             node_insert_after = node
 
     # Recompute positions after RS moves
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
 
-    # AG prefetch: move each start chain before the ag_wait
     for ag_wait, ag_prefetch_starts in ag_prefetch.items():
         ag_wait_pos = node_positions[ag_wait]
         sorted_starts = sorted(ag_prefetch_starts, key=lambda n: node_positions[n])
         for ag_start in sorted_starts:
             if node_positions[ag_start] < ag_wait_pos:
                 continue
-            chain = _collect_node_producers(ag_start, node_positions)
-            for node in chain:
+            # ag_start and its dependencies must be before ag_wait
+            nodes = _collect_nodes_must_be_before(ag_start, node_positions)
+            for node in nodes:
                 ag_wait.prepend(node)
 
 
