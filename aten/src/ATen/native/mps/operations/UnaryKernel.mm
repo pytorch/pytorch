@@ -14,7 +14,8 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
-// KURT: call site of `exec_unary_kernel`
+// exec_unary_kernel auto-falls back to `_dense_castout_<in>` / `_strided_castout_<in>` when the direct per-(out,in)
+// kernel isn't registered. Castout variants are registered by REGISTER_UNARY_OP itself, keyed on the input dtype.
 #define REGISTER_UNARY_TI_DISPATCH(NAME)                    \
   static void NAME##_kernel_mps(TensorIteratorBase& iter) { \
     lib.exec_unary_kernel(iter, #NAME);                     \
