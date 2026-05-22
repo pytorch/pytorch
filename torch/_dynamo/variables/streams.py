@@ -357,6 +357,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         # FxTracebackAnnotateVariable uses self.target_values for the
         # annotation and for us target_values is a tuple of args---and it must
         # remain a tuple of args for reconstruct_type.
+        assert strm.user_object_index is not None, "stream not registered"
         stream_idx: int = strm.user_object_index
         annotation: dict[str, Any] = {"stream": stream_idx}
         stack = contextlib.ExitStack()
