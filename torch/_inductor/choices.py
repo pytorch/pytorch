@@ -508,6 +508,8 @@ class InductorChoices:
         else:
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
+            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
+                return 1
             rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
             xvals_per_block = 128
             xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block

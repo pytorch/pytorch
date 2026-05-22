@@ -3588,11 +3588,23 @@ def _reduction_configs(
         # Try to use all SMs with small x
         if x <= 1024:
             x_block = max(min(x // 128, 8), 2)
-            outer_r_block = min(rnumel, 64)
+            if rnumel >= 4096:
+                # For large reduction sizes, use bigger RBLOCK to reduce loop
+                # iterations. This is especially important for multi-pass
+                # reductions (e.g., welford + normalize fusion).
+                outer_r_block = 512
+                x_block = max(min(x // 64, 8), 2)
+                num_warps = 16
+            else:
+                outer_r_block = min(rnumel, 64)
         # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
         elif x // 4096 <= 8:
             x_block = 16
-            outer_r_block = 512 // x_block
+            if rnumel >= 4096:
+                outer_r_block = 512
+                num_warps = 16
+            else:
+                outer_r_block = 512 // x_block
         elif num_dynamic > 1:
             # Lots of compute with multiple dynamic shape per loop iteration
             # Larger RBLOCK minimizes loop iteration
