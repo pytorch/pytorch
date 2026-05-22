@@ -120,6 +120,7 @@ from .simd import (
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
+    is_unaligned_buffer_name,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -2851,12 +2852,7 @@ class TMACompatibilityChecker:
         # When operations like slicing, as_strided, or view(dtype=...) are folded into
         # the kernel argument (for example, via reinterpret_tensor with a non-aligned
         # storage_offset), the resulting buffer's data_ptr may not be 16-byte aligned.
-        # Inductor tracks such buffers by adding their names to V.graph.unaligned_buffers.
-        # Here we reuse this information to check if the buffer is unaligned.
-        if (
-            self.buffer_name is not None
-            and self.buffer_name in V.graph.unaligned_buffers
-        ):
+        if self.buffer_name is not None and is_unaligned_buffer_name(self.buffer_name):
             log.debug(
                 "%s TMA descriptor base must be 16 byte aligned but buffer %s "
                 "is recorded as unaligned (e.g. produced by a sub-pointer "
