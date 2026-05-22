@@ -1321,6 +1321,34 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, (False, True, True))
 
     # =====================================================================
+    # Pybind11 opaque object comparison (Placement types)
+    # =====================================================================
+
+    def test_placement_cmp(self):
+        """Placement subclasses (Shard, Replicate) use C++ value-based __eq__."""
+        from torch.distributed.tensor.placement_types import Replicate, Shard
+
+        self._assert_all_cmp_equals(Shard(0), Shard(0), error_ops=self._ORDERING_OPS)
+        self._assert_all_cmp_equals(Shard(0), Shard(1), error_ops=self._ORDERING_OPS)
+        self._assert_all_cmp_equals(Shard(0), Replicate(), error_ops=self._ORDERING_OPS)
+
+    def test_placement_tuple_cmp(self):
+        """Tuple of Placement objects: mirrors DTensor's placements comparison."""
+        from torch.distributed.tensor.placement_types import Replicate, Shard
+
+        p1 = (Shard(0), Replicate())
+        p2 = (Shard(0), Replicate())
+        p3 = (Shard(1), Replicate())
+
+        for op in (operator.eq, operator.ne):
+            with self.subTest(op=op.__name__):
+                self._assert_cmp_equals(p1, p2, op)
+            torch._dynamo.reset()
+            with self.subTest(op=op.__name__, args="diff"):
+                self._assert_cmp_equals(p1, p3, op)
+            torch._dynamo.reset()
+
+    # =====================================================================
     # GetAttrVariable resolution
     # =====================================================================
 

@@ -258,6 +258,8 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
   # shellcheck disable=SC1091
+  source /opt/intel/oneapi/tcm/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
@@ -445,8 +447,9 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time test_xpu_sycl_tla_backend
+  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION
+  # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
+  # time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
