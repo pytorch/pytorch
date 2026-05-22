@@ -400,11 +400,10 @@ unsafe_allow_optimization_of_collectives = False
 disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 # See Note [Tangents memory format]
-# By default tangents strideness is guessed to be contiguous,
-# At runtime non contiguous tangents will be coerced to be contiguous.
-# This config changes this guess for tangents strides to be the same as outputs.
+# Tangent strideness is guessed to match output strides.
+# At runtime tangents with different strides will be coerced to the output strides.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = not is_fbcode()
+guess_tangent_strides_as_outputs = True
 
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
