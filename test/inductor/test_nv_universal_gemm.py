@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -95,6 +97,35 @@ def _nvgemm_config(**overrides):
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
+
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_matmul_cpp_wrapper(self, autotune_at_compile_time):
+        """Test that NVGEMM can be called through non-AOT C++ wrapper."""
+        m, n, k = 512, 512, 512
+        dtype = torch.bfloat16
+
+        def matmul(a, b):
+            return a @ b
+
+        a = torch.randn(m, k, device="cuda", dtype=dtype)
+        b = torch.randn(k, n, device="cuda", dtype=dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                cpp_wrapper=True,
+                **{"triton.autotune_at_compile_time": autotune_at_compile_time},
+            )
+        ):
+            result, (code,) = run_and_get_code(torch.compile(matmul), a, b)
+
+        self.assertIn("_Kernel_Module_Load", code)
+        self.assertIn("cute_dsl_", code)
+        self.assertIn("dynamic_shapes", code)
+        self.assertIn("dynamic_strides", code)
+        torch.testing.assert_close(result, expected)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
@@ -498,6 +529,91 @@ class TestNVUniversalGemm(TestCase):
             torch.testing.assert_close(result_2, expected_2)
 
             self.assertFalse(torch.allclose(result_1, result_2))
+
+
+class TestNVUniversalGemmNativeManifest(TestCase):
+    """Unit tests for NVGEMM native artifact metadata."""
+
+    def test_parse_nvgemm_export_header_metadata(self):
+        from torch._inductor.codegen.nv_universal_gemm.native_manifest import (
+            parse_nvgemm_header_metadata,
+        )
+
+        symbol_prefix = "nvgemm_test_symbol"
+        header = f"""
+typedef struct {{
+  void* data;
+  int32_t dynamic_shapes[2];
+  int64_t dynamic_strides[2];
+}} {symbol_prefix}_Tensor_A;
+
+typedef struct {{
+  void* data;
+  int32_t dynamic_shapes[2];
+  int64_t dynamic_strides[2];
+}} {symbol_prefix}_Tensor_B;
+
+typedef struct {{
+  void* data;
+  int32_t dynamic_shapes[2];
+  int64_t dynamic_strides[2];
+}} {symbol_prefix}_Tensor_Out;
+
+typedef struct {{
+  int32_t initialized;
+}} {symbol_prefix}_Kernel_Module_t;
+
+static inline int32_t cute_dsl_{symbol_prefix}_wrapper(
+    {symbol_prefix}_Kernel_Module_t* module,
+    {symbol_prefix}_Tensor_A* a,
+    {symbol_prefix}_Tensor_B* b,
+    {symbol_prefix}_Tensor_Out* out,
+    cudaStream_t stream) {{
+  return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header_path = Path(tmpdir) / "kernel.h"
+            header_path.write_text(header)
+
+            metadata = parse_nvgemm_header_metadata(header_path, symbol_prefix)
+
+        self.assertIsNotNone(metadata)
+        if metadata is None:
+            self.fail("Expected NVGEMM header metadata")
+        self.assertEqual(
+            metadata.module_struct_name, f"{symbol_prefix}_Kernel_Module_t"
+        )
+        self.assertEqual(
+            metadata.module_load_hook, f"{symbol_prefix}_Kernel_Module_Load"
+        )
+        self.assertEqual(
+            metadata.module_unload_hook, f"{symbol_prefix}_Kernel_Module_Unload"
+        )
+        self.assertEqual(metadata.wrapper_name, f"cute_dsl_{symbol_prefix}_wrapper")
+        self.assertEqual(
+            [param.kind for param in metadata.wrapper_params],
+            [
+                "module",
+                "tensor_descriptor",
+                "tensor_descriptor",
+                "tensor_descriptor",
+                "stream",
+            ],
+        )
+        self.assertEqual(len(metadata.tensor_descriptors), 3)
+        self.assertEqual(
+            [
+                (field.name, field.c_type, field.array_size)
+                for field in metadata.tensor_descriptors[0].fields
+            ],
+            [
+                ("data", "void *", None),
+                ("dynamic_shapes", "int32_t", 2),
+                ("dynamic_strides", "int64_t", 2),
+            ],
+        )
 
 
 class TestNVUniversalGemmHeuristics(TestCase):
