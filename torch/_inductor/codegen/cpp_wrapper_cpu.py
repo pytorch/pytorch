@@ -286,6 +286,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        self._cpp_wrapper_link_flags: OrderedSet[str] = OrderedSet()
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
@@ -1566,6 +1567,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_code = "None"
             needs_vec_isa = str(self.needs_vec_isa)
             kernel_needs_vec_isa = "None"
+        link_flags = tuple(self._cpp_wrapper_link_flags)
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1577,6 +1579,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
+                link_flags={link_flags!r},
             )
             """
         )

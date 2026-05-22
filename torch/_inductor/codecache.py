@@ -3499,12 +3499,38 @@ class CppCodeCache:
         device_type: str = "cpu",
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
+        link_flags: Sequence[str] = (),
         optimized_code: str | None = None,
         needs_vec_isa: bool | None = None,
         kernel_needs_vec_isa: bool | None = None,
     ) -> Any:
         """Compile and load a C++ library.  Returns a callable that returns the loaded
-        library."""
+        library.
+
+        Args:
+            extra_flags: Extra compiler arguments used in compile and link steps.
+            link_flags: Extra arguments used only in final link steps. Direct file
+                inputs are hashed into the cache key.
+        """
+
+        def get_link_flags_key(
+            link_flags: tuple[str, ...],
+        ) -> tuple[tuple[str, str | None], ...]:
+            hashed_flags: list[tuple[str, str | None]] = []
+            for arg in link_flags:
+                digest = None
+                if os.path.isfile(arg):
+                    h = hashlib.sha256()
+                    with open(arg, "rb") as f:
+                        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    digest = h.hexdigest()
+                hashed_flags.append((arg, digest))
+            return tuple(hashed_flags)
+
+        extra_flags = tuple(extra_flags)
+        link_flags = tuple(link_flags)
+        link_flags_key = get_link_flags_key(link_flags)
         base_device_type = device_type.split(":", maxsplit=1)[0]
         main_needs_vec_isa = _resolve_needs_vec_isa(
             base_device_type, main_code, needs_vec_isa
@@ -3531,6 +3557,14 @@ class CppCodeCache:
             **shared_compile_command,
             "vec_isa": picked_vec_isa if kernel_needs_vec_isa else invalid_vec_isa,
         }
+        main_link_command = {
+            **main_compile_command,
+            "extra_flags": extra_flags + link_flags,
+        }
+        link_command = {
+            **shared_compile_command,
+            "extra_flags": extra_flags + link_flags,
+        }
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
@@ -3545,7 +3579,7 @@ class CppCodeCache:
             compile_only=bool(optimized_code),
             min_optimize=min_optimize,
             # pyrefly: ignore [bad-argument-type]
-            **main_compile_command,
+            **(main_compile_command if optimized_code else main_link_command),
         )
         optimized_build_option = CppTorchDeviceOptions(
             # pyrefly: ignore [bad-argument-type]
@@ -3563,10 +3597,20 @@ class CppCodeCache:
             ).get_command_line()
 
         main_cmd_line = get_hashable_command_line(main_build_option)
-        optimized_cmd_line = get_hashable_command_line(optimized_build_option)
+        optimized_cmd_line = (
+            get_hashable_command_line(optimized_build_option) if optimized_code else ""
+        )
+        link_cmd_line = (
+            get_hashable_command_line(CppTorchDeviceOptions(**link_command))
+            if optimized_code
+            else ""
+        )
 
         key, main_path = write(
-            main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+            main_code,
+            "main.cpp",
+            extra=f"{optimized_code} {main_cmd_line} {optimized_cmd_line} "
+            f"{link_cmd_line} {link_flags_key}",
         )
 
         # Don't bother writing if the argument is empty.
@@ -3632,7 +3676,7 @@ class CppCodeCache:
                         optimized_builder.get_target_file_path(),
                     ],
                     # pyrefly: ignore [bad-argument-type]
-                    BuildOption=CppTorchDeviceOptions(**shared_compile_command),
+                    BuildOption=CppTorchDeviceOptions(**link_command),
                     output_dir=output_dir,
                 )
 
@@ -3832,6 +3876,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
+        link_flags: Sequence[str] = (),
         kernel_code: str | None = None,
     ) -> Any:
         """
@@ -3850,6 +3895,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 kernel_code is provided.
             kernel_code: If present, C++ source code that will be built at -O3 and
                 linked to main_code.
+            extra_flags: Extra compiler arguments used in compile and link steps.
+            link_flags: Extra arguments used only in final link steps. Direct file
+                inputs are hashed into the cache key.
 
         Returns:
             A python version of ENTRY_FUNCTION()
@@ -3869,6 +3917,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             device_type,
             submit_fn=submit_fn,
             extra_flags=extra_flags,
+            link_flags=link_flags,
             optimized_code=kernel_code,
             needs_vec_isa=needs_vec_isa,
             kernel_needs_vec_isa=kernel_needs_vec_isa,
@@ -4234,7 +4283,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         bindings_future = cls.load_pybinding_async(
             binding_types,
             cls._codegen_glue(meta, headerfile),
-            extra_flags=(libfile, cls.build_standalone_runtime()),
+            link_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
             device_type="cuda" if meta.is_cuda() else "cpu",
         )
