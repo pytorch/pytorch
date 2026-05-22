@@ -6000,7 +6000,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     @requires_cuda_and_triton
-    def test_wrap_fusion_non_unary_fusion(self):
+    def test_wrap_fusion_non_unary_fusion_eq_shape(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
@@ -6029,6 +6029,38 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_non_unary_fusion_broadcasted_shape(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel, output_tile={"x": "BLOCK_SIZE"})[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            out = out * c # Non-unary epilogue
+
+            out2 = torch.empty_like(a)
+            add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
+            return out
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        c = torch.randn(8, dtype=torch.float32, device="cuda").unsqueeze(1)
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
 
 
 if HAS_CUDA_AND_TRITON:
