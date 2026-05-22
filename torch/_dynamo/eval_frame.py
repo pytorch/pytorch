@@ -89,6 +89,7 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
+from torch.fx.experimental.dynamic_spec import ShapesSpec
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -125,7 +126,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+    from torch.fx.experimental.dynamic_spec import ParamsSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -823,10 +824,8 @@ class _TorchDynamoContext:
             )
         # Normalize the shorthand forms: dict / ParamsSpec / ShapesSpec all
         # land here as a ShapesSpec (or None).
-        from torch.fx.experimental.dynamic_spec import ShapesSpec as _ShapesSpec
-
-        if shapes_spec is not None and not isinstance(shapes_spec, _ShapesSpec):
-            shapes_spec = _ShapesSpec(shapes_spec)
+        if shapes_spec is not None and not isinstance(shapes_spec, ShapesSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
@@ -1136,8 +1135,10 @@ class _TorchDynamoContext:
                 )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
-                    prior_error_on_graph_break = _get_error_on_graph_break()
-                    _set_error_on_graph_break(self.error_on_graph_break)
+                    current_error_on_graph_break = _get_error_on_graph_break()
+                    if current_error_on_graph_break != self.error_on_graph_break:
+                        prior_error_on_graph_break = current_error_on_graph_break
+                        _set_error_on_graph_break(self.error_on_graph_break)
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -1227,7 +1228,6 @@ class _TorchDynamoContext:
             )
         else:
             compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
-
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
@@ -1345,6 +1345,11 @@ class OptimizeContext(_TorchDynamoContext):
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_compiled_autograd)
+
+    def __call__(self, fn: Any) -> Any:
+        result = super().__call__(fn)
+        result._is_torch_compile = True  # type: ignore[attr-defined]
+        return result
 
     def __reduce__(
         self,
