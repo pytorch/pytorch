@@ -288,14 +288,6 @@ int munmap(void* addr, size_t length) {
 #endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
-  } while (0)
-
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
 // symbol and link it into the final .so.
@@ -579,6 +571,11 @@ class AOTInductorModelBase {
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
+
+    // Wait for the constant folding kernels to complete. The folded
+    // constants may be read by inference on a different stream after
+    // swap_constant_buffer(), which has no GPU synchronization.
+    wait_for_completion();
 
     return folded_constants;
   }

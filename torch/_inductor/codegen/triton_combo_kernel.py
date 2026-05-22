@@ -20,6 +20,7 @@ from ..runtime.triton_heuristics import (
     SequentialFlattenComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
+from ..stream_utils import get_raw_stream_name
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
@@ -497,9 +498,7 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        return triton_kernel_cls(
-            tiling,
-            features=features,
+        kwargs: dict[str, Any] = dict(
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
@@ -507,6 +506,9 @@ class ComboKernel(Kernel):
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
         )
+        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
+
+        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
@@ -1071,7 +1073,7 @@ class ComboKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"

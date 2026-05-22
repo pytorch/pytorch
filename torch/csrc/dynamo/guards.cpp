@@ -331,13 +331,7 @@ static PyObject* TensorGuards_new(
 
 static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
     const c10::SymIntArrayRef& intArray) {
-  std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
-  std::transform(
-      intArray.begin(),
-      intArray.end(),
-      optVec.begin(),
-      [](const c10::SymInt& value) { return value; });
-  return optVec;
+  return {intArray.begin(), intArray.end()};
 }
 
 static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
@@ -1084,8 +1078,7 @@ static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
 
   if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
     // Already aligned – return the original tensor.
-    Py_INCREF(item);
-    return item;
+    return Py_NewRef(item);
   }
 
   // Misaligned – clone while preserving strides.
@@ -1579,11 +1572,10 @@ class StorageOverlapChecker {
       size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
-    std::transform(
-        objects.begin(),
-        objects.end(),
-        std::back_inserter(tensors),
-        [=](PyObject* obj) { return THPVariable_Unpack(obj); });
+    std::ranges::transform(
+        objects, std::back_inserter(tensors), [](PyObject* obj) {
+          return THPVariable_Unpack(obj);
+        });
     return tensors;
   }
 
@@ -1851,6 +1843,53 @@ class TYPE_MATCH : public LeafGuard {
 
  private:
   // id of the type of the original object.
+  intptr_t _expected;
+};
+
+// Type match that unwraps FakeScriptObject before checking. During outer
+// AOTAutograd tracing, opaque objects (e.g. DeviceMesh) are wrapped in a
+// FakeScriptObject for FX tracing; at runtime Dynamo sees the real object.
+// The guard must pass in both cases.
+class FAKE_SCRIPT_TYPE_MATCH : public LeafGuard {
+ public:
+  FAKE_SCRIPT_TYPE_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object fake_script_object_type,
+      py::object type_id,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _fake_script_object_type(std::move(fake_script_object_type)),
+        _expected(py::cast<intptr_t>(std::move(type_id))) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int is_fake = PyObject_IsInstance(value, _fake_script_object_type.ptr());
+    if (is_fake == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    if (is_fake == 1) {
+      PyObject* real_obj = PyObject_GetAttrString(value, "real_obj");
+      if (real_obj == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      bool result = Py_TYPE(real_obj) == (void*)_expected;
+      Py_DECREF(real_obj);
+      return result;
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return Py_TYPE(value) == (void*)_expected;
+  }
+
+ private:
+  // The FakeScriptObject Python class, used for the isinstance check.
+  py::object _fake_script_object_type;
+  // id of the expected (unwrapped) type.
   intptr_t _expected;
 };
 
@@ -3739,25 +3778,45 @@ class GuardManager {
   }
 
   // Caller must hold dict_to_guard_managers lock.
+  //
+  // This function does two things; they must be gated differently.
+  //
+  // 1) Map cleanup: remove `this` from `map[dict]` for every dict this
+  //    manager watched. Must always run -- including when
+  //    `_disable_dict_tag_matching` is already true -- otherwise a later
+  //    watch callback on a still-live dict would dereference the freed
+  //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
+  //    read in this function).
+  //
+  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
+  //    when the dict pointer is still alive. The watch callback sets
+  //    `_disable_dict_tag_matching = true` on every event, including
+  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
+  //    in our map may have been freed, so PyDict_Unwatch on them would
+  //    crash. When the flag is true, the dict's eventual deallocation
+  //    will tear down the watch automatically; skipping PyDict_Unwatch
+  //    here only loses an early-cleanup optimisation.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      auto stashed_pointers = value_stashed_pointers.second;
 
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
+      for (auto& stashed_pointer : stashed_pointers) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        auto& managers = map[dict_pointer];
 
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
+        // (1) Always: remove this manager from the per-dict list.
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
 
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+        // (2) Only when the dict is still guaranteed alive: unwatch and
+        // erase the now-empty map entry. The map.erase below invalidates
+        // the `managers` reference, so it must be the last use.
+        if (!_disable_dict_tag_matching && managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(dict_pointer);
         }
       }
     }
@@ -5415,9 +5474,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "FrameLocalsGuardAccessor(key=" +
-        py::repr(_key).cast<std::string>() +
-        ", framelocals_idx=" + std::to_string(_framelocals_idx) + ")";
+    return fmt::format(
+        "FrameLocalsGuardAccessor(key={}, framelocals_idx={})",
+        py::repr(_key).cast<std::string>(),
+        _framelocals_idx);
   }
 
  public: // cloning functions
@@ -5584,7 +5644,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("ListGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5731,7 +5791,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5876,8 +5936,8 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     // Helpful when printing GuardManager tree structure.
-    return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
-        std::to_string(_index) + ")";
+    return fmt::format(
+        "TensorPropertyGuardAccessor<{}>({})", to_string(_prop), _index);
   }
 
  public: // cloning functions
@@ -6492,7 +6552,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleIteratorGetItemAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -7030,7 +7090,7 @@ void install_object_aliasing_guard(
     GuardManager* y,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds tensor X is tensor Y guard. This is a an example of relational guard.
+  // Adds tensor X is tensor Y guard. This is an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<OBJECT_ALIASING>(
       x->get_root(), std::move(verbose_code_parts), std::move(user_stack));
@@ -7053,7 +7113,7 @@ void install_no_tensor_aliasing_guard(
     const py::list& tensor_names,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks none of tensors alias. This is a an example of
+  // Adds a guard that checks none of tensors alias. This is an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
@@ -7082,7 +7142,7 @@ void install_symbolic_shape_guard(
     py::object py_addr_keep_alive,
     py::object verbose_code_parts,
     py::object user_stack) {
-  // Adds a guard that checks symbolic shapes. This is a an example of
+  // Adds a guard that checks symbolic shapes. This is an example of
   // relational guard. There is one guard object that is shared between
   // multiple guard managers.
   std::shared_ptr<RelationalGuard> guard =
@@ -7341,6 +7401,17 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &TYPE_MATCH::check);
+  py::class_<
+      FAKE_SCRIPT_TYPE_MATCH,
+      LeafGuard,
+      std::shared_ptr<FAKE_SCRIPT_TYPE_MATCH>>(py_m, "FAKE_SCRIPT_TYPE_MATCH")
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::list,
+           py::object>())
+      .def("__call__", &FAKE_SCRIPT_TYPE_MATCH::check);
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &ID_MATCH::check);
@@ -7681,6 +7752,21 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<TYPE_MATCH>(
                 self.get_root(),
                 std::move(value),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fake_script_type_match_guard",
+          [](GuardManager& self,
+             py::object fake_script_object_type,
+             py::object type_id,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FAKE_SCRIPT_TYPE_MATCH");
+            self.add_leaf_guard(std::make_shared<FAKE_SCRIPT_TYPE_MATCH>(
+                self.get_root(),
+                std::move(fake_script_object_type),
+                std::move(type_id),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })

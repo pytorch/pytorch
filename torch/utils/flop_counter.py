@@ -53,10 +53,13 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target) -> None:
-            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction))):
+            from torch._ops import HigherOrderOperator
+
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction, HigherOrderOperator))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), JitFunction, "
+                    f"or HigherOrderOperator"
                     f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
@@ -187,7 +190,8 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out_shape) -> int:
+        out_shape,
+        **kwargs) -> int:
 
     def t(shape):
         return [shape[1], shape[0]] + list(shape[2:])
@@ -449,6 +453,10 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
+    if cum_seq_q is None and query.ndim == 4:
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_flash_attention_nested_shapes(
@@ -557,6 +565,11 @@ def _flash_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    if cum_seq_q is None and query.ndim == 4:
+        grad_out = grad_out.transpose(-2, -3)
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_flash_attention_nested_shapes(
@@ -606,6 +619,41 @@ def _efficient_attention_backward_flop(
         sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
         for query_shape, key_shape, value_shape, grad_out_shape in shapes
     )
+
+
+def _register_flex_attention_flops() -> None:
+    from torch._higher_order_ops.flex_attention import (
+        flex_attention,
+        flex_attention_backward,
+    )
+
+    def _get_sparsity_hint(kwargs: dict[str, Any]) -> float:
+        node_meta = kwargs.get("_node_meta")
+        if node_meta is None:
+            return 0.0
+        custom = node_meta.get("custom")
+        if custom is None:
+            return 0.0
+        return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
+
+    @register_flop_formula(flex_attention, get_raw=True)
+    def flex_attention_forward_flop(
+        query, key, value, *args, out_val=None, **kwargs
+    ) -> int:
+        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
+
+    @register_flop_formula(flex_attention_backward, get_raw=True)
+    def flex_attention_backward_flop(
+        query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
+    ) -> int:
+        grad_out_shape = grad_out.shape if grad_out is not None else out.shape
+        flops = sdpa_backward_flop_count(
+            grad_out_shape, query.shape, key.shape, value.shape
+        )
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
 
 
 def _varlen_attn_forward_flop(
@@ -710,6 +758,9 @@ flop_registry = {
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
+
+_register_flex_attention_flops()
+
 
 def normalize_tuple(x):
     if not isinstance(x, tuple):

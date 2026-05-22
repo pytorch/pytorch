@@ -1,6 +1,8 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <array>
+#include <limits>
 
 namespace c10::CachingAllocator {
 
@@ -19,7 +21,9 @@ std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
       "garbage_collection_threshold",
       "roundup_power2_divisions",
       "expandable_segments",
-      "pinned_use_background_threads"};
+      "pinned_use_background_threads",
+      "pinned_max_round_threshold_mb",
+      "pinned_max_cached_size_mb"};
   return keys;
 }
 
@@ -238,6 +242,26 @@ size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
+size_t AcceleratorAllocatorConfig::parsePinnedMaxRoundThreshold(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  constexpr size_t max_allowed_mb = std::numeric_limits<size_t>::max() / kMB;
+  size_t val = std::min(tokenizer.toSizeT(++i), max_allowed_mb);
+  pinned_max_round_threshold_ = val * kMB;
+  return i;
+}
+
+size_t AcceleratorAllocatorConfig::parsePinnedMaxCachedSize(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  constexpr size_t max_allowed_mb = std::numeric_limits<size_t>::max() / kMB;
+  size_t val = std::min(tokenizer.toSizeT(++i), max_allowed_mb);
+  pinned_max_cached_size_ = val * kMB;
+  return i;
+}
+
 void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
@@ -262,6 +286,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
   max_non_split_rounding_size_ = large_segment_size_.load();
 
+  bool max_round_threshold_set{false}, max_cached_size_set{false};
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "large_segment_size_mb") {
@@ -278,6 +303,12 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       i = parseExpandableSegments(tokenizer, i);
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
+    } else if (key == "pinned_max_round_threshold_mb") {
+      i = parsePinnedMaxRoundThreshold(tokenizer, i);
+      max_round_threshold_set = true;
+    } else if (key == "pinned_max_cached_size_mb") {
+      i = parsePinnedMaxCachedSize(tokenizer, i);
+      max_cached_size_set = true;
     } else {
       // If a device-specific configuration parser hook is registered, it will
       // check if the key is unrecognized.
@@ -294,6 +325,16 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     if (i + 1 < tokenizer.size()) {
       tokenizer.checkToken(++i, ",");
     }
+  }
+
+  if (max_round_threshold_set && max_cached_size_set &&
+      pinned_max_round_threshold_ > pinned_max_cached_size_) {
+    TORCH_WARN_ONCE(
+        "pinned_max_round_threshold_mb (",
+        pinned_max_round_threshold_ >> 20,
+        ") > pinned_max_cached_size_mb (",
+        pinned_max_cached_size_ >> 20,
+        "). The cache size limit takes precedence: allocations above pinned_max_cached_size_mb are never rounded up.");
   }
 }
 

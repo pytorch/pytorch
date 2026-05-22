@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_ARM64,
     IS_CI,
-    IS_CPU_CAPABILITY_SVE256,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
@@ -1140,8 +1139,6 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
-    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/177243
     @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
@@ -5006,6 +5003,26 @@ class AOTInductorTestsTemplate:
         result2 = aoti_module(sample)
         self.assertTrue(torch.allclose(result2, sample * 2))
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_check_error_message_preserved(self):
+        # Exception thrown from CONVERT_EXCEPTION_TO_ERROR_CODE at the outer
+        # AOTI C ABI boundary (i.e. not from an aoti_torch_* shim) must reach
+        # Python via AOTInductorGetLastError, not be flattened to the generic
+        # "run_func_(...) API call failed" message.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        m = M()
+        good = torch.randn(4, dtype=torch.float32, device=self.device)
+        bad_dtype = good.to(torch.float16)
+        so_path = AOTIRunnerUtil.compile(m, (good,))
+        aoti_module = torch._inductor.aoti_load_package(so_path)
+        aoti_module(good)
+        with self.assertRaisesRegex(RuntimeError, "unmatched dtype"):
+            aoti_module(bad_dtype)
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
@@ -5336,7 +5353,7 @@ class AOTInductorTestsTemplate:
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
-            with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
+            with self.assertRaisesRegex(Exception, "Expected .* but received"):
                 optimized(torch.randn(100), torch.tensor(2))
 
     @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
@@ -5363,7 +5380,7 @@ class AOTInductorTestsTemplate:
         )
         optimized = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(model(*input1), optimized(*input1))
-        with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
+        with self.assertRaisesRegex(Exception, "Expected .* but received"):
             optimized(*input2)
 
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
@@ -5478,6 +5495,21 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
 
         self.check_model(m, inputs)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_assert_size_stride_guarded_by_env_check(self):
+        # Verify that assert_size_stride calls in AOTI-generated code are
+        # guarded by _check_aoti_runtime_check_inputs_env() so they only
+        # fire when AOTI_RUNTIME_CHECK_INPUTS is set.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.qr(x)[0]
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        FileCheck().check(
+            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
+        ).run(code)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
@@ -7140,13 +7172,23 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
-        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+        compile_config = {"always_keep_tensor_constants": True}
+        if self.device == "cuda":
+            compile_config["aot_inductor.weight_use_caching_allocator"] = True
+
+        with torch.no_grad(), config.patch(compile_config):
             so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
 
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def constant_buffer_memory_used():
+            if self.device == "cuda":
+                return torch.cuda.memory_allocated(self.device)
+            free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
+            return -free_memory
 
         def runner_call(*args, **kwargs):
             import torch.fx._pytree as fx_pytree
@@ -7168,11 +7210,11 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-        # Do not use user managed_buffer, should have less free memory.
+        mem_before = constant_buffer_memory_used()
+        # Do not use user managed_buffer, should allocate an owned constant buffer.
         runner.update_constant_buffer(new_weights, True, False, False)
-        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-        self.assertGreater(mem_before, mem_after)
+        mem_after = constant_buffer_memory_used()
+        self.assertGreater(mem_after, mem_before)
 
         runner.swap_constant_buffer()
         new_output = runner_call(test_inputs)
@@ -7203,10 +7245,10 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-        # Try user managed_buffer, should have same free memory.
+        mem_before = constant_buffer_memory_used()
+        # Try user managed_buffer, should not allocate an owned constant buffer.
         runner.update_constant_buffer(new_weights, True, False, True)
-        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
+        mem_after = constant_buffer_memory_used()
         self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
@@ -7250,6 +7292,54 @@ class AOTInductorTestsTemplate:
 
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
+
+    def test_load_constants_allow_h2d_copy(self):
+        # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
+        # accepts a CPU state_dict for a non-CPU model, the way a typical user
+        # would after torch.load(..., map_location="cpu").
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k, device=device))
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        compiled = torch._inductor.aoti_load_package(package_path)
+
+        (weight_fqn,) = compiled.get_constant_fqns()
+        cpu_state_dict = {weight_fqn: torch.randn(N, K, device="cpu")}
+        compiled.load_constants(
+            cpu_state_dict, check_full_update=True, allow_h2d_copy=True
+        )
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = torch.nn.functional.linear(
+            test_inputs, cpu_state_dict[weight_fqn].to(self.device)
+        )
+        self.assertEqual(expected, compiled(test_inputs))
+
+        # Without allow_h2d_copy, the same call must error out.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(cpu_state_dict, check_full_update=True)
+
+        # allow_h2d_copy + user_managed must be rejected up-front.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(
+                cpu_state_dict,
+                check_full_update=True,
+                user_managed=True,
+                allow_h2d_copy=True,
+            )
 
     def test_cond_share_predicate(self):
         class Model(torch.nn.Module):

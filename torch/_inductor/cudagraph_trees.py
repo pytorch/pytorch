@@ -69,6 +69,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
+    copy_strided_storage_,
     get_expanded_dims,
     get_input_idxs_to_check,
     index_expanded_dims,
@@ -428,11 +429,15 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
-
+        compile_id = kwargs.get("compile_id", "")
         if int_key is None:
-            log.info("Recording cudagraph tree for graph without symints")
+            log.info(
+                "[%s] Recording cudagraph tree for graph without symints", compile_id
+            )
         else:
-            log.info("Recording cudagraph tree for symint key %s", int_key)
+            log.info(
+                "[%s] Recording cudagraph tree for symint key %s", compile_id, int_key
+            )
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -1145,7 +1150,13 @@ class CUDAGraphNode:
             if not isinstance(srcs[idx], torch.Tensor):
                 continue
             expanded_dims = self.expanded_dims[idx]
-            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))  # type: ignore[arg-type]
+            indexed_dst = index_expanded_dims(dsts[idx], expanded_dims)  # type: ignore[arg-type]
+            if torch._debug_has_internal_overlap(indexed_dst) != 0:
+                # rare path: dst still self-overlaps after dropping expanded dims
+                copy_strided_storage_(dsts[idx], srcs[idx])  # type: ignore[arg-type]
+                srcs[idx] = None  # type: ignore[call-overload]
+                continue
+            dst_tensors.append(indexed_dst)
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))  # type: ignore[arg-type]
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
@@ -2208,7 +2219,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        return False
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2220,6 +2234,12 @@ class CUDAGraphTreeManager:
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
+
+        if (
+            self.path_state == ExecutionState.EXECUTION
+            and self.can_start_new_generation()
+        ):
+            self.try_end_curr_execution()
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2271,11 +2291,15 @@ class CUDAGraphTreeManager:
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
-                if (
-                    status == CheckInvariantStatus.StaticInputIdxMismatch
-                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
-                ):
-                    unexpected_rerecord = True
+                if status != CheckInvariantStatus.SUCCESS:
+                    # StaticInputIdxMismatch fires on non-cudagraph-managed
+                    # static inputs (nn parameters and mark_static_address
+                    # tensors) whose identity can churn under
+                    # inline_inbuilt_nn_modules. We re-record but don't count
+                    # those toward cudagraph_unexpected_rerecord_limit. All
+                    # other mismatch reasons do count.
+                    if status != CheckInvariantStatus.StaticInputIdxMismatch:
+                        unexpected_rerecord = True
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2570,6 +2594,9 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation():
+            if not self.current_node.all_outputs_are_dead():
+                self.apply_checkpoint_execution_state_in_allocator()
+            self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2641,6 +2668,15 @@ class CUDAGraphTreeManager:
         assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        live_storage_refs = list(self.current_node.path_live_weakrefs())
+        if not live_storage_refs:
+            return
+
+        if isinstance(self.current_node, CUDAGraphNode):
+            # Cached replay outputs are the Tensor objects returned to users.
+            # Drop them before poisoning stale outputs so future replays rebuild
+            # fresh Tensor objects.
+            self.current_node.remove_path_cached_tensors()
 
         stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
@@ -2671,7 +2707,7 @@ class CUDAGraphTreeManager:
                 stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = OrderedSet[Any]()
-        for storage_ref in self.current_node.path_live_weakrefs():
+        for storage_ref in live_storage_refs:
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
@@ -2679,7 +2715,14 @@ class CUDAGraphTreeManager:
                 msg = self.format_dealloc_msg(
                     stor_stack_trace.get(storage_ref.data_ptr())
                 )
-                torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                if torch._C._has_Standard_Deleter(_storage_deref):
+                    torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                else:
+                    # Replayed outputs are reconstructed from raw data pointers
+                    # and have non-owning storages.
+                    torch._C._cuda_cudaCachingAllocator_raw_delete(
+                        storage_ref.data_ptr()
+                    )
 
                 if self.disable_invalidate_aliases:
                     continue

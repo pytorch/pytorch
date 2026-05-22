@@ -243,7 +243,7 @@ enum {name} {{
 
         to_json_decl = f"void to_json(nlohmann::json& nlohmann_json_j, const {name}& nlohmann_json_t)"
         to_json_def = f"""{{
-{chr(10).join([f'  nlohmann_json_j["{name}"] = nlohmann_json_t.{name};' for name, f in cpp_fields.items()])}
+{chr(10).join([f'  nlohmann_json_j["{name}"] = nlohmann_json_t.{name};' for name in cpp_fields])}
 }}
 """
         from_json_decl = f"void from_json(const nlohmann::json& nlohmann_json_j, {name}& nlohmann_json_t)"
@@ -254,7 +254,7 @@ enum {name} {{
             chr(10).join(
                 [
                     f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
-                    for name, f in cpp_fields.items()
+                    for name in cpp_fields
                 ]
             )
         }

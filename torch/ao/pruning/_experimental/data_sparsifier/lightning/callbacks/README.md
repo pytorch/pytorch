@@ -1,6 +1,6 @@
 # Lightning callbacks for data sparsifier and scheduler
 
-**These are callback scripts for lightning and does not introduce pytorch lightning dependency on PyTorch.**
+**These are callback scripts for lightning and do not introduce pytorch lightning dependency on PyTorch.**
 
 ## Introduction
 Callbacks for PytorchLightning that specifies on when and how to sparsify the data weights of the model.

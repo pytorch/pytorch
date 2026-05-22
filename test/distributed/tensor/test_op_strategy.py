@@ -30,6 +30,7 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
+from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
@@ -444,6 +445,46 @@ class TestCostModel(DTensorOpTestBase):
         # Cost increases with earlier mesh dimensions due to the way
         # mesh dimensions are ordered (outer to inner in device hierarchy)
         self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
+
+
+class TestReductionStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _make_spec(self, mesh: DeviceMesh, placements):
+        tensor_meta = TensorMeta(
+            shape=torch.Size([8, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        return DTensorSpec(mesh, tuple(placements), tensor_meta)
+
+    def test_common_reduction_strategy_uses_per_strategy_linearity(self):
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(2, 2))
+        partial_avg_spec = self._make_spec(mesh, (Partial("avg"), Replicate()))
+        sharded_spec = self._make_spec(mesh, (Shard(0), Shard(1)))
+
+        reduction_strategy = common_reduction_strategy(
+            OpStrategy([OpSpec(partial_avg_spec), OpSpec(sharded_spec)]),
+            [0],
+            reduction_op="sum",
+        )
+
+        sharded_reduction_spec = reduction_strategy.strategies[1]
+        self.assertEqual(
+            sharded_reduction_spec.input_specs[0].placements, (Shard(0), Shard(1))
+        )
+        self.assertEqual(
+            sharded_reduction_spec.output_spec.placements,
+            (Partial("sum"), Shard(0)),
+        )
 
 
 # -------------Test op strategy registration-------------
@@ -1160,6 +1201,12 @@ class TestOpSpecMesh(TestCase):
         op_spec = OpSpec(output_specs=None, input_specs=(None, None))
         with self.assertRaisesRegex(AssertionError, "Cannot determine mesh"):
             _ = op_spec.mesh
+
+    def test_op_strategy_str_handles_all_specs_none(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/182370."""
+        op_strategy = OpStrategy([OpSpec(output_specs=None, input_specs=(None,))])
+
+        self.assertEqual(str(op_strategy), "OpStrategy[(None) -> None]")
 
 
 class TestExpandToFullMeshOpStrategy(TestCase):

@@ -141,9 +141,9 @@ void block_sparse_triangular_solve_vec(
         auto values = A.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = A.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = A.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
         int buffer_size = 0;
 
@@ -265,9 +265,9 @@ void block_sparse_triangular_solve_mat(
         auto values = A.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = A.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = A.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
         int buffer_size = 0;
 
@@ -383,9 +383,9 @@ void block_sparse_mv(
         auto values = mat.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = mat.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = mat.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         at::cuda::sparse::bsrmv(
             handle,
             block_layout,
@@ -494,9 +494,9 @@ void block_sparse_mm(
         auto values = mat1.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = mat1.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = mat1.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
 
         at::cuda::sparse::bsrmm(
             handle,

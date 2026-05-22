@@ -140,6 +140,23 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
 
+    def test_root_no_forward_inputs(self):
+        device = torch.device(device_type.type, 0)
+
+        class ParameterOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4, device=device))
+
+            def forward(self):
+                return self.weight @ self.weight
+
+        model = ParameterOnlyModule()
+        fully_shard(model)
+        out = model()
+        self.assertEqual(out.shape, (4, 4))
+        out.sum().backward()
+
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
@@ -2472,6 +2489,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             fully_shard(layer)
             layer._get_fsdp_state()._lazy_init()
         share_comm_ctx(list(model))
+        shared_comm_ctx = model[0]._get_fsdp_state()._comm_ctx
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn(4, 3, lin_dim, device=device_type.type)
@@ -2496,7 +2514,6 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
-            module_fqn: str | None = None,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -2508,7 +2525,6 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
-                module_fqn,
             )
 
         orig_foreach_reduce = foreach_reduce
@@ -2530,7 +2546,6 @@ class TestFullyShardShareCommContext(FSDPTest):
             partial_reduce_output: torch.Tensor | None,  # only used for HSDP
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
-            module_fqn: str | None = None,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2550,7 +2565,6 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
-                module_fqn,
             )
 
         with (
@@ -2565,6 +2579,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         self.assertEqual(len(all_gather_streams), 1)
         self.assertEqual(len(reduce_scatter_streams), 1)
+        self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
 
 
