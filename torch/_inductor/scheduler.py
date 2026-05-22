@@ -4999,8 +4999,7 @@ class Scheduler:
         hint_override: int | None = None,
     ) -> str:
         """
-        Benchmark fused list of nodes and return the execution time
-        in milliseconds on randomly generated inputs.
+        Generate a kernel given a list of pre-fused nodes.
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
@@ -5015,7 +5014,7 @@ class Scheduler:
         self, module: ModuleType, device: torch.device
     ) -> tuple[float, str]:
         """
-        Benchmark fused list of nodes and return the execution time
+        Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
         """
         self.current_device = device
@@ -8878,8 +8877,10 @@ class Scheduler:
             reordered_nodes, name_to_freeable_input_buf, graph_outputs
         )
 
-        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
-        if reorder_peak_memory < default_peak_memory * 1.1:
+        if (
+            reorder_peak_memory
+            < default_peak_memory * config.triton.cudagraph_partition_memory_budget
+        ):
             return reordered_nodes
 
         return nodes
