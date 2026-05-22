@@ -674,13 +674,15 @@ class DeferredTritonCallWrapper:
             scratch_spaces=scratch_spaces,
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
+        num_warps = str(params["num_warps"])
+        shared_mem = str(params["shared_mem"])
         launch_kernel_args = [
             kernel_var_name,
             "grid_0",
             "grid_1",
             "grid_2",
-            str(params["num_warps"]),
-            str(params["shared_mem"]),
+            num_warps,
+            shared_mem,
             "kernel_args_",
             "stream_",
         ]
@@ -697,6 +699,8 @@ class DeferredTritonCallWrapper:
                 arg_types,
                 arg_signatures,
                 launch_kernel_args,
+                num_warps=num_warps,
+                shared_mem=shared_mem,
             )
         else:
             prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
@@ -709,9 +713,11 @@ class DeferredTritonCallWrapper:
         arg_types: list[Any],
         arg_signatures: list[str | None],
         launch_kernel_args: list[str],
+        num_warps: str,
+        shared_mem: str,
     ) -> None:
         """Wrap a kernel launch in an AOTI record_function profiling scope."""
-        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
+        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", kernel_var_name)
         prefix.writeline("{")
         with prefix.indent():
             prefix.writelines(
@@ -725,8 +731,8 @@ class DeferredTritonCallWrapper:
                 ("grid_0", "grid_0"),
                 ("grid_1", "grid_1"),
                 ("grid_2", "grid_2"),
-                ("num_warps", launch_kernel_args[4]),
-                ("shared_mem", launch_kernel_args[5]),
+                ("num_warps", num_warps),
+                ("shared_mem", shared_mem),
             ]
             for k, v in record_launch_kernel_args:
                 arg_name = f"{normalized_kernel_name}_{k}"
