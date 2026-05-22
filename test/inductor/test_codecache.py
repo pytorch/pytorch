@@ -995,6 +995,50 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    @torch._dynamo.config.patch(
+        {
+            "caching_precompile": True,
+        }
+    )
+    def test_cache_hot_load_caching_precompile_autocast(self):
+        def fn(x):
+            return x + 1 * x
+
+        x = torch.randn(3, 2, device="cuda")
+
+        with fresh_cache():
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifact_bytes, cache_info = artifacts
+        self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+            self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+            compiled_fn = torch.compile(fn)
+            with torch.amp.autocast(device_type="cuda"):
+                eager_result = fn(x)
+                compiled_result = compiled_fn(x)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
+
     @config.patch(
         {
             "fx_graph_cache": True,

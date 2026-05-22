@@ -271,11 +271,18 @@ class GuardManagerWrapper:
     the check_nopybind from C++.
     """
 
-    def __init__(self, root: RootGuardManager | None = None) -> None:
+    def __init__(
+        self,
+        root: RootGuardManager | None = None,
+        local_state: Any | None = None,
+    ) -> None:
         if root is None:
             self.root = RootGuardManager()
         else:
             self.root = root
+
+        if local_state is not None:
+            self.root.set_local_state(local_state)
 
         self.diff_guard_root: RootGuardManager | None = None
         self.closure_vars: dict[str, Any] | None = None
@@ -3871,6 +3878,7 @@ class ShapeCodeParts:
 class GuardsState:
     output_graph: OutputGraphGuardsState
     shape_code_parts: ShapeCodeParts | None
+    local_state: Any | None = None
 
 
 class _Missing:
@@ -4367,6 +4375,7 @@ class CheckFunctionManager:
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
         strict_error: bool = False,
+        guard_build_local_state: Any | None = None,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -4390,6 +4399,7 @@ class CheckFunctionManager:
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         self.runtime_global_scope = runtime_global_scope
+        self.guard_build_local_state = guard_build_local_state
         self.global_state: torch._C._dynamo.guards.GlobalStateGuard | None = None
         self.torch_function_mode_stack_check_fn: Callable[[], bool] | None = None
 
@@ -4701,6 +4711,7 @@ class CheckFunctionManager:
         guards_state = GuardsState(
             output_graph=output_graph_guards_state,
             shape_code_parts=self.shape_code_parts,
+            local_state=self.guard_manager.root.get_local_state(),
         )
 
         return pickle_guards_state(guards_state, builder)
@@ -4715,7 +4726,7 @@ class CheckFunctionManager:
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
-        guard_manager = GuardManagerWrapper()
+        guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
 
         w_builder = None
