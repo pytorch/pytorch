@@ -1608,6 +1608,34 @@ class CUDAGraphNode:
                 return False
         return True
 
+    @staticmethod
+    def _check_liveness_ignoring_tensor_refs(
+        indices: list[PathOutputIndex],
+        output_refs: list[list[StorageWeakRefWrapper | None]],
+        ignored_live_ref_counts: dict[PathOutputIndex, int],
+    ) -> bool:
+        "Check liveness after subtracting temporary Tensor refs held for restoration."
+        for depth, output_index in indices:
+            w = output_refs[depth][output_index]
+            assert w is not None
+            ignored_count = ignored_live_ref_counts.get((depth, output_index), 0)
+            if ignored_count == 0:
+                if w() is not None:
+                    return False
+                continue
+
+            if w.extra_ref_check is not None and not w.extra_ref_check():
+                return False
+
+            stor_count = torch._C._storage_Use_Count(w.ref.cdata) - ignored_count
+            if w.extra_ref_check is not None:
+                # See StorageWeakRefWrapper.expired().
+                stor_count -= 2
+            assert stor_count >= 0
+            if stor_count != 0:
+                return False
+        return True
+
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
         "Adds node as a child of self"
         self.children[function_id].append(node)
@@ -1855,17 +1883,54 @@ class CUDAGraphNode:
         # the cudagraph managed tensors which died upon recording must also die upon
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
+        cleared_inputs: list[tuple[int, InputType]] = []
+        expected_dead_indices_after_graph = OrderedSet(
+            self.expected_dead_indices_after_graph
+        )
+        cleared_input_ref_counts: dict[int, int] = defaultdict(int)
         for idx in self.cudagraph_managed_idxs:
             if not self.preserved_aliased_inputs[idx]:
+                inp = inputs[idx]
+                cleared_inputs.append((idx, inp))
+                if (
+                    isinstance(inp, torch.Tensor)
+                    and self.live_cudagraph_managed_path_refs[idx]
+                    in expected_dead_indices_after_graph
+                ):
+                    cleared_input_ref_counts[id(inp)] += 1
                 inputs[idx] = None  # type: ignore[call-overload]
+                del inp
 
-        torch._check(
-            self._check_liveness(
-                self.expected_dead_indices_after_graph, self.path_weakrefs
-            ),
-            lambda: "TODO: graph recording observed an input tensor deallocate during graph "
-            " recording that did not occur during replay. Please file an issue.",
-        )
+        ignored_live_ref_counts: dict[PathOutputIndex, int] = defaultdict(int)
+        seen_input_ids: OrderedSet[int] = OrderedSet()
+        for idx, inp in cleared_inputs:
+            if not isinstance(inp, torch.Tensor):
+                continue
+            path_ref = self.live_cudagraph_managed_path_refs[idx]
+            if path_ref is None or path_ref not in expected_dead_indices_after_graph:
+                continue
+
+            inp_id = id(inp)
+            if inp_id in seen_input_ids:
+                continue
+            seen_input_ids.add(inp_id)
+
+            # sys.getrefcount() adds one temporary reference, and the local
+            # `inp` adds another. If no refs remain beyond cleared_inputs,
+            # clearing inputs would drop this TensorImpl's storage reference.
+            if sys.getrefcount(inp) == cleared_input_ref_counts[inp_id] + 2:
+                ignored_live_ref_counts[path_ref] += 1
+
+        if not self._check_liveness_ignoring_tensor_refs(
+            self.expected_dead_indices_after_graph,
+            self.path_weakrefs,
+            ignored_live_ref_counts,
+        ):
+            for idx, inp in cleared_inputs:
+                inputs[idx] = inp
+            status = CheckInvariantStatus.ExpectedDeadIndicesAfterGraphMismatch
+            return status, lambda: f"{status}"
+
         return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def num_descendants(self) -> int:
@@ -2069,6 +2134,10 @@ class CUDAGraphTreeManager:
 
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
+        # warn once when replay-time liveness would make an existing graph unsafe
+        self.warned_liveness_mismatch: OrderedSet[tuple[GraphID | None, FunctionID]] = (
+            OrderedSet()
+        )
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
@@ -2282,7 +2351,9 @@ class CUDAGraphTreeManager:
 
         if not self.in_recording:
             unexpected_rerecord = False
-            unexpected_rerecord_reason = None
+            unexpected_rerecord_reason: str | Callable[..., str] | None = None
+            liveness_mismatch = False
+            liveness_mismatch_reason: str | Callable[..., str] | None = None
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
@@ -2292,6 +2363,28 @@ class CUDAGraphTreeManager:
                     return self.execute_node(child, new_inputs)
 
                 if status != CheckInvariantStatus.SUCCESS:
+                    if log.isEnabledFor(logging.DEBUG):
+                        mismatch_reason: str | Callable[..., str] = status_logger()
+                        log.debug(
+                            "[%s] CUDAGraph invariant mismatch function=%s, "
+                            "mode=%s, reason=%s",
+                            self.compile_id,
+                            self.get_func_name(function_id),
+                            self.id_to_mode[function_id].name,
+                            mismatch_reason,
+                        )
+                    else:
+                        # Defer reason computation until needed (for exceed_rerecord_limit)
+                        mismatch_reason = status_logger
+
+                    if (
+                        status
+                        == CheckInvariantStatus.ExpectedDeadIndicesAfterGraphMismatch
+                    ):
+                        liveness_mismatch = True
+                        liveness_mismatch_reason = mismatch_reason
+                        continue
+
                     # StaticInputIdxMismatch fires on non-cudagraph-managed
                     # static inputs (nn parameters and mark_static_address
                     # tensors) whose identity can churn under
@@ -2300,19 +2393,7 @@ class CUDAGraphTreeManager:
                     # other mismatch reasons do count.
                     if status != CheckInvariantStatus.StaticInputIdxMismatch:
                         unexpected_rerecord = True
-                    # Only compute detailed reason when debug logging is enabled
-                    if log.isEnabledFor(logging.DEBUG):
-                        unexpected_rerecord_reason = status_logger()
-                        log.debug(
-                            "[%s] Re-recording function=%s, mode=%s, reason=%s",
-                            self.compile_id,
-                            self.get_func_name(function_id),
-                            self.id_to_mode[function_id].name,
-                            unexpected_rerecord_reason,
-                        )
-                    else:
-                        # Defer reason computation until needed (for exceed_rerecord_limit)
-                        unexpected_rerecord_reason = status_logger
+                    unexpected_rerecord_reason = mismatch_reason
 
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
@@ -2331,6 +2412,23 @@ class CUDAGraphTreeManager:
                     function_id
                 ]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
+
+            if liveness_mismatch:
+                curr_node_id = self._get_node_id()
+                skip_key = (curr_node_id, function_id)
+                if skip_key not in self.warned_liveness_mismatch:
+                    self.warned_liveness_mismatch.add(skip_key)
+                    assert liveness_mismatch_reason is not None
+                    reason = (
+                        liveness_mismatch_reason
+                        if isinstance(liveness_mismatch_reason, str)
+                        else liveness_mismatch_reason()
+                    )
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraph due to {reason}; replay would overwrite "
+                        "a live tensor from a prior cudagraph recording."
+                    )
+                return self.ids_to_funcs[function_id].model(new_inputs)
 
             # nb: run before checkpointing because checkpointing is slow, and we will
             # be using the eager caching allocator pool which does not require live
