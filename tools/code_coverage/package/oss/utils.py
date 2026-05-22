@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 
 from ..util.setting import CompilerType, TestType, TOOLS_FOLDER
@@ -78,14 +79,10 @@ def clean_up_gcda() -> None:
 
 
 def get_gcda_files() -> list[str]:
-    folder_has_gcda = os.path.join(get_pytorch_folder(), "build")
-    if os.path.isdir(folder_has_gcda):
-        # TODO use glob
-        # output = glob.glob(f"{folder_has_gcda}/**/*.gcda")
-        output = subprocess.check_output(["find", folder_has_gcda, "-iname", "*.gcda"])
-        return output.decode("utf-8").split("\n")
-    else:
+    build_dir = Path(get_pytorch_folder()) / "build"
+    if not build_dir.is_dir():
         return []
+    return sorted(str(path) for path in build_dir.rglob("*.gcda") if path.is_file())
 
 
 def run_oss_python_test(binary_file: str) -> None:
