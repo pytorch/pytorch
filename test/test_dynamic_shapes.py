@@ -734,6 +734,19 @@ def forward(self, x_1):
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
 
+    def test_set_replacement_skips_direct_cycles(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        i0_sym = i0.node.expr
+        i1_sym = i1.node.expr
+
+        shape_env._set_replacement(i0_sym, i1_sym, "test")
+        shape_env._set_replacement(i1_sym, i0_sym, "test")
+
+        self.assertEqual(shape_env.replacements[i0_sym], i1_sym)
+        self.assertNotIn(i1_sym, shape_env.replacements)
+
     def test_expect_true_with_s0(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 5)

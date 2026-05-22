@@ -7439,6 +7439,10 @@ class ShapeEnv:
         if tgt == self.replacements.get(a, None):
             return
 
+        # avoid direct cycle, find will reduce rank to 1
+        if a == self.replacements.get(tgt, None):
+            return
+
         if a in tgt.free_symbols:
             return
 
