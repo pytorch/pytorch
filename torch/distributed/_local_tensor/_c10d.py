@@ -85,7 +85,7 @@ def _resolve_pg_or_name(
     """
     if isinstance(group, (ProcessGroup, ScriptObject)):
         return group
-    return _resolve_process_group(group)
+    return _resolve_process_group(GroupName(group))
 
 
 def _prepare_collective_groups(
