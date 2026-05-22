@@ -18,9 +18,10 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import inspect
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, TYPE_CHECKING
@@ -711,7 +712,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_function(
         self,
         tx: Any,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(
@@ -933,6 +934,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # CPython where a.__eq__(b) can return NotImplemented.
             # See object_protocol.py for the full dispatch architecture.
             return self.richcompare_impl(tx, args[0], name)
+        elif name == "__subclasscheck__" and len(args) == 1 and not kwargs:
+            if (self_py := self.as_python_constant()) and (
+                derived_py := args[0].as_python_constant()
+            ):
+                if (
+                    inspect.getattr_static(self_py, "__subclasscheck__", None)
+                    is type.__subclasscheck__
+                ):
+                    return variables.ConstantVariable.create(
+                        issubclass(derived_py, self_py)
+                    )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
         # cannot trace into.  Constant-fold it for VTs backed by a real
         # Python object so that copy.deepcopy can trace through.
@@ -985,7 +997,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Performance optimization to implement optree.tree_map faster than tracing it"""
@@ -1018,7 +1030,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
@@ -1035,7 +1047,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
@@ -1057,7 +1069,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1096,7 +1108,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1111,7 +1123,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1222,7 +1234,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-        return NO_SUCH_SUBOBJ
+
+        try:
+            return self.as_python_constant()
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
 
     def is_python_equal(self, other: object) -> bool:
         """

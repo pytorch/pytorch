@@ -764,7 +764,7 @@ class TensorVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return map_fn.call_function(tx, [self, *rest], {})
@@ -824,7 +824,7 @@ class TensorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
@@ -2185,7 +2185,7 @@ class TensorVariable(VariableTracker):
                 for a in args
             )
         ):
-            return self.call_method(tx, "new_empty", args, kwargs)
+            return self.call_method(tx, "new_empty", list(args), kwargs)
         return None
 
     def method_new_tensor(
@@ -2467,7 +2467,7 @@ class SymNodeVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -2828,8 +2828,8 @@ class NumpyNdarrayVariable(TensorVariable):
 
     @staticmethod
     def patch_args(
-        name: str, args: Sequence[VariableTracker], kwargs: dict[str, VariableTracker]
-    ) -> tuple[Sequence[VariableTracker], dict[str, VariableTracker]]:
+        name: str, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
         if name == "clip":
             kwargs_rename = {"a_min": "min", "a_max": "max"}
             kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
@@ -2839,7 +2839,7 @@ class NumpyNdarrayVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..exc import unimplemented
@@ -2957,7 +2957,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Handle `Subclass(existing_tensor, ...)` calls.
