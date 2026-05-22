@@ -387,6 +387,11 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward19, [["add", "add_1", "add_2"]]),
         # Consumers of an unsupported producer are not fused horizontally.
         (TestPartitionFunctions.forward20, [["add"], ["add_1"]]),
+        # Reachability through unsupported nodes still prevents cyclic partitions.
+        (
+            TestPartitionFunctions.forward12,
+            [["add"], ["add_1", "add_3", "add_4"], ["add_2"]],
+        ),
         # Tuple producer/getitem chains still fuse with their data-dependent user.
         (TestPartitionFunctions.forward14, [["std_mean", "getitem", "getitem_1", "add"]]),
     ])
