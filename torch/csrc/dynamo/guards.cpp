@@ -857,7 +857,7 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
-  const PyObject* obj = nullptr;
+  PyObject* obj = nullptr;
   unsigned long long expected = 0;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return nullptr;
@@ -7274,8 +7274,7 @@ void* convert_to_root_guard_manager(py::object root) {
   if (root.is(py::none())) {
     return nullptr;
   }
-  const RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
-  return (void*)root_mgr;
+  return std::move(root).cast<RootGuardManager*>();
 }
 
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
