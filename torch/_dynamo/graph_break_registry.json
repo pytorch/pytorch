@@ -2783,6 +2783,17 @@
       "Hints": []
     }
   ],
+  "GB4393": [
+    {
+      "Gb_type": "issubclass() with unsupported arguments",
+      "Context": "issubclass({derived}, {cls})",
+      "Explanation": "Arguments to issubclass() must be backed by python values.",
+      "Hints": [
+        "Make sure your arguments are types.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0203": [
     {
       "Gb_type": "non-const keys in dict_keys",
@@ -3904,7 +3915,7 @@
   "GB0277": [
     {
       "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
-      "Context": "str(example_value)",
+      "Context": "context",
       "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
       "Hints": [
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
