@@ -24,6 +24,8 @@ optimization of PyTorch programs.
 
 from __future__ import annotations
 
+import _warnings
+
 import collections
 import collections.abc
 import contextlib
@@ -82,6 +84,7 @@ from .bytecode_transformation import (
     create_jump_absolute,
     create_rot_n,
     create_swap,
+    get_call_callable_depth,
     get_code_keys,
     Instruction,
     is_generator,
@@ -201,7 +204,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -809,7 +812,12 @@ def generic_jump(
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
         jump_inst = create_instruction(inst.opname, target=if_jump[0])
-        jump_inst.copy_positions(inst)
+        # For inlined frames, use the root frame's current instruction
+        # positions so the output code maps to the correct source line.
+        positions_inst = (
+            self.output.root_tx.current_instruction if self.parent is not None else inst
+        )
+        jump_inst.copy_positions(positions_inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
@@ -1009,6 +1017,27 @@ def _reconstruct_block_stack(
             cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
 
 
+def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any]:
+    """Create a wrapper for warnings.warn that reports the given source location.
+
+    When warnings.warn (stacklevel=1) inspects its caller frame, it sees the
+    wrapper's code object -- whose co_filename and line table point to the
+    original leaf-frame location.  This preserves Python's per-location
+    warning dedup even when the call is inlined into a different frame by
+    nested graph breaks.
+    """
+    import warnings
+
+    # Use a lambda so all bytecode is on one line and co_firstlineno
+    # equals the body line (no off-by-one vs a multi-line def).
+    wrapper: Callable[..., Any] = lambda *args, **kwargs: warnings.warn(*args, **kwargs)  # noqa: E731
+    wrapper.__code__ = wrapper.__code__.replace(
+        co_filename=filename,
+        co_firstlineno=lineno,
+    )
+    return wrapper
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1100,6 +1129,12 @@ def break_graph_if_unsupported(
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
+            # When warnings.warn is called from an inlined frame, replace
+            # it on the symbolic stack before compile_subgraph so the codegen
+            # naturally reconstructs the wrapper via LOAD_GLOBAL.
+            if self.parent is not None:
+                self._maybe_replace_warnings_warn_on_stack(inst)
+
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=int(push) - stack_effect
@@ -1109,6 +1144,16 @@ def break_graph_if_unsupported(
             _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
+
+            # For inlined frames, use the root frame's current instruction
+            # positions so the output code maps to the correct source line.
+            # The output code is always for the root function, so line numbers
+            # from inlined child frames would be wrong.
+            positions_inst = (
+                self.output.root_tx.current_instruction
+                if self.parent is not None
+                else inst
+            )
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -1128,7 +1173,7 @@ def break_graph_if_unsupported(
                 if inst.arg is None:
                     raise AssertionError("expected inst.arg is not None to be true")
                 call_insts = create_call_function(inst.arg, False)
-                call_insts[-1].copy_positions(inst)
+                call_insts[-1].copy_positions(positions_inst)
                 self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
@@ -1136,6 +1181,7 @@ def break_graph_if_unsupported(
                     raise AssertionError("expected inst.target is None to be true")
                 inst_copy = copy.copy(inst)
                 inst_copy.exn_tab_entry = None
+                inst_copy.copy_positions(positions_inst)
                 self.output.add_output_instructions([inst_copy])
 
             self.output.add_output_instructions(cleanup)
@@ -1440,7 +1486,7 @@ class InstructionTranslatorBase(
     def inline_generator_function(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1453,7 +1499,7 @@ class InstructionTranslatorBase(
     def inline_user_function_return(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
@@ -3333,6 +3379,43 @@ class InstructionTranslatorBase(
         counters["resumes"][new_code.co_name] += 1
 
         return new_code, resume_name
+
+    def _maybe_replace_warnings_warn_on_stack(self, inst: Instruction) -> None:
+        """Replace warnings.warn on the symbolic stack with a wrapper that
+        preserves the leaf frame's source location for warning dedup.
+
+        When nested graph breaks inline a warnings.warn call into the root
+        frame's bytecode, the root frame's line numbers defeat Python's
+        per-location warning dedup.  This replaces the SkipFunctionVariable
+        for warnings.warn on the symbolic stack before compile_subgraph, so
+        the codegen naturally reconstructs the wrapper via LOAD_GLOBAL.
+        """
+        if inst.arg is None:
+            return
+
+        try:
+            depth = get_call_callable_depth(inst.opname, inst.arg)
+        except ValueError:
+            return
+
+        callable_idx = len(self.stack) - depth
+        callable_var = self.stack[callable_idx]
+        if not (
+            isinstance(callable_var, SkipFunctionVariable)
+            and callable_var.value is _warnings.warn
+        ):
+            return
+
+        leaf_filename = self.f_code.co_filename
+        leaf_lineno = inst.positions.lineno if inst.positions else inst.starts_line
+        if leaf_lineno is None:
+            return
+
+        wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
+        wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
+        self.stack[callable_idx] = SkipFunctionVariable(
+            wrapper, source=GlobalSource(wrapper_name)
+        )
 
     def create_call_resume_at(
         self,
@@ -5545,7 +5628,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         cls,
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tracer = None
@@ -5625,7 +5708,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         if not isinstance(
