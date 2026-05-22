@@ -228,9 +228,11 @@ class RecordFunctionVariable(GenericContextWrappingVariable):
         )
 
     def enter(self, tx):
+        tx.active_generic_context_managers.append(self)
         return self.record_fn.enter(tx)
 
     def exit(self, tx, *args):
+        tx.active_generic_context_managers.pop()
         return self.record_fn.exit(tx, *args)
 
 

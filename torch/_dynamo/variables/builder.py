@@ -1064,6 +1064,7 @@ class VariableBuilder:
                 return self.wrap_tensor(value)
 
         if isinstance(value, torch.profiler.record_function):
+            self.install_guards(GuardBuilder.ID_MATCH)
             return RecordFunctionVariable(value)
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
