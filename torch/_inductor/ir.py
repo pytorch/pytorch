@@ -7961,17 +7961,19 @@ class UserDefinedTritonKernel(ExternKernel):
         return self._codegen(wrapper, epilogue_fusion=None)
 
     def codegen_with_epilogue_fusion(
-        self, wrapper: PythonWrapperCodegen, epilogue_fusion: tuple[ComputedBuffer, str]
+        self,
+        wrapper: PythonWrapperCodegen,
+        epilogue_fusion: tuple[ComputedBuffer, str, list[tuple[str, str]]],
     ) -> None:
         """
-        epilogue_fusion: (fused epilogue node, modified kerel src code)
+        epilogue_fusion: (fused epilogue node, modified kernel src code, additional buf args)
         """
         return self._codegen(wrapper, epilogue_fusion)
 
     def _codegen(
         self,
         wrapper: PythonWrapperCodegen,
-        epilogue_fusion: tuple[ComputedBuffer, str] | None,
+        epilogue_fusion: tuple[ComputedBuffer, str, list[tuple[str, str]]] | None,
     ) -> None:
         """Overrides the parent member.
         See https://github.com/pytorch/pytorch/issues/151692"""
@@ -8008,8 +8010,13 @@ class UserDefinedTritonKernel(ExternKernel):
             assert len(self.formal_accesses.read_writes.writes) == 1
             mutable_arg_name = next(iter(self.formal_accesses.read_writes.writes)).name
             assert mutable_arg_name in named_args
-            epilogue_computed_buffer, _ = epilogue_fusion
+            epilogue_computed_buffer, _, additional_args = epilogue_fusion
             named_args[mutable_arg_name] = epilogue_computed_buffer
+            prepended = {
+                param_name: V.graph.get_buffer(buf_name)
+                for param_name, buf_name in additional_args
+            }
+            named_args = {**prepended, **named_args}
 
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
