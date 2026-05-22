@@ -24,7 +24,8 @@ ExperimentalConfig::ExperimentalConfig(
     bool record_python_gc_info,
     bool expose_kineto_event_metadata,
     std::string custom_profiler_config,
-    bool adjust_timestamps)
+    bool adjust_timestamps,
+    bool trace_only)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
@@ -37,7 +38,8 @@ ExperimentalConfig::ExperimentalConfig(
       record_python_gc_info{record_python_gc_info},
       expose_kineto_event_metadata{expose_kineto_event_metadata},
       custom_profiler_config(std::move(custom_profiler_config)),
-      adjust_timestamps{adjust_timestamps} {}
+      adjust_timestamps{adjust_timestamps},
+      trace_only{trace_only} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();
