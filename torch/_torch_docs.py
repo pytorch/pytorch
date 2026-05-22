@@ -14123,7 +14123,8 @@ the returned index satisfies the following rules:
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension unless :attr:`sorter` is provided, in which case the sequence does not
-                              need to be sorted
+                              need to be sorted. PyTorch does not validate this condition when :attr:`sorter` is 
+                              not provided, and the behavior is undefined if the sequence is not sorted.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:
