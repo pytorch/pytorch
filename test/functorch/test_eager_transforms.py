@@ -1461,6 +1461,22 @@ class TestAutogradFunction(TestCase):
         grad(f)(x)
         self.assertEqual(names, ["FooBarGeneratedBackward"])
 
+    def test_set_data_does_not_propagate_functorch_keys(self, device):
+        # Regression: Tensor.set_data used to copy FuncTorchGradWrapper onto a
+        # plain destination, triggering an unchecked cast in maybeGetTensorWrapper.
+        weight = nn.Parameter(torch.randn(8, 8, device=device))
+
+        def f(x):
+            weight.data = x.new_zeros(8, 8) + weight.detach()
+            return (x * weight).sum()
+
+        x = torch.randn(8, 8, device=device)
+        g = grad(f)(x)
+        self.assertEqual(g.shape, x.shape)
+        self.assertFalse(
+            torch._C._dispatch_keys(weight).has(DispatchKey.FuncTorchGradWrapper)
+        )
+
 
 @markDynamoStrictTest
 class TestAutogradFunctionVmapAPI(TestCase):
