@@ -34,7 +34,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -4680,6 +4680,28 @@ def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
         )
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=((2,),))
+
+def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # Shapes chosen to land on the quack/cutedsl override's supported path:
+    # fp16/bf16/fp32, SM 9.x/10.x, rank >= 2.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((4, 8, 32), (32,), {'eps': 1e-5}),
+        ((2, 16, 512), (512,), {'eps': 1e-5}),
+        ((4, 32, 1024), (1024,), {'eps': 1e-5}),
+        # multi-dim normalized_shape: exercises the override's reshape logic
+        ((2, 4, 8, 16), (8, 16), {'eps': 1e-5}),
+        # eps=None exercises the finfo(float32).eps fallback in _fused_rms_norm_impl
+        # (accumulator dtype, matching aten/src/ATen/native/cuda/layer_norm_kernel.cu).
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
 
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -15890,7 +15912,6 @@ op_db: list[OpInfo] = [
         "native_group_norm",
         aten_name="native_group_norm",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
         ref=reference_native_group_norm,
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
@@ -16647,7 +16668,6 @@ op_db: list[OpInfo] = [
            aliases=('group_norm',),
            ref=reference_group_norm,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -23579,6 +23599,37 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
     )
 )
 
+if "cutedsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="cutedsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_cutedsl,
+            decorators=[
+                onlyCUDA,
+                skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
+            ],
+            skips=(
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
+                DecorateInfo(
+                    unittest.skip("override intentionally narrower than aten"),
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
+
 op_db += opinfo.definitions.op_db
 
 # Separate registry for experimental Python Reference OpInfos.
@@ -26362,17 +26413,6 @@ python_ref_db = [
         "_refs.nn.functional.group_norm",
         torch_opinfo_name="nn.functional.group_norm",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-        )
     ),
     PythonRefInfo(
         "_refs.native_group_norm",
@@ -26381,8 +26421,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_meta", device_type="mps", dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)),
         ),
         torch_opinfo_name="native_group_norm",
     ),

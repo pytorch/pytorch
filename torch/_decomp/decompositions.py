@@ -1140,18 +1140,103 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
 def unfold_backward(
     grad: Tensor, input_size: list[int], dimension: int, size: int, step: int
 ) -> Tensor:
+    torch._check_value(step > 0, lambda: f"step is {step} but must be > 0")
     if len(input_size) == 0:
         return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
-    idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
-    idx = idx.unfold(0, size, step).flatten()
-    grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
-    # nb. At the moment this generates two kernels in triton
-    # It could potentially be fused into one call to scatter_reduce,
-    # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    index = (None,) * dim + (idx,)
-    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
+
+    def _vectorized_index_put() -> Tensor:
+        idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
+        idx = idx.unfold(0, size, step).flatten()
+        source = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+        index = (None,) * dim + (idx,)
+        return aten._unsafe_index_put(
+            grad_input, index, source, accumulate=True
+        ).contiguous()
+
+    if step >= size:
+        return _vectorized_index_put()
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def _is_canonical_grad_shape() -> bool:
+        if grad.dim() != len(input_size) + 1:
+            return False
+        if not statically_known_true(grad.size(-1) == size):
+            return False
+
+        n_folds = (input_size[dim] - size) // step + 1
+        if not statically_known_true(grad.size(dim) == n_folds):
+            return False
+
+        return all(
+            source_dim == dim
+            or statically_known_true(grad.size(source_dim) == dim_size)
+            for source_dim, dim_size in enumerate(input_size)
+        )
+
+    if _is_canonical_grad_shape():
+        return _vectorized_index_put()
+
+    def _sym_min_if_needed(a, b):
+        if statically_known_true(a <= b):
+            return a
+        if statically_known_true(b <= a):
+            return b
+        return torch.sym_min(a, b)
+
+    def _sym_max_if_needed(a, b):
+        if statically_known_true(a >= b):
+            return a
+        if statically_known_true(b >= a):
+            return b
+        return torch.sym_max(a, b)
+
+    def _reshape_source(source: Tensor, target_shape: list[int]) -> Tensor:
+        ndim = len(target_shape)
+        source_ndim = source.dim()
+        if source_ndim > ndim:
+            return source.expand(target_shape)
+
+        dim_offset = ndim - source_ndim
+        view_shape = [1] * ndim
+        for source_dim in range(source_ndim):
+            target_dim = dim if source_dim == dim else source_dim + dim_offset
+            if target_dim < 0 or target_dim >= ndim:
+                return source.expand(target_shape)
+            if statically_known_true(view_shape[target_dim] == 1):
+                view_shape[target_dim] = source.shape[source_dim]
+            else:
+                # Multiple grad dimensions may align to the unfolded input
+                # dimension after select(); only singleton collisions can
+                # still be reshaped and broadcast to the target shape.
+                torch._check(
+                    source.shape[source_dim] == 1,
+                    lambda: "unfold_backward grad shape is not broadcastable "
+                    "to input_size",
+                )
+
+        return source.reshape(view_shape).expand(target_shape)
+
+    input_dim_size = input_size[dim]
+    grad_dim_size = grad.size(dim)
+    # Descending offsets make each grad_input element accumulate overlapping
+    # windows in increasing fold-index order, matching native numerics.
+    for offset in reversed(range(size)):
+        max_valid_len = _sym_max_if_needed(
+            (input_dim_size - offset + step - 1) // step, 0
+        )
+        valid_len = _sym_min_if_needed(grad_dim_size, max_valid_len)
+        idx = torch.arange(valid_len, device=grad.device, dtype=torch.int32)
+        idx = idx * step + offset
+        source = grad.select(-1, offset).narrow(dim, 0, valid_len)
+        source_shape = list(input_size)
+        source_shape[dim] = valid_len
+        source = _reshape_source(source, source_shape)
+        grad_input = aten.index_add(grad_input, dim, idx, source)
+
+    return grad_input.contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -1586,9 +1671,10 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward.multiple_grads)
+@register_decomposition(aten.native_group_norm_backward)
+@out_wrapper("out0", "out1", "out2")
 @pw_cast_for_opmath
-def native_group_norm_backward_multiple_grads(
+def native_group_norm_backward(
     grad_output: Tensor | None,
     input: Tensor,
     mean: Tensor,
@@ -1599,9 +1685,10 @@ def native_group_norm_backward_multiple_grads(
     HxW: int,
     group: int,
     output_mask: list[bool],
-    grad_mean: Tensor | None,
-    grad_rstd: Tensor | None,
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    *,
+    grad_mean: Tensor | None = None,
+    grad_rstd: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
     optional_tensors_present = tuple(
         t for t in (grad_output, gamma, grad_mean, grad_rstd) if t is not None
     )
@@ -1634,178 +1721,117 @@ def native_group_norm_backward_multiple_grads(
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    grad_output_cast = (
+        _maybe_convert_to_dtype(grad_output, computation_dtype)
+        if grad_output is not None
+        else None
+    )
+    input_cast = _maybe_convert_to_dtype(input, computation_dtype)
+    mean_cast = _maybe_convert_to_dtype(mean, computation_dtype)
+    rstd_cast = _maybe_convert_to_dtype(rstd, computation_dtype)
+    gamma_cast = (
+        _maybe_convert_to_dtype(gamma, computation_dtype) if gamma is not None else None
+    )
+    grad_mean_cast = (
+        _maybe_convert_to_dtype(grad_mean, computation_dtype)
+        if grad_mean is not None
+        else None
+    )
+    grad_rstd_cast = (
+        _maybe_convert_to_dtype(grad_rstd, computation_dtype)
+        if grad_rstd is not None
+        else None
+    )
+
     # Compute Internal gradients
     ds: Tensor | None = None
     db: Tensor | None = None
-    if grad_output is not None:
-        ds = torch.mul(grad_output, input).view(N, C, HxW).sum(2)
-        db = grad_output.view(N, C, HxW).sum(2)
+    if grad_output_cast is not None:
+        ds = torch.mul(grad_output_cast, input_cast).view(N, C, HxW).sum(2)
+        db = grad_output_cast.view(N, C, HxW).sum(2)
 
-    d_input: Tensor | None = None
-    d_gamma: Tensor | None = None
-    d_bias: Tensor | None = None
+    d_input: Tensor = torch.Tensor()
+    d_gamma: Tensor = torch.Tensor()
+    d_bias: Tensor = torch.Tensor()
+
+    param_output_dtype = gamma.dtype if gamma is not None else input.dtype
+    param_device = gamma.device if gamma is not None else input.device
+
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if ds is None or db is None:
             ds_val: Tensor | int = 0
             db_val: Tensor | int = 0
             c1: Tensor | int = 0
-        elif gamma is not None:
-            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
-            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+        elif gamma_cast is not None:
+            ds_val = (
+                torch.mul(ds, gamma_cast.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            )
+            db_val = (
+                torch.mul(db, gamma_cast.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            )
             c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                gamma.reshape(1, group, cpg),
+                rstd_cast.unsqueeze(-1),
+                gamma_cast.reshape(1, group, cpg),
             )
         else:
             ds_val = ds.reshape(N, group, cpg).sum(2)
             db_val = db.reshape(N, group, cpg).sum(2)
-            c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                torch.ones((1, group, cpg), dtype=rstd.dtype, device=rstd.device),
-            )
+            c1 = rstd_cast.unsqueeze(-1)
 
-        grad_mean_val = grad_mean if grad_mean is not None else 0
-        grad_rstd_val = grad_rstd if grad_rstd is not None else 0
-        c2 = (db_val * mean - ds_val - grad_rstd_val) * rstd * rstd * rstd * s
-        c3 = -c2 * mean - (db_val * rstd - grad_mean_val) * s
+        grad_mean_val = grad_mean_cast if grad_mean_cast is not None else 0
+        grad_rstd_val = grad_rstd_cast if grad_rstd_cast is not None else 0
+        c2 = (
+            (db_val * mean_cast - ds_val - grad_rstd_val)
+            * rstd_cast
+            * rstd_cast
+            * rstd_cast
+            * s
+        )
+        c3 = -c2 * mean_cast - (db_val * rstd_cast - grad_mean_val) * s
 
         c1 = c1.unsqueeze(-1) if isinstance(c1, torch.Tensor) else c1
         c2 = _unsqueeze_to_dim(c2, 4)
         c3 = _unsqueeze_to_dim(c3, 4)
 
-        if grad_output is not None:
+        if grad_output_cast is not None:
             d_input = (
-                grad_output.reshape(N, group, cpg, HxW) * c1
-                + input.reshape(N, group, cpg, HxW) * c2
+                grad_output_cast.reshape(N, group, cpg, HxW) * c1
+                + input_cast.reshape(N, group, cpg, HxW) * c2
                 + c3
             )
         else:
-            d_input = input.reshape(N, group, cpg, HxW) * c2 + c3
-        d_input = d_input.reshape(input.shape).to(input.dtype)
-    if output_mask[1] and ds is not None and db is not None:
-        d_gamma = (
-            (
-                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
-                * rstd.unsqueeze(-1)
+            d_input = input_cast.reshape(N, group, cpg, HxW) * c2 + c3
+        d_input = d_input.reshape(input.shape)
+
+    if output_mask[1]:
+        if ds is not None and db is not None:
+            d_gamma = (
+                (
+                    (
+                        ds.view(N, group, cpg)
+                        - db.view(N, group, cpg) * mean_cast.unsqueeze(-1)
+                    )
+                    * rstd_cast.unsqueeze(-1)
+                )
+                .sum(0)
+                .reshape(C)
             )
-            .sum(0)
-            .reshape(C)
-        )
-    if output_mask[2] and db is not None:
-        d_bias = db.sum(0)
+        else:
+            d_gamma = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
+
+    if output_mask[2]:
+        if db is not None:
+            d_bias = db.sum(0)
+        else:
+            d_bias = torch.zeros((C,), dtype=param_output_dtype, device=param_device)
+
+    d_input = _maybe_convert_to_dtype(d_input, input.dtype)
+    d_gamma = _maybe_convert_to_dtype(d_gamma, param_output_dtype)
+    d_bias = _maybe_convert_to_dtype(d_bias, param_output_dtype)
 
     return d_input, d_gamma, d_bias
-
-
-# out_wrapper currently does not allow optional outputs
-@register_decomposition(aten.native_group_norm_backward.multiple_grads_out)
-def native_group_norm_backward_multiple_grads_out(
-    grad_output: Tensor | None,
-    input: Tensor,
-    mean: Tensor,
-    rstd: Tensor,
-    gamma: Tensor | None,
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    output_mask: list[bool],
-    grad_mean: Tensor | None,
-    grad_rstd: Tensor | None,
-    *,
-    out0: torch.Tensor,
-    out1: torch.Tensor,
-    out2: torch.Tensor,
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    result = native_group_norm_backward_multiple_grads(
-        grad_output,
-        input,
-        mean,
-        rstd,
-        gamma,
-        N,
-        C,
-        HxW,
-        group,
-        output_mask,
-        grad_mean,
-        grad_rstd,
-    )
-    grad_input = (out0, out1, out2)
-    for i, r in enumerate(result):
-        if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
-            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
-
-    return grad_input
-
-
-@register_decomposition(aten.native_group_norm_backward.default)
-@pw_cast_for_opmath
-def native_group_norm_backward(
-    grad_output: Tensor | None,
-    input: Tensor,
-    mean: Tensor,
-    rstd: Tensor,
-    gamma: Tensor | None,
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    output_mask: list[bool],
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    return native_group_norm_backward_multiple_grads(
-        grad_output,
-        input,
-        mean,
-        rstd,
-        gamma,
-        N,
-        C,
-        HxW,
-        group,
-        output_mask,
-        None,
-        None,
-    )
-
-
-# out_wrapper currently does not allow optional outputs
-@register_decomposition(aten.native_group_norm_backward.out)
-def native_group_norm_backward_out(
-    grad_output: Tensor | None,
-    input: Tensor,
-    mean: Tensor,
-    rstd: Tensor,
-    gamma: Tensor | None,
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    output_mask: list[bool],
-    *,
-    out0: torch.Tensor,
-    out1: torch.Tensor,
-    out2: torch.Tensor,
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-    return native_group_norm_backward_multiple_grads_out(
-        grad_output,
-        input,
-        mean,
-        rstd,
-        gamma,
-        N,
-        C,
-        HxW,
-        group,
-        output_mask,
-        None,
-        None,
-        out0=out0,
-        out1=out1,
-        out2=out2,
-    )
 
 
 def _maybe_cast(x: Tensor | None, dtype) -> Tensor | None:
