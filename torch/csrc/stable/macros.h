@@ -114,7 +114,8 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     std::time_t t = std::time(nullptr);
     std::tm tm = *std::localtime(&t);
     std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
-              << line << "] Exception across libtorch C API boundary:" << error_msg;
+              << line
+              << "] Exception across libtorch C API boundary:" << error_msg;
   }
 
   throw std::runtime_error(ss.str());

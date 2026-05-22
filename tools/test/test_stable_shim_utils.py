@@ -10,6 +10,7 @@ sys.path.append(str(REPO_ROOT))
 import re
 
 from tools.linter.adapters._stable_shim_utils import (
+    DYNAMIC_VERSION_CALL_IDENTIFIER_MATCHER,
     FUNCTION_IDENTIFIER_MATCHER,
     IdentifierMatcher,
     IdentifierUse,
@@ -235,6 +236,46 @@ class TestStableShimUtils(unittest.TestCase):
             8: ["short1", "short2"],
         }
         result = self._run_match_on_sample(sample, matcher, expected_version)
+
+        self.assertEqual(result, expected)
+
+    def test_dynamic_version_call_identifier(self):
+        """
+        This unit tests confirms the dynamic version call macro is parsed correctly and that its versioning guarantees
+        are correct.
+        """
+        matcher = MatcherAccumulator([DYNAMIC_VERSION_CALL_IDENTIFIER_MATCHER])
+        expected_version = (2, 13, 7)
+        matcher.set_scope_version(expected_version)
+
+        sample = """
+        const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
+            torch_shim_bc_const_char_ptr, torch_exception_get_what);
+
+        const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_10_0(
+            super_old_fallback, something_from_2_10);
+        """
+
+        expected = {
+            3: [
+                IdentifierUse(
+                    identifier="torch_shim_bc_const_char_ptr", version=(2, 13, 7)
+                ),
+                IdentifierUse(
+                    identifier="torch_exception_get_what", version=(2, 13, 0)
+                ),
+            ],
+            6: [
+                IdentifierUse(identifier="super_old_fallback", version=(2, 13, 7)),
+                IdentifierUse(identifier="something_from_2_10", version=(2, 10, 0)),
+            ],
+        }
+        result = {}
+        for li, line in enumerate(sample.split("\n"), 1):
+            matcher.process_line(line)
+            res = matcher.identifiers_used()
+            if res:
+                result[li] = res
 
         self.assertEqual(result, expected)
 
