@@ -89,7 +89,8 @@ class TestOnlineSoftmax(TestCase):
     def test_codegen_online_softmax(self, use_log_softmax, V):
         wrapper_code = self.get_softmax_wrapper(use_log_softmax=use_log_softmax, V=V)
 
-        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+        expected_num_loops = 0 if V == 2048 else 2
+        self.assertEqual(wrapper_code.count("for r0_offset in"), expected_num_loops)
 
     def test_no_online_softmax_for_cpu(self):
         code = self.get_softmax_wrapper(V=2048, device="cpu")
@@ -102,8 +103,16 @@ class TestOnlineSoftmax(TestCase):
         """
         Persistent reduction has no for loops.
         """
-        wrapper_code = self.get_softmax_wrapper(1024)
+        wrapper_code = self.get_softmax_wrapper(2048)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
+
+    def test_codegen_softmax_persistent_reduction_not_generic_inner_reduction(self):
+        def f(x):
+            return x.sum(dim=-1, keepdim=True)
+
+        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+        _, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertNotIn("triton_heuristics.persistent_reduction", code)
 
     @inductor_config.patch("triton.persistent_reductions", False)
     def test_sdpa(self):

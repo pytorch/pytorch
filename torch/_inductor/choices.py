@@ -417,11 +417,19 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if (
+            reduction_hint == ReductionHint.INNER
+            and not cooperative_reduction
+            and features.has_only_reduction_type("online_softmax_reduce")
+        ):
+            threshold = 2048
+
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
