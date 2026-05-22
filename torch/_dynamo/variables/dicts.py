@@ -566,18 +566,6 @@ class ConstDictVariable(VariableTracker):
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
-        elif name == "__setitem__" and self.is_mutable():
-            self.install_dict_keys_match_guard()
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            tx.output.side_effects.mutation(self)
-            self.items[Hashable(args[0])] = args[1]
-            return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
@@ -748,6 +736,17 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
         self.call_method(tx, "update", [other], {})
         return self
+
+    def mp_ass_subscript_impl(
+        self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict_ass_sub)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+        self.install_dict_keys_match_guard()
+        tx.output.side_effects.mutation(self)
+        self.items[HashableTracker(key)] = value
+        return ConstantVariable.create(None)
 
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Mapping length for dict objects."""
