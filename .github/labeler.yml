@@ -144,6 +144,15 @@
 - .ci/docker/common/requirements_tpu.txt
 - .github/ci_commit_pins/torch_tpu.txt
 
+"ciflow/inductor-helion":
+- torch/_inductor/codegen/helion_backend.py
+- torch/utils/_helion.py
+- test/inductor/test_helion_backend.py
+- test/inductor/test_helion_kernels.py
+- test/inductor/helion_expected_failures/**
+- test/inductor/helion_skip_tests/**
+- .github/workflows/inductor-helion.yml
+
 "ciflow/b200":
 - test/test_matmul_cuda.py
 - test/test_scaled_matmul_cuda.py
