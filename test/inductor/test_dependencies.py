@@ -4,7 +4,13 @@ import contextlib
 import torch
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ExternKernel, FixedLayout, Pointwise
+from torch._inductor.ir import (
+    Buffer,
+    ExternKernel,
+    FixedLayout,
+    Pointwise,
+    ShapeAsConstantBuffer,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
@@ -100,13 +106,14 @@ class TestDependencies(InductorTestCase):
         index = self._create_buffer("index", (4,), torch.int64)
         value = self._create_buffer("value", (4,))
         out = self._create_buffer("out", (4,))
+        shape_arg = ShapeAsConstantBuffer(expr=sympy_index_symbol("nested_size"))
 
         extern = ExternKernel(
             name="extern",
             layout=out.layout,
             inputs=[data],
-            constant_args=([None, index],),
-            kwargs={"value": {"nested": value}},
+            constant_args=([None, index, shape_arg],),
+            kwargs={"value": {"nested": (value, shape_arg)}},
         )
 
         reads = {dep.name for dep in extern.get_read_writes().reads}

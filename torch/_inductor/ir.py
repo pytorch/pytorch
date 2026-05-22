@@ -6632,7 +6632,9 @@ class ExternKernel(InputsKernel):
 
         def add_nested_ir_reads(value: Any) -> None:
             if isinstance(value, IRNode):
-                read_writes.reads.add(dependencies.StarDep(value.get_name()))
+                name = value.maybe_get_name()
+                if name is not None:
+                    read_writes.reads.add(dependencies.StarDep(name))
             elif isinstance(value, dict):
                 for nested_value in value.values():
                     add_nested_ir_reads(nested_value)
