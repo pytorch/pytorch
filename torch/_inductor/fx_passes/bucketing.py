@@ -14,6 +14,7 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -326,7 +327,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+    all_node_ancestors: BitsetAncestors | None = None,
 ) -> bool:
     """Check if an all_gather derives from exactly one placeholder (parameter).
 
@@ -336,7 +337,9 @@ def is_fsdp_all_gather(
     if not is_all_gather_into_tensor(node):
         return False
     if all_node_ancestors is not None:
-        phs = (a for a in all_node_ancestors[node] if a.op == "placeholder")
+        phs = (
+            a for a in all_node_ancestors.iter_ancestors(node) if a.op == "placeholder"
+        )
         return next(phs, None) is not None and next(phs, None) is None
     from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
@@ -1059,31 +1062,61 @@ def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
 def _sort_bucket_region(
     g: torch.fx.Graph,
     new_nodes: list[torch.fx.Node],
-    inputs: list[torch.fx.Node],
+    new_nodes_inputs: list[torch.fx.Node],
 ) -> None:
-    """Stable topological sort of the region between ``new_nodes`` and any
-    ``inputs`` that ended up after them, so every input precedes the new
-    bucketed collective.
+    """Topologically sort the smallest region spanning *new_nodes* and their inputs.
 
-    Only the smallest contiguous region that spans both ``new_nodes`` and
-    the out-of-place ``inputs`` is reordered; the rest of the graph is
-    untouched.
+    After bucketing inserts *new_nodes*, some *new_nodes_inputs* may sit after
+    the new collective in the linked list.  This sorts just the affected
+    region so every input precedes its consumer.
+
+    Complexity: O(D) where D = distance between the farthest input and
+    new_nodes in the linked list.  No full-graph enumeration.
     """
-    if not new_nodes or not inputs:
+    if not new_nodes or not new_nodes_inputs:
         return
+
+    new_set: OrderedSet[torch.fx.Node] = OrderedSet(new_nodes)
+    external: OrderedSet[torch.fx.Node] = OrderedSet(
+        [inp for inp in new_nodes_inputs if inp not in new_set]
+    )
+    if not external:
+        return
+
+    # Walk backward/forward from the new_nodes span to find all external
+    # inputs.  ``remaining`` counts how many we still need to locate;
+    # each walk stops as soon as its share is found.
+    first = new_nodes[0]
+    last = new_nodes[-1]
+    remaining = len(external)
+
+    cursor: torch.fx.Node | None = first.prev
+    while cursor is not None and cursor.op != "placeholder" and remaining > 0:
+        if cursor in external:
+            first = cursor
+            remaining -= 1
+        cursor = cursor.prev
+
+    cursor = last.next
+    while cursor is not None and cursor.op != "output" and remaining > 0:
+        if cursor in external:
+            last = cursor
+            remaining -= 1
+        cursor = cursor.next
+
+    if first is last:
+        return
+
+    region: OrderedSet[torch.fx.Node] = OrderedSet()
+    cursor = first
+    while cursor is not None:
+        region.add(cursor)
+        if cursor is last:
+            break
+        cursor = cursor.next
 
     from torch._dynamo.graph_deduplication import _stable_topological_sort_region
 
-    positions: dict[torch.fx.Node, int] = {n: i for i, n in enumerate(g.nodes)}
-    first_pos = min(positions[n] for n in new_nodes)
-    last_pos = max(
-        *(positions[n] for n in new_nodes),
-        *(positions.get(inp, -1) for inp in inputs),
-    )
-    if last_pos <= first_pos:
-        return
-
-    region = OrderedSet(n for n in g.nodes if first_pos <= positions[n] <= last_pos)
     _stable_topological_sort_region(g, region)
 
 

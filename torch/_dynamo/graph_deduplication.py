@@ -354,7 +354,7 @@ def _stable_topological_sort_impl(
     while pending:
         node = pending.pop()
 
-        if node.target == "output":
+        if node.op == "output":
             outputs.add(node)
             if node.users:
                 raise AssertionError("output nodes should have no users")
