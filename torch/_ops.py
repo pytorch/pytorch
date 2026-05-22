@@ -1278,7 +1278,7 @@ class OpOverloadPacket(Generic[_P, _T]):
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
-    def overload_ops(self):
+    def op_overloads(self):
         return [getattr(self, n) for n in self.overloads()]
 
 

@@ -79,7 +79,7 @@ def _add_op_to_registry(registry, op, fn):
     else:
         if not isinstance(op, OpOverloadPacket):
             raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
-        overloads.extend(op.overload_ops())
+        overloads.extend(op.op_overloads())
 
     for op_overload in overloads:
         if op_overload in registry:
@@ -276,7 +276,7 @@ def remove_decompositions(
     """
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket):
-            for opo in op.overload_ops():
+            for opo in op.op_overloads():
                 decompositions.pop(opo, None)
         elif isinstance(op, OpOverload):
             decompositions.pop(op, None)

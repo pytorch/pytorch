@@ -248,7 +248,7 @@ def get_signature_for_torch_op(
     if isinstance(op, OpOverload):
         schemas = [op._schema]
     elif isinstance(op, OpOverloadPacket):
-        schemas = [overload._schema for overload in op.overload_ops()]
+        schemas = [overload._schema for overload in op.op_overloads()]
     else:
         override = _manual_overrides.get(op)
         if override:

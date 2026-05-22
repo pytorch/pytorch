@@ -1372,7 +1372,7 @@ def _collect_all_valid_cia_ops_for_namespace(
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
-        for op_overload in op_packet.overload_ops():
+        for op_overload in op_packet.op_overloads():
             if _is_preservable_cia_op(op_overload):
                 cia_ops.add(op_overload)
     return cia_ops
