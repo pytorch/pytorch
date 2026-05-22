@@ -23,6 +23,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_assert_async.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros_like.h>
@@ -557,8 +558,9 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    at::_assert_async(index.max() < dim_size);
-    at::_assert_async(index.min() >= -dim_size);
+    auto [index_min, index_max] = at::aminmax(index);
+    at::_assert_async(index_max < dim_size);
+    at::_assert_async(index_min >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -1175,32 +1177,6 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const bool indContig = index.is_contiguous();
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-  // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
-  // self.scatter_add_(0, idx.view({n, 1, ...}).expand_as(src), src). Delegate
-  // so scatter_add's own TMA/vectorized eligibility check + dispatch is the
-  // single source of truth (see PR #182675). Pattern from
-  // pytorch/pytorch#180430.
-  // Gated on CUDA >= 12.8: pre-12.8 builds compile out the TMA branch in
-  // scatter_add and fall back to its vectorized atomicAdd path, which
-  // regresses skewed/high-contention workloads vs indexFunc{Small,Large}Index
-  // (warp-per-entry scheduling concentrates atomic contention on hot rows).
-  // Older builds therefore stay on the existing indexFunc dispatch.
-  // index_add supports {complex64, complex128, ComplexHalf, Bool} that
-  // scatter_add does not, so exclude those and let them use indexFunc.
-  const auto stype = self_.scalar_type();
-  const bool dtype_supported_by_scatter_add =
-      !c10::isComplexType(stype) && stype != at::kBool;
-  if (dim == 0 && alpha.toDouble() == 1.0 && numIndex > 0 &&
-      dtype_supported_by_scatter_add &&
-      index.dim() <= 1 && indContig) {
-    std::vector<int64_t> idx_shape(source_.dim(), 1);
-    idx_shape[0] = static_cast<int64_t>(numIndex);
-    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
-    return;
-  }
-#endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \

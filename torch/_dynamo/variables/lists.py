@@ -44,6 +44,8 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
+    unpack_and_apply_fn,
+    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -55,6 +57,18 @@ from .object_protocol import type_implements_nb_index, validate_sequence_index
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+def pytuple_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is tuple
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), tuple)
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), list)
 
 
 class BaseListVariable(VariableTracker):
@@ -281,6 +295,22 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
+        kwargs: dict[str, Any] = {}
+        if issubclass(self.python_type(), list):
+            kwargs["mutation_type"] = ValueMutationNew()
+        return type(self)(new_items, **kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -357,31 +387,6 @@ class BaseListVariable(VariableTracker):
                 return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
-                return self
-        elif name in ("__mul__", "__imul__"):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            if not (args[0].is_python_constant() and args[0].python_type() is int):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
-                    ],
-                )
-
-            val = args[0].as_python_constant()
-
-            if name == "__mul__":
-                return type(self)(self.items * val, source=self.source)
-            else:
-                self.items *= val
                 return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
@@ -812,15 +817,30 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if not args[0].has_force_unpack_var_sequence(tx):
-                raise_observed_exception(
-                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
+            # CPython has a series of checks to optimize list.extend for different data types
+            # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
+            from .dicts import ConstDictVariable
+            from .sets import SetVariable
+            from .user_defined import UserDefinedObjectVariable
+
+            sz = len(self.items)
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                self.items.extend(args[0].items)
+            elif isinstance(args[0], UserDefinedObjectVariable):
+                self.items.extend(unpack_iterable(tx, args[0]))
+            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
+                items = [item.vt for item in args[0].items]
+                self.items.extend(items)
+            elif isinstance(args[0], ConstantVariable):
+                items = unpack_iterable(tx, args[0])
+                self.items.extend(items)
+            else:
+                unpack_and_apply_fn(
+                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
                 )
 
-            (arg,) = args
-            arg.force_apply_to_var_sequence(
-                tx, lambda item: self.call_method(tx, "append", [item], {})
-            )
+            if len(self.items) > sz:
+                tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
@@ -1020,6 +1040,26 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # list_inplace_repeat: https://github.com/python/cpython/blob/v3.13.13/Objects/listobject.c#L1071
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_items = self.items * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.items[:] = new_items
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1143,10 +1183,10 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
-            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+            elif len(args) == 1:
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
-                self.items[:] = arg.force_unpack_var_sequence(tx)
+                self.items[:] = unpack_iterable(tx, arg)
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1167,6 +1207,32 @@ class ListVariable(CommonListMethodsVariable):
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_Concat for sequences
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L725-L773 (list_concat)
+        if not pylist_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate list (not '{other.python_type_name()}') to list",
+            )
+
+        items = self.items + other.unpack_var_sequence(tx)
+        return ListVariable(items, mutation_type=ValueMutationNew())
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_InPlaceConcat for sequences
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1464-L1472
+        self.call_method(tx, "extend", [other], {})
+        return self
 
     def is_hashable(self) -> bool:
         return False
@@ -1216,7 +1282,7 @@ class DequeVariable(CommonListMethodsVariable):
         tx: "InstructionTranslator",
         key: VariableTracker,
     ) -> VariableTracker:
-        # deque_item: https://github.com/python/cpython/blob/62a6e898e01/Modules/_collectionsmodule.c#L1888
+        # deque_item: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1888
         # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
         # nb_index_impl).  deque has no mp_subscript, so this is the real path.
         index = key.as_python_constant()
@@ -1224,6 +1290,36 @@ class DequeVariable(CommonListMethodsVariable):
             return self.items[index]
         except IndexError:
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_Concat for deque
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L691-L699
+
+        if not issubclass(other.python_type(), collections.deque):
+            raise_type_error(
+                tx,
+                f"can only concatenate deque (not '{other.python_type_name()}') to deque",
+            )
+
+        return DequeVariable(
+            self.items + other.unpack_var_sequence(tx),
+            maxlen=self.maxlen,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Implements PySequence_InPlaceConcat for deque
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L572-L584
+        self.call_method(tx, "extend", [other], {})
+        return self
 
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
@@ -1430,6 +1526,25 @@ class TupleVariable(BaseListVariable):
         if self.python_type() is not tuple:
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr((), name))
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ):
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L441-L486 (tuple_concat)
+        if len(self.items) == 0 and pytuple_checkexact(other):
+            return other
+
+        if not pytuple_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate tuple (not '{other.python_type_name()}') to tuple",
+            )
+
+        return TupleVariable(
+            self.items + other.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # CPython tuplehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L321
@@ -1670,6 +1785,37 @@ class SizeVariable(TupleVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(torch.Size, name))
+
+    def sq_concat_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        """
+        Implements torch.Size concatenation via sq_concat protocol.
+        torch.Size accepts concatenation with any tuple-like object.
+        Ref: torch/csrc/Size.cpp::THPSize_concat
+        """
+        if not pytuple_check(other):
+            raise_type_error(
+                tx,
+                f"can only concatenate tuple (not '{other.python_type_name()}') to torch.Size",
+            )
+        # Size nb_add uses sq_concat. We do the opposite here because of the reverse keyword
+        return self.nb_add_impl(tx, other)
+
+    def nb_add_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # NOTE: The python interpreter tries, in order:
+        #    1. right.nb_add(left, right)  (only if right is a subclass of left)
+        #    2. left.nb_add(left, right)
+        #    3. right.nb_add(left, right)
+        #    4. left.sq_concat(right)
+        #  Hence, to support tuple + size -> size, we need to implement nb_add
+        if not pytuple_check(other):
+            return ConstantVariable(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
 class SliceVariable(VariableTracker):
