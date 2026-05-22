@@ -89,6 +89,7 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
+from torch.fx.experimental.dynamic_spec import ShapesSpec
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -125,7 +126,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+    from torch.fx.experimental.dynamic_spec import ParamsSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -823,10 +824,8 @@ class _TorchDynamoContext:
             )
         # Normalize the shorthand forms: dict / ParamsSpec / ShapesSpec all
         # land here as a ShapesSpec (or None).
-        from torch.fx.experimental.dynamic_spec import ShapesSpec as _ShapesSpec
-
-        if shapes_spec is not None and not isinstance(shapes_spec, _ShapesSpec):
-            shapes_spec = _ShapesSpec(shapes_spec)
+        if shapes_spec is not None and not isinstance(shapes_spec, ShapesSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
