@@ -1314,11 +1314,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            items = [
-                item.call_method(tx, "__index__", [], {}) if item.is_tensor() else item
-                for item in tup.items  # type: ignore[missing-attribute]
-            ]
-            return SizeVariable(items)
+            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
