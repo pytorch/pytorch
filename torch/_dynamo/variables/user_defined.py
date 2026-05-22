@@ -841,7 +841,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1013,7 +1013,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
@@ -1314,7 +1314,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            items = [
+                item.call_method(tx, "__index__", [], {}) if item.is_tensor() else item
+                for item in tup.items  # type: ignore[missing-attribute]
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
@@ -1512,7 +1516,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
@@ -1540,7 +1544,7 @@ class RemovableHandleClass:
 def call_random_fn(
     tx: "InstructionTranslator",
     fn: Callable[..., Any],
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     from .builder import VariableBuilder
@@ -1586,7 +1590,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value_type: type | None = None,
         cls_source: TypeSource | None = None,
         base_cls_vt: VariableTracker | None = None,
-        init_args: Sequence[VariableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2738,7 +2742,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
@@ -3490,7 +3494,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """Emulate tree_map behavior for user-defined objects.
@@ -3587,7 +3591,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
@@ -4696,7 +4700,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         raise NotImplementedError
 
     def _validate_rest_for_tree_map(
-        self, rest: "collections.abc.Sequence[VariableTracker]"
+        self, rest: "list[VariableTracker]"
     ) -> list["UserDefinedTupleVariable"] | None:
         """Validate that rest args are compatible for tree_map fast-path."""
         others: list[UserDefinedTupleVariable] = []
@@ -4733,7 +4737,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not self._is_pytree_node():
@@ -4762,7 +4766,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
