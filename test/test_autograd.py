@@ -7728,6 +7728,10 @@ for shape in [(1,), ()]:
         device_type = torch.accelerator.current_accelerator().type
         if not torch.amp.is_autocast_available(device_type):
             self.skipTest(f"autocast not available for {device_type}")
+        try:
+            torch.tensor([1.0], device=device_type, dtype=torch.bfloat16)
+        except (RuntimeError, TypeError):
+            self.skipTest(f"bf16 not supported on {device_type}")
         self._test_checkpointing_non_reentrant_autocast(device_type=device_type)
 
     @unittest.skipIf(not TEST_ACCELERATOR, "Test requires an accelerator")
