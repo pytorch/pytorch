@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -13209,7 +13210,7 @@ class TestAutogradDeviceType(TestCase):
             @staticmethod
             def backward(ctx, grad):
                 # Reentrant backward in child will take much longer.
-                reentrant_root.backward()
+                reentrant_root.backward(grad)
                 return grad
 
         # Parent gpu graph.
@@ -13780,6 +13781,9 @@ class TestAutogradDeviceType(TestCase):
         x = torch.ones((1,), dtype=torch.double, device="cpu", requires_grad=True)
         gradcheck(lambda x: x.to("cuda"), (x,))
 
+    @unittest.skipIf(
+        IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
+    )
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
         for fmt_a in (torch.contiguous_format, torch.channels_last):
@@ -13931,6 +13935,19 @@ class TestAutogradDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.autograd.grad(b, a)
+
+    def test_grad_unused_input_error_message(self, device):
+        for unused_idx in [0, 1]:
+            x = torch.randn(10, requires_grad=True, device=device)
+            y = torch.randn(10, requires_grad=True, device=device)
+            inputs = (x, y)
+
+            # If unused_idx is 0, use inputs[1]. If unused_idx is 1, use inputs[0].
+            out = inputs[1 - unused_idx].sum()
+
+            expected_msg = f"The differentiated Tensor at index {unused_idx} appears"
+            with self.assertRaisesRegex(RuntimeError, expected_msg):
+                torch.autograd.grad(out, inputs)
 
     def test_pow_real_negative_base_complex_exponent(self, device):
         # OpInfo doesn't naturally support input of mixed types, hence this test here.
@@ -16664,6 +16681,9 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
 
+    @unittest.skipIf(
+        IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
+    )
     def test_is_retain_graph(self):
         retain_graph_set = False
 

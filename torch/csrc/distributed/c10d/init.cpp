@@ -3556,6 +3556,9 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+#ifdef NCCL_HAS_MAX_P2P_PEERS
+      .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
+#endif
       .def(
           "unsafe_get_ptr",
           [](const ncclConfig_t& self) {
@@ -3822,10 +3825,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               })
           .def(
               "exception",
-              [](::c10d::Work& work) -> std::exception_ptr {
+              [](::c10d::Work& work) -> py::object {
                 TORCH_WARN_ONCE(
                     fmt::format(kDeprecationWarning, "Work::exception"));
-                return work.exception();
+                auto eptr = work.exception();
+                if (!eptr) {
+                  return py::none();
+                }
+                // pybind11 can't convert std::exception_ptr (#147312);
+                // hand back a typed Python exception object instead.
+                torch::translate_exception_to_python(eptr);
+                return py::error_already_set().value();
               })
           .def(
               "source_rank",

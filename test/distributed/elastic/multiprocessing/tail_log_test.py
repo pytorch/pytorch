@@ -30,6 +30,7 @@ def write(max: int, sleep: float, file: str):
 
 class TailLogTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
         self.threadpool = ThreadPoolExecutor()
 
