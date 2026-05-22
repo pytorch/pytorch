@@ -600,11 +600,6 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -1020,6 +1015,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             if len(args) == 2 and not kwargs:
                 variable, new_grad = args
+                if isinstance(variable, variables.LazyVariableTracker):
+                    variable = variable.realize()
                 if not variable.is_tensor():
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
@@ -1030,11 +1027,32 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     (variable, variable_grad, new_grad),
                     kwargs,
                 )
-                updated_grad = updated_grad.clone(source=None)
+                updated_grad = updated_grad.clone(source=None, mutation_type=None)
                 tx.output.side_effects.store_attr(variable, "grad", updated_grad)
                 return ConstantVariable.create(None)
+            if len(args) == 3 and not kwargs:
+                variable, variable_grad, new_grad = args
+                if isinstance(variable, variables.LazyVariableTracker):
+                    variable = variable.realize()
+                if not variable.is_tensor():
+                    raise AssertionError(
+                        "Expected first argument to accumulate_grad_ to be a tensor"
+                    )
+                updated_grad = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.accumulate_grad_no_alias),
+                    (variable, variable_grad, new_grad),
+                    kwargs,
+                )
+                tx.output.side_effects.store_attr(
+                    variable,
+                    "grad",
+                    updated_grad.clone(source=None, mutation_type=None),
+                )
+                return updated_grad
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
+                VariableTracker.build(tx, polyfills.accumulate_grad_no_alias),
+                args,
+                kwargs,
             )
 
         @register(math.radians)

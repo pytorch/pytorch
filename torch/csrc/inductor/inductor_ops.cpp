@@ -74,14 +74,21 @@ static std::optional<Tensor> accumulate_grad_(
     const std::optional<Tensor>& variable_grad,
     const std::optional<Tensor>& new_grad) {
   if (!new_grad.has_value()) {
-    return variable_grad;
+    if (!variable_grad.has_value() || !variable_grad->defined()) {
+      return std::nullopt;
+    }
+    at::Tensor grad = variable_grad->clone();
+    variable.mutable_grad() = grad;
+    return grad;
   }
 
-  at::Tensor grad = variable_grad.value_or(Tensor());
+  at::Tensor grad = variable_grad.has_value() && variable_grad->defined()
+      ? variable_grad->clone()
+      : Tensor();
   if (new_grad->device() != kMeta && !grad.defined()) {
     // Unlike eager AccumulateGrad, this op's schema does not allow the returned
-    // grad to alias new_grad. Clone when initializing grad so functionalization
-    // can model the output with a simple variable_grad-only alias contract.
+    // grad to alias any input. Clone when initializing grad so
+    // functionalization can safely model the output as fresh.
     if (new_grad->is_sparse() || new_grad->is_sparse_csr() ||
         new_grad->is_nested() || new_grad->is_mkldnn()) {
       grad = new_grad->clone();
@@ -91,7 +98,7 @@ static std::optional<Tensor> accumulate_grad_(
   } else if (new_grad->device() != kMeta) {
     // Do not call into this codepath from C++ frontend, instead call directly
     // into accumulateGrad. The refcount argument only affects no-existing-grad
-    // steal paths, which are handled above to avoid new_grad aliasing.
+    // steal paths, which are handled above to avoid input aliasing.
     torch::autograd::AccumulateGrad::accumulateGrad(
         variable,
         grad,
@@ -107,6 +114,9 @@ static std::optional<Tensor> accumulate_grad_(
   if (!grad.defined()) {
     return std::nullopt;
   }
+  // Compiled autograd graphs use this op as the grad-accumulation side effect,
+  // but functionalization still requires the returned grad to be fresh.
+  variable.mutable_grad() = grad;
   return grad;
 }
 
@@ -125,7 +135,7 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
           c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "accumulate_grad_(Tensor variable, Tensor(a!)? variable_grad, Tensor? new_grad) -> Tensor(a!)?",
+      "accumulate_grad_(Tensor variable, Tensor? variable_grad, Tensor? new_grad) -> Tensor?",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
 }

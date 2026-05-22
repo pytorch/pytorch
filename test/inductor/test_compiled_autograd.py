@@ -1136,6 +1136,7 @@ main()
             )
         finally:
             handle.remove()
+        self.assertEqual(param.grad, active * 2)
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
@@ -2142,14 +2143,42 @@ main()
             gm(x, variable_grad.clone(), new_grad), variable_grad + new_grad
         )
         self.assertIn("accumulate_grad_", gm.code)
+        self.assertEqual(variable_grad, torch.ones_like(x))
+
+        x.grad = None
+        with torch.no_grad():
+            accumulated_grad = torch.ops.inductor.accumulate_grad_.default(
+                x, variable_grad, new_grad
+            )
+        self.assertEqual(accumulated_grad, variable_grad + new_grad)
+        self.assertEqual(x.grad, accumulated_grad)
+        self.assertEqual(
+            x.grad.untyped_storage().data_ptr(),
+            accumulated_grad.untyped_storage().data_ptr(),
+        )
+        self.assertEqual(variable_grad, torch.ones_like(x))
+        self.assertNotEqual(
+            accumulated_grad.untyped_storage().data_ptr(),
+            variable_grad.untyped_storage().data_ptr(),
+        )
+        self.assertNotEqual(
+            accumulated_grad.untyped_storage().data_ptr(),
+            new_grad.untyped_storage().data_ptr(),
+        )
 
         dense_new_grad = torch.ones_like(x) * 4
         dense_expected = dense_new_grad.clone()
+        x.grad = None
         with torch.no_grad():
             initialized_grad = torch.ops.inductor.accumulate_grad_.default(
                 x, None, dense_new_grad
             )
         self.assertEqual(initialized_grad, dense_expected)
+        self.assertEqual(x.grad, initialized_grad)
+        self.assertEqual(
+            x.grad.untyped_storage().data_ptr(),
+            initialized_grad.untyped_storage().data_ptr(),
+        )
         self.assertNotEqual(
             initialized_grad.untyped_storage().data_ptr(),
             dense_new_grad.untyped_storage().data_ptr(),
@@ -2162,11 +2191,13 @@ main()
             torch.tensor([3.0, 4.0]),
             x.size(),
         )
+        x.grad = None
         with torch.no_grad():
             initialized_sparse_grad = torch.ops.inductor.accumulate_grad_.default(
                 x, None, sparse_new_grad
             )
         self.assertTrue(initialized_sparse_grad.is_sparse)
+        self.assertEqual(x.grad, initialized_sparse_grad)
         self.assertEqual(initialized_sparse_grad.to_dense(), sparse_new_grad.to_dense())
         self.assertNotEqual(
             initialized_sparse_grad._indices().untyped_storage().data_ptr(),
