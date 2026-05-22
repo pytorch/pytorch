@@ -124,6 +124,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.silu,  # inductor uses exact eager decomposition
+    aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
@@ -1260,7 +1261,7 @@ def bucketize_scalar(
     ).squeeze(0)
 
 
-@register_decomposition(aten.rrelu_with_noise_functional)
+@decomp.register_decomposition(aten.rrelu_with_noise_functional, extra_random_decomps)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,

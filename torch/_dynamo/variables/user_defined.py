@@ -812,7 +812,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 m, self, source_fn=source
             ).call_function(tx, [], {})
         raise_type_error(
-            tx, f"object of type {self.python_type_name()} has no negative"
+            tx, f"bad operand type for unary -: '{self.python_type_name()}'"
         )
 
     def nb_positive_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -823,13 +823,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 m, self, source_fn=source
             ).call_function(tx, [], {})
         raise_type_error(
-            tx, f"object of type {self.python_type_name()} has no positive"
+            tx, f"bad operand type for unary +: '{self.python_type_name()}'"
+        )
+
+    def nb_absolute_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__abs__")
+        if m:
+            source = self.source and AttrSource(self.source, "__abs__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx,
+            f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1001,7 +1013,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
@@ -1302,7 +1314,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            items = [
+                item.call_method(tx, "__index__", [], {}) if item.is_tensor() else item
+                for item in tup.items  # type: ignore[missing-attribute]
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
@@ -1500,7 +1516,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
@@ -1528,7 +1544,7 @@ class RemovableHandleClass:
 def call_random_fn(
     tx: "InstructionTranslator",
     fn: Callable[..., Any],
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     from .builder import VariableBuilder
@@ -1574,7 +1590,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value_type: type | None = None,
         cls_source: TypeSource | None = None,
         base_cls_vt: VariableTracker | None = None,
-        init_args: Sequence[VariableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1824,7 +1840,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = self.lookup_class_mro_attr("__neg__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(
-                tx, f"object of type {self.python_type_name()} has no negative"
+                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
             )
         if type_attr is None:
             raise_type_error(tx, "'NoneType' object is not callable")
@@ -1832,7 +1848,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method("__neg__")
         if method is None:
             raise_type_error(
-                tx, f"object of type {self.python_type_name()} has no negative"
+                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
             )
 
         return self.call_method(tx, "__neg__", [], {})
@@ -1846,7 +1862,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = self.lookup_class_mro_attr("__pos__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(
-                tx, f"object of type {self.python_type_name()} has no positive"
+                tx, f"bad operand type for unary +: '{self.python_type_name()}'"
             )
         if type_attr is None:
             raise_type_error(tx, "'NoneType' object is not callable")
@@ -1854,10 +1870,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method("__pos__")
         if method is None:
             raise_type_error(
-                tx, f"object of type {self.python_type_name()} has no positive"
+                tx,
+                f"bad operand type for unary +: '{self.python_type_name()}'",
             )
 
         return self.call_method(tx, "__pos__", [], {})
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_absolute calls __abs__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9406
+        type_attr = self.lookup_class_mro_attr("__abs__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx,
+                f"bad operand type for abs(): '{self.python_type_name()}'",
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__abs__")
+        if method is None:
+            raise_type_error(
+                tx,
+                f"bad operand type for abs(): '{self.python_type_name()}'",
+            )
+
+        return self.call_method(tx, "__abs__", [], {})
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
@@ -2165,6 +2206,52 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             nb_slot=PyNumberSlots.NB_MULTIPLY,
             reverse=reverse,
         )
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10337-L10340
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__lshift__",
+            "__rlshift__",
+            nb_slot=PyNumberSlots.NB_LSHIFT,
+            reverse=reverse,
+        )
+
+    def nb_inplace_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ilshift__", [other], {})
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10341-L10344
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__rshift__",
+            "__rrshift__",
+            nb_slot=PyNumberSlots.NB_RSHIFT,
+            reverse=reverse,
+        )
+
+    def nb_inplace_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__irshift__", [other], {})
 
     def nb_or_impl(
         self,
@@ -2655,7 +2742,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
@@ -3407,7 +3494,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """Emulate tree_map behavior for user-defined objects.
@@ -3504,7 +3591,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
@@ -4613,7 +4700,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         raise NotImplementedError
 
     def _validate_rest_for_tree_map(
-        self, rest: "collections.abc.Sequence[VariableTracker]"
+        self, rest: "list[VariableTracker]"
     ) -> list["UserDefinedTupleVariable"] | None:
         """Validate that rest args are compatible for tree_map fast-path."""
         others: list[UserDefinedTupleVariable] = []
@@ -4650,7 +4737,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not self._is_pytree_node():
@@ -4679,7 +4766,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
