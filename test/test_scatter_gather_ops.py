@@ -1,19 +1,22 @@
 # Owner(s): ["module: scatter & gather ops"]
 
 import random
+import unittest
+from typing import NamedTuple
 
 import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM, serialTest)
+    (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
+     subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater
+from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -93,7 +96,7 @@ class TestScatterGather(TestCase):
                 res = torch.gather(src, dim=dim, index=ind)
                 ref = src[ind0] if dim == 0 else src[:, ind0]
                 self.assertEqual(res, ref, atol=0, rtol=0)
-                if res.device.type == "cuda":
+                if device != 'cpu':
                     ref_cpu = src.cpu()[ind0.cpu()] if dim == 0 else src.cpu()[:, ind0.cpu()]
                     self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
                 res = torch.gather(src, dim=dim, index=ind_discontig)
@@ -122,7 +125,7 @@ class TestScatterGather(TestCase):
         src = make_tensor((16, 2, 16), device=device, dtype=dtype)
         ind = torch.randint(2, (16, 1), device=device).view(16, 1, 1).expand(16, 1, 16)
         res = torch.gather(src, dim=1, index=ind)
-        if res.device.type == "cuda":
+        if device != 'cpu':
             ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
             self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
 
@@ -528,6 +531,563 @@ class TestScatterGather(TestCase):
         helper([50, 1], 100)
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
+
+# ---------------------------------------------------------------------------
+# CuTeDSL scatter_add override tests. Two surfaces:
+#   (a) dispatch conds: call the eligibility predicates directly to verify
+#       the routing matrix (dtypes, shapes, outer-strided, int32 index,
+#       deterministic mode). No kernel execution.
+#   (b) correctness: run torch.scatter_add on shapes the conds accept and
+#       compare to a naive reference. Covers both TMA and vec-scatter
+#       paths via the shape parameters.
+# ---------------------------------------------------------------------------
+
+
+def _expanded_idx(index_1d, trailing_shape):
+    """Build the expanded-1D index (stride 0 on every axis > 0)."""
+    idx = index_1d
+    for s in trailing_shape:
+        idx = idx.unsqueeze(-1).expand(*idx.shape, s)
+    return idx
+
+
+def _make_override_triple(
+    M_out, M_src, shape_tail, *, dtype=torch.float32,
+    idx_dtype=torch.int64, outer_pad_self=0, outer_pad_src=0,
+):
+    """Build a (self, idx_2d, src, idx_1d) triple for the expanded-1D
+    scatter_add pattern. ``outer_pad_*`` widens the allocated buffer's
+    inner dim, then slices, producing a view with stride(-1)==1 but
+    outer stride != prod(shape[1:]).
+    """
+    N = 1
+    for s in shape_tail:
+        N *= s
+    if outer_pad_self:
+        big = torch.zeros(M_out, N + outer_pad_self, device="cuda", dtype=dtype)
+        self_t = big[:, :N].view(M_out, *shape_tail)
+    else:
+        self_t = torch.zeros(M_out, *shape_tail, device="cuda", dtype=dtype)
+    if outer_pad_src:
+        big = torch.randn(M_src, N + outer_pad_src, device="cuda", dtype=dtype)
+        src = big[:, :N].view(M_src, *shape_tail)
+    else:
+        src = torch.randn(M_src, *shape_tail, device="cuda", dtype=dtype)
+    index_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=idx_dtype)
+    return self_t, _expanded_idx(index_1d, shape_tail), src, index_1d
+
+
+def _naive_scatter_add(self_t, idx_1d, src, alpha=1.0):
+    """Reference implementation. Works on any stride pattern."""
+    ref = self_t.clone().float()
+    src_f = src.float()
+    for i, r in enumerate(idx_1d.tolist()):
+        ref[r] += alpha * src_f[i]
+    return ref.to(self_t.dtype)
+
+
+def _override_tol(dtype):
+    return 1e-4 if dtype == torch.float32 else 0.5
+
+
+def _misaligned_view(rows, cols, dtype):
+    """Allocate (rows*cols + 1) elements and slice from index 1, producing
+    a contiguous (rows, cols) view whose data_ptr is one element past a
+    16B-aligned base."""
+    t = torch.empty(rows * cols + 1, device="cuda", dtype=dtype)[1:].view(rows, cols)
+    # Sanity check: if the allocator ever hands us a base such that the
+    # +1-element slice is still 16B-aligned, the test silently passes
+    # without exercising the misalignment path.
+    assert t.data_ptr() % 16 != 0, (  # noqa: S101
+        f"test bug: data_ptr() should be misaligned, got {t.data_ptr() % 16=}"
+    )
+    return t
+
+
+def _outer_padded_view(rows, cols, dtype):
+    """Allocate (rows, cols + 1) zeros and slice the first `cols` columns,
+    producing a view with stride(0) == cols + 1 (not cols)."""
+    return torch.zeros(rows, cols + 1, device="cuda", dtype=dtype)[:, :cols]
+
+
+# Joint matrix for the data_ptr / row-stride alignment cond checks. Each
+# case names a misalignment site and what the cond should return. M_out /
+# M_src / D are fixed; D=128 -> row_bytes = 128 * elem_size, which is
+# 16B-aligned for fp32 and bf16, so any cond rejection here comes from
+# the new data_ptr / row-stride checks (not the row_bytes check).
+_M_OUT, _M_SRC, _D = 100, 50, 128
+
+
+class _AlignmentCase(NamedTuple):
+    name: str
+    # which buffer is misaligned: "self_dp", "src_dp", "both_dp",
+    # "self_rs", "src_rs"
+    site: str
+    dtype: torch.dtype
+    expected_tma: bool
+    expected_vec: bool
+
+    @property
+    def M_out(self):
+        return _M_OUT
+
+    @property
+    def M_src(self):
+        return _M_SRC
+
+    @property
+    def D(self):
+        return _D
+
+
+_ALIGNMENT_CASES = [
+    # data_ptr misalignment via storage_offset=1.
+    _AlignmentCase("fp32_self_dp", "self_dp", torch.float32, False, True),
+    _AlignmentCase("fp32_src_dp", "src_dp", torch.float32, False, False),
+    _AlignmentCase("fp32_both_dp", "both_dp", torch.float32, False, False),
+    _AlignmentCase("bf16_self_dp", "self_dp", torch.bfloat16, False, False),
+    # Outer row-stride misalignment via shape (D+1) slice.
+    _AlignmentCase("fp32_self_rs", "self_rs", torch.float32, False, True),
+    _AlignmentCase("fp32_src_rs", "src_rs", torch.float32, False, False),
+    _AlignmentCase("bf16_self_rs", "self_rs", torch.bfloat16, False, False),
+]
+
+
+def _build_alignment_case(case):
+    """Return (self, src) tensors for an alignment case."""
+    dtype = case.dtype
+    if case.site == "self_dp":
+        self_t = _misaligned_view(case.M_out, case.D, dtype).zero_()
+        src = torch.randn(case.M_src, case.D, device="cuda", dtype=dtype)
+    elif case.site == "src_dp":
+        self_t = torch.zeros(case.M_out, case.D, device="cuda", dtype=dtype)
+        src = _misaligned_view(case.M_src, case.D, dtype).normal_()
+    elif case.site == "both_dp":
+        self_t = _misaligned_view(case.M_out, case.D, dtype).zero_()
+        src = _misaligned_view(case.M_src, case.D, dtype).normal_()
+    elif case.site == "self_rs":
+        self_t = _outer_padded_view(case.M_out, case.D, dtype)
+        src = torch.randn(case.M_src, case.D, device="cuda", dtype=dtype)
+    elif case.site == "src_rs":
+        self_t = torch.zeros(case.M_out, case.D, device="cuda", dtype=dtype)
+        src = _outer_padded_view(case.M_src, case.D, dtype).normal_()
+    else:
+        raise ValueError(f"unknown site: {case.site}")
+    return self_t, src
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestScatterAddOverrideConds(TestCase):
+    """Unit tests for the dispatch predicates in
+    torch._native.ops.scatter_add.cutedsl_impl."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cls.impl = cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    def _conds(self, self_t, idx, src, dim=0):
+        # _is_*_supported take (self, dim, index, src); they build the
+        # analysis iter internally and pattern-match its strides against
+        # the kernel's expected layout.
+        return (
+            self.impl._is_tma_supported(self_t, dim, idx, src),
+            self.impl._is_vec_scatter_supported(self_t, dim, idx, src),
+        )
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    @parametrize("N", [128, 256, 512, 1024])
+    def test_accepts_contig_supported_shapes(self, dtype, N):
+        self_t, idx, src, _ = _make_override_triple(100, 50, (N,), dtype=dtype)
+        tma, vec = self._conds(self_t, idx, src)
+        self.assertTrue(tma)
+        self.assertTrue(vec)
+
+    def test_rejects_row_bytes_not_16_aligned(self):
+        # fp32 D=129 -> row_bytes=516, 516 % 16 != 0 -> TMA rejects
+        # (cp.reduce.async.bulk requires 16-aligned gmem operands).
+        # 129 % 4 != 0 -> vec also rejects.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
+    def test_alignment_cond_matrix(self, case):
+        # Joint coverage of the data_ptr / row-stride alignment checks
+        # in `_alignment_contract_ok`. src always needs 16B alignment
+        # (LDG.128 / TMA load); self/dst needs 16B for TMA but only 4B
+        # for vec-scatter, so dtype changes the vec-scatter expectation
+        # whenever the dst misalignment is sub-4B (bf16 storage_offset=1
+        # is 2B-aligned; bf16 row-stride pad of 1 elem leaves a 2B
+        # remainder).
+        #
+        # bf16 cases require sm_90+: pre-sm_90 vec-scatter and TMA both
+        # gate bf16 unconditionally, which would mask the alignment cond
+        # under test (False return value would come from the SM gate,
+        # not _alignment_contract_ok).
+        if case.dtype is torch.bfloat16 and not SM90OrLater:
+            self.skipTest("bf16 alignment cond requires sm_90+")
+        torch.manual_seed(0)
+        self_t, src = _build_alignment_case(case)
+        idx = _expanded_idx(
+            torch.randint(0, case.M_out, (case.M_src,), device="cuda", dtype=torch.int64),
+            (case.D,),
+        )
+        self.assertEqual(
+            self._conds(self_t, idx, src), (case.expected_tma, case.expected_vec),
+            msg=f"{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
+        )
+
+    def test_out_cond_rejects_misaligned_out(self):
+        # The .out impl runs the kernel on ``out``, not ``self`` (see
+        # _make_impls.out_impl). A misaligned ``out`` with aligned
+        # ``self`` must be rejected -- otherwise the kernel runs on
+        # ``out``'s misaligned data_ptr and faults with
+        # cudaErrorMisalignedAddress (the exact bug this diff prevents,
+        # just on the .out variant).
+        M_out, M_src, D = 100, 50, 128
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.bfloat16)
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.bfloat16)
+        # Misaligned out: one-element (2B) offset from a 16B boundary.
+        # bf16 -> 2B-aligned, which fails both the TMA 16B and the
+        # vec-scatter 4B destination alignment checks.
+        out_mis = (
+            torch.empty(M_out * D + 1, device="cuda", dtype=torch.bfloat16)[1:]
+            .view(M_out, D)
+        )
+        self.assertNotEqual(
+            out_mis.data_ptr() % 16, 0,
+            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+        )
+        idx = _expanded_idx(
+            torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),
+            (D,),
+        )
+        self.assertFalse(
+            self.impl._tma_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out TMA cond accepted misaligned `out`",
+        )
+        self.assertFalse(
+            self.impl._vs_out_cond(self_t, 0, idx, src, out=out_mis),
+            msg=".out vec-scatter cond accepted misaligned `out`",
+        )
+
+    def test_tma_accepts_row_not_chunk_multiple(self):
+        # bf16 D=264 -> row_bytes=528, 16-aligned but not a multiple of
+        # chunk_bytes (512). TMA descriptor handles the partial final
+        # chunk via OOB-clamp-to-zero; cond should accept.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (264,), dtype=torch.bfloat16)
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_rejects_unsupported_dtype(self):
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,), dtype=torch.float64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_dim_nonzero_on_default_contig(self):
+        # Default-contiguous (M, N) tensor with dim=1 permutes to (N, M) with
+        # outer stride 1 and inner stride N -- inner is not packed, so the
+        # post-permute eligibility check still rejects.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        self.assertEqual(self._conds(self_t, idx, src, dim=1), (False, False))
+
+    def test_accepts_dim_after_permute(self):
+        # User-facing tensors are (N, M)-shaped views of (M, N)-contiguous
+        # backing storage. After ``movedim(1, 0)`` the layout becomes
+        # (M, N)-contiguous, which is what the kernel expects.
+        M_self, M_src, N = 100, 50, 128
+        big_self = torch.zeros(M_self, N, device="cuda").transpose(0, 1)
+        big_src = torch.randn(M_src, N, device="cuda").transpose(0, 1)
+        idx_1d = torch.randint(0, M_self, (M_src,), device="cuda", dtype=torch.int64)
+        # Index broadcast pattern along the inner axis of the permuted view
+        # = N axis of the user's tensor.
+        idx = idx_1d.unsqueeze(0).expand(N, M_src)
+        self.assertEqual(self._conds(big_self, idx, big_src, dim=1), (True, True))
+
+    def test_rejects_non_expanded_index(self):
+        # Materialized 2D index (not a broadcast view) has nonzero stride
+        # on every axis -> the stride(i) == 0 check fails.
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        bad_idx = torch.randint(0, 100, (50, 128), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, bad_idx, src), (False, False))
+
+    def test_rejects_inner_non_contig(self):
+        # permute(1, 0) -> trailing axis has stride 100 (not 1).
+        big_self = torch.zeros(128, 100, device="cuda").permute(1, 0)
+        big_src = torch.randn(128, 50, device="cuda").permute(1, 0)
+        idx = _expanded_idx(
+            torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertEqual(self._conds(big_self, idx, big_src), (False, False))
+
+    def test_accepts_outer_strided(self):
+        self_t, idx, src, _ = _make_override_triple(
+            100, 50, (128,), outer_pad_self=64
+        )
+        self.assertFalse(self_t.is_contiguous())
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    @parametrize("idx_dtype", [torch.int32, torch.int64])
+    def test_accepts_int32_and_int64_index(self, idx_dtype):
+        self_t, idx, src, _ = _make_override_triple(
+            100, 50, (128,), idx_dtype=idx_dtype
+        )
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_rejects_deterministic_mode(self):
+        # The determinism gate lives in _base_cond_ok (the shared
+        # prelude), not the per-path support_check. Call the wrapped
+        # cond to exercise the full dispatch-layer predicate.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        with DeterministicGuard(True):
+            self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
+            self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
+
+    def test_rejects_empty_self(self):
+        # self.shape[0] == 0 with a non-empty src would have every index
+        # out of range. Cond must reject so aten raises the index error
+        # instead of our kernel silently writing OOB.
+        self_t = torch.zeros(0, 128, device="cuda", dtype=torch.float32)
+        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestScatterAddOverrideCorrectness(TestCase):
+    """End-to-end: torch.scatter_add vs a naive reference on shapes the
+    conds accept (TMA-eligible and vec-scatter-only)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    @parametrize("dtype,shape_tail", [
+        subtest((torch.float32, (128,)), name="fp32_N128"),       # TMA, single chunk
+        subtest((torch.float32, (1024,)), name="fp32_N1024"),     # TMA, full chunks
+        subtest((torch.bfloat16, (128,)), name="bf16_N128"),
+        subtest((torch.bfloat16, (1024,)), name="bf16_N1024"),
+        subtest((torch.float16, (256,)), name="fp16_N256"),
+        subtest((torch.float32, (132,)), name="fp32_N132_partial"),   # TMA partial final chunk
+        subtest((torch.bfloat16, (264,)), name="bf16_N264_partial"),  # TMA partial final chunk
+        subtest((torch.float32, (4, 32)), name="fp32_3d"),        # nD flatten
+    ])
+    def test_matches_reference(self, dtype, shape_tail):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, shape_tail, dtype=dtype)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        ref = _naive_scatter_add(
+            self_t.reshape(self_t.shape[0], -1),
+            idx_1d,
+            src.reshape(src.shape[0], -1),
+        ).reshape(self_t.shape)
+        tol = _override_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("variant", ["functional", "out", "inplace"])
+    def test_op_variants(self, variant):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        if variant == "functional":
+            got = torch.scatter_add(self_t, 0, idx, src)
+        elif variant == "out":
+            got = torch.empty_like(self_t)
+            torch.scatter_add(self_t, 0, idx, src, out=got)
+        else:
+            got = self_t.clone()
+            ret = got.scatter_add_(0, idx, src)
+            self.assertIs(ret, got)
+        self.assertEqual(got, ref)
+
+    @parametrize("outer_pad_self,outer_pad_src", [(64, 0), (0, 64), (64, 64)])
+    def test_outer_strided(self, outer_pad_self, outer_pad_src):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(
+            200, 100, (128,),
+            outer_pad_self=outer_pad_self, outer_pad_src=outer_pad_src,
+        )
+        got = torch.scatter_add(self_t, 0, idx, src)
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        self.assertEqual(got, ref)
+
+    def test_repeated_index_accumulates(self):
+        # All indices target row 0: result[0] == sum(src).
+        torch.manual_seed(0)
+        src = torch.randn(64, 128, device="cuda")
+        self_t = torch.zeros(10, 128, device="cuda")
+        idx = _expanded_idx(
+            torch.zeros(64, device="cuda", dtype=torch.int64), (128,)
+        )
+        got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(got[0], src.sum(0), atol=1e-3, rtol=1e-3)
+        self.assertEqual(got[1:].abs().sum().item(), 0)
+
+    def test_matches_reference_dim1_after_permute(self):
+        # Build operands whose scatter axis (dim=1) becomes axis 0 after
+        # ``movedim``, landing on the kernel-eligible (M, N)-contiguous
+        # layout. Concretely: take a contiguous (M, N) buffer and view it
+        # as (N, M) via transpose; scatter_add along dim=1 then sees
+        # exactly the original buffer after movedim(1, 0).
+        torch.manual_seed(0)
+        M_out, M_src, N = 200, 100, 128
+        self_t = torch.zeros(M_out, N, device="cuda", dtype=torch.float32).transpose(0, 1)
+        src = torch.randn(M_src, N, device="cuda", dtype=torch.float32).transpose(0, 1)
+        idx_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64)
+        idx = idx_1d.unsqueeze(0).expand(N, M_src)
+        got = torch.scatter_add(self_t, 1, idx, src)
+        # Reference: same scatter with dim=0 on the (M, N) view, then
+        # transpose back to match self_t's layout.
+        ref = _naive_scatter_add(
+            self_t.movedim(1, 0), idx_1d, src.movedim(1, 0)
+        ).movedim(0, 1)
+        self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
+
+    def test_empty_index_is_noop(self):
+        # End-to-end: empty index/src must produce the input unchanged
+        # without any kernel-launch crash. In current TI behavior,
+        # empty 2D shapes coalesce to ndim=1 so eligibility rejects and
+        # aten handles the no-op. The numel==0 guard in _run is a
+        # belt-and-braces defense (mirrors aten's pattern) for the case
+        # where eligibility passes but the iter has no work.
+        torch.manual_seed(0)
+        self_t = torch.randn(200, 128, device="cuda", dtype=torch.float32)
+        idx = torch.empty(0, 128, device="cuda", dtype=torch.int64)
+        src = torch.empty(0, 128, device="cuda", dtype=torch.float32)
+        for variant in ("functional", "out", "inplace"):
+            ref = self_t.clone()
+            if variant == "functional":
+                got = torch.scatter_add(self_t, 0, idx, src)
+            elif variant == "out":
+                got = torch.empty_like(self_t)
+                torch.scatter_add(self_t, 0, idx, src, out=got)
+            else:
+                got = self_t.clone()
+                got.scatter_add_(0, idx, src)
+            self.assertEqual(got, ref)
+
+    def test_deterministic_mode_uses_aten(self):
+        # Under use_deterministic_algorithms(True), the cond rejects and
+        # scatter_add falls through to aten's deterministic path. Verify
+        # end-to-end numerics match a naive reference.
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        with DeterministicGuard(True):
+            got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(got, ref)
+
+    @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
+    def test_alignment_correctness(self, case):
+        # End-to-end regression for the SEV-class crash where a
+        # misaligned data_ptr / row stride bypassed the cond and faulted
+        # in the TMA / vec-scatter kernel (cudaErrorMisalignedAddress
+        # from cp.reduce.async.bulk or LDG.128). With the alignment cond
+        # in place, every case here either runs via vec-scatter (when
+        # the relaxed dst-only 4B contract is met -- expected_vec=True)
+        # or falls through to aten; both must produce correct numerics.
+        from torch._native.ops.scatter_add import cutedsl_impl
+
+        # See test_alignment_cond_matrix.
+        if case.dtype is torch.bfloat16 and not SM90OrLater:
+            self.skipTest("bf16 alignment cond requires sm_90+")
+        torch.manual_seed(0)
+        self_t, src = _build_alignment_case(case)
+        idx_1d = torch.randint(0, case.M_out, (case.M_src,), device="cuda", dtype=torch.int64)
+        idx = _expanded_idx(idx_1d, (case.D,))
+
+        # Confirm the cond observed in the unit test matches what the
+        # dispatch-layer cond returns end-to-end (no skew between
+        # eligibility check and kernel execution).
+        self.assertEqual(
+            cutedsl_impl._is_tma_supported(self_t, 0, idx, src), case.expected_tma,
+        )
+        self.assertEqual(
+            cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src), case.expected_vec,
+        )
+
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        tol = _override_tol(case.dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol, msg=case.name)
+
+    def test_misaligned_out_correctness(self):
+        # End-to-end regression for the .out variant: when ``out`` is
+        # misaligned the .out cond must reject so the call falls through
+        # to aten (the kernel runs on ``out``, so a misaligned ``out``
+        # would otherwise fault with cudaErrorMisalignedAddress -- same
+        # SEV-class bug as the functional path, just on .out).
+        torch.manual_seed(0)
+        M_out, M_src, D = 200, 100, 128
+        self_t = torch.zeros(M_out, D, device="cuda", dtype=torch.bfloat16)
+        src = torch.randn(M_src, D, device="cuda", dtype=torch.bfloat16)
+        # bf16 -> 2B-aligned data_ptr; fails both 16B (TMA) and 4B
+        # (vec-scatter) destination alignment.
+        out_mis = _misaligned_view(M_out, D, torch.bfloat16)
+        self.assertNotEqual(out_mis.data_ptr() % 16, 0)
+        idx_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64)
+        idx = _expanded_idx(idx_1d, (D,))
+
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        ret = torch.scatter_add(self_t, 0, idx, src, out=out_mis)
+        self.assertIs(ret, out_mis)
+        tol = _override_tol(torch.bfloat16)
+        self.assertEqual(out_mis, ref, atol=tol, rtol=tol)
+
+    @parametrize("dtype,N", [
+        # chunk_bytes < 128 (small D)
+        subtest((torch.float32, 8), name="fp32_N8_cb32"),
+        subtest((torch.float32, 16), name="fp32_N16_cb64"),
+        subtest((torch.bfloat16, 8), name="bf16_N8_cb16"),
+        subtest((torch.bfloat16, 16), name="bf16_N16_cb32"),
+        # 128 < chunk_bytes < 512 but not a multiple of 128 -- stage 1
+        # also misaligns here without the stage-stride padding.
+        subtest((torch.float32, 36), name="fp32_N36_cb144"),
+        subtest((torch.bfloat16, 72), name="bf16_N72_cb144"),
+    ])
+    @unittest.skipUnless(SM90OrLater, "TMA path requires sm_90+")
+    def test_smem_stage_alignment_multi_iter(self, dtype, N):
+        # Regression for TMA stage-1 smem misalignment: stage 1 of the
+        # 2-stage pipeline buffer lands at offset chunk_bytes, so any
+        # chunk_bytes that isn't 128B-aligned (small D < 128, or D's
+        # row_bytes not a multiple of 128) makes cp.async.bulk fault
+        # with cudaErrorMisalignedAddress the first time a CTA writes
+        # stage 1. Stage 1 is only reached when a CTA does >= 2
+        # iterations, i.e. M_src > grid_x. _plan_grid caps grid_x at
+        # sm*64, so M_src must exceed that to expose the bug.
+        from torch._native.ops.scatter_add import cutedsl_impl
+
+        torch.manual_seed(0)
+        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        M_out, M_src = 1024, sm * 64 + 256
+        self_t, idx, src, idx_1d = _make_override_triple(
+            M_out, M_src, (N,), dtype=dtype
+        )
+        # Assert the TMA path is the one that actually runs -- otherwise
+        # the test would silently regress to vec-scatter (which has no
+        # smem stage stride and can't reproduce this bug).
+        self.assertTrue(
+            cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
+            msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
+        )
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        torch.cuda.synchronize()
+        tol = _override_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+
+
+instantiate_parametrized_tests(TestScatterAddOverrideConds)
+instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
+
 
 # Generic Device Test Framework instantiation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests

@@ -56,6 +56,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/TensorIterator.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -1853,7 +1854,7 @@ static PyObject* THPModule_set_override_stale_capture_stream(
       "enabled must be a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setOverrideStaleCaptureStream(arg == Py_True);
+  at::globalContext().setOverrideStaleCaptureStream(Py_IsTrue(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2242,6 +2243,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_disable_torch_dispatch,
      METH_VARARGS,
      nullptr},
+    {"_skip_one_hop_torch_function",
+     THPModule_skip_one_hop_torch_function,
+     METH_VARARGS,
+     nullptr},
+    {"_peek_should_skip_torch_function",
+     THPModule_peek_should_skip_torch_function,
+     METH_NOARGS,
+     nullptr},
+    {"_set_skip_next_torch_function",
+     THPModule_set_skip_next_torch_function,
+     METH_O,
+     nullptr},
     {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
     {"_has_torch_function_unary",
      THPModule_has_torch_function_unary,
@@ -2514,6 +2527,8 @@ PyObject* initModule() {
 #endif
 
   torch::distributed::initPlacementBindings(module);
+
+  torch::initTensorIteratorBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
