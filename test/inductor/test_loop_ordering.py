@@ -1240,12 +1240,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
     @parametrize("dynamic", (False, True))
     def test_tiled_coalesce_analysis(self, downcast_transposed_v, dynamic):
         # test one pw var, one red var
-        from torch._inductor import tiling_utils
-
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
 
             i_vars = coalesce_analysis.norm_read_writes.index_vars
 
@@ -1282,15 +1280,13 @@ class MemoryCoalescingTest(MockSchedulerTest):
         def foo(x):
             return (*torch.var_mean(x, [1, 3]),)
 
-        from torch._inductor import tiling_utils
-
         inp = torch.randn(1, 2, 4, 8, device=GPU_TYPE)
         out_eager = foo(inp)
 
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
             red_vars = coalesce_analysis.norm_read_writes.reduce_vars
 
             self.assertTrue(len(red_vars) == 2)
@@ -1363,12 +1359,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, dynamic):
-        from torch._inductor import tiling_utils
-
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
             return nodes
 
@@ -1519,12 +1513,10 @@ class TestTiling(TestCase):
 
         x = self.T("cont")
 
-        from torch._inductor import tiling_utils
-
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
             if coalesce_analysis is None:
                 raise AssertionError
 
@@ -1574,13 +1566,12 @@ class TestTiling(TestCase):
         - Read of w: uncoalesced (uses indirect index)
         - Write to output: coalesced (contiguous)
         """
-        from torch._inductor import tiling_utils
         from torch.utils._sympy.symbol import symbol_is_type, SymT
 
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            coalesce_analysis = nodes[0].get_coalesce_analysis()
             self.assertIsNotNone(coalesce_analysis)
 
             # Should have exactly 1 uncoalesced access (the indirect weight read)
@@ -1629,6 +1620,58 @@ class TestTiling(TestCase):
         # Verify correctness
         expected = embedding_1d(indices, weights)
         self.assertEqual(out, expected)
+
+    @parametrize("dynamic", (False, True))
+    def test_scatter_broadcast_no_tiling(self, dynamic):
+        """Scatter with broadcast loads should not trigger 2D tiling."""
+        num_nodes = 4096
+        num_edges = 16384
+        feat_dim = 64
+
+        src = torch.randint(0, num_nodes, (num_edges,), device=GPU_TYPE)
+        features = torch.randn(num_nodes, feat_dim, device=GPU_TYPE)
+
+        if dynamic:
+            torch._dynamo.mark_dynamic(src, 0)
+            torch._dynamo.mark_dynamic(features, 0)
+
+        def f(src, features):
+            gathered = features[src]
+            out = torch.zeros(num_nodes, feat_dim, device=GPU_TYPE)
+            return out.scatter_add_(0, src.unsqueeze(1).expand_as(gathered), gathered)
+
+        out, code = run_and_get_code(torch.compile(f), src, features)
+        FileCheck().check_not("ynumel").run(code[0])
+        self.assertEqual(out, f(src, features))
+
+    def test_cont_plus_transposed_picks_2d(self):
+        """Contiguous + transposed addition should still pick 2D tiling."""
+        x = torch.randn(256, 256, device=GPU_TYPE)
+        y = torch.randn(256, 256, device=GPU_TYPE).T
+
+        def f(x, y):
+            return x + y
+
+        out, code = run_and_get_code(torch.compile(f), x, y)
+        FileCheck().check("ynumel").run(code[0])
+        self.assertEqual(out, f(x, y))
+
+    def test_mixed_broadcast_transpose_picks_2d(self):
+        """Mixed broadcast and transposed access: 2D chosen for real coalescing only."""
+        x = torch.randn(256, 256, device=GPU_TYPE)
+        y = torch.randn(256, 256, device=GPU_TYPE).T
+        z = torch.randn(256, device=GPU_TYPE)
+
+        def f(x, y, z):
+            return x + y + z.unsqueeze(1)
+
+        out, code = run_and_get_code(torch.compile(f), x, y, z)
+        # 2D tiling should be selected because of real transposed coalescing
+        # from y, even though z's broadcast score is filtered as already-
+        # coalesced-in-1D. Both y and z contribute to the same variable (n0),
+        # so this tests per-expression filtering within a single variable.
+        FileCheck().check("ynumel").run(code[0])
+        self.assertEqual(out, f(x, y, z))
 
 
 class TestSplitIterationRanges(MockSchedulerTest):

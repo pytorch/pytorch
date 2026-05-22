@@ -1448,10 +1448,11 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         b = torch.randn(5, 4, device=device)
         nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
 
-        # Guard CUDA tensors
-        if "cuda" in device:
+        # Non-CPU devices don't use POSIX shared memory
+        if device != "cpu":
             result = nt.share_memory_()
             self.assertIs(result, nt)
+            self.assertTrue(nt.is_shared())
             return
 
         result = nt.share_memory_()

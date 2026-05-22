@@ -26,7 +26,6 @@ for more information on the design.
 
 import collections
 import contextlib
-import functools
 import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
@@ -129,13 +128,6 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
-
-
-@functools.cache
-def get_prev_stack_var_name() -> str:
-    from ..bytecode_transformation import unique_id
-
-    return unique_id("___prev_torch_function_mode_stack")
 
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
@@ -269,7 +261,7 @@ torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
-    def __init__(self, py_stack: Iterable[Any]) -> None:
+    def __init__(self, py_stack: Iterable[Any], skip_next: bool) -> None:
         # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
         # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
         # These are their definitions:
@@ -284,6 +276,13 @@ class SymbolicTorchFunctionState:
         # This is important because now if a mode is pushed while dynamo is tracing, we know whether
         # or not torch function modes are enabled and whether we should trace it.
         self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
+
+        # Mirrors PythonTorchFunctionTLS::skip_next in C++.
+        # Set by _skip_one_hop_torch_function, consumed by has_torch_function.
+        # The real TLS flag is consumed by save_global_state in
+        # OutputGraph.__init__ (which runs before this) and passed in here.
+        # On tracing failure, restore_graphstate restores the real TLS.
+        self.skip_next = skip_next
 
         # This differs from the C API of the same name
         # this will only be false iff we have entered torch._C.DisableTorchFunction
@@ -604,6 +603,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
+        tensor_var = tensor_var.realize()
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
