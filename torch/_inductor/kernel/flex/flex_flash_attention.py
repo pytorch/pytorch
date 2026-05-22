@@ -1302,6 +1302,11 @@ def create_flex_flash_attention_kernel(
                 mask_graph.graph_module
             )
     if packed_mask_intervals is not None:
+        assert all(not isinstance(buf, sympy.Expr) for buf in mask_mod_other_buffers), (
+            "Packed mask interval lowering assumes mask_mod aux placeholders map "
+            "1:1 to tensor aux_tensors. Dynamic symbol captures need explicit "
+            "placeholder-to-buffer mapping."
+        )
         configs = [
             conf
             if conf.mask_mod_vec_size_forced
