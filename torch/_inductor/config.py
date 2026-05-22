@@ -1534,6 +1534,14 @@ disable_cpp_codegen = False
 # can no longer be updated.
 freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 
+# Allow freezing for inference graphs discovered after tracing, even if ambient
+# grad mode is enabled before tracing starts. This is useful for compiled
+# functions that enter no_grad/inference_mode internally, but it can freeze
+# parameters from a grad-enabled caller, so keep it opt-in.
+freezing_traced_inference: bool = (
+    os.environ.get("TORCHINDUCTOR_FREEZING_TRACED_INFERENCE", "0") == "1"
+)
+
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
