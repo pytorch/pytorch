@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ... import config as inductor_config
+from .. import config as inductor_config
 from .base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from ...kernel_inputs import KernelInputs
+    from ..kernel_inputs import KernelInputs
 
 
 class GemmMaxAutotuneTemplateConfigHeuristics(TemplateConfigHeuristics):
