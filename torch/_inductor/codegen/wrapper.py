@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Literal, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -2332,31 +2332,56 @@ class PythonWrapperCodegen(CodeGen):
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
-        for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
+        def bind_input_symbol(
+            sym: sympy.Symbol,
+            input_name: str,
+            kind: Literal["size", "stride"],
+            dim: int,
+        ) -> None:
             if sym in bound_vars:
-                continue
-            if input_name not in graph_inputs:
-                continue
+                return
             if kind == "size":
                 self.prefix.writeline(f"{sym} = {input_name}.size()[{dim}]")
             else:
                 self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
             bound_vars.add(sym)
 
+        for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
+            if sym in bound_vars:
+                continue
+            if input_name not in graph_inputs:
+                continue
+            bind_input_symbol(sym, input_name, kind, dim)
+
+        # Input size/stride assertions are emitted after codegen_inputs(), but
+        # their expected tuples can reference bare symbols that are not explicit
+        # graph inputs. Bind only symbols needed for those graph-input asserts.
+        if config.size_asserts:
+            for input_name, value in inputs:
+                if not isinstance(value, ir.TensorBox):
+                    continue
+                if input_name not in V.graph.graph_input_names:
+                    continue
+                if sympy_product(value.get_size()) == 0:
+                    continue
+                for dim, size in enumerate(value.get_size()):
+                    if isinstance(size, sympy.Symbol):
+                        bind_input_symbol(size, input_name, "size", dim)
+                for dim, stride in enumerate(value.get_stride()):
+                    if isinstance(stride, sympy.Symbol):
+                        bind_input_symbol(stride, input_name, "stride", dim)
+
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
             bound_vars: OrderedSet[sympy.Symbol],
         ):
             for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
-                if not isinstance(expr, Expr):
+                if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
                     continue
 
-                symbols = (
-                    OrderedSet([expr])
-                    if isinstance(expr, sympy.Symbol)
-                    else OrderedSet(expr.free_symbols)
-                )
-                undefined_symbols = [sym for sym in symbols if sym not in bound_vars]
+                undefined_symbols = [
+                    sym for sym in expr.free_symbols if sym not in bound_vars
+                ]
                 if len(undefined_symbols) > 0:
                     raise AssertionError(
                         f"For {expr}, expected {undefined_symbols} to have been codegen-ed."

@@ -8141,9 +8141,11 @@ def _record_symbolic_input_source(
     if not isinstance(expr, sympy.Symbol) or not isinstance(tensor, TensorBox):
         return
 
+    if not tensor.is_input_buffer():
+        return
+
     name = tensor.get_name()
-    if name in V.graph.graph_inputs:
-        V.graph.symbolic_input_sources.setdefault(expr, (name, kind, int(dim)))
+    V.graph.symbolic_input_sources.setdefault(expr, (name, kind, int(dim)))
 
 
 @register_lowering(aten.sym_size.int)

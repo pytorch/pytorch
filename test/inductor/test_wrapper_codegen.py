@@ -7,6 +7,7 @@ import sympy
 import torch
 from torch._inductor import ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
@@ -51,6 +52,21 @@ class TestPythonWrapperCodegen(TestCase):
         self.assertEqual(wrapper.prefix.getvalue(), "")
         self.assertEqual(list(bound_vars), [])
 
+    def test_record_symbolic_input_source_ignores_non_input_tensorbox(self):
+        s0 = sympy.Symbol("s0")
+        tensor = ir.Pointwise.create(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=lambda index: index[0],
+            ranges=[s0],
+        )
+        graph = SimpleNamespace(graph_inputs={}, symbolic_input_sources={})
+
+        with V.set_graph_handler(graph):
+            _record_symbolic_input_source(tensor, 0, s0, "size")
+
+        self.assertEqual(graph.symbolic_input_sources, {})
+
     def test_codegen_inputs_binds_recorded_symbolic_input_source(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
@@ -67,6 +83,7 @@ class TestPythonWrapperCodegen(TestCase):
         )
         graph = SimpleNamespace(
             graph_inputs={"arg0_1": tensor},
+            graph_input_names=["arg0_1"],
             symbolic_input_sources={s0: ("arg0_1", "size", 0)},
         )
 
@@ -84,13 +101,14 @@ class TestPythonWrapperCodegen(TestCase):
                 layout=ir.FixedLayout(
                     torch.device("cpu"),
                     torch.float32,
-                    size=[s0, 3],
+                    size=[s0 + 1, 3],
                     stride=[3, 1],
                 ),
             )
         )
         graph = SimpleNamespace(
             graph_inputs={"arg0_1": tensor},
+            graph_input_names=["arg0_1"],
             symbolic_input_sources={},
         )
 
