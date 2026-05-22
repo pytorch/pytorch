@@ -514,7 +514,7 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(actual, fn(a, b, scale), atol=1e-2, rtol=1e-2)
         FileCheck().check("@cute.jit").check("aux0").check(
             "epilogue_args=("
-        ).check_not("epilogue_arg_kinds=").run("\n".join(codes))
+        ).check("epilogue_arg_kinds=('tile',)").run("\n".join(codes))
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_epilogue_tuned_kernel_option_codegen(self):
@@ -577,7 +577,81 @@ class GemmEpilogueFusionTests(TestCase):
                 torch.testing.assert_close(actual, fn(a, b, scale), atol=1e-2, rtol=1e-2)
                 FileCheck().check("@cute.jit").check("aux0").check(
                     "epilogue_args=("
-                ).check_not("epilogue_arg_kinds=").run("\n".join(codes))
+                ).check(f"epilogue_arg_kinds=('{kind}',)").run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_epilogue_reads_many_broadcast_closure_tensors(self):
+        try:
+            import quack  # noqa: F401
+        except ImportError:
+            self.skipTest("QuACK is not available")
+
+        def fn(a, b, row0, col1, row2, col3, row4):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: (((acc.float() * row0 + col1) * row2 + col3) * row4).relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+        row0 = torch.randn(1, 16, device="cuda", dtype=torch.float32)
+        col1 = torch.randn(16, 1, device="cuda", dtype=torch.float32)
+        row2 = torch.randn(1, 16, device="cuda", dtype=torch.float32)
+        col3 = torch.randn(16, 1, device="cuda", dtype=torch.float32)
+        row4 = torch.randn(1, 16, device="cuda", dtype=torch.float32)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            row0,
+            col1,
+            row2,
+            col3,
+            row4,
+        )
+
+        torch.testing.assert_close(
+            actual, fn(a, b, row0, col1, row2, col3, row4), atol=1e-2, rtol=1e-2
+        )
+        FileCheck().check("@cute.jit").check("aux0").check("aux4").check(
+            "epilogue_args=("
+        ).check("epilogue_arg_kinds=('row', 'col', 'row', 'col', 'row')").check_not(
+            "extern_kernels.mm"
+        ).run("\n".join(codes))
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_epilogue_reads_two_tile_closure_tensors(self):
+        try:
+            import quack  # noqa: F401
+        except ImportError:
+            self.skipTest("QuACK is not available")
+
+        def fn(a, b, tile0, tile1):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: (acc.float() + tile0 * tile1).relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+        tile0 = torch.randn(16, 16, device="cuda", dtype=torch.float32)
+        tile1 = torch.randn(16, 16, device="cuda", dtype=torch.float32)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, tile0, tile1
+        )
+
+        torch.testing.assert_close(actual, fn(a, b, tile0, tile1), atol=1e-2, rtol=1e-2)
+        FileCheck().check("@cute.jit").check("aux0").check("aux1").check(
+            "epilogue_args=("
+        ).check("epilogue_arg_kinds=('tile', 'tile')").check_not(
+            "extern_kernels.mm"
+        ).run("\n".join(codes))
 
     @requires_cuda_and_triton
     def test_cuda_inductor_triton_epilogue_reads_mask_closure_tensor(self):

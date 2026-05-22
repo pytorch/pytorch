@@ -30,6 +30,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         beta = kwargs.pop("beta")
         out_dtype = kwargs.pop("out_dtype", None)
         epilogue_arg_indices = kwargs.pop("epilogue_arg_indices", ())
+        epilogue_arg_kinds = kwargs.pop("epilogue_arg_kinds", ())
         local_reduce_out_index = kwargs.pop("local_reduce_out_index", None)
         aux_out_index = kwargs.pop("aux_out_index", None)
         local_reduce_group = kwargs.pop("local_reduce_group", None)
@@ -56,6 +57,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             beta=beta,
             out_dtype=out_dtype,
             epilogue_arg_indices=epilogue_arg_indices,
+            epilogue_arg_kinds=epilogue_arg_kinds,
             local_reduce_out_index=local_reduce_out_index,
             aux_out_index=aux_out_index,
             local_reduce_group=local_reduce_group,
@@ -85,6 +87,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         beta: float,
         out_dtype: Any | None = None,
         epilogue_arg_indices: tuple[int, ...] = (),
+        epilogue_arg_kinds: tuple[str, ...] = (),
         local_reduce_out_index: int | None = None,
         aux_out_index: int | None = None,
         local_reduce_group: int | None = None,
@@ -112,6 +115,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.beta = beta
         self.out_dtype = out_dtype
         self.epilogue_arg_indices = epilogue_arg_indices
+        self.epilogue_arg_kinds = epilogue_arg_kinds
         self.local_reduce_out_index = local_reduce_out_index
         self.aux_out_index = aux_out_index
         self.local_reduce_group = local_reduce_group
@@ -141,6 +145,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 beta=self.beta,
                 out_dtype=self.out_dtype,
                 epilogue_arg_indices=self.epilogue_arg_indices,
+                epilogue_arg_kinds=self.epilogue_arg_kinds,
                 local_reduce_out_index=self.local_reduce_out_index,
                 aux_out_index=self.aux_out_index,
                 local_reduce_group=self.local_reduce_group,
@@ -166,7 +171,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
     def hash_key(self) -> str:
         return code_hash(
             f"{self.gemm_op}\n{self.alpha}\n{self.beta}\n{self.out_dtype}\n"
-            f"{self.epilogue_arg_indices}\n{self.local_reduce_out_index}\n{self.aux_out_index}\n"
+            f"{self.epilogue_arg_indices}\n{self.epilogue_arg_kinds}\n{self.local_reduce_out_index}\n{self.aux_out_index}\n"
             f"{self.local_reduce_group}\n{self.local_reduce_dim}\n{self.local_reduce_op}\n"
             f"{self.local_reduce_scale}\n{self.local_reduce_max_power}\n{self.local_reduce_feeds_main}\n"
             f"{self.local_reduce_source_from_epilogue}\n"
