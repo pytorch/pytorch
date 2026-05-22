@@ -1534,8 +1534,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(
