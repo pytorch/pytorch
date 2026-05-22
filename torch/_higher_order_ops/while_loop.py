@@ -705,9 +705,9 @@ def while_loop_vmap(
         unwrap_batched(additional_inputs_list, interpreter.level()),
     )
     # Flatten for easier manipulation
-    flat_carried, carried_spec = pytree.tree_flatten(unwrapped_carried)
+    flat_carried, _ = pytree.tree_flatten(unwrapped_carried)
     flat_carried_bdims, _ = pytree.tree_flatten(carried_bdims)
-    flat_additional, additional_spec = pytree.tree_flatten(unwrapped_additional)
+    flat_additional, _ = pytree.tree_flatten(unwrapped_additional)
     flat_additional_bdims, _ = pytree.tree_flatten(additional_bdims)
 
     batch_size = interpreter.batch_size()
