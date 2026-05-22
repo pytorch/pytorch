@@ -38,8 +38,17 @@ import weakref
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, TypeVar
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    TypedDict,
+    Union,
+)
+from typing_extensions import NotRequired, ParamSpec, TypeVar
 
 import sympy
 
@@ -64,7 +73,7 @@ from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
-from torch.fx._lazy_graph_module import _make_graph_module
+from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
@@ -190,6 +199,43 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 RootGuardManager = guards.RootGuardManager
+
+TensorMetadataDim = int | torch.SymInt | None
+TensorMetadataSequence = Sequence[TensorMetadataDim]
+OutputReturnKind = Literal["graph_out", "input", "constant"]
+
+
+class SizesStridesInfo(TypedDict):
+    size: TensorMetadataSequence
+    stride: TensorMetadataSequence
+    values_size: NotRequired[TensorMetadataSequence]
+    values_stride: NotRequired[TensorMetadataSequence]
+
+
+class CodeOptions(TypedDict):
+    co_argcount: int
+    co_posonlyargcount: int
+    co_kwonlyargcount: int
+    co_nlocals: int
+    co_stacksize: int
+    co_flags: int
+    co_code: bytes
+    co_consts: tuple[object, ...]
+    co_names: tuple[str, ...]
+    co_varnames: tuple[str, ...]
+    co_filename: str
+    co_name: str
+    co_qualname: NotRequired[str]
+    co_firstlineno: int
+    co_linetable: bytes
+    co_exceptiontable: NotRequired[bytes]
+    co_freevars: tuple[str, ...]
+    co_cellvars: tuple[str, ...]
+
+
+class OutputReturnInfo(NamedTuple):
+    kind: OutputReturnKind
+    value: object
 
 
 # Capture fn pointer at import time
@@ -403,7 +449,7 @@ class OutputGraphGuardsState:
     torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
     guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
-    input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    input_source_to_sizes_strides: dict[Source, SizesStridesInfo]
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: torch.device | None
@@ -463,9 +509,13 @@ class StackLocalsMetadata:
     )  # order of locals codegen'd to the stack
     stack_null_idxes: list[int] = dc_field(default_factory=list)
     locals_null_keys: list[str] = dc_field(default_factory=list)
-    stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
+    stack_ctx_args: list[tuple[int, tuple[object, ...]]] = dc_field(
+        default_factory=list
+    )
     stack_ctx_idxes_orig: list[int] = dc_field(default_factory=list)
-    locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
+    locals_ctx_args: list[tuple[str, tuple[object, ...]]] = dc_field(
+        default_factory=list
+    )
 
 
 # TODO we should expand this to make it work for atribtrary in/out
@@ -481,7 +531,7 @@ class ExportMetaData:
     # 1) graph out
     # 2) user input
     # 3) constants
-    output_return_type: dict[int, tuple[str, Any]] = dc_field(default_factory=dict)
+    output_return_type: dict[int, OutputReturnInfo] = dc_field(default_factory=dict)
     # output spec of the traced function
     out_spec: torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec = (
         torch.utils._pytree._LEAF_SPEC
@@ -602,7 +652,7 @@ class OutputGraph(OutputGraphCommon):
 
     def __init__(
         self,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         compiler_fn: CompilerFn | None,
         root_tx: "InstructionTranslatorBase",
         export: bool,
@@ -739,7 +789,7 @@ class OutputGraph(OutputGraphCommon):
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
-        self.code_options: dict[str, Any] = dict(code_options)
+        self.code_options: CodeOptions = cast(CodeOptions, dict(code_options))
         self.output_instructions: list[Instruction] = []
         self.output_pycode: list[list[str] | None] = []
         # used to track nodes that are added between calls of copy_graphstate
@@ -1403,7 +1453,7 @@ class OutputGraph(OutputGraphCommon):
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
             {},
-            {},
+            {},  # type: ignore[arg-type]
         )
 
     def count_calls(self) -> int:
@@ -1624,7 +1674,7 @@ class OutputGraph(OutputGraphCommon):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
                 return VariableTracker.build(
-                    self,
+                    self,  # type: ignore[arg-type]
                     target,
                     ConstantSource(source_name=module_key),
                 )
@@ -2124,25 +2174,23 @@ class OutputGraph(OutputGraphCommon):
                         variable: VariableTracker = value.variable
                         vt_to_graph_out_idx[variable] = value.index
 
+                    output_return_type = self.export_metadata.output_return_type
                     for idx, vt in enumerate(flat_returns.items):
                         if vt in vt_to_graph_out_idx:
-                            self.export_metadata.output_return_type[idx] = (
-                                "graph_out",
-                                vt_to_graph_out_idx[vt],
+                            output_return_type[idx] = OutputReturnInfo(
+                                "graph_out", vt_to_graph_out_idx[vt]
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))
+                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and getattr(source, "is_input", False)
                         ):
-                            self.export_metadata.output_return_type[idx] = (
-                                "input",
-                                vt.source,
+                            output_return_type[idx] = OutputReturnInfo(
+                                "input", vt.source
                             )
                         elif vt.is_python_constant():
-                            self.export_metadata.output_return_type[idx] = (
-                                "constant",
-                                vt.as_python_constant(),
+                            output_return_type[idx] = OutputReturnInfo(
+                                "constant", vt.as_python_constant()
                             )
                         else:
                             raise AssertionError(
@@ -3831,7 +3879,7 @@ class SubgraphTracer(fx.Tracer):
             kwargs,
             name,
             type_expr,
-            proxy_factory_fn,
+            proxy_factory_fn,  # type: ignore[arg-type]
         )
 
         # append stack trace to fx node
