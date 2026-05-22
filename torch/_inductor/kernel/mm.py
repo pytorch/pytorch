@@ -449,12 +449,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_triton(layout.device)
     ):
         node = V.graph.current_node
-        if node is not None and node.meta.get("math", {}).get(
-            "symmetric", False
-        ):
-            from torch._inductor.kernel.diag_symm_mm import (
-                diag_symm_mm_template,
-            )
+        if node is not None and node.meta.get("math", {}).get("symmetric", False):
+            from torch._inductor.kernel.diag_symm_mm import diag_symm_mm_template
 
             templates_to_use.append(diag_symm_mm_template)
 
