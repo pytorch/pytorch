@@ -3,9 +3,11 @@ import copy
 import itertools
 
 import torch
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
+    Placement,
     Replicate,
     Shard,
 )
@@ -14,6 +16,15 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    def test_placements_subclass_opaque_base(self):
+        for cls in (Placement, Shard, _StridedShard, Partial, Replicate):
+            self.assertTrue(issubclass(cls, OpaqueBase))
+            self.assertIsInstance(cls, OpaqueBaseMeta)
+
+        self.assertIsInstance(Shard(0), OpaqueBase)
+        self.assertIsInstance(Replicate(), OpaqueBase)
+        self.assertIsInstance(Partial(), OpaqueBase)
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)

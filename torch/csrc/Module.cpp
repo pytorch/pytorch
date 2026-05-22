@@ -158,6 +158,20 @@ static PyObject* module;
 
 static THPGenerator* THPDefaultCPUGenerator = nullptr;
 
+namespace {
+
+struct THPOpaqueBase {};
+
+void installOpaqueBase(PyObject* module) {
+  auto py_module = py::reinterpret_borrow<py::module>(module);
+  auto pybind_opaque_base =
+      py::class_<THPOpaqueBase>(py_module, "_OpaqueBase").def(py::init<>());
+  py::module_::import("torch._opaque_base")
+      .attr("_install_opaque_base")(pybind_opaque_base);
+}
+
+} // namespace
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -2453,6 +2467,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  installOpaqueBase(module);
   // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.

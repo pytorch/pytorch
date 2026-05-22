@@ -52,6 +52,7 @@ from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    scoped_load_inline,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._import_utils import import_dill
@@ -1780,6 +1781,56 @@ def forward(self, primals, tangents):
         ):
             register_opaque_type(NoOpaqueBase, typ="reference")
 
+    @scoped_load_inline
+    def test_pybind_opaque_base_requires_metaclass_for_registration(self, load_inline):
+        cpp_source = r"""
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
+
+struct BaseOnlyOpaque {};
+struct WithMetaOpaque {};
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  py::object opaque_base_module = py::module_::import("torch._opaque_base");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
+  py::object opaque_base_meta = opaque_base_module.attr("OpaqueBaseMeta");
+
+  py::class_<BaseOnlyOpaque>(m, "BaseOnlyOpaque", opaque_base)
+      .def(py::init<>());
+  py::class_<WithMetaOpaque>(
+      m, "WithMetaOpaque", opaque_base, py::metaclass(opaque_base_meta))
+      .def(py::init<>());
+}
+        """
+
+        module = load_inline(
+            name="opaque_base_pybind_test",
+            cpp_sources=cpp_source,
+            functions=None,
+            verbose=False,
+            with_cuda=False,
+        )
+
+        self.assertTrue(issubclass(module.BaseOnlyOpaque, OpaqueBase))
+        self.assertNotIsInstance(
+            module.BaseOnlyOpaque, torch._opaque_base.OpaqueBaseMeta
+        )
+        with self.assertRaisesRegex(TypeError, "py::metaclass"):
+            register_opaque_type(module.BaseOnlyOpaque, typ="reference")
+
+        self.assertTrue(issubclass(module.WithMetaOpaque, OpaqueBase))
+        self.assertIsInstance(module.WithMetaOpaque, torch._opaque_base.OpaqueBaseMeta)
+        register_opaque_type(module.WithMetaOpaque, typ="reference")
+
+        obj = module.WithMetaOpaque()
+        fake_obj = FakeScriptObject(
+            None, get_opaque_type_name(module.WithMetaOpaque), obj
+        )
+        self.assertIsInstance(obj, OpaqueBase)
+        self.assertIsInstance(fake_obj, module.WithMetaOpaque)
+
+    def test_invalid_reference_type_members(self):
         class BadMember(OpaqueBase):
             def __init__(self, x):
                 self.x = x
@@ -4110,6 +4161,16 @@ class fn(torch.nn.Module):
         # Already called during import; second call should be a no-op.
         torch._C._set_generator_metaclass(OpaqueBaseMeta)
         self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
+
+    def test_opaque_base_is_pybind_backed(self):
+        self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
+        self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
+
+        class PyOpaque(OpaqueBase):
+            def __init__(self, value):
+                self.value = value
+
+        self.assertEqual(PyOpaque(3).value, 3)
 
     def test_generator_metaclass_is_set(self):
         """Generator's metaclass should be OpaqueBaseMeta after import"""

@@ -208,7 +208,9 @@ def register_opaque_type(
     if typ != "value" and not isinstance(cls, OpaqueBaseMeta):
         raise TypeError(
             f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
-            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
+            "with torch._opaque_base.OpaqueBaseMeta "
+            "(or use 'py::metaclass(torch._opaque_base.OpaqueBaseMeta)' "
+            "for pybind classes). "
             "This is required so that FakeScriptObject can be registered "
             "as a virtual subclass, allowing isinstance() checks to work "
             "during torch.compile tracing. "

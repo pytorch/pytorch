@@ -2142,17 +2142,19 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
-  // Use OpaqueBase as the metaclass to allow isinstance(fake_obj, ProcessGroup)
-  // to work.
+  // Subclass OpaqueBase and use its metaclass so pybind sees a real Python
+  // base while isinstance(fake_obj, ProcessGroup) still unwraps real_obj.
   py::object opaque_base_module = py::module_::import("torch._opaque_base");
-  py::object opaque_base = opaque_base_module.attr("OpaqueBaseMeta");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
+  py::object opaque_base_meta = opaque_base_module.attr("OpaqueBaseMeta");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
           ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
           module,
           "ProcessGroup",
-          py::metaclass(opaque_base),
+          opaque_base,
+          py::metaclass(opaque_base_meta),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
