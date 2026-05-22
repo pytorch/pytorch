@@ -235,47 +235,19 @@ static bool may_turn_const(const at::Tensor& t) {
       t.device().type() != c10::DeviceType::Meta;
 }
 
-// Registers a fake tensor's constant in the mode's storage mapping
-static void add_constant_storage_mapping(
+static void set_constant_on_mode(
     const at::Tensor& fake_tensor,
+    std::shared_ptr<at::Tensor> constant,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  if (!mode)
+  if (!mode || !constant)
     return;
-  auto constant = fake_tensor.unsafeGetTensorImpl()->constant();
-  if (!constant || !constant->has_storage())
-    return;
-  auto* storage_impl = constant->storage().unsafeGetStorageImpl();
-  // weak reference to not keep the fake tensor alive, math
-  auto weak_impl = c10::weak_intrusive_ptr<c10::TensorImpl>(
-      c10::intrusive_ptr<c10::TensorImpl>::unsafe_reclaim_from_nonowning(
-          fake_tensor.unsafeGetTensorImpl()));
-  mode->constant_storage_mapping_[storage_impl].push_back(std::move(weak_impl));
+  c10::StorageImpl* storage = nullptr;
+  if (constant->has_storage())
+    storage = constant->storage().unsafeGetStorageImpl();
+  mode->set_constant(
+      fake_tensor.getIntrusivePtr(), std::move(constant), storage);
 }
 
-// Given a real tensor, finds all fake tensors whose constant shares the same
-// underlying storage and clears their constants
-static void invalidate_constant_aliases(
-    const at::Tensor& real_tensor,
-    const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  if (!mode || !real_tensor.has_storage())
-    return;
-  auto* storage_impl = real_tensor.storage().unsafeGetStorageImpl();
-  auto it = mode->constant_storage_mapping_.find(storage_impl);
-  if (it == mode->constant_storage_mapping_.end())
-    return;
-  for (auto& weak_ref : it->second) {
-    // try to promote to strong intrusive_ptr
-    // if faketensor is dead, impl will be nullptr
-    auto impl = weak_ref.lock();
-    if (impl) {
-      impl->set_constant(nullptr); // clear constant
-    }
-  }
-  mode->constant_storage_mapping_.erase(it);
-}
-
-// Before falling through to meta dispatch, checks if any mutable argument
-// carries a constant and invalidates it (and all its storage aliases)
 static void invalidate_written_to_constants(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -289,8 +261,8 @@ static void invalidate_written_to_constants(
   bool any_constant = std::any_of(
       flat_arg_fake_tensors.begin(),
       flat_arg_fake_tensors.end(),
-      [](const at::Tensor& t) {
-        return t.unsafeGetTensorImpl()->constant() != nullptr;
+      [&](const at::Tensor& t) {
+        return mode->has_constant(t.unsafeGetTensorImpl());
       });
   if (!any_constant || !schema.is_mutable())
     return;
@@ -301,12 +273,14 @@ static void invalidate_written_to_constants(
     const auto& t = ivalue.toTensor();
     if (!is_our_fake(t, mode))
       continue;
-    auto constant = t.unsafeGetTensorImpl()->constant();
+    auto constant = mode->get_constant(t.unsafeGetTensorImpl());
     if (!constant)
       continue;
     if (!schema.is_mutable({c10::SchemaArgType::input, idx}))
       continue;
-    invalidate_constant_aliases(*constant, mode);
+    if (constant->has_storage())
+      mode->invalidate_constant_aliases(
+          constant->storage().unsafeGetStorageImpl());
   }
 }
 
@@ -462,9 +436,10 @@ void fakeFallback(
             return std::nullopt;
           auto fake = real_tensor_to_fake(t, mode);
           if (may_turn_const(t)) {
-            fake.unsafeGetTensorImpl()->set_constant(
-                std::make_shared<at::Tensor>(t.clone()));
-            add_constant_storage_mapping(fake, mode);
+            set_constant_on_mode(
+                fake,
+                std::make_shared<at::Tensor>(t.clone()),
+                mode);
           }
           return fake;
         });
@@ -497,8 +472,8 @@ void fakeFallback(
         std::all_of(
             flat_arg_fake_tensors.begin(),
             flat_arg_fake_tensors.end(),
-            [](const at::Tensor& t) {
-              return t.unsafeGetTensorImpl()->constant() != nullptr;
+            [&](const at::Tensor& t) {
+              return mode && mode->has_constant(t.unsafeGetTensorImpl());
             });
 
     // isinstance(func, torch._ops.OpOverload) — always true in C++ fallback
@@ -523,7 +498,7 @@ void fakeFallback(
           stack, arguments_begin, num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (is_our_fake(t, mode)) {
-              auto constant = t.unsafeGetTensorImpl()->constant();
+              auto constant = mode->get_constant(t.unsafeGetTensorImpl());
               if (constant) {
                 tensor_memo[constant->unsafeGetTensorImpl()] = t;
                 return *constant;
@@ -564,14 +539,11 @@ void fakeFallback(
               auto memo_it = tensor_memo.find(t.unsafeGetTensorImpl());
               if (memo_it != tensor_memo.end()) {
                 auto& orig_fake = memo_it->second;
-                orig_fake.unsafeGetTensorImpl()->set_constant(
-                    std::move(cloned));
-                add_constant_storage_mapping(orig_fake, mode);
+                set_constant_on_mode(orig_fake, std::move(cloned), mode);
                 return orig_fake;
               }
               auto fake = real_tensor_to_fake(t, mode);
-              fake.unsafeGetTensorImpl()->set_constant(std::move(cloned));
-              add_constant_storage_mapping(fake, mode);
+              set_constant_on_mode(fake, std::move(cloned), mode);
               return fake;
             });
         return;
@@ -582,8 +554,9 @@ void fakeFallback(
       for_each_tensor(
           stack, returns_begin, num_returns,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-            if (t.defined() && !t.is_fake())
-              invalidate_constant_aliases(t, mode);
+            if (t.defined() && !t.is_fake() && t.has_storage())
+              mode->invalidate_constant_aliases(
+                  t.storage().unsafeGetStorageImpl());
             return std::nullopt;
           });
 

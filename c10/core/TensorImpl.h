@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -260,18 +261,30 @@ struct C10_API FakeTensorMode {
   // returns true if prim_meta_impl was found and executed
   std::function<bool(const void* op, void* stack)> prim_meta_fn_;
 
-  // maps StorageImpl* -> list of weak TensorImpl pointers for all fake tensors
-  // whose constant shares that storage
-  std::unordered_map<
-      c10::StorageImpl*,
-      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
-      constant_storage_mapping_;
-
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)) {}
+
+  void set_constant(
+      const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+      std::shared_ptr<at::Tensor> constant,
+      c10::StorageImpl* constant_storage);
+
+  std::shared_ptr<at::Tensor> get_constant(c10::TensorImpl* fake_impl) const;
+  bool has_constant(c10::TensorImpl* fake_impl) const;
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+
+  // key = faketensor, value = real constant
+  std::unordered_map<c10::TensorImpl*, std::shared_ptr<at::Tensor>>
+      tensor_to_constant_;
+  // key = constant storage, values = all fake tensors that share this storage (aliases)
+  std::unordered_map<
+      c10::StorageImpl*,
+      std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>>>
+      constant_storage_mapping_;
+  mutable std::mutex constant_mutex_;
 };
 
 struct C10_API ExtraMeta {
@@ -282,9 +295,6 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
-  // Backing real tensor for constant propagation in C++ FakeTensorMode.
-  // Matches Python FakeTensor.constant.
-  std::shared_ptr<at::Tensor> constant_ = nullptr;
 
   ExtraMeta() = default;
   ~ExtraMeta() = default;
@@ -303,7 +313,6 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
-    constant_ = other.constant_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1506,16 +1515,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
-  }
-
-  void set_constant(std::shared_ptr<at::Tensor> constant) {
-    get_extra_meta().constant_ = std::move(constant);
-  }
-
-  std::shared_ptr<at::Tensor> constant() const {
-    if (!extra_meta_)
-      return nullptr;
-    return extra_meta_->constant_;
   }
 
   /**

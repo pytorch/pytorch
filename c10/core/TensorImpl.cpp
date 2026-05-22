@@ -1120,4 +1120,46 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 
 } // namespace impl
 
+void FakeTensorMode::set_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+    std::shared_ptr<at::Tensor> constant,
+    c10::StorageImpl* constant_storage) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  if (constant_storage) {
+    constant_storage_mapping_[constant_storage].push_back(
+        c10::weak_intrusive_ptr<c10::TensorImpl>(fake_impl));
+  }
+  tensor_to_constant_[fake_impl.get()] = std::move(constant);
+}
+
+std::shared_ptr<at::Tensor> FakeTensorMode::get_constant(
+    c10::TensorImpl* fake_impl) const {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = tensor_to_constant_.find(fake_impl);
+  if (it == tensor_to_constant_.end())
+    return nullptr;
+  return it->second;
+}
+
+bool FakeTensorMode::has_constant(c10::TensorImpl* fake_impl) const {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = tensor_to_constant_.find(fake_impl);
+  return it != tensor_to_constant_.end() && it->second != nullptr;
+}
+
+void FakeTensorMode::invalidate_constant_aliases(
+    c10::StorageImpl* storage_impl) {
+  std::lock_guard<std::mutex> lock(constant_mutex_);
+  auto it = constant_storage_mapping_.find(storage_impl);
+  if (it == constant_storage_mapping_.end())
+    return;
+  for (auto& weak_ref : it->second) {
+    auto impl = weak_ref.lock();
+    if (impl) {
+      tensor_to_constant_.erase(impl.get());
+    }
+  }
+  constant_storage_mapping_.erase(it);
+}
+
 } // namespace c10
