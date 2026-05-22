@@ -112,9 +112,8 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     fi
 fi
 
-USE_GLOO_WITH_OPENSSL="ON"
+USE_GLOO_WITH_OPENSSL="OFF"
 if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* ]]; then
-  USE_GLOO_WITH_OPENSSL="OFF"
   USE_GOLD_LINKER="OFF"
 fi
 

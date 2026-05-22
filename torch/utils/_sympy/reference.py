@@ -177,7 +177,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-count, bad-argument-type]
         return _keep_float(FloatPow)(a, b)
 
     @staticmethod
@@ -361,6 +361,24 @@ class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
     @staticmethod
     def sym_sum(args):
         return torch.sym_sum(args)
+
+    @staticmethod
+    def floor_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.floor(x)
+        return x
+
+    @staticmethod
+    def ceil_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.ceil(x)
+        return x
+
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.trunc(x)
+        return x
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:

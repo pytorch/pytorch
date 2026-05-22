@@ -19,18 +19,18 @@ void initializeDtypes() {
 #undef DEFINE_SCALAR_TYPE
 
   for (at::ScalarType scalarType : all_scalar_types) {
-    auto [primary_name, legacy_name] = c10::getDtypeNames(scalarType);
-    PyObject* dtype = THPDtype_New(scalarType, primary_name);
-    torch::registerDtypeObject((THPDtype*)dtype, scalarType);
-    Py_INCREF(dtype);
-    if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=
-        0) {
+    auto [primary_view, legacy_view] = c10::getDtypeNames(scalarType);
+    std::string primary_name(primary_view);
+    std::string legacy_name(legacy_view);
+    THPObjectPtr dtype(THPDtype_New(scalarType, primary_name));
+    torch::registerDtypeObject((THPDtype*)dtype.get(), scalarType);
+    if (PyModule_AddObjectRef(
+            torch_module.get(), primary_name.c_str(), dtype.get()) != 0) {
       throw python_error();
     }
     if (!legacy_name.empty()) {
-      Py_INCREF(dtype);
-      if (PyModule_AddObject(torch_module.get(), legacy_name.c_str(), dtype) !=
-          0) {
+      if (PyModule_AddObjectRef(
+              torch_module.get(), legacy_name.c_str(), dtype.get()) != 0) {
         throw python_error();
       }
     }

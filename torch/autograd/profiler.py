@@ -516,12 +516,18 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def export_chrome_trace(self, path):
+    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if kineto_available():
+        if use_python_export and kineto_available():
+            from torch.profiler._chrome_trace_export import (
+                export_chrome_trace as _export,
+            )
+
+            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
+        elif kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
             self._ensure_function_events()
@@ -703,6 +709,12 @@ class profile:
                 flow_start=kineto_event.flow_start(),
                 external_id=kineto_event.external_id(),
                 linked_correlation_id=kineto_event.linked_correlation_id(),
+                structured_input_shapes=kineto_event.structured_input_shapes(),
+                structured_input_strides=kineto_event.structured_input_strides(),
+                input_dtypes=kineto_event.dtypes(),
+                python_id=kineto_event.python_id(),
+                python_parent_id=kineto_event.python_parent_id(),
+                python_module_id=kineto_event.python_module_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:

@@ -263,6 +263,143 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_rendezvous_via_pg_allgather(self) -> None:
+        import pickle
+
+        self._init_process()
+
+        pg = dist.group.WORLD
+        pg.use_pg_for_symm_mem_rendezvous = True
+        try:
+            torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+            t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
+                self.rank
+            )
+            symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+            self.assertEqual(symm_mem_hdl.rank, self.rank)
+            self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+            entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
+                "entries"
+            ]
+            ag_entries = [
+                e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+            ]
+            # On NVLink-fabric hardware both the RendezvousRequest and handle
+            # exchange go through pg_all_gather → 2 allgathers. On hardware
+            # without NVLink fabric only the RendezvousRequest uses
+            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
+            self.assertIn(
+                len(ag_entries),
+                [1, 2],
+                f"expected 1 or 2 NCCL _all_gather_base from rendezvous, "
+                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            )
+
+            symm_mem_hdl.barrier()
+            for peer in range(self.world_size):
+                buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+                self.assertTrue(buf.eq(peer).all())
+            symm_mem_hdl.barrier()
+        finally:
+            pg.use_pg_for_symm_mem_rendezvous = False
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_custom_backend(self) -> None:
+        # Simulate the ncclx multi-backend setup.  NCCLXStub wraps NCCL
+        # (CUDA-only, like ncclx) and registers via extended_api=True.
+        # When new_group() is called with "cpu:gloo,cuda:ncclx_stub",
+        # _new_process_group_helper can leave the wrapper ProcessGroup's
+        # backendType_ as UNDEFINED.  This used to crash
+        # getUsePgForSymmMemRendezvous() because getDefaultBackend() fails
+        # for UNDEFINED.  The fix looks up the CUDA backend directly, so
+        # PG-based rendezvous works even with UNDEFINED default backend.
+        self._init_process()
+
+        import pickle
+
+        from torch._C._distributed_c10d import _DistributedBackendOptions, NCCLXStub
+
+        def create_ncclx_stub(dist_opts: _DistributedBackendOptions, pg_options=None):
+            if pg_options is None:
+                pg_options = dist.ProcessGroupNCCL.Options()
+            backend = NCCLXStub(
+                dist_opts.store,
+                dist_opts.group_rank,
+                dist_opts.group_size,
+                pg_options,
+            )
+            backend.setUsePgForSymmMemRendezvous(True)
+            return backend
+
+        dist.Backend.register_backend(
+            "ncclx_stub", create_ncclx_stub, extended_api=True, devices=["cuda"]
+        )
+
+        pg = dist.new_group(
+            list(range(self.world_size)), backend="cpu:gloo,cuda:ncclx_stub"
+        )
+
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
+        ag_entries = [
+            e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+        ]
+        self.assertGreaterEqual(
+            len(ag_entries),
+            1,
+            f"expected NCCL _all_gather_base from PG rendezvous, "
+            f"got: {[e['profiling_name'] for e in entries]}",
+        )
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pg_rendezvous_abort_after(self) -> None:
+        self._init_process()
+
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.use_pg_for_symm_mem_rendezvous = True
+        pg = dist.new_group(list(range(self.world_size)), pg_options=opts)
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+        pg.abort()
+
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
         self._init_process()
@@ -1297,8 +1434,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_0 = torch.compile(func_0, fullgraph=True)
         code_0 = run_and_get_triton_code(compiled_0, arg)
 
-        self.assertIn("one_shot_all_reduce", code_0)
-        self.assertNotIn("return (buf0", code_0)
+        FileCheck().check("one_shot_all_reduce").run(code_0)
+        FileCheck().check_not("return (buf0").run(code_0)
+
+        eager_result_0 = func_0(arg.clone())
+        compiled_result_0 = compiled_0(arg.clone())
+        torch.testing.assert_close(eager_result_0, compiled_result_0)
 
         # All-reduce on a slice view
         def func_1(x):
@@ -1310,8 +1451,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_1 = torch.compile(func_1, fullgraph=True)
         code_1 = run_and_get_triton_code(compiled_1, arg)
 
-        self.assertIn("one_shot_all_reduce", code_1)
-        self.assertNotIn("return (buf0", code_1)
+        FileCheck().check("one_shot_all_reduce").run(code_1)
+        FileCheck().check_not("return (buf0").run(code_1)
+
+        eager_result_1 = func_1(arg.clone())
+        compiled_result_1 = compiled_1(arg.clone())
+        torch.testing.assert_close(eager_result_1, compiled_result_1)
 
         # All-reduce on input
         def func_2(x):
@@ -1321,7 +1466,11 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_2 = torch.compile(func_2, fullgraph=True)
         code_2 = run_and_get_triton_code(compiled_2, arg)
 
-        self.assertNotIn("one_shot_all_reduce", code_2)
+        FileCheck().check_not("one_shot_all_reduce").run(code_2)
+
+        eager_result_2 = func_2(arg.clone())
+        compiled_result_2 = compiled_2(arg.clone())
+        torch.testing.assert_close(eager_result_2, compiled_result_2)
 
         # All-reduce on matmul output
         def func_3(x):
@@ -1332,8 +1481,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_3 = torch.compile(func_3, fullgraph=True)
         code_3 = run_and_get_triton_code(compiled_3, arg)
 
-        self.assertIn("one_shot_all_reduce", code_3)
-        self.assertNotIn("return (buf0", code_3)
+        FileCheck().check("one_shot_all_reduce").run(code_3)
+        FileCheck().check_not("return (buf0").run(code_3)
+
+        eager_result_3 = func_3(arg.clone())
+        compiled_result_3 = compiled_3(arg.clone())
+        torch.testing.assert_close(eager_result_3, compiled_result_3)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
@@ -1606,6 +1759,46 @@ class LoweringTest(MultiProcContinuousTest):
             atol=1e-5,
             msg="Compiled and eager do not match",
         )
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_custom_op_symm_mem_realization(self):
+        """Test that torch.compile allocates symm_mem for custom ops with registered symm_mem_args."""
+        self._init_process()
+
+        from torch.library import Library  # noqa: SCOPED_LIBRARY
+
+        group_name = dist.group.WORLD.group_name
+
+        lib = Library("test_symm_realize", "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define(
+            "my_collective(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        lib.register_symm_mem_args("my_collective", ["input"])
+
+        @torch.library.impl(lib, "my_collective", "Meta")
+        def meta_impl(input, reduce_op, group_name):
+            return torch.empty_like(input)
+
+        @torch.library.impl(lib, "my_collective", "CUDA")
+        def cuda_impl(input, reduce_op, group_name):
+            if not symm_mem.is_symm_mem_tensor(input):
+                raise ValueError(
+                    f"Expected input to be a symmetric memory tensor, but got {type(input)}"
+                )
+            return input.clone()
+
+        def func(x):
+            x = x + 1
+            return torch.ops.test_symm_realize.my_collective(x, "sum", group_name)
+
+        compiled = torch.compile(func, fullgraph=True)
+        x = torch.rand(4, 4, device=self.device)
+        code = run_and_get_triton_code(compiled, x)
+
+        # Verify that exactly one symm_mem allocation call is generated
+        FileCheck().check_count("empty_strided_p2p(", 1, exactly=True).run(code)
 
 
 class SymmMemSingleProcTest(TestCase):

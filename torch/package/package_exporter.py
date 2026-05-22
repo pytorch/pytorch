@@ -688,7 +688,7 @@ class PackageExporter:
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
                         if module is None:
-                            # If not module was passed on in the entries preceding this one, continue.
+                            # If no module was passed on in the entries preceding this one, continue.
                             continue
                         if not isinstance(module, str):
                             raise AssertionError(

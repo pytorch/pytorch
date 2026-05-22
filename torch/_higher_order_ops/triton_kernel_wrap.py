@@ -1199,8 +1199,10 @@ def identify_triton_stores(source_code: str) -> TritonStores:
 
     tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
     """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
 
-    tree = ast.parse(source_code)
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
     stores = []
 
     def _extract_arg(node, arg_name, positional_index):
@@ -1339,7 +1341,7 @@ def triton_kernel_wrapper_mutation_dense(
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
             if (exp_meta := maybe_unpack_tma_experimental_metadata(v)) is not None:
-                from triton.tools.experimental_descriptor import (  # noqa: F401
+                from triton.tools.experimental_descriptor import (
                     create_1d_tma_descriptor,
                     create_2d_tma_descriptor,
                 )
@@ -1738,7 +1740,7 @@ class TritonHOPifier:
         kwargs: dict,
     ) -> list["TritonConfig"]:
         # Reimplement autotuner.prune_configs(...) here
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py   # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
         # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
@@ -2134,7 +2136,7 @@ class TritonHOPifier:
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # These are the default values in upstream Triton
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py
         default_perf_model = None
         default_early_config_prune = None
 

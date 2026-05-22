@@ -299,7 +299,7 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
 
 void CUDAPluggableAllocator::attachOomRejectionObserver(
     c10::cuda::CUDACachingAllocator::OomRejectionObserver observer) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "CUDAPluggableAllocator does not yet support attachOomRejectionObserver. "
       "If you need it, please file an issue describing your use case.");

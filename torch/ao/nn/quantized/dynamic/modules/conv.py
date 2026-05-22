@@ -68,7 +68,7 @@ class Conv1d(nnq.Conv1d):
         reduce_range=True,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",
             stacklevel=2,
         )
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -241,7 +241,7 @@ class Conv3d(nnq.Conv3d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",
             stacklevel=2,
         )
         if padding_mode == "reflect":
@@ -334,7 +334,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",
             stacklevel=2,
         )
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -417,7 +417,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",
             stacklevel=2,
         )
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -500,7 +500,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",
             stacklevel=2,
         )
         factory_kwargs = {"device": device, "dtype": dtype}

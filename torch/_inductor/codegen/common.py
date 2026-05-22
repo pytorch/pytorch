@@ -507,6 +507,7 @@ def init_backend_registration() -> None:
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
+    from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -552,7 +553,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
-            TritonScheduling,
+            XPUCombinedScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
@@ -1016,34 +1017,42 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return repr(value)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
@@ -2604,7 +2613,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(  # noqa: G200
+            log.info(
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2790,9 +2799,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

@@ -2,7 +2,6 @@
 import abc
 import functools
 import inspect
-import unittest
 import weakref
 
 import torch
@@ -11,6 +10,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import set_default_dtype
 
 
@@ -201,6 +201,34 @@ user_stack=None)
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
 
+    def test_fake_script_type_match_guard(self):
+        class Real:
+            pass
+
+        class Other:
+            pass
+
+        root = RootGuardManager()
+        real = Real()
+        fake = FakeScriptObject(object(), "Real", real)
+        guard = guards.FAKE_SCRIPT_TYPE_MATCH(
+            root,
+            FakeScriptObject,
+            id_type(real),
+            ["type match through FakeScriptObject"],
+            None,
+        )
+
+        # Passes for the FakeScriptObject at compile time and the real
+        # underlying object at runtime.
+        self.assertTrue(guard(fake))
+        self.assertTrue(guard(real))
+        # Different real type wrapped in FakeScriptObject should fail.
+        self.assertFalse(guard(FakeScriptObject(object(), "Other", Other())))
+        # Different raw type should fail.
+        self.assertFalse(guard(Other()))
+        self.assertFalse(guard(5))
+
     def test_id_guard(self):
         root = RootGuardManager()
         foo = 4
@@ -254,8 +282,12 @@ user_stack=None)
         guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
         self.assertTrue(guard(foo))
 
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+
         try:
-            torch.set_default_device("cuda")
+            device = torch.accelerator.current_accelerator()
+            torch.set_default_device(device)
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -333,22 +365,101 @@ user_stack=None)
 
     def test_dynamic_indices_guard(self):
         root = RootGuardManager()
-        guard1 = guards.DYNAMIC_INDICES(root, set(), ["x.size(0) == y.size(0)"], None)
-        guard2 = guards.DYNAMIC_INDICES(
-            root, set({0, 1}), ["x.size(0) == y.size(0)"], None
+
+        # Test with expected attr: _dynamo_dynamic_indices = {0, 1}
+        # and absent attr: _dynamo_static_indices
+        expected_attrs = {"_dynamo_dynamic_indices": {0, 1}}
+        absent_attrs = ["_dynamo_static_indices"]
+        dependent_attrs = {}  # type: ignore[var-annotated]
+        guard = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs,
+            ["dimension marking guard"],
+            None,
         )
 
+        # No attr at all -> pass (unspecified = don't care)
         x = torch.randn(4)
-        self.assertTrue(guard1(x))
-        self.assertTrue(guard2(x))
+        self.assertTrue(guard(x))
 
-        x._dynamo_dynamic_indices = set({0})
-        self.assertFalse(guard1(x))
-        self.assertTrue(guard2(x))
+        # Exact match -> pass
+        x._dynamo_dynamic_indices = {0, 1}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
 
-        x._dynamo_dynamic_indices = set({2})
-        self.assertFalse(guard1(x))
-        self.assertFalse(guard2(x))
+        # Subset -> pass (runtime markings are a subset of compiled)
+        x._dynamo_dynamic_indices = {0}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
+
+        # Different set -> fail
+        x._dynamo_dynamic_indices = {2}
+        x._has_dynamo_dim_marking = True
+        self.assertFalse(guard(x))
+
+        # Absent attr present -> fail
+        x._dynamo_dynamic_indices = {0, 1}
+        x._dynamo_static_indices = {0}
+        x._has_dynamo_dim_marking = True
+        self.assertFalse(guard(x))
+
+    def test_dimension_marking_guard_dependent_attrs(self):
+        root = RootGuardManager()
+
+        # Test dependent_attrs: _dynamo_shape_ids is checked only when
+        # _dynamo_unbacked_indices (gate) is present.
+        expected_attrs = {"_dynamo_unbacked_indices": {0}}
+        absent_attrs = []  # type: ignore[var-annotated]
+        dependent_attrs = {
+            "_dynamo_shape_ids": ({0: "batch"}, "_dynamo_unbacked_indices"),
+        }
+        guard = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs,
+            ["dimension marking guard dependent"],
+            None,
+        )
+
+        # No gate attr -> pass (don't care)
+        x = torch.randn(4)
+        self.assertTrue(guard(x))
+
+        # Gate present + dependent attr matches -> pass
+        x._dynamo_unbacked_indices = {0}
+        x._dynamo_shape_ids = {0: "batch"}
+        x._has_dynamo_dim_marking = True
+        self.assertTrue(guard(x))
+
+        # Gate present + dependent attr mismatch -> fail
+        x._dynamo_shape_ids = {0: "other"}
+        self.assertFalse(guard(x))
+
+        # Gate present + dependent attr absent + expected non-None -> fail
+        del x._dynamo_shape_ids
+        self.assertFalse(guard(x))
+
+        # Test with expected=None for dependent attr (compile-time also absent)
+        dependent_attrs_none = {
+            "_dynamo_shape_ids": (None, "_dynamo_unbacked_indices"),
+        }
+        guard2 = guards.DIMENSION_DYNAMIC_MARKING_GUARD(
+            root,
+            expected_attrs,
+            absent_attrs,
+            dependent_attrs_none,
+            ["dimension marking guard dependent none"],
+            None,
+        )
+
+        # Gate present + dependent attr absent + expected None -> pass
+        y = torch.randn(4)
+        y._dynamo_unbacked_indices = {0}
+        y._has_dynamo_dim_marking = True
+        self.assertTrue(guard2(y))
 
     def test_tensor_match_guard(self):
         guard_manager = RootGuardManager()
@@ -445,10 +556,14 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_call_function_no_args_guard(self):
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+
         root = RootGuardManager()
-        x = torch.cuda.current_device()
+        device = torch.accelerator.current_accelerator()
+        # Use device.index which is device-agnostic (works on all accelerators)
+        x = device.index if device.index is not None else 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
@@ -815,9 +930,13 @@ user_stack=None)
 
         self.assertTrue(root.check(f_locals))
 
-        # Check that no one can add a leaf guard
+        # ID_MATCH is the only leaf guard supported on DictGuardManager.
+        dict_mgr.add_id_match_guard(id(f_locals["d"]), "id match on dict", None)
+        self.assertTrue(root.check(f_locals))
+
+        # Other leaf guards are rejected.
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_id_match_guard(id_type(f_locals), "id match", None)
+            dict_mgr.add_equals_match_guard(f_locals["d"], ["equals match"], None)
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):
@@ -1056,8 +1175,7 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
         def hook(guard_wrapper, f_locals, builder):
             guard_str = str(guard_wrapper)
-            # One for tensor and one for y
-            self.assertEqual(guard_str.count("NO_HASATTR"), 2)
+            self.assertEqual(guard_str.count("NO_HASATTR"), 1)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
@@ -1066,19 +1184,23 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
     def test_immutable_tag_safe(self):

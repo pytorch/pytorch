@@ -95,7 +95,6 @@ std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
           onnx_type,
           " is an unexpected tensor scalar type");
   }
-  return std::optional<at::ScalarType>{};
 }
 
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {

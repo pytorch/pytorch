@@ -22,7 +22,9 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
+#include <cstdint>
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
@@ -87,8 +89,12 @@ bool check_prefer_cudnn_attention() {
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
     auto minor = dprops->minor;
     return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
+#else
+    return cudnn_version > 91500 && (major == 9 || major == 10);
+#endif
   } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
@@ -267,6 +273,56 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     return false;
   }
   return true;
+}
+
+bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug) {
+#if defined(USE_ROCM)
+  return true;
+#else
+  if (!has_only_dense_inputs(params)) {
+    return true;
+  }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major < 8) {
+    return true;
+  }
+  const int64_t alignment_bytes =
+      minimum_gemm_alignment(params) * params.query.element_size();
+  // The CUDA caching allocator returns base pointers aligned to >= 256 bytes,
+  // which exceeds the alignment_bytes the CUTLASS kernels require. So pointer
+  // alignment is fully determined by storage_offset * element_size. Computing
+  // it symbolically avoids touching data_ptr() (which calls numel() and would
+  // throw on FakeTensors with symbolic shapes during tracing).
+  const auto offset_bytes = [](const at::Tensor& tensor) {
+    return tensor.sym_storage_offset() * tensor.element_size();
+  };
+  // Empty tensors need no alignment. For symbolic offsets (FakeTensors),
+  // assume aligned so the chooser does not regress tracing; the eager runtime
+  // call re-checks.
+  const auto is_aligned = [&](const at::Tensor& tensor) {
+    const auto offset_is_aligned =
+        (offset_bytes(tensor) % alignment_bytes).sym_eq(0);
+    return TORCH_GUARD_OR_FALSE(tensor.sym_numel().sym_eq(0)) ||
+        TORCH_GUARD_OR_TRUE(offset_is_aligned);
+  };
+  if (!is_aligned(params.query) || !is_aligned(params.key) ||
+      !is_aligned(params.value)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets * element_size to be aligned to ",
+          alignment_bytes,
+          " bytes. Got query.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.query) % alignment_bytes,
+          ", key.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.key) % alignment_bytes,
+          ", value.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.value) % alignment_bytes,
+          ".");
+    }
+    return false;
+  }
+  return true;
+#endif
 }
 
 template <int Major, int Minor>
@@ -496,6 +552,18 @@ bool check_cudnn_dropout(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
+  constexpr int64_t max_cudnn_dim_size = 65535;
+  const auto b = params.query.sym_size(0);
+  const auto h = params.query.sym_size(1);
+  if (b > max_cudnn_dim_size || h > max_cudnn_dim_size) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA does not support batch size or num_heads greater than ",
+          max_cudnn_dim_size,
+          ". Got batch size: ", b, ", num_heads: ", h);
+    }
+    return false;
+  }
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
@@ -883,7 +951,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifdef USE_ROCM
       check_head_dim_size_flash<true /* caller_is_meff */>
 #else
-      check_head_dim_size_mem_efficient
+      check_head_dim_size_mem_efficient,
+      check_data_ptr_alignment_mem_efficient
 #endif
   );
   for (auto& constraint : general_constraints) {
@@ -1015,7 +1084,7 @@ bool check_for_seq_len_1_nested_tensor(sdp_params const& params, bool debug) {
   const auto nt_q_tensor_impl =
       at::native::get_nested_tensor_impl(params.query);
   const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 

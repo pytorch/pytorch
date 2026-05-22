@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
 
 import json
 import os
@@ -43,6 +44,8 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.elastic.events.api import EventMetadataValue
 
 logger = get_logger(__name__)
@@ -57,6 +60,29 @@ __all__ = [
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+
+
+class _AliveCallbackProxy:
+    """Mutable callback wrapper for the health check server.
+
+    The C++ pybind ``HealthCheckThriftServer`` binds its ``alive_callback``
+    at construction time and cannot update it afterward.  This proxy is
+    created *before* the health check server so it can be passed as the
+    callback.  Initially it returns ``time.time()`` (signalling "alive").
+    After the agent is constructed, :meth:`set_delegate` wires it to
+    ``agent._get_alive_time`` for real liveness tracking.
+    """
+
+    def __init__(self) -> None:
+        self._delegate: Callable[[], int] | None = None
+
+    def __call__(self) -> int:
+        if self._delegate is not None:
+            return self._delegate()
+        return int(time.time())
+
+    def set_delegate(self, delegate: Callable[[], int]) -> None:
+        self._delegate = delegate
 
 
 class LocalElasticAgent(SimpleElasticAgent):
@@ -156,6 +182,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         exit_barrier_timeout: float = 300,
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
+        health_check_server: HealthCheckServer | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout, shutdown_timeout)
         self._start_method = start_method
@@ -164,7 +191,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
-        self._health_check_server: HealthCheckServer | None = None
+        self._health_check_server = health_check_server
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -445,22 +472,6 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         if "CUDA_VISIBLE_DEVICES" in os.environ:
             worker_env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
-
-    def _pre_invoke_run(self) -> None:
-        # Start the health check server immediately, before rendezvous,
-        # so that TW sees a healthy thrift port while the agent is still
-        # initializing (package fetch, rendezvous, model load, etc.).
-        # The _get_alive_time callback dynamically checks self._worker_watchdog:
-        # returns current time during init, real watchdog time once workers run.
-        if justknobs_check(
-            "ai_infra/pytorch_distributed:torchelastic_enable_healthcheck_before_rendezvous",
-            default=False,
-        ):
-            logger.info(
-                "Starting health check server before rendezvous "
-                "(torchelastic_enable_healthcheck_before_rendezvous=True)"
-            )
-            self._setup_healthcheck()
 
     def _shutdown(
         self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30

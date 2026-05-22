@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
+from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_XPU,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -271,6 +273,15 @@ class TestUtils(TestCase):
         res2 = zip_dicts(d1, d2)
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
+    def test_device_mapping_keys_are_upper_case(self):
+        self.assertTrue(all(k == k.upper() for k in _device_mapping))
+
+    def test_lookup_device_info_is_case_insensitive(self):
+        upper = lookup_device_info("AMD INSTINCT MI300X")
+        self.assertIsNotNone(upper)
+        self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
+        self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
 
 def has_supported_gpu():
     """Check if any GPU platform with Triton support is available."""
@@ -289,6 +300,7 @@ class TestAnalysis(TestCase):
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_diff(self, device, dtype):
         """
         diff, testing out the nruns feature too.
@@ -403,6 +415,7 @@ class TestAnalysis(TestCase):
             (True, "TRITON"),
         ],
     )
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
@@ -556,6 +569,7 @@ class TestAnalysis(TestCase):
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_combine_profiles(self, device, dtype):
         """
         Test combining multiple profiles into a single profile.

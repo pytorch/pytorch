@@ -474,13 +474,13 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
   // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
   // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
-  constexpr uint MAX_WARPS = 1024/32;
+  constexpr uint MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
-  const uint WARP_BITS = __builtin_ctz(warpSize);
+  const uint WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
 
   const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
-  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
+  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
+  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % C10_WARP_SIZE
 
   // Stage 1: Each warp's lane 0 stores its counts in smem.
   // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...

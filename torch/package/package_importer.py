@@ -147,13 +147,14 @@ class PackageImporter(Importer):
 
         self._mangler = PackageMangler()
 
-        # used for reduce deserializaiton
+        # used for reduce deserialization
         self.storage_context: Any = None
         self.last_map_location = None
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
+    # pyrefly: ignore [bad-override]
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
@@ -293,7 +294,7 @@ class PackageImporter(Importer):
 
         @contextmanager
         def set_deserialization_context():
-            # to let reduce_package access deserializaiton context
+            # to let reduce_package access deserialization context
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:

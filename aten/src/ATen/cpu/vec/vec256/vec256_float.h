@@ -123,7 +123,9 @@ class Vectorized<float> {
       tmp_values[i] = 0.0;
     }
     std::memcpy(
-        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
+        tmp_values,
+        reinterpret_cast<const float*>(ptr),
+        std::min<int64_t>(count, size()) * sizeof(float));
     return _mm256_loadu_ps(tmp_values);
   }
   void store(void* ptr, int64_t count = size()) const {
@@ -132,7 +134,8 @@ class Vectorized<float> {
     } else if (count > 0) {
       float tmp_values[size()];
       _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(float));
     }
   }
   const float& operator[](int idx) const = delete;

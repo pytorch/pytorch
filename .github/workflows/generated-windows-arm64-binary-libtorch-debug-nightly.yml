@@ -47,24 +47,36 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-  libtorch-cpu-shared-with-deps-debug-build:
+
+  wheel-build:
+    name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.10"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "libtorch-cpu-shared-with-deps-debug"
+            pytorch_extra_install_requirements: ""
+            libtorch_config: "debug"
+            libtorch_variant: "shared-with-deps"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
-      LIBTORCH_VARIANT: shared-with-deps
-      # This is a dummy value for libtorch to work correctly with our batch scripts
-      # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.10"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
     steps:
       - name: Populate binary env
         shell: cmd
@@ -117,30 +129,39 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-debug
+          name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-shared-with-deps-debug-test:  # Testing
+
+  wheel-test:
+    name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - libtorch-cpu-shared-with-deps-debug-build
-      - get-label-type
+    needs: [get-label-type, wheel-build]
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.10"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "libtorch-cpu-shared-with-deps-debug"
+            runs_on: "windows-11-arm64-preview"
+            libtorch_config: "debug"
+            libtorch_variant: "shared-with-deps"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
-      LIBTORCH_VARIANT: shared-with-deps
-      # This is a dummy value for libtorch to work correctly with our batch scripts
-      # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.10"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
     steps:
       - name: Populate binary env
         shell: cmd
@@ -172,7 +193,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-debug
+          name: ${{ matrix.build_name }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -182,28 +203,40 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_test.sh"
-  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+
+  wheel-upload:
+    name: ${{ matrix.build_name }}-upload
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-debug-test
+    needs: wheel-test
+    uses: ./.github/workflows/_binary-upload.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.10"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "libtorch-cpu-shared-with-deps-debug"
+            libtorch_config: "debug"
+            libtorch_variant: "shared-with-deps"
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      LIBTORCH_CONFIG: debug
-      LIBTORCH_VARIANT: shared-with-deps
-      # This is a dummy value for libtorch to work correctly with our batch scripts
-      # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.10"
-      build_name: libtorch-cpu-shared-with-deps-debug
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: ""
+      DOCKER_IMAGE_TAG_PREFIX: ""
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      build_name: ${{ matrix.build_name }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    uses: ./.github/workflows/_binary-upload.yml

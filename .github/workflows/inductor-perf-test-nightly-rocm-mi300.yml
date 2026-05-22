@@ -63,7 +63,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -111,9 +114,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-inductor-benchmark-test:
-    permissions:
-      id-token: write
-      contents: read
     name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-benchmark-build

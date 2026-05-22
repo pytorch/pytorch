@@ -25,7 +25,7 @@ using at::ScalarType;
 using std::optional;
 using c10::fmap;
 
-inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs, std::shared_ptr<Node> saved_for = nullptr) {
+inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs, c10::intrusive_ptr<Node> saved_for = nullptr) {
   // NB: we must explicitly do the conversion in the lambda, otherwise template
   // deduction will give a Tensor of Variable which is not convertible
   return fmap(xs, [&saved_for](const SavedVariable& x) {
@@ -34,7 +34,7 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs, std::shar
   });
 }
 
-inline c10::List<std::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs, std::shared_ptr<Node> saved_for = nullptr) {
+inline c10::List<std::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs, c10::intrusive_ptr<Node> saved_for = nullptr) {
   torch::List<std::optional<Tensor>> result;
   result.reserve(xs.size());
   for (const SavedVariable& v : xs) {

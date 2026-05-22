@@ -246,8 +246,8 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertIn("Break Reasons", explain_str)
 
         # Verify that for the given functions above, we report the correct number of graphs, graph breaks, and ops
-        self.assertEqual(8, explain_output.graph_count)
-        self.assertEqual(7, explain_output.graph_break_count)
+        self.assertEqual(2, explain_output.graph_count)
+        self.assertEqual(1, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
 
 
@@ -424,8 +424,47 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
+class TestDefaultBackend(torch._dynamo.test_case.TestCase):
+    def test_set_default_backend(self):
+        self.addCleanup(torch.compiler.set_default_backend, None)
+
+        self.assertEqual(torch.compiler.get_default_backend(), "inductor")
+
+        torch.compiler.set_default_backend("eager")
+        self.assertEqual(torch.compiler.get_default_backend(), "eager")
+
+        torch.compiler.set_default_backend(None)
+        self.assertEqual(torch.compiler.get_default_backend(), "inductor")
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compiler.set_default_backend(cnt)
+        self.assertIs(torch.compiler.get_default_backend(), cnt)
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f)
+        opt_f(torch.randn(3, 3))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_set_default_backend_explicit_override(self):
+        self.addCleanup(torch.compiler.set_default_backend, None)
+
+        eager_and_record = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compiler.set_default_backend(eager_and_record)
+
+        def f(x):
+            return torch.relu(x)
+
+        # Explicit backend= should override the default
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnt)
+        opt_f(torch.randn(3, 3))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(eager_and_record.graphs), 0)
+
+
+instantiate_device_type_tests(TestOptimizations, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

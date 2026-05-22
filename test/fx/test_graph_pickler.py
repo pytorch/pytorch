@@ -129,7 +129,7 @@ class TestDebugDumps(TestCase):
         When a lambda is nested in a list, debug_dumps should find the path
         to it (e.g., "root[1]").
         """
-        bad_obj = [1, lambda x: x, 3]  # noqa: E731
+        bad_obj = [1, lambda x: x, 3]
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root[1]", result)
 
@@ -138,7 +138,7 @@ class TestDebugDumps(TestCase):
         When a lambda is nested in a dict, debug_dumps should find the path
         to it (e.g., "root['bad_key']").
         """
-        bad_obj = {"good": 1, "bad": lambda x: x}  # noqa: E731
+        bad_obj = {"good": 1, "bad": lambda x: x}
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root['bad']", result)
 
@@ -146,7 +146,7 @@ class TestDebugDumps(TestCase):
         """
         debug_dumps should find unpicklables even when deeply nested.
         """
-        bad_obj = {"level1": {"level2": {"level3": [1, 2, lambda x: x]}}}  # noqa: E731
+        bad_obj = {"level1": {"level2": {"level3": [1, 2, lambda x: x]}}}
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("level3", result)
         self.assertIn("[2]", result)
@@ -155,7 +155,7 @@ class TestDebugDumps(TestCase):
         """
         debug_dumps should handle tuples correctly.
         """
-        bad_obj = (1, 2, lambda x: x)  # noqa: E731
+        bad_obj = (1, 2, lambda x: x)
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root[2]", result)
 
@@ -176,7 +176,7 @@ class TestDebugDumps(TestCase):
 
         def build_nested(depth):
             if depth == 0:
-                return lambda x: x  # noqa: E731
+                return lambda x: x
             return [build_nested(depth - 1)]
 
         deeply_nested = build_nested(100)
@@ -193,7 +193,7 @@ class TestDebugDumps(TestCase):
         class Container:
             def __init__(self):
                 self.good = 1
-                self.bad = lambda x: x  # noqa: E731
+                self.bad = lambda x: x
 
         obj = Container()
         result = self.GraphPickler.debug_dumps(obj, verbose=False)
@@ -210,7 +210,7 @@ class TestDebugDumps(TestCase):
             good: int
             bad: object
 
-        obj = MyData(good=1, bad=lambda x: x)  # noqa: E731
+        obj = MyData(good=1, bad=lambda x: x)
         result = self.GraphPickler.debug_dumps(obj, verbose=False)
         self.assertIn("bad", result)
 
@@ -226,7 +226,7 @@ class TestDebugDumps(TestCase):
         old_stdout = sys.stdout
         sys.stdout = captured
         try:
-            self.GraphPickler.debug_dumps([1, lambda x: x], verbose=True)  # noqa: E731
+            self.GraphPickler.debug_dumps([1, lambda x: x], verbose=True)
         finally:
             sys.stdout = old_stdout
 
@@ -554,7 +554,7 @@ class TestDillSerializationFeatures(TestCase):
         gm = torch.fx.symbolic_trace(SimpleModule())
 
         for node in gm.graph.nodes:
-            node.meta["lambda_fn"] = lambda x: x * 3  # noqa: E731
+            node.meta["lambda_fn"] = lambda x: x * 3
 
         options = self.Options(node_metadata_key_filter=None)
         serialized = self.GraphPickler.dumps(gm, options)

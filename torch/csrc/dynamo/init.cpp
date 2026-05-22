@@ -13,6 +13,8 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/python_numbers.h>
 
+#include <Python.h>
+
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
@@ -334,13 +336,28 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
   return slots;
 }
 
+// Helper function to check if a type has a specific method defined in its MRO
+static bool type_has_method(PyTypeObject* type, const char* method_name) {
+  // Check if the method is defined in the type or any of its base classes
+  return PyObject_HasAttrString((PyObject*)type, method_name);
+}
+
 int64_t get_pytype_slots(PyTypeObject* type) {
   int64_t slots = 0;
   if (PyType_GetSlot(type, Py_tp_hash) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_HASH));
-  if (PyType_GetSlot(type, Py_tp_iter) != nullptr)
+  // For tp_iter, only set the bit if __iter__ is actually defined in the type's
+  // MRO. CPython automatically fills tp_iter with a slot wrapper even if
+  // __iter__ is not defined.
+  if (PyType_GetSlot(type, Py_tp_iter) != nullptr &&
+      type_has_method(type, "__iter__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITER));
-  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr)
+  // For tp_iternext, only set the bit if __next__ is actually defined in the
+  // type's MRO. CPython automatically fills tp_iternext with a slot wrapper
+  // even if __next__ is not defined, so we need to check if the method is truly
+  // implemented.
+  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr &&
+      type_has_method(type, "__next__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITERNEXT));
   if (PyType_GetSlot(type, Py_tp_call) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_CALL));
@@ -412,7 +429,7 @@ void _register_functions(PyObject* mod) {
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
   if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
@@ -421,23 +438,23 @@ void initDynamoBindings(PyObject* torch) {
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
       PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* utils = torch_c_dynamo_utils_init();
   if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* guards = torch_c_dynamo_guards_init();
   if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
   if (compiled_autograd == nullptr ||
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   auto m = py::handle(eval_frame).cast<py::module>();
@@ -448,7 +465,8 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_readonly("backend", &CacheEntry::backend)
-      .def_property_readonly("next", &CacheEntry::next)
+      .def_readonly(
+          "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(
           "update_diff_guard_root_manager",
           &CacheEntry::update_diff_guard_root_manager);
@@ -478,6 +496,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
+  m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
+  m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
@@ -576,13 +596,6 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
       .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET);
-
-  py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
-      .value("NONE", EvalFrameOverride::NONE)
-      .value("SKIP", EvalFrameOverride::SKIP)
-      .value("ERROR", EvalFrameOverride::ERROR);
-
-  m.def("set_eval_frame_override", &set_eval_frame_override);
 }
 
 } // namespace torch::dynamo

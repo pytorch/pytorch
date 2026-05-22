@@ -77,7 +77,7 @@ def export_target(
     if binary_file is None:
         raise Exception(  # noqa: TRY002
             f"{merged_file} doesn't have corresponding binary!"
-        )  # noqa: TRY002
+        )
     print_log("start to export: ", merged_file)
     # run export
     cmd_shared_library = (

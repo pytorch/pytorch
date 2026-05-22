@@ -552,10 +552,8 @@ class TORCH_API OperatorHandle {
   }
 
   template <typename F>
-  PyObject* getPythonOp(
-      c10::impl::PyInterpreter* self_interpreter,
-      F slow_accessor) const {
-    return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  PyObject* getPythonOp(F slow_accessor) const {
+    return operatorDef_->op.getPythonOp(slow_accessor);
   }
 
   bool operator==(const OperatorHandle& other) const {

@@ -40,6 +40,7 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/view_as_real.h>
 #endif
@@ -291,15 +292,9 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
 // Metal kernel-based nonzero using prefix-sum + scatter.
 // Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
 // Step 2: GPU prefix sum of block totals → block offsets + total count.
-// Host:   Read back total count, allocate output.
+// Host (optional):   Read back total count, allocate output, unless max_element is provided
 // Step 3: Scatter multi-dimensional indices into the output.
-Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
-  int64_t nDim = self.dim();
-  if (self.numel() == 0) {
-    at::native::resize_output(out_, {0, nDim});
-    return out_;
-  }
-
+static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
@@ -314,13 +309,11 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   TORCH_CHECK(out_.is_mps());
 
   Tensor input = self.contiguous();
+  const int64_t nDim = self.dim();
   const auto numel = static_cast<uint32_t>(input.numel());
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
-  // All three kernels declare [[max_total_threads_per_threadgroup(1024)]]
-  // so mtl_dispatch1DJob picks the same threadgroup size for steps 1 and 3,
-  // ensuring tgid in scatter matches block_offsets from the prefix sum.
   auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
   auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
   auto pso_step3 = lib.getPipelineStateForFunc(fmt::format("scatter_nonzero_indices_{}", type_str));
@@ -330,7 +323,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
   uint32_t num_blocks = (numel + threads_per_group - 1) / threads_per_group;
 
-  // Single allocation: [prefix | block_sums | block_offsets | total]
   auto tmp = at::empty({input.numel() + 2 * num_blocks + 1}, input.options().dtype(kInt));
   Tensor prefix_buf = tmp.slice(0, 0, numel);
   Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks);
@@ -354,24 +346,29 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     }
   });
 
-  const int64_t total_nonzero = total_nonzero_buf.item<int>();
+  if (!max_elements) {
+    // Dynamic path: sync to learn output size
+    const int64_t total_nonzero = total_nonzero_buf.item<int>();
+    at::native::resize_output(out_, {total_nonzero, nDim});
+    max_elements = total_nonzero;
+  }
 
-  at::native::resize_output(out_, {total_nonzero, nDim});
   if (out_.numel() == 0) {
-    return out_;
+    return;
   }
 
   bool contiguous_output = out_.is_contiguous();
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
+  int max_entries = static_cast<int>(*max_elements);
 
-  // Step 3: scatter indices (block_offsets already on GPU)
+  // Step 3: scatter indices, capped at max_entries
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:pso_step3];
-      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf);
+      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf, max_entries);
       mtl_dispatch1DJob(computeEncoder, pso_step3, numel);
     }
   });
@@ -379,13 +376,52 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   if (!contiguous_output) {
     out_.copy_(out);
   }
+}
 
+Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
+  int64_t nDim = self.dim();
+  if (self.numel() == 0) {
+    at::native::resize_output(out_, {0, nDim});
+    return out_;
+  }
+
+  nonzero_impl_mps(self, out_, std::nullopt);
   return out_;
 }
 
 Tensor nonzero_mps(const Tensor& self) {
   Tensor out = at::empty({0}, self.options().dtype(kLong));
   return nonzero_out_mps(self, out);
+}
+
+Tensor& nonzero_static_out_mps(const Tensor& self, int64_t size, int64_t fill_value, Tensor& result) {
+  TORCH_CHECK(size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+
+  int64_t nDim = self.dim();
+  if (result.dim() != 2 || result.size(0) != size || result.size(1) != nDim) {
+    at::native::resize_output(result, {size, nDim});
+  }
+
+  if (result.size(0) == 0 || result.size(1) == 0) {
+    return result;
+  }
+
+  result.fill_(fill_value);
+
+  if (self.numel() == 0) {
+    return result;
+  }
+
+  nonzero_impl_mps(self, result, size);
+  return result;
+}
+
+Tensor nonzero_static_mps(const Tensor& self, int64_t size, int64_t fill_value) {
+  TORCH_CHECK(size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+  int64_t nDim = self.dim();
+  auto result = at::empty({size, nDim}, at::TensorOptions().dtype(kLong).device(kMPS));
+  nonzero_static_out_mps(self, size, fill_value, result);
+  return result;
 }
 
 Tensor masked_select_mps(const Tensor& self, const Tensor& mask) {

@@ -748,7 +748,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
+            logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval, timeout=self._shutdown_timeout)
@@ -903,18 +903,8 @@ class SimpleElasticAgent(ElasticAgent):
 
         put_metric(f"workers.{spec.role}.flakiness", int(flakiness))
 
-    def _pre_invoke_run(self) -> None:
-        """Hook called before the worker lifecycle loop in ``_invoke_run``.
-
-        Subclasses can override this to perform setup that must happen
-        before rendezvous and worker initialization (e.g. starting a
-        health check server).  The default implementation is a no-op.
-        """
-
     def _invoke_run(self, role: str = DEFAULT_ROLE) -> RunResult:
         # NOTE: currently only works for a single role
-
-        self._pre_invoke_run()
 
         spec = self._worker_group.spec
         role = spec.role

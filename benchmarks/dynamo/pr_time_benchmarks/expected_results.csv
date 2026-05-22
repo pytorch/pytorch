@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,15640000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,17270000000,0.1
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,17660000000,0.1
 
 
 
@@ -42,7 +42,7 @@ sum_floordiv_regression,compile_time_instruction_count,3641000000,0.1
 
 
 
-symint_sum,compile_time_instruction_count,3210000000,0.1
+symint_sum,compile_time_instruction_count,3125000000,0.1
 
 
 
@@ -118,4 +118,4 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,36050,0.1
+dtensor_dispatch_custom_handler,instruction_count,34910,0.1

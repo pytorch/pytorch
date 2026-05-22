@@ -89,30 +89,54 @@ inline void _exp_reduce_sum_fusion_kernel(
     const int& size,
     T2* out,
     T1& val) {
-  auto vec_size = vec::Vectorized<T1>::size();
-  auto vec_max = vec::Vectorized<T1>(val);
+  constexpr auto vec_size1 = vec::Vectorized<T1>::size();
+  constexpr auto vec_size2 = vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  using Vec = vec::Vectorized<T1>;
+  using VecN = vec::VectorizedN<T1, T1_n>;
+
+  auto vec_max = VecN(val);
+  auto vec_max_tail = Vec(val);
   T1 tmp_sum = 0;
-  auto vec_tmp_sum = vec::Vectorized<T1>(tmp_sum);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
-    auto tmp1 = tmp0 - vec_max;
-    Vectorized<T1> tmp2;
-    if constexpr (std::is_same_v<T1, float> &&
-              (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>))
-    {
-        tmp2 = tmp1.fexp_u20();
+  auto vec_tmp_sum = VecN(tmp_sum);
+  auto vec_tmp_sum_tail = Vec(tmp_sum);
+  const long vec_end_n = vec_size2 * (size / vec_size2);
+  const long vec_end = vec_size1 * (size / vec_size1);
+  auto exp_vec = [](const auto& v) {
+    if constexpr (
+        std::is_same_v<T1, float> &&
+        (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>)) {
+      return v.fexp_u20();
     } else {
-        tmp2 = tmp1.exp_u20();
+      return v.exp_u20();
     }
-    vec_tmp_sum += tmp2;
+  };
+
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size2) {
+    auto tmp0 = VecN::loadu(a + i);
+    auto tmp1 = tmp0 - vec_max;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum = vec_tmp_sum + tmp2;
+    auto out_n = vec::convert<T2, T2_n, T1, T1_n, true>(tmp2);
+    out_n.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size1) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 - vec_max_tail;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum_tail = vec_tmp_sum_tail + tmp2;
     _store(out + i, tmp2);
   }
+  vec_tmp_sum[0] += vec_tmp_sum_tail;
   tmp_sum = vec::vec_reduce_all<T1>(
       [](vec::Vectorized<T1>& x, vec::Vectorized<T1>& y) {
         return x + y;
       },
       vec_tmp_sum);
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  for (long i = vec_end; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 - val;
     auto tmp2 = exp(tmp1);
@@ -131,17 +155,31 @@ inline void _mul_reduce_max_fusion_kernel(
     const int& size,
     scalar_t* out,
     scalar_t& max) {
-  auto vec_size = vec::Vectorized<scalar_t>::size();
-  auto vec_scale = vec::Vectorized<scalar_t>(scale);
+  using Vec = vec::Vectorized<scalar_t>;
+  using VecN = vec::VectorizedN<scalar_t, 2>;
+  constexpr auto vec_size = Vec::size();
+  constexpr auto vec_size_n = VecN::size();
+  auto vec_scale = VecN(scale);
   scalar_t tmp_max = -std::numeric_limits<scalar_t>::infinity();
-  auto vec_tmp_max = vec::Vectorized<scalar_t>(tmp_max);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = vec::Vectorized<scalar_t>::loadu(a + i);
+  auto vec_tmp_max = VecN(tmp_max);
+  auto vec_tmp_max_tail = Vec(tmp_max);
+  const long vec_end_n = vec_size_n * (size / vec_size_n);
+  const long vec_end = vec_size * (size / vec_size);
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size_n) {
+    auto tmp0 = VecN::loadu(a + i);
     auto tmp1 = tmp0 * vec_scale;
     vec_tmp_max = vec::maximum(vec_tmp_max, tmp1);
+    tmp1.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 * Vec(scale);
+    vec_tmp_max_tail = vec::maximum(vec_tmp_max_tail, tmp1);
     _store(out + i, tmp1);
   }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  vec_tmp_max[0] = vec::maximum(vec_tmp_max[0], vec_tmp_max_tail);
+  for (; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 * scale;
     tmp_max = std::max(tmp_max, tmp1);

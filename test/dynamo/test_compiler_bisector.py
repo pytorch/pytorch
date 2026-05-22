@@ -8,6 +8,7 @@ import torch._prims_common as utils
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -29,14 +30,13 @@ class TestCompilerBisector(TestCase):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
         if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+            self.lib._destroy()
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.lib = lib
         return lib
 
@@ -102,13 +102,17 @@ class TestCompilerBisector(TestCase):
         from torch._inductor import config
 
         # similar setup to test_joint_graph (see below)
-        def pass_fn(graph: torch.fx.Graph):
-            nodes = graph.find_nodes(op="call_function", target=operator.add)
-            if len(nodes) != 1:
-                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
-            args = list(nodes[0].args)
-            args[1] = 2
-            nodes[0].args = tuple(args)
+        class CustomPrePass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(op="call_function", target=operator.add)
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
+
+            def uuid(self):
+                return hash("TestCompilerBisector.test_pre_grad.pass_class")
 
         def foo(x):
             return x + 1
@@ -123,25 +127,29 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(pre_grad_custom_pass=pass_fn):
+        with config.patch(pre_grad_custom_pass=CustomPrePass()):
             out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_passes")
-        self.assertEqual(out.bisect_number, 0)
+        self.assertEqual(out.bisect_number, 3)
         self.assertTrue("pre_grad_custom_pass" in out.debug_info)
 
     def test_joint_graph(self):
         from torch._inductor import config
 
-        def pass_fn(graph: torch.fx.Graph):
-            nodes = graph.find_nodes(
-                op="call_function", target=torch.ops.aten.add.Tensor
-            )
-            if len(nodes) != 1:
-                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
-            args = list(nodes[0].args)
-            args[1] = 2
-            nodes[0].args = tuple(args)
+        class CustomPostPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.Graph):
+                nodes = graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.add.Tensor
+                )
+                if len(nodes) != 1:
+                    raise AssertionError(f"Expected 1 node, got {len(nodes)}")
+                args = list(nodes[0].args)
+                args[1] = 2
+                nodes[0].args = tuple(args)
+
+            def uuid(self):
+                return hash("TestCompilerBisector.test_joint_graph.pass_class")
 
         def foo(x):
             return x + 1
@@ -156,7 +164,7 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(joint_custom_post_pass=pass_fn):
+        with config.patch(joint_custom_post_pass=CustomPostPass()):
             out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "joint_graph_passes")
@@ -306,7 +314,7 @@ class TestCompilerBisector(TestCase):
                     if "submod_" in name:
                         # the test case is simple enough that using
                         # the original example_inputs works for sub
-                        # moule
+                        # module
                         submod.forward = torch._inductor.standalone_compile(
                             submod,
                             example_inputs,
@@ -335,7 +343,7 @@ class TestCompilerBisector(TestCase):
         from unittest.mock import patch
 
         from torch._dynamo.utils import counters
-        from torch._inductor.compiler_bisector import get_env_val, reset_counters
+        from torch._inductor.compiler_bisector import get_env_val
 
         def foo(x):
             return x + 1
@@ -351,7 +359,7 @@ class TestCompilerBisector(TestCase):
 
         with patch.dict(os.environ, env):
             get_env_val.cache_clear()
-            reset_counters()
+            CompilerBisector.reset_counters()
             torch._dynamo.reset()
             counters.clear()
             CompilerBisector.bisection_enabled = True
@@ -367,6 +375,38 @@ class TestCompilerBisector(TestCase):
             finally:
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
+
+    def test_bisect_run_debuginfo(self):
+        import os
+        import subprocess
+        from pathlib import Path
+        from unittest.mock import patch
+
+        test_file = (
+            Path(__file__).resolve().parent / "_test_compiler_bisector_run_helper.py"
+        )
+        # Minimize test runtime by searching only the subsystem that's broken.
+        with patch.dict(
+            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+        ):
+            output = subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "torch._inductor.compiler_bisector",
+                    "run",
+                    "python",
+                    str(test_file),
+                ],
+                stdout=subprocess.PIPE,
+                check=True,
+                text=True,
+                timeout=300,
+            )
+        expected_result = (
+            "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
+        )
+        self.assertIn(expected_result, output.stdout)
 
 
 if __name__ == "__main__":

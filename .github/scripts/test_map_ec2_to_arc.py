@@ -150,6 +150,22 @@ def test_mixed_runners():
     )
 
 
+def test_passthrough_runner_no_prefix():
+    """Passthrough runners (ROCm, XPU) should not get the OSDC prefix."""
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2" },
+      { config: "default", shard: 1, num_shards: 1, runner: "linux.idc.xpu" },
+    ]}"""
+    result = run(matrix, prefix="mt-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    runners = [e["runner"] for e in output["include"]]
+    check(
+        runners == ["linux.rocm.gpu.2", "linux.idc.xpu"],
+        f"passthrough runners should not get prefix, got {runners}",
+    )
+
+
 def test_github_output_file():
     """When GITHUB_OUTPUT is set, the script writes test-matrix to that file."""
     matrix = """{ include: [
