@@ -61,11 +61,10 @@ __global__ void RowwiseMomentsCUDAKernel(
   if (blockDim.x <= C10_WARP_SIZE) {
     val = cuda_utils::WarpReduce(val, welford_op);
   } else {
-    // There will be a warning if we declare a __shared__ WelfordType array.
-    // https://github.com/pytorch/pytorch/pull/13967
-    __shared__ typename std::aligned_storage<
-        sizeof(WelfordType),
-        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE_UPPER_BOUND];
+    // Use a byte array with alignas instead of a __shared__ WelfordType array
+    // directly, because nvcc warns on non-trivial constructors in __shared__.
+    __shared__ alignas(WelfordType)
+        char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
     WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
     val = cuda_utils::BlockReduce(
         val,

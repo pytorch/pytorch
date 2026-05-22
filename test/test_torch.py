@@ -1382,9 +1382,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_types_and(torch.half))
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
-        if dtype == torch.half and torch.device(device).type == 'cpu':
-            self.skipTest('float16 not implemented on CPU')
-
         module = torch.nn.MaxUnpool1d(3, 1)
         input = torch.randn(1, 1, 7, dtype=dtype, device=device)
         indices = torch.zeros_like(input, dtype=torch.long, device=device)
@@ -1396,9 +1393,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_types_and(torch.half))
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
-        if dtype == torch.half and torch.device(device).type == 'cpu':
-            self.skipTest('float16 not implemented on CPU')
-
         module = torch.nn.MaxUnpool2d(3, 1)
         input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
         indices = torch.zeros_like(input, dtype=torch.long, device=device)
@@ -1410,9 +1404,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_types_and(torch.half))
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
-        if dtype == torch.half and torch.device(device).type == 'cpu':
-            self.skipTest('float16 not implemented on CPU')
-
         module = torch.nn.MaxUnpool3d(3, 1)
         input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
         indices = torch.zeros_like(input, dtype=torch.long, device=device)
@@ -3843,10 +3834,6 @@ class TestTorchDeviceType(TestCase):
             dst3 = torch.empty(0, device=device, dtype=dtype)
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
-
-        # Since half on CPU is not supported, need to skip the remaining test cases
-        if dtype == torch.half and torch.device(device).type == 'cpu':
-            return
 
         # Ensure that masks are expanded to match tensor properly
         a = torch.rand(100, 100, device=device).mul(100).to(dtype)
