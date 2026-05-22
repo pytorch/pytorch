@@ -9,6 +9,15 @@ requires = [
     # license-files lives solely under [project], which we do. CI pins the
     # exact 0.12 patch we test against in .ci/docker/requirements-ci.txt.
     "scikit-build-core>=0.12",
+    # Imported by torchgen at build time (cmake/Codegen.cmake runs
+    # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
+    # `assert_never`). Currently also pulled in transitively through
+    # scikit-build-core, but list it explicitly as a direct build-time dep.
+    "typing-extensions>=4.15.0",
+    # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
+    # assembly loops at build time and does `import six`. NNPACK is on by
+    # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
+    "six",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -104,10 +113,16 @@ exclude = [
     "torch/csrc/**",
     "!torch/csrc/inductor/aoti_runtime/model.h",
     # Source-only directories the package walk picks up but setup.py excluded.
+    # Keep the .py modules nightly ships under torch/nativert/, and the
+    # libshm headers consumed at runtime (torch/lib/libshm/{*.h},
+    # torch/lib/libshm_windows/libshm.h).
     "torch/nativert/**",
+    "!torch/nativert/**/*.py",
     "torch/headeronly/**",
     "torch/lib/libshm/**",
+    "!torch/lib/libshm/**/*.h",
     "torch/lib/libshm_windows/**",
+    "!torch/lib/libshm_windows/**/*.h",
     # Stray CMakeLists.txt copied in by directory installs.
     "**/CMakeLists.txt",
     # functorch dev artifacts (docs, notebooks, examples, op-analysis tools).
