@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.onnx._internal.exporter import _ir_passes
 from torch.testing._internal import common_utils
 

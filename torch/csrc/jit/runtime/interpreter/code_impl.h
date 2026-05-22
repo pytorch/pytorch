@@ -446,7 +446,7 @@ struct CodeImpl {
     // check if the node should be emitted as instruction or operator
     const Operator& op = node->getOperator();
     std::string unique_op_name = c10::toString(op.schema().operator_name());
-    if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
+    if (unique_op_name.starts_with("aten::__getitem__.Dict")) {
       // __get_item__ overloaded operator for Dict
       // needs to be emitted an instruction
       emitOperatorOrInstruction(node, DICT_INDEX);
@@ -866,17 +866,17 @@ struct CodeImpl {
   }
 
   void dump(std::ostream& out, size_t i) const {
-    out << i << " " << instructions_[i];
+    out << i << ' ' << instructions_[i];
     if (instructions_[i].op == OP || instructions_[i].op == CALL ||
         instructions_[i].op == OPN) {
       out << " # " << *instructions_source_[i];
     } else {
-      out << "\n";
+      out << '\n';
     }
   }
 
   void dump(std::ostream& out) const {
-    out << *graph_ << "\n";
+    out << *graph_ << '\n';
     for (const auto i : c10::irange(instructions_.size())) {
       dump(out, i);
     }

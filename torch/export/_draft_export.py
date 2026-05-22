@@ -5,10 +5,10 @@ import os
 import re
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import torch
 import torch._logging._internal
@@ -71,7 +71,7 @@ def prettify_frame_locals(
     return res
 
 
-def get_loc(filename: str, lineno: int) -> Optional[str]:
+def get_loc(filename: str, lineno: int) -> str | None:
     try:
         with open(filename) as f:
             for i, line in enumerate(f):
@@ -101,7 +101,7 @@ class FailureReport:
     torch.ops.{op} is missing a fake kernel implementation.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.GUARD_ADDED:
             locals_info = (
@@ -140,7 +140,7 @@ class FailureReport:
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.MISMATCHED_FAKE_KERNEL:
             op = self.data["op"]
@@ -150,7 +150,7 @@ class FailureReport:
     The reason for the mismatch is: {reason}.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a fake implementation.
-"""  # noqa: B950
+"""
 
         else:
             raise ValueError(f"Unknown failure type: {self.failure_type}")
@@ -185,7 +185,7 @@ class DraftExportReport:
         if self.successful():
             return f"""{GREEN_COLOR}
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
 {END_COLOR}"""
@@ -295,6 +295,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 
         self.logger.addHandler(self)
         self.prev_get_dtrace = torch._logging._internal.GET_DTRACE_STRUCTURED
+        # pyrefly: ignore [bad-assignment]
         torch._logging._internal.GET_DTRACE_STRUCTURED = True
         return self
 
@@ -302,6 +303,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
         self.log_record = LogRecord()
         self.expression_created_logs = {}
         self.logger.removeHandler(self)
+        # pyrefly: ignore [bad-assignment]
         torch._logging._internal.GET_DTRACE_STRUCTURED = self.prev_get_dtrace
         self.prev_get_dtrace = False
 
@@ -365,9 +367,9 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[Mapping[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = True,
@@ -474,7 +476,8 @@ def draft_export(
             else:
                 continue
 
-            assert failure_type is not None
+            if failure_type is None:
+                raise AssertionError("failure_type cannot be None at this point")
             failures.append(
                 FailureReport(
                     failure_type,
@@ -525,7 +528,7 @@ with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_prof
         log.info(
             """
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
     """

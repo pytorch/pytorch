@@ -35,6 +35,8 @@ class C10_CUDA_API CUDAError : public c10::Error {
         static_cast<uint32_t>(__LINE__),                            \
         true);                                                      \
   } while (0)
+// backwards compat due to hipify v2 changes, for extension projects
+#define C10_HIP_CHECK C10_CUDA_CHECK
 
 #define C10_CUDA_CHECK_WARN(EXPR)                              \
   do {                                                         \
@@ -91,7 +93,7 @@ C10_CUDA_API void c10_cuda_check_implementation(
     const int32_t err,
     const char* filename,
     const char* function_name,
-    const int line_number,
+    const uint32_t line_number,
     const bool include_device_assertions);
 
 } // namespace c10::cuda

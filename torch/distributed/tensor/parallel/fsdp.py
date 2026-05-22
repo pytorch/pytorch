@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -14,7 +14,6 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
@@ -31,12 +30,14 @@ __all__ = ["DTensorExtensions"]
 
 def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if device_mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
     num_chunks = device_mesh.size(mesh_dim=0)
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if tensor.placements[0].is_shard():
         shard_dim = cast(DShard, placement).dim
         chunk_size = tensor.size(shard_dim) // num_chunks
@@ -53,13 +54,15 @@ def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
 def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
-    assert coord is not None
+    if coord is None:
+        raise AssertionError
     return _get_box_for(tensor, coord[0])
 
 
 def _create_shard_md_from_dt(dt: DTensor, current_rank: int) -> ShardMetadata:
     mesh = dt.device_mesh
-    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
 
     offsets, sizes = _get_local_box(dt)
     return ShardMetadata(
@@ -79,6 +82,7 @@ def _create_sharded_tensor_md_from_dt(
     my_rank = dist.get_rank(dt_pg)
     scapegoat_rank = 0 if my_rank > 0 else 1
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if dt.placements[0].is_shard():
         shard_count = dt_pg.size()
     else:
@@ -110,7 +114,8 @@ def _create_sharded_tensor_md_from_dt(
 
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
-    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+    if mesh.ndim != 1:
+        raise AssertionError("Only 1D DeviceMeshes currently handled")
     return mesh.get_group()
 
 
@@ -135,9 +140,11 @@ def _rewrite_spec_if_needed(
             break
     if rewrite:
         spec = copy.deepcopy(spec)
+        # pyrefly: ignore [missing-attribute]
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
+                # pyrefly: ignore [missing-attribute]
                 spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec
@@ -151,7 +158,8 @@ def _chunk_tensor(
     pg: dist.ProcessGroup,
 ) -> torch.Tensor:
     if type(tensor) is ShardedTensor:
-        assert len(tensor.local_shards()) == 1
+        if len(tensor.local_shards()) != 1:
+            raise AssertionError
 
         inner_param = tensor.local_tensor()
         inner_st = _create_chunk_sharded_tensor(
@@ -178,7 +186,8 @@ def _chunk_tensor(
         return st_outer
     elif type(tensor) is DTensor:
         device_mesh = tensor.device_mesh
-        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+        if device_mesh.ndim != 1:
+            raise AssertionError("Only 1D DeviceMeshes currently handled")
 
         inner_param = tensor._local_tensor
 
@@ -227,7 +236,7 @@ def _chunk_dtensor(
 
     The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
     if root_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
     if root_mesh.ndim < 2:
@@ -240,7 +249,7 @@ def _chunk_dtensor(
     tensor = tensor.detach().clone()
 
     # When a layer is not involved in TP, then the tensor will not be a DTensor.
-    # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
+    # e.g. When a layer is not specified in the parallelize_plan, TP will have no effect on the layer.
     # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
@@ -296,15 +305,16 @@ def _pre_load_state_dict(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: Optional[DeviceMesh],
+    parent_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
-    assert parent_mesh == tensor.device_mesh
+    if parent_mesh != tensor.device_mesh:
+        raise AssertionError
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]
     # HSDP + TP: [Replicate(), Shard(0), tp_placement] -> [Replicate(), Replicate(), tp_placement]
-    for i in range(0, len(placements) - 1):
+    for i in range(len(placements) - 1):
         placements[i] = Replicate()
     tensor = tensor.redistribute(
         device_mesh=tensor.device_mesh,
@@ -335,7 +345,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Any | None]:
         return _flatten_tensor(tensor)
 
     def post_unflatten_transform(
@@ -364,7 +374,7 @@ class DTensorExtensions(FSDPExtensions):
         world_size: int,
         num_devices_per_node: int,
         pg: dist.ProcessGroup,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
 
@@ -385,6 +395,6 @@ class DTensorExtensions(FSDPExtensions):
     def all_gather_dtensor(
         self,
         tensor: DTensor,
-        parent_mesh: Optional[DeviceMesh],
+        parent_mesh: DeviceMesh | None,
     ) -> torch.Tensor:
         return _all_gather_dtensor(tensor, parent_mesh)

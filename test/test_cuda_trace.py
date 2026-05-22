@@ -14,12 +14,13 @@ from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, T
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
     def setUp(self):
+        super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 

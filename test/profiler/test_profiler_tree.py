@@ -27,13 +27,16 @@ from torch.utils._pytree import tree_map
 PRUNE_ALL = 1
 KEEP_ELLIPSES = 2
 KEEP_NAME_AND_ELLIPSES = 3
+IGNORE = 4
 
 PRUNE_FUNCTIONS = {
     "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
+    "<built-in method __enter__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
+    "<built-in function all>": IGNORE,
     "cudaStreamIsCapturing": PRUNE_ALL,
     # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
     "cudaGetDeviceCount": PRUNE_ALL,
@@ -117,6 +120,8 @@ class ProfilerTree:
                 if prune_level is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
+                elif prune_level == IGNORE:
+                    flatten(node.children, depth, out)
                 elif prune_level == KEEP_NAME_AND_ELLIPSES:
                     out.append((depth, name))
                     if node.children:
@@ -124,7 +129,8 @@ class ProfilerTree:
                 elif prune_level == KEEP_ELLIPSES:
                     out.append((depth, "..."))
                 else:
-                    assert prune_level == PRUNE_ALL
+                    if prune_level != PRUNE_ALL:
+                        raise AssertionError(f"Expected PRUNE_ALL, got {prune_level}")
 
             return out
 
@@ -221,7 +227,8 @@ class ProfilerTree:
             if parent:
                 parent_name = to_string(parent.extra_fields.callsite)
                 caller_name = to_string(extra_fields.caller)
-                assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
+                if parent_name != caller_name:
+                    raise AssertionError(f"{parent_name} vs. {caller_name}")
 
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
@@ -624,8 +631,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -671,8 +677,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -722,10 +727,9 @@ class TestProfilerTree(TestCase):
               <built-in method add of type object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_function__
                   torch/_tensor.py(...): __torch_function__
-                    <built-in function all>
-                      torch/_tensor.py(...): <genexpr>
-                        <built-in function issubclass>
-                      torch/_tensor.py(...): <genexpr>
+                    torch/_tensor.py(...): <genexpr>
+                      <built-in function issubclass>
+                    torch/_tensor.py(...): <genexpr>
                     <built-in method add of type object at 0xXXXXXXXXXXXX>
                       aten::add
                     torch/_tensor.py(...): _convert
@@ -762,21 +766,22 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
-                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
-                  torch/_library/simple_registry.py(...): find
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                  torch/_library/simple_registry.py(...): find
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): __torch_dispatch__
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/_ops.py(...): __call__
-                    <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
-                      aten::add
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
+                PythonSubclass
+                  torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                  test_profiler_tree.py(...): __torch_dispatch__
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/_ops.py(...): __call__
+                      <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
+                        aten::add
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   ...""",
@@ -876,7 +881,7 @@ class TestProfilerTree(TestCase):
               aten::add_
                 cudaLaunchKernel
                   void at::native::vectorized_elementwise_kernel<...>(...)
-            [memory]""",  # noqa: B950
+            [memory]""",
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
@@ -1145,7 +1150,7 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    ...""",  # noqa: B950
+                    ...""",
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 

@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import itertools
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch._ops
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.onnx._internal.exporter import _registration
 
 
@@ -26,7 +28,8 @@ def get_onnx_implemented_overloads(
     """
     registered_ops: list[_registration.TorchOp] = []
     for onnx_decomp_meta in registry.functions.values():
-        assert len(onnx_decomp_meta) > 0
+        if len(onnx_decomp_meta) == 0:
+            raise AssertionError("onnx_decomp_meta must not be empty")
         # Different OnnxDecompMeta for the same TorchOp should
         # have the same fx_target.
         fx_target = onnx_decomp_meta[0].fx_target

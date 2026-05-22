@@ -84,7 +84,7 @@ RUN cp $(which patchelf) /patchelf
 
 FROM patchelf as python
 # build python
-COPY manywheel/build_scripts /build_scripts
+COPY manywheel/s390_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
 ENV SSL_CERT_FILE=
 RUN bash build_scripts/build.sh && rm -r build_scripts
@@ -114,6 +114,9 @@ RUN env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
 
 # cmake-3.28.0 from pip for onnxruntime
 RUN python3 -mpip install cmake==3.28.0
+
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
 # build onnxruntime 1.21.0 from sources.
 # it is not possible to build it from sources using pip,

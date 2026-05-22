@@ -1,10 +1,19 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
+from torch._inductor.config import (
+    inductor_default_autotune_rep,
+    inductor_default_autotune_warmup,
+)
+from torch._inductor.runtime.benchmarking import (
+    Benchmarker,
+    TorchProfilerBenchmarker,
+    TritonBenchmarker,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -103,6 +112,159 @@ class TestBenchmarker(TestCase):
         many_devices_kwargs = cpu_kwargs
         many_devices_kwargs.update(gpu_kwargs)
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_benchmark_warmup_and_rep_defaults(self):
+        """Test that benchmark_gpu receives default warmup and rep values when not specified."""
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0  # Return a dummy timing
+
+        benchmarker = TritonBenchmarker()
+        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+
+        with patch.object(TritonBenchmarker, "benchmark_gpu", capture_benchmark_gpu):
+            benchmarker.benchmark(fn, fn_args, fn_kwargs)
+
+        self.assertEqual(captured_kwargs["warmup"], inductor_default_autotune_warmup)
+        self.assertEqual(captured_kwargs["rep"], inductor_default_autotune_rep)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_benchmark_warmup_and_rep_custom_values(self):
+        """Test that benchmark_gpu receives custom warmup and rep values when specified."""
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0  # Return a dummy timing
+
+        benchmarker = TritonBenchmarker()
+        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+
+        custom_warmup = 50
+        custom_rep = 200
+
+        with patch.object(TritonBenchmarker, "benchmark_gpu", capture_benchmark_gpu):
+            benchmarker.benchmark(
+                fn, fn_args, fn_kwargs, warmup=custom_warmup, rep=custom_rep
+            )
+
+        self.assertEqual(captured_kwargs["warmup"], custom_warmup)
+        self.assertEqual(captured_kwargs["rep"], custom_rep)
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
+    def test_benchmarker_cpu_override_dispatch(self, benchmarker_cls, device="cpu"):
+        # Registers a custom handler for 'cpu' and verifies dispatch uses it instead of the default path.
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = benchmarker_cls()
+
+        # Snapshot registry and restore at the end to avoid cross-test pollution.
+        orig = dict(_bench._BENCHMARK_DISPATCH)
+        try:
+            seen = {"cpu_override": 0}
+
+            def custom_cpu(self, fn, *, warmup, rep, **kw):
+                seen["cpu_override"] += 1
+                return "cpu-override"
+
+            # Override the built-in 'cpu' registration
+            _bench.register_benchmarker("cpu", custom_cpu, override=True)
+
+            # Ensure default CPU/GPU methods are NOT called if registry override works.
+            with (
+                patch.object(
+                    benchmarker_cls,
+                    "benchmark_cpu",
+                    side_effect=AssertionError(
+                        "benchmark_cpu should not be called when a custom 'cpu' handler is registered"
+                    ),
+                    create=True,
+                ),
+                patch.object(
+                    benchmarker_cls,
+                    "benchmark_gpu",
+                    side_effect=AssertionError(
+                        "benchmark_gpu should not be called for 'cpu' device"
+                    ),
+                    create=True,
+                ),
+            ):
+                (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+                out = benchmarker.benchmark(fn, fn_args, fn_kwargs)
+                self.assertEqual(out, "cpu-override")
+                self.assertEqual(seen["cpu_override"], 1)
+        finally:
+            _bench._BENCHMARK_DISPATCH.clear()
+            _bench._BENCHMARK_DISPATCH.update(orig)
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
+    def test_benchmarker_cpu_override_runs_callable(
+        self, benchmarker_cls, device="cpu"
+    ):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = benchmarker_cls()
+        orig = dict(_bench._BENCHMARK_DISPATCH)
+        try:
+            # Override CPU but still route to benchmark_cpu internally
+            def custom_cpu(self, f, *, warmup, rep, **kw):
+                # Just delegate to the original path; we want to ensure `f()` calls the user's fn.
+                return self.benchmark_cpu(f, warmup=warmup, rep=rep, **kw)
+
+            _bench.register_benchmarker("cpu", custom_cpu, override=True)
+            # Define a simple op and ensure it actually runs without TypeError
+            (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+            out = benchmarker.benchmark(fn, fn_args, fn_kwargs, warmup=1, rep=1)
+            self.assertGreater(out, 0)
+        finally:
+            _bench._BENCHMARK_DISPATCH.clear()
+            _bench._BENCHMARK_DISPATCH.update(orig)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @parametrize(
+        "hip_value, expected_buffer_size_bytes",
+        ((None, 1024), ("mock-hip", 256 * 1024 * 1024)),
+    )
+    def test_torch_profiler_benchmarker_reuses_inductor_helpers(
+        self, hip_value, expected_buffer_size_bytes, device=GPU_TYPE
+    ):
+        benchmarker = TorchProfilerBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 1024
+        _, _callable = self.make_params(device, size=16)
+
+        captured_buffer_lengths = []
+        original_empty = torch.empty
+
+        def empty_spy(*args, **kwargs):
+            captured_buffer_lengths.append(args[0])
+            return original_empty(*args, **kwargs)
+
+        with patch.object(
+            benchmarker,
+            "get_event_pairs",
+            wraps=benchmarker.get_event_pairs,
+        ) as mock_get_event_pairs:
+            with patch.object(torch.version, "hip", hip_value):
+                with patch(
+                    "torch._inductor.runtime.benchmarking.torch.empty",
+                    side_effect=empty_spy,
+                ):
+                    timing = benchmarker.benchmark_gpu(
+                        _callable,
+                        rep=1,
+                        estimation_iters=1,
+                        memory_warmup_iters=0,
+                    )
+
+        self.assertGreater(timing, 0)
+        mock_get_event_pairs.assert_called_once_with(1)
+        self.assertGreater(len(captured_buffer_lengths), 0)
+        self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
 
 
 if __name__ == "__main__":

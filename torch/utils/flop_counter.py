@@ -1,8 +1,11 @@
 # mypy: allow-untyped-defs
+from types import NoneType
+import logging
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar, Callable
+from typing import Any, TypeVar
+from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
@@ -15,6 +18,17 @@ __all__ = ["FlopCounterMode", "register_flop_formula"]
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+log = logging.getLogger(__name__)
+
+
+try:
+    from triton.runtime.jit import JITFunction as _JITFunction
+except ImportError:
+    if any(getattr(torch.version, attr, None) is not None for attr in ["cuda", "hip", "xpu"]):
+        log.warning("triton not found; flop counting will not work for triton kernels")
+    _JITFunction = NoneType
+
 
 aten = torch.ops.aten
 
@@ -33,16 +47,20 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
-        def register(target):
-            if not isinstance(target, torch._ops.OpOverloadPacket):
+        def register(target) -> None:
+            from torch._ops import HigherOrderOperator
+
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction, HigherOrderOperator))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
-                    f"{target} which is of type {type(target)}")
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), JitFunction, "
+                    f"or HigherOrderOperator"
+                    f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
             flop_registry[target] = flop_formula
@@ -61,7 +79,8 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of two matrices.
     m, k = a_shape
     k2, n = b_shape
-    assert k == k2
+    if k != k2:
+        raise AssertionError(f"matmul: inner dimensions must match (k == k2), got {k} and {k2}")
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
@@ -77,8 +96,10 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of two tensor.
     b, m, k = a_shape
     b2, k2, n = b_shape
-    assert b == b2
-    assert k == k2
+    if b != b2:
+        raise AssertionError(f"bmm: batch dimensions must match (b == b2), got {b} and {b2}")
+    if k != k2:
+        raise AssertionError(f"bmm: inner dimensions must match (k == k2), got {k} and {k2}")
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     flop = b * m * n * 2 * k
     return flop
@@ -145,9 +166,14 @@ def conv_flop_count(
     flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
-@register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution, aten._slow_conv2d_forward])
+@register_flop_formula([aten.convolution,
+                        aten._convolution,
+                        aten.cudnn_convolution,
+                        aten._slow_conv2d_forward,
+                        aten.convolution_overrideable])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
+    # pyrefly: ignore [bad-argument-type]
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
@@ -164,7 +190,8 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out_shape) -> int:
+        out_shape,
+        **kwargs) -> int:
 
     def t(shape):
         return [shape[1], shape[0]] + list(shape[2:])
@@ -259,17 +286,27 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     """
     Count flops for self-attention.
 
-    NB: We can assume that value_shape == key_shape
+    Supports GQA (grouped-query attention) where key/value have fewer heads
+    than the query. The kernel broadcasts KV heads to match query heads.
     """
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
+    b, h_q, s_q, d_q = query_shape
+    _b2, h_kv, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
-    assert b == _b2 == _b3 and h == _h2 == _h3 and d_q == _d2 and s_k == _s3 and d_q == _d2
+    if not (b == _b2 == _b3 and h_kv == _h3 and d_q == _d2 and s_k == _s3):
+        raise AssertionError(
+            f"sdpa_flop_count: query/key/value shapes are incompatible: "
+            f"q={query_shape}, k={key_shape}, v={value_shape}"
+        )
+    if h_q < h_kv or h_q % h_kv != 0:
+        raise AssertionError(
+            f"sdpa_flop_count: query heads ({h_q}) must be a multiple of "
+            f"key/value heads ({h_kv})"
+        )
     total_flops = 0
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
-    # scores: [b, h, s_q, s_k] @ v: [b, h, s_k, d_v] -> out: [b, h, s_q, d_v]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_v))
+    # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_q), (b * h_q, d_q, s_k))
+    # scores: [b, h_q, s_q, s_k] @ v: [b, h_q, s_k, d_v] -> out: [b, h_q, s_q, d_v]
+    total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_v))
     return total_flops
 
 
@@ -304,7 +341,7 @@ def _unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -318,18 +355,24 @@ def _unpack_flash_attention_nested_shapes(
         # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
         # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
         # So the flops calculation in this case is an overestimate of the actual flops.
-        assert len(key.shape) == 3
-        assert len(value.shape) == 3
-        assert grad_out is None or grad_out.shape == query.shape
+        if len(key.shape) != 3:
+            raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
+        if len(value.shape) != 3:
+            raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
+        if grad_out is not None and grad_out.shape != query.shape:
+            raise AssertionError("sdpa_flop_count: grad_out.shape must match query.shape when provided")
         _, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
-        assert cum_seq_q is not None
-        assert cum_seq_k is not None
-        assert cum_seq_q.shape == cum_seq_k.shape
+        if cum_seq_q is None:
+            raise AssertionError("sdpa_flop_count: cum_seq_q must not be None")
+        if cum_seq_k is None:
+            raise AssertionError("sdpa_flop_count: cum_seq_k must not be None")
+        if cum_seq_q.shape != cum_seq_k.shape:
+            raise AssertionError("sdpa_flop_count: cum_seq_q and cum_seq_k must have the same shape")
         seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
         seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
-        for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
+        for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths, strict=True):
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
             new_value_shape = (1, h_v, seq_k_len, d_v)
@@ -350,7 +393,7 @@ def _unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -366,18 +409,25 @@ def _unpack_efficient_attention_nested_shapes(
         # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
         # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
         # So the flops calculation in this case is an overestimate of the actual flops.
-        assert len(key.shape) == 4
-        assert len(value.shape) == 4
-        assert grad_out is None or grad_out.shape == query.shape
+        if len(key.shape) != 4:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: expected key.shape to be 4-dimensional")
+        if len(value.shape) != 4:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: expected value.shape to be 4-dimensional")
+        if grad_out is not None and grad_out.shape != query.shape:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: grad_out.shape must match query.shape when provided")
         _, _, h_q, d_q = query.shape
         _, _, h_k, d_k = key.shape
         _, _, h_v, d_v = value.shape
-        assert cu_seqlens_q is not None
-        assert cu_seqlens_k is not None
-        assert cu_seqlens_q.shape == cu_seqlens_k.shape
+        if cu_seqlens_q is None:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_q must not be None")
+        if cu_seqlens_k is None:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_k must not be None")
+        if cu_seqlens_q.shape != cu_seqlens_k.shape:
+            raise AssertionError("_unpack_efficient_attention_nested_shapes: "
+                                 "cu_seqlens_q and cu_seqlens_k must have the same shape")
         seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
         seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
-        for len_q, len_k in zip(seqlens_q, seqlens_k):
+        for len_q, len_k in zip(seqlens_q, seqlens_k, strict=True):
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
             new_value_shape = (1, h_v, len_k, d_v)
@@ -453,29 +503,39 @@ def _efficient_attention_forward_flop(
 
 
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
-    total_flops = 0
-    b, h, s_q, d_q = query_shape
-    _b2, _h2, s_k, _d2 = key_shape
+    b, h_q, s_q, d_q = query_shape
+    _b2, h_kv, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
     _b4, _h4, _s4, _d4 = grad_out_shape
-    assert b == _b2 == _b3 == _b4 and h == _h2 == _h3 == _h4 and d_q == _d2
-    assert d_v == _d4 and s_k == _s3 and s_q == _s4
+    if not (b == _b2 == _b3 == _b4 and h_kv == _h3 and h_q == _h4):
+        raise AssertionError(
+            "sdpa_backward_flop_count: batch/heads mismatch among tensors"
+        )
+    if h_q < h_kv or h_q % h_kv != 0:
+        raise AssertionError(
+            f"sdpa_backward_flop_count: query heads ({h_q}) must be a multiple of "
+            f"key/value heads ({h_kv})"
+        )
+    if not (d_q == _d2 and d_v == _d4 and s_k == _s3 and s_q == _s4):
+        raise AssertionError(
+            "sdpa_backward_flop_count: grad_out/value/key/query shapes are incompatible"
+        )
     total_flops = 0
     # Step 1: We recompute the scores matrix.
-    # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
+    # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_q), (b * h_q, d_q, s_k))
 
     # Step 2: We propagate the gradients through the score @ v operation.
-    # gradOut: [b, h, s_q, d_v] @ v: [b, h, d_v, s_k] -> gradScores: [b, h, s_q, s_k]
-    total_flops += bmm_flop((b * h, s_q, d_v), (b * h, d_v, s_k))
-    # scores: [b, h, s_k, s_q] @ gradOut: [b, h, s_q, d_v] -> gradV: [b, h, s_k, d_v]
-    total_flops += bmm_flop((b * h, s_k, s_q), (b * h, s_q, d_v))
+    # gradOut: [b, h_q, s_q, d_v] @ v: [b, h_q, d_v, s_k] -> gradScores: [b, h_q, s_q, s_k]
+    total_flops += bmm_flop((b * h_q, s_q, d_v), (b * h_q, d_v, s_k))
+    # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
+    total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
     # Step 3: We propagate th gradients through the k @ v operation
-    # gradScores: [b, h, s_q, s_k] @ k: [b, h, s_k, d_q] -> gradQ: [b, h, s_q, d_q]
-    total_flops += bmm_flop((b * h, s_q, s_k), (b * h, s_k, d_q))
-    # q: [b, h, d_q, s_q] @ gradScores: [b, h, s_q, s_k] -> gradK: [b, h, d_q, s_k]
-    total_flops += bmm_flop((b * h, d_q, s_q), (b * h, s_q, s_k))
+    # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
+    total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
+    # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]
+    total_flops += bmm_flop((b * h_q, d_q, s_q), (b * h_q, s_q, s_k))
     return total_flops
 
 
@@ -552,6 +612,120 @@ def _efficient_attention_backward_flop(
     )
 
 
+def _register_flex_attention_flops() -> None:
+    from torch._higher_order_ops.flex_attention import (
+        flex_attention,
+        flex_attention_backward,
+    )
+
+    def _get_sparsity_hint(kwargs: dict[str, Any]) -> float:
+        node_meta = kwargs.get("_node_meta")
+        if node_meta is None:
+            return 0.0
+        custom = node_meta.get("custom")
+        if custom is None:
+            return 0.0
+        return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
+
+    @register_flop_formula(flex_attention, get_raw=True)
+    def flex_attention_forward_flop(
+        query, key, value, *args, out_val=None, **kwargs
+    ) -> int:
+        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
+
+    @register_flop_formula(flex_attention_backward, get_raw=True)
+    def flex_attention_backward_flop(
+        query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
+    ) -> int:
+        grad_out_shape = grad_out.shape if grad_out is not None else out.shape
+        flops = sdpa_backward_flop_count(
+            grad_out_shape, query.shape, key.shape, value.shape
+        )
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
+
+
+def _varlen_attn_forward_flop(
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn forward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k if cu_seq_k is not None else cu_seq_q,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
+
+
+def _varlen_attn_out_flop(
+    out,
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn_out forward."""
+    return _varlen_attn_forward_flop(
+        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k,
+    )
+
+
+def _varlen_attn_backward_flop(
+    grad_out,
+    query,
+    key,
+    value,
+    out,
+    lse,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn backward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in sizes
+    )
+
+
 flop_registry = {
     aten.mm: mm_flop,
     aten.addmm: addmm_flop,
@@ -561,6 +735,7 @@ flop_registry = {
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.cudnn_convolution: conv_flop,
+    aten.convolution_overrideable: conv_flop,
     aten._slow_conv2d_forward: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
@@ -574,6 +749,9 @@ flop_registry = {
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
+
+_register_flex_attention_flops()
+
 
 def normalize_tuple(x):
     if not isinstance(x, tuple):
@@ -598,7 +776,7 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
-def convert_to_percent_str(num, denom):
+def convert_to_percent_str(num, denom) -> str:
     if denom == 0:
         return "0%"
     return f"{num / denom:.2%}"
@@ -635,15 +813,15 @@ class FlopCounterMode:
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
+            mods: torch.nn.Module | list[torch.nn.Module] | None = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[dict[Any, Any]] = None):
+            custom_mapping: dict[Any, Any] | None = None) -> None:
         super().__init__()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
-        self.mode: Optional[_FlopCounterMode] = None
+        self.mode: _FlopCounterMode | None = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -675,7 +853,9 @@ class FlopCounterMode:
         if depth is None:
             depth = 999999
 
+
         import tabulate
+
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []
@@ -738,7 +918,8 @@ class FlopCounterMode:
         return self
 
     def __exit__(self, *args):
-        assert self.mode is not None
+        if self.mode is None:
+            raise AssertionError("Internal error: FlopCounter.__exit__ called but mode is None")
         b = self.mode.__exit__(*args)
         self.mode = None  # break cycles
         self.mod_tracker.__exit__()
@@ -752,13 +933,12 @@ class FlopCounterMode:
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
-
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
     supports_higher_order_operators = True
 
-    def __init__(self, counter: FlopCounterMode):
+    def __init__(self, counter: FlopCounterMode) -> None:
         self.counter = counter
 
     def _execute_with_isolated_flop_counting(self, branch_fn, operands):
@@ -782,15 +962,25 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
-            return NotImplemented
-
-        # The flop counter for cond counts the upper bound of flops.
-        # For example, if a matmul is executed 2 times in true branch
-        # but only 1 time in the false branch, the flop counter will
-        # record the larger number of flops, i.e. 2 times.
-        if func is torch.ops.higher_order.cond:
-
+        is_triton = func in {torch.ops.higher_order.triton_kernel_wrapper_mutation,
+                             torch.ops.higher_order.triton_kernel_wrapper_functional}
+        if is_triton:
+            from torch._higher_order_ops.triton_kernel_wrap import get_kernel
+            # Special case - look in the triton flop registry for the kernel
+            from triton.runtime.jit import JITFunction
+            kernel_name = get_kernel(kwargs["kernel_idx"])
+            # Unwrap heuristics if they are present
+            while not isinstance(kernel_name, JITFunction):
+                if hasattr(kernel_name, "fn"):
+                    kernel_name = kernel_name.fn
+                else:
+                    break
+            return self.counter._count_flops(kernel_name, None, args, kwargs)
+        elif func is torch.ops.higher_order.cond:
+            # The flop counter for cond counts the upper bound of flops.
+            # For example, if a matmul is executed 2 times in true branch
+            # but only 1 time in the false branch, the flop counter will
+            # record the larger number of flops, i.e. 2 times.
             pred, true_branch, false_branch, operands = args
             # Step 1: Count flops for true branch and false branch separately
             true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
@@ -829,6 +1019,8 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+        else:
+            return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

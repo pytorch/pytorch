@@ -7,7 +7,6 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/Operators.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <utility>
 
@@ -189,8 +188,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
   self_ = maybePadToLogicalRank(self_, 0, max_logical_rank);
 
   // masked_select returns a 1D tensor, so we have to reshape it into 2D
-  const auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_rule(
@@ -214,8 +213,8 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
-  const auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
-  return std::make_tuple(result, 0);
+  auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
@@ -295,7 +294,7 @@ rrelu_with_noise_batch_rule(
 
   auto ret = at::rrelu_with_noise(self_, noise_, lower, upper, training, std::move(generator));
 
-  return std::make_tuple(ret, 0, noise_, 0);
+  return std::make_tuple(std::move(ret), 0, std::move(noise_), 0);
 }
 
 static Tensor rrelu_with_noise_batch(
@@ -322,11 +321,13 @@ static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rul
   Tensor& self, std::optional<int64_t> self_bdim,
   Tensor& buffer, std::optional<int64_t> buffer_bdim) {
   // NB: This emulates handle_pointwise_ops except we ignore the last argument, buffer
-  // when any of the inputs are on cuda.
-  // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
+  // when any of the inputs are on cuda/xpu.
+  // We do this because on cuda/xpu, buffer is a dummy tensor always of logical rank 1 and
   // it becomes an issue when the rest of the inputs are scalar
   int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
-  if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
+  bool inputs_on_cuda = grad.is_cuda() || self.is_cuda() || buffer.is_cuda();
+  bool inputs_on_xpu = grad.is_xpu() || self.is_xpu() || buffer.is_xpu();
+  if (!inputs_on_cuda && !inputs_on_xpu) {
     out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
   Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
@@ -441,6 +442,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
+  BINARY_POINTWISE2(ldexp, Tensor);
   BINARY_POINTWISE(logaddexp);
   BINARY_POINTWISE(logaddexp2);
   POINTWISE_BOXED(lerp.Scalar);

@@ -97,43 +97,38 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   int64_t nDims = self.dim();
   TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
 
-  int64_t height = self.size(0);
-  int64_t width = self.size(1);
+  auto height = self.sym_size(0);
+  auto width = self.sym_size(1);
 
   if (nDims > 2) {
-    int64_t dim1 = height;
     for (const auto i : c10::irange(1, nDims)) {
-      if (self.size(i) != dim1) {
+      if (self.sym_size(i) != height) {
         TORCH_CHECK(false, "all dimensions of input must be of equal length");
       }
     }
   }
 
-  int64_t storage_offset = self.storage_offset();
-  std::vector<int64_t> sizes;
-  std::vector<int64_t> strides;
-  int64_t size = std::min(height, width);
+  auto storage_offset = self.sym_storage_offset();
+  auto size = std::min(height, width);
 
   int64_t stride = 0;
   for (const auto i : c10::irange(nDims)) {
     stride += self.stride(i);
   }
-  strides.push_back(stride);
-  sizes.push_back(size);
+  std::vector<SymInt> strides{stride};
+  std::vector<SymInt> sizes{size};
 
-  auto main_diag = self.as_strided(sizes, strides, storage_offset);
+  auto main_diag = self.as_strided_symint(sizes, strides, storage_offset);
   main_diag.fill_(fill_value);
 
   if (wrap && nDims == 2 && height > width + 1) {
-    std::vector<int64_t> wrap_sizes;
+    auto step = width + 1;
+    auto wrap_size = ((self.numel() + step - 1) / step) - size;
+    std::vector<SymInt> wrap_sizes{wrap_size};
 
-    int64_t step = width + 1;
-    int64_t wrap_size = ((self.numel() + step - 1) / step) - size;
-    wrap_sizes.push_back(wrap_size);
+    auto offset = self.stride(0) * (width + 1);
 
-    int64_t offset = self.stride(0) * (width + 1);
-
-    auto wrap_diag = self.as_strided(wrap_sizes, strides, storage_offset + offset);
+    auto wrap_diag = self.as_strided_symint(wrap_sizes, strides, storage_offset + offset);
     wrap_diag.fill_(fill_value);
   }
 

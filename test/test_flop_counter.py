@@ -13,12 +13,14 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils.flop_counter import sdpa_flop_count
 
 
 try:
@@ -48,6 +50,28 @@ def T(*shape, requires_grad=False):
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
 class TestFlopCounter(TestCase):
+    def test_sdpa_flop_count_gqa(self):
+        """sdpa_flop_count should handle GQA where KV heads < Q heads."""
+        # MHA: q_heads == kv_heads
+        q_shape = (2, 32, 128, 64)
+        k_shape = (2, 32, 128, 64)
+        v_shape = (2, 32, 128, 64)
+        mha_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertTrue(mha_flops > 0)
+
+        # GQA: q_heads=32, kv_heads=8 (ratio 4:1)
+        k_gqa = (2, 8, 128, 64)
+        v_gqa = (2, 8, 128, 64)
+        gqa_flops = sdpa_flop_count(q_shape, k_gqa, v_gqa)
+        # Flops should be equal since KV heads are broadcast to match Q heads
+        self.assertEqual(gqa_flops, mha_flops)
+
+        # Incompatible: q_heads not a multiple of kv_heads
+        k_bad = (2, 5, 128, 64)
+        v_bad = (2, 5, 128, 64)
+        with self.assertRaises(AssertionError):
+            sdpa_flop_count(q_shape, k_bad, v_bad)
+
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
         with FlopCounterMode() as mode:
@@ -270,7 +294,7 @@ class TestFlopCounter(TestCase):
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
         with FlopCounterMode() as mode:
-            for i in range(50):
+            for _ in range(50):
                 out = model(x)
                 out.sum().backward()
         self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
@@ -463,7 +487,70 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
-    @skipIfRocm  # Nested tensor
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Flash attention not supported (pre-SM80 hardware on CUDA)",
+    )
+    def test_sdpa_gqa(self):
+        """Test flop counting for grouped-query attention (GQA)."""
+        batch_size = 2
+        n_heads_q = 32
+        n_heads_kv = 8
+        seq_len = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        query = torch.randn(
+            batch_size,
+            n_heads_q,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        key = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        value = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0, is_causal=True, enable_gqa=True
+            )
+        gqa_flops = int(get_total_flops(mode))
+
+        # Compare with MHA (KV heads expanded to match Q heads)
+        key_expanded = key.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        value_expanded = value.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        mode_mha = FlopCounterMode()
+        with mode_mha:
+            out_mha = F.scaled_dot_product_attention(
+                query,
+                key_expanded,
+                value_expanded,
+                dropout_p=0,
+                is_causal=True,
+            )
+        mha_flops = int(get_total_flops(mode_mha))
+
+        # GQA flops should equal MHA flops (kernel broadcasts KV heads)
+        self.assertEqual(gqa_flops, mha_flops)
+        self.assertTrue(gqa_flops > 0)
+
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -683,7 +770,6 @@ class TestFlopCounter(TestCase):
             ),
         )
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -823,6 +909,226 @@ class TestFlopCounter(TestCase):
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
+    @requires_cuda_and_triton
+    def test_flop_counter_custom_triton_manual_decomp(self):
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import _FlopCounterMode, register_flop_formula
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device="cuda")
+        out = torch.empty(3, device="cuda")
+
+        @register_flop_formula(sin_kernel)
+        def compute_sin_kernel_flops(*args, **kwargs) -> int:
+            # dummy implementation
+            return 2
+
+        def sin_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode() as m:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        self.assertExpectedInline(get_total_flops(m), """2""")
+
+        # Now, wrap in a triton op and do the decomp
+        @torch._library.triton.triton_op("mylib::sin_op", mutates_args=())
+        def op() -> None:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        def op_decompose(mode, *args, **kwargs):
+            with mode:
+                torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        torch.library.register_torch_dispatch(
+            "mylib::sin_op", _FlopCounterMode, op_decompose
+        )
+        # Should now output 2 flops; previously would be 0
+        with FlopCounterMode() as m2:
+            torch.ops.mylib.sin_op()
+        self.assertExpectedInline(get_total_flops(m2), """2""")
+
+    @requires_cuda_and_triton
+    def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self):
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import _FlopCounterMode, register_flop_formula
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        @triton.jit
+        def cos_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.cos(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device="cuda")
+        out = torch.empty(3, device="cuda")
+
+        @register_flop_formula(sin_kernel)
+        def compute_sin_kernel_flops(*args, **kwargs) -> int:
+            return 1
+
+        @register_flop_formula(cos_kernel)
+        def compute_cos_kernel_flops(*args, **kwargs) -> int:
+            return 1
+
+        def sin_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        def cos_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode() as m:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+            torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
+
+        self.assertExpectedInline(get_total_flops(m), """2""")
+
+        # Now, wrap in a triton op and do the decomp
+        @torch._library.triton.triton_op("mylib::trig_op", mutates_args=())
+        def trig_op() -> None:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+            torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
+
+        def op_decompose(mode, *args, **kwargs):
+            with mode:
+                torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+                torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
+
+        # Simulate the decomposition of the triton op into its kernels
+        # this takes place in aot_autograd, which is then seen for AC
+        torch.library.register_torch_dispatch(
+            "mylib::trig_op", _FlopCounterMode, op_decompose
+        )
+
+        # Should now output 2 flops; It is important that we compile
+        # this function to aot_eager in order to decompose the triton
+        # op into its kernels
+        with FlopCounterMode() as m2:
+            torch.ops.mylib.trig_op()
+        self.assertExpectedInline(get_total_flops(m2), """2""")
+
+    @requires_cuda_and_triton
+    @torch._functorch.config.patch("activation_memory_budget", 0.1)
+    @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
+    @torch._functorch.config.patch("is_non_builtin_to_include", True)
+    def test_flop_counter_custom_triton_op_two_kernels_auto_ac(self):
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import register_flop_formula
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        @triton.jit
+        def cos_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.cos(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        n_elements = int(1e7)
+        x = torch.randn(n_elements, device="cuda", requires_grad=True)
+
+        cos_flops_recorded, sin_flops_recorded = 0, 0
+
+        @register_flop_formula(sin_kernel)
+        def compute_sin_kernel_flops(*args, **kwargs) -> int:
+            # dummy implementation
+            nonlocal sin_flops_recorded
+            sin_flops_recorded += 1
+            return 1
+
+        @register_flop_formula(cos_kernel)
+        def compute_cos_kernel_flops(*args, **kwargs) -> int:
+            # dummy implementation
+            nonlocal cos_flops_recorded
+            cos_flops_recorded += 1
+            return 1
+
+        def sin_grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        def cos_grid(meta):
+            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        @torch._library.triton.triton_op("mylib::trig_op", mutates_args=())
+        def trig_op(x_inp: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x_inp)
+            torch.library.wrap_triton(sin_kernel)[sin_grid](
+                x_inp, output, n_elements, 256
+            )
+            torch.library.wrap_triton(cos_kernel)[cos_grid](
+                x_inp, output, n_elements, 256
+            )
+            return output
+
+        # Register a backward
+        def trig_op_backward(ctx, grad_output):
+            (out,) = ctx.saved_tensors
+            return grad_output * out
+
+        def trig_op_setup_context(ctx, inputs, output):
+            ctx.save_for_backward(output)
+
+        trig_op.register_autograd(trig_op_backward, setup_context=trig_op_setup_context)
+
+        def fn(x_inp: torch.Tensor):
+            y1 = torch.ops.mylib.trig_op(x_inp)
+            y2 = torch.ops.mylib.trig_op(y1)
+            y3 = torch.ops.mylib.trig_op(y2)
+            return y3
+
+        torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)(x)
+
+        # Since we decompose, we will call the formula 3 times
+        self.assertEqual(
+            sin_flops_recorded,
+            3,
+            "Custom formula for sin_kernel not recorded during partitioning",
+        )
+        self.assertEqual(
+            cos_flops_recorded,
+            3,
+            "Custom formula for cos_kernel not recorded during partitioning",
+        )
+
     @skipIfNoTorchVision
     def test_inference_mode(self):
         def get_flops(model):
@@ -856,7 +1162,7 @@ class TestFlopCounter(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
-        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        dtype = e4m3_type
         with FlopCounterMode() as mode:
             torch._scaled_mm(
                 torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
@@ -867,6 +1173,263 @@ class TestFlopCounter(TestCase):
             )
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Flash attention not supported (pre-SM80 hardware on CUDA)",
+    )
+    def test_varlen_attn(self):
+        import torch.nn.attention.varlen
+
+        n_heads = 8
+        head_dim = 64
+        dtype = torch.float16
+        seq_lens = [128, 64]
+        total_tokens = sum(seq_lens)
+        cu_seqs = torch.tensor(
+            [0] + list(torch.tensor(seq_lens).cumsum(0).tolist()),
+            dtype=torch.int32,
+            device="cuda",
+        )
+        max_s = max(seq_lens)
+
+        query = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+        fw_flops = int(get_total_flops(mode))
+        expected_fw = sum(
+            sdpa_flop_count(
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+            )
+            for s in seq_lens
+        )
+        self.assertEqual(fw_flops, expected_fw)
+        # 2 bmms per sequence, each 2*h*s*d*s; total = 2048*(128^2 + 64^2) = 41943040
+        self.assertExpectedInline(str(fw_flops), """41943040""")
+
+        mode_bw = FlopCounterMode()
+        with mode_bw:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+            out.sum().backward()
+        fw_bw_flops = int(get_total_flops(mode_bw))
+        # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
+        self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
+        self.assertExpectedInline(str(fw_bw_flops), """146800640""")
+
+
+class TestFlexAttentionEstimation(TestCase):
+    def test_flex_attention_flop_registration(self):
+        """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
+        from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
+        from torch.utils.flop_counter import flop_registry
+
+        # Registered in flop_registry like sdpa
+        self.assertIn(torch.ops.higher_order.flex_attention, flop_registry)
+        self.assertIn(torch.ops.higher_order.flex_attention_backward, flop_registry)
+
+        # GQA: 16 query heads, 4 kv heads
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        # Realistic output: (out_bf16, logsumexp_fp32, max_scores_fp32)
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+        mm = graph.call_function(torch.ops.aten.mm.default, args=(q, q))
+
+        # is_compute_node recognizes flex_attention alongside mm
+        self.assertTrue(is_compute_node(fwd))
+        self.assertTrue(is_compute_node(mm))
+        self.assertFalse(is_compute_node(q))
+
+        # Flops match sdpa_flop_count
+        fwd_flops = flop_registry[torch.ops.higher_order.flex_attention](
+            q.meta["val"], k.meta["val"], v.meta["val"], out_val=fwd.meta["val"]
+        )
+        expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertEqual(fwd_flops, expected_flops)
+
+    @unittest.skipIf(not HAS_CUDA, "requires CUDA")
+    def test_flex_attention_roofline_estimate(self):
+        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+
+        est_ms = estimate_roofline_runtime_ms(fwd)
+        self.assertGreater(est_ms, 0.0)
+
+    def test_sparsity_hint_annotate_propagates(self):
+        """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+
+        class M(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.9}):
+                    return flex_attention(q, k, v)
+
+        with FakeTensorMode():
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                ep = torch.export.export(M(), (q, q, q), strict=False)
+
+        flex_node = next(
+            (
+                n
+                for n in ep.graph.nodes
+                if n.op == "call_function" and "flex_attention" in str(n.target)
+            ),
+            None,
+        )
+        self.assertIsNotNone(flex_node)
+        custom = flex_node.meta.get("custom", {})
+        self.assertIn("sparsity_hint", custom)
+        self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
+
+    def test_sparsity_hint_affects_flex_attention_flops(self):
+        """sparsity_hint via annotate reduces flex_attention flop count."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+        from torch.utils._pytree import tree_map
+
+        class Dense(torch.nn.Module):
+            def forward(self, q, k, v):
+                return flex_attention(q, k, v)
+
+        class Sparse(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.5}):
+                    return flex_attention(q, k, v)
+
+        with FakeTensorMode():
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                dense_ep = torch.export.export(Dense(), (q, q, q), strict=False)
+                sparse_ep = torch.export.export(Sparse(), (q, q, q), strict=False)
+
+        def find_flex(graph):
+            return next(
+                (
+                    n
+                    for n in graph.nodes
+                    if n.op == "call_function" and "flex_attention" in str(n.target)
+                ),
+                None,
+            )
+
+        dense_node = find_flex(dense_ep.graph)
+        sparse_node = find_flex(sparse_ep.graph)
+        self.assertIsNotNone(dense_node)
+        self.assertIsNotNone(sparse_node)
+
+        def get_flops(node):
+            from torch._inductor.fx_passes.overlap_scheduling import (
+                _get_flop_registry_key,
+            )
+
+            def _get_val(n):
+                return n.meta.get("val") if isinstance(n, torch.fx.Node) else n
+
+            args = tree_map(_get_val, node.args)
+            kwargs = tree_map(_get_val, node.kwargs)
+            out = _get_val(node)
+            flop_key = _get_flop_registry_key(node.target)
+            self.assertIsNotNone(flop_key)
+            flop_func = torch.utils.flop_counter.flop_registry[flop_key]
+            return flop_func(*args, **kwargs, out_val=out, _node_meta=node.meta)
+
+        dense_flops = get_flops(dense_node)
+        sparse_flops = get_flops(sparse_node)
+        self.assertGreater(dense_flops, 0)
+        self.assertEqual(sparse_flops, dense_flops // 2)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ import sys
 import textwrap
 from collections.abc import Sequence
 from importlib import import_module
-from typing import Any, IO, Optional, Union
+from typing import Any, IO
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -53,7 +53,7 @@ use_buck = inductor_config.is_fbcode()
 
 
 class AOTIMinifierError(Exception):
-    def __init__(self, original_exception: Union[str, Exception]) -> None:
+    def __init__(self, original_exception: str | Exception) -> None:
         additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
         full_message = f"{additional_message}: {str(original_exception)}"
         super().__init__(full_message)
@@ -64,7 +64,7 @@ def dump_to_minify(
     exported_program: ExportedProgram,
     compiler_name: str,
     command: str = "minify",
-    options: Optional[dict[str, Any]] = None,
+    options: dict[str, Any] | None = None,
 ) -> None:
     """
     If command is "minify":
@@ -72,7 +72,8 @@ def dump_to_minify(
     If command is "run":
         Dump exported_program to `cwd/repro.py`, with run command.
     """
-    assert command in ["minify", "run"]
+    if command not in ["minify", "run"]:
+        raise AssertionError(f"command must be 'minify' or 'run', got {command!r}")
 
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -134,15 +135,15 @@ def save_graph_repro_ep(
     fd: IO[Any],
     compiler_name: str,
     *,
-    exported_program: Optional[ExportedProgram] = None,
-    gm: Optional[torch.nn.Module] = None,
-    args: Optional[tuple[Any]] = None,
-    config_patches: Optional[dict[str, str]] = None,
+    exported_program: ExportedProgram | None = None,
+    gm: torch.nn.Module | None = None,
+    args: tuple[Any] | None = None,
+    config_patches: dict[str, str] | None = None,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     command: str = "run",
-    accuracy: Optional[Union[str, bool]] = None,
-    check_str: Optional[str] = None,
+    accuracy: str | bool | None = None,
+    check_str: str | None = None,
     module_in_comment: bool = False,
     strict: bool = False,
 ) -> None:
@@ -158,8 +159,10 @@ def save_graph_repro_ep(
         raise AOTIMinifierError("If gm is defined, args should also be defined")
 
     if exported_program is None:
-        assert gm is not None
-        assert args is not None
+        if gm is None:
+            raise AssertionError("gm must not be None when exported_program is None")
+        if args is None:
+            raise AssertionError("args must not be None when exported_program is None")
         exported_program = torch.export.export(gm, args, strict=strict)
     elif gm is None:
         gm = exported_program.module(check_guards=False)
@@ -193,8 +196,8 @@ def dump_compiler_graph_state(
     args: Sequence[Any],
     compiler_name: str,
     *,
-    config_patches: Optional[dict[str, str]] = None,
-    accuracy: Optional[Union[str, bool]] = None,
+    config_patches: dict[str, str] | None = None,
+    accuracy: str | bool | None = None,
     strict: bool = False,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -235,9 +238,9 @@ def dump_compiler_graph_state(
 def generate_compiler_repro_exported_program(
     exported_program: ExportedProgram,
     *,
-    options: Optional[dict[str, str]] = None,
+    options: dict[str, str] | None = None,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
 ) -> str:
     model_str = textwrap.dedent(
         f"""
@@ -272,7 +275,7 @@ isolate_fails_code_str = None
     return model_str
 
 
-def repro_load_args(load_args: Any, save_dir: Optional[str]) -> tuple[Any]:
+def repro_load_args(load_args: Any, save_dir: str | None) -> tuple[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -301,6 +304,7 @@ def repro_load_args(load_args: Any, save_dir: Optional[str]) -> tuple[Any]:
 def repro_common(
     options: Any, exported_program: ExportedProgram
 ) -> tuple[torch.fx.GraphModule, Any, Any]:
+    # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module(check_guards=False)
     args, kwargs = exported_program.example_inputs
@@ -310,7 +314,7 @@ def repro_common(
 def repro_get_args(
     options: Any,
     exported_program: ExportedProgram,
-    config_patches: Optional[dict[str, Any]],
+    config_patches: dict[str, Any] | None,
 ) -> tuple[torch.fx.GraphModule, Any, Any]:
     mod, args, kwargs = repro_common(options, exported_program)
     return mod, args, kwargs
@@ -319,7 +323,7 @@ def repro_get_args(
 def repro_run(
     options: Any,
     exported_program: ExportedProgram,
-    config_patches: Optional[dict[str, Any]],
+    config_patches: dict[str, Any] | None,
 ) -> None:
     from torch._inductor import _aoti_compile_and_package_inner
 
@@ -352,10 +356,10 @@ def export_for_aoti_minifier(
     tuple_inputs: tuple[Any],
     strict: bool = False,
     skip_export_error: bool = True,
-) -> Optional[torch.nn.Module]:
+) -> torch.nn.Module | None:
     # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
     # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
-    # In these case, we return None. Otherwise, we return the exported graph module.
+    # In these cases, we return None. Otherwise, we return the exported graph module.
     # This won't affect the minifier result because the minifier is only responsible for catching
     # errors in AOTI, not export.
     #
@@ -383,13 +387,14 @@ def export_for_aoti_minifier(
                 return None
         raise AOTIMinifierError(e) from e
     # we should never reach here
+    # pyrefly: ignore [unreachable]
     return None
 
 
 def repro_minify(
     options: Any,
     exported_program: ExportedProgram,
-    config_patches: Optional[dict[str, Any]],
+    config_patches: dict[str, Any] | None,
 ) -> None:
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
@@ -402,7 +407,10 @@ def repro_minify(
         mod, args, kwargs, options=config_patches
     )
     compiler_name = "aot_inductor"
-    assert options.minifier_export_mode in ["dynamo", "python"]
+    if options.minifier_export_mode not in ["dynamo", "python"]:
+        raise AssertionError(
+            f"minifier_export_mode must be 'dynamo' or 'python', got {options.minifier_export_mode!r}"
+        )
     strict = options.minifier_export_mode == "dynamo"
     skip_export_error = options.skip_export_error
 
@@ -418,10 +426,11 @@ def repro_minify(
     def module_fails(
         gm: torch.fx.GraphModule,
         flat_example_inputs: list[Any],
-        check_str: Optional[str] = None,
+        check_str: str | None = None,
     ) -> bool:
         # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
+        # pyrefly: ignore [bad-assignment]
         gm = export_for_aoti_minifier(
             gm, tuple_inputs, strict=strict, skip_export_error=skip_export_error
         )
@@ -431,7 +440,8 @@ def repro_minify(
         if gm is None:
             return False
 
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
 
         try:
             _aoti_compile_and_package_inner(
@@ -471,12 +481,12 @@ def repro_minify(
 def run_repro(
     exported_program: ExportedProgram,
     *,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: dict[str, str] | None = None,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
-    save_dir: Optional[str] = None,
-    tracing_mode: Optional[str] = None,
-    check_str: Optional[str] = None,
+    accuracy: bool | str = "",
+    save_dir: str | None = None,
+    tracing_mode: str | None = None,
+    check_str: str | None = None,
     minifier_export_mode: str = "python",
     skip_export_error: bool = True,
     **more_kwargs: Any,

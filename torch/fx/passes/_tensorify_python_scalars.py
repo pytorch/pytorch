@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-import os
-from typing import Any, Union
+import operator
+from typing import Any, TYPE_CHECKING
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -11,18 +11,15 @@ import torch
 import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
-from torch._dynamo.utils import get_metrics_context
+from torch._dynamo.utils import _is_tensorify_enabled, get_metrics_context
 from torch._prims_common import get_computation_dtype
-from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import (  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     has_free_symbols,
     ShapeEnv,
 )
-from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
@@ -30,6 +27,11 @@ from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from torch.fx.graph_module import GraphModule
 
 
 __all__: list[str] = []
@@ -82,12 +84,31 @@ SUPPORTED_OPS = {
     torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
     torch.ops.aten.div.Tensor: torch.ops.aten.div.Tensor,
+    torch.ops.aten.pow.Tensor_Tensor: torch.ops.aten.pow.Tensor_Tensor,
+    operator.mul: torch.ops.aten.mul.Tensor,
+    operator.add: torch.ops.aten.add.Tensor,
+    operator.sub: torch.ops.aten.sub.Tensor,
+    operator.truediv: torch.ops.aten.div.Tensor,
+    operator.pow: torch.ops.aten.pow.Tensor_Tensor,
     torch.ops.aten.gt.Scalar: torch.ops.aten.gt.Tensor,
     torch.ops.aten.lt.Scalar: torch.ops.aten.lt.Tensor,
     torch.ops.aten.ge.Scalar: torch.ops.aten.ge.Tensor,
     torch.ops.aten.le.Scalar: torch.ops.aten.le.Tensor,
     torch.ops.aten.eq.Scalar: torch.ops.aten.eq.Tensor,
     torch.ops.aten.ne.Scalar: torch.ops.aten.ne.Tensor,
+    operator.gt: torch.ops.aten.gt.Tensor,
+    operator.lt: torch.ops.aten.lt.Tensor,
+    operator.ge: torch.ops.aten.ge.Tensor,
+    operator.le: torch.ops.aten.le.Tensor,
+    operator.eq: torch.ops.aten.eq.Tensor,
+    operator.ne: torch.ops.aten.ne.Tensor,
+}
+
+SUPPORTED_METHOD_OPS = {
+    "mul_": torch.ops.aten.mul_.Tensor,
+    "add_": torch.ops.aten.add_.Tensor,
+    "sub_": torch.ops.aten.sub_.Tensor,
+    "div_": torch.ops.aten.div_.Tensor,
 }
 
 
@@ -108,16 +129,26 @@ def tensorify_python_scalars(
     Returns:
         None
     """
-    import sympy
 
-    knob = True
-    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
-        if env in ("0", "FALSE"):
-            knob = False
-    else:
-        knob = justknobs_check("pytorch/compiler:tensorify_python_scalars")
-    if not knob:
+    if not _is_tensorify_enabled():
         return None
+
+    # This pass uses MetaProxy which relies on __torch_function__.
+    # DisableTorchFunctionSubclass may be active here (see #177088),
+    # so re-enable dispatch for MetaProxy ops.
+    with torch._C._EnableTorchFunction():
+        return _tensorify_impl(gm, shape_env, fake_mode)
+
+
+def _tensorify_impl(
+    gm: GraphModule,
+    shape_env: ShapeEnv,
+    fake_mode: fake_tensor.FakeTensorMode,
+) -> None:
+    """Helper fn in tensorify_python_scalars so the caller can wrap
+    with _EnableTorchFunction (#180906).
+    """
+    import sympy
 
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
@@ -152,7 +183,7 @@ def tensorify_python_scalars(
         # cache constants, why not
         if isinstance(expr, (Integer, Number, BooleanAtom)):
             dtype = None
-            c: Union[bool, int, float]
+            c: bool | int | float
             if isinstance(expr, BooleanAtom):
                 dtype = torch.bool
                 c = bool(expr)
@@ -164,9 +195,13 @@ def tensorify_python_scalars(
                 c = float(expr)
 
             node = graph.call_function(
-                torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
+                torch.ops.aten.scalar_tensor.default,
+                # pyrefly: ignore [unbound-name]
+                (c,),
+                {"dtype": dtype},
             )
             with fake_mode:
+                # pyrefly: ignore [unbound-name]
                 node.meta["val"] = torch.ops.aten.scalar_tensor.default(c, dtype=dtype)
             expr_to_tensor_proxy[expr] = MetaProxy(
                 node,
@@ -202,34 +237,55 @@ def tensorify_python_scalars(
                 and node.op == "call_function"
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
-                dtype = node.args[0].meta["val"].dtype
+                source_tensor = node.args[0].meta["val"]
+                dtype = source_tensor.dtype
+
+                if not isinstance(node.args[0], fx.Node):
+                    raise AssertionError(f"Expected fx.Node, got {node.args[0]}")
+
+                s = node.meta["val"].node.expr
+
+                expr_to_sym_proxy[s] = MetaProxy(
+                    node, tracer=tracer, fake_mode=fake_mode
+                )
+
+                # only tensorify if the dtype is floating point
                 if not dtype.is_floating_point:
                     continue
 
-                assert isinstance(node.args[0], fx.Node), node.args[0]
-
-                s = node.meta["val"].node.expr
                 expr_to_tensor_proxy[s] = MetaProxy(
                     node.args[0], tracer=tracer, fake_mode=fake_mode
                 )
+                if len(source_tensor.shape) != 0:
+                    # .item() always produces a scalar value, even when it is
+                    # called on a size-1 tensor with rank > 0. Preserve that 0-d
+                    # semantics before tensorifying the scalar expression so
+                    # later tensor math and autograd tangents do not keep an
+                    # accidental length-1 dimension.
+                    expr_to_tensor_proxy[s] = torch.ops.aten.reshape.default(
+                        expr_to_tensor_proxy[s], []
+                    )
                 # Upcast the float tensor to torch.float64 to avoid precision problem
                 expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
                     expr_to_tensor_proxy[s], torch.float64
                 )
-                expr_to_sym_proxy[s] = MetaProxy(
-                    node, tracer=tracer, fake_mode=fake_mode
-                )
+
+            # pyrefly: ignore [bad-argument-type]
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
                     expr_to_sym_proxy[sym_expr] = MetaProxy(
-                        node, tracer=tracer, fake_mode=fake_mode
+                        # pyrefly: ignore [bad-argument-type]
+                        node,
+                        tracer=tracer,
+                        fake_mode=fake_mode,
                     )
 
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
-            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32
+
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
@@ -248,11 +304,26 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
-            if node.op == "call_function" and (
-                replacement_op := SUPPORTED_OPS.get(node.target)
-            ):
+
+            replacement_op = None
+            is_inplace_method = False
+            if node.op == "call_function":
+                replacement_op = SUPPORTED_OPS.get(node.target)
+            elif node.op == "call_method":
+                replacement_op = SUPPORTED_METHOD_OPS.get(node.target)
+                is_inplace_method = replacement_op is not None
+
+            if replacement_op is not None:
+                # Pure SymFloat/SymBool expression nodes are scalar intermediates,
+                # not tensor-valued ops. Let later tensor uses consume their
+                # symbolic expression instead of treating them as a tensorify
+                # failure here.
+                if not hasattr(node.meta.get("val"), "dtype"):
+                    continue
+
                 args: list[Any] = []
                 transform = False
+
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
                 for a in node.args:
@@ -268,8 +339,14 @@ def tensorify_python_scalars(
                             transform = False
                             break
 
-                        # We use _expr instead of expr b/c we want the symbol not the replacement
-                        tensorified_symbols.add(a.meta["val"].node._expr)
+                        # Track the original backed float symbols that flowed into
+                        # this tensorified expression so the later specialization
+                        # sweep does not incorrectly restart analysis for them.
+                        tensorified_symbols.update(
+                            s
+                            for s in a.meta["val"].node._expr.free_symbols
+                            if symbol_is_type(s, SymT.FLOAT)
+                        )
 
                         # The upcasting is irrelevant when the compute dtype is bool. This happens
                         # in cases where we are tensorifying a comparison operator such as
@@ -291,7 +368,10 @@ def tensorify_python_scalars(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
-                    if compute_dtype != node.meta["val"].dtype:
+                    if (
+                        compute_dtype != node.meta["val"].dtype
+                        and not is_inplace_method
+                    ):
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
                                 replacement_proxy,
@@ -300,6 +380,7 @@ def tensorify_python_scalars(
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)
+
                     graph.erase_node(node)
 
                     metrics_context = get_metrics_context()
@@ -315,7 +396,8 @@ def tensorify_python_scalars(
                         and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
                         failed_tensorify_ops.update(str(node.target))
-                        log.info("Failed to tensorify %s", str(node.target))
+
+                        log.info("Failed to tensorify %s", node.target)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -353,7 +435,7 @@ def tensorify_python_scalars(
     # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
-    for k, v in shape_env.var_to_val.items():
+    for k, v in shape_env.backed_var_to_val.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
             if (

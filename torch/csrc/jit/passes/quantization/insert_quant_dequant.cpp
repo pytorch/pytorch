@@ -750,7 +750,7 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  void collectObserverNodesAndValueToQuantize(Module& module, Value*);
+  void collectObserverNodesAndValueToQuantize(Module& module, Value* /*v*/);
   void cleanup(Module& module, Graph* g);
   void removeObserverNodes(Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);
@@ -1230,7 +1230,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
     TORCH_INTERNAL_ASSERT(
         dequantized_val->uses().size() == 1,
         "Expect to have one dequantize node for each use");
-    // Replace useses of dequantized_val with the input of
+    // Replace uses of dequantized_val with the input of
     // dequantize node
     dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
     dequantize_node->removeAllInputs();
@@ -1633,9 +1633,9 @@ void InsertQuantDeQuantHelper::runForOnDevicePTQ(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-  // Unliked the run method we dont need to extract new qparam values for the
+  // Unlike the run method we don't need to extract new qparam values for
   // the same graph used in different call site.
-  // Reason is that for on device PTQ we dont:
+  // Reason is that for on device PTQ we don't:
   // 1. Run calculate_qparams
   // 2. Get the scale and zero point
   // 3. get axis and dtype
@@ -1830,9 +1830,9 @@ Module InsertQuantDeQuantOnDevicePTQ(
   InsertQuantDeQuantHelper h(quant_type, debug);
   h.runForOnDevicePTQ(module, quantize_method_name);
   h.removeObserverNodes(module);
-  // Dont need:
+  // Don't need:
   // ReplicateChooseQParamsQuantDequant: This is propagating dynamic quant's
-  // quant dequant RemoveRedundantQuantizationOps: THis is removing activation
+  // quant dequant RemoveRedundantQuantizationOps: This is removing activation
   // observers for dynamic quant when the op related to it is not dynamically
   // quantizable. Doesn't really make sense. In our case we won't have those
   // anyway since for dynamic quant activations won't be observed We can still

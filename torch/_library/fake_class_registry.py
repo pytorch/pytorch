@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import logging
-from typing import Any, Optional, Protocol, Union
+from typing import Any, Protocol
 
 import torch
 from torch._library.utils import parse_namespace
@@ -12,23 +12,128 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
-        self.wrapped_obj = wrapped_obj
+    def __init__(
+        self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject | None
+    ):
+        # Use object.__setattr__ to bypass our custom __setattr__ during initialization
+        object.__setattr__(self, "wrapped_obj", wrapped_obj)
+        object.__setattr__(self, "script_class_name", script_class_name)
 
-        # The fully qualified name of the class of original script object
-        self.script_class_name = script_class_name
+        from torch._library.opaque_object import is_opaque_type
+
+        # We don't want to deepcopy when tracing with opaque objects because
+        # if a mutation happens intentionally (Ex. caching in device mesh)
+        # then we want it to be recorded on the real object
+        real_obj = x
+        if not is_opaque_type(type(x)):
+            try:
+                with _disable_current_modes():
+                    real_obj = copy.deepcopy(x)
+            except (RuntimeError, TypeError) as e:
+                log.warning(
+                    "Unable to deepcopy the custom object %s due to %s. "
+                    "Defaulting to the user given object. This might be "
+                    "dangerous as side effects may be directly applied "
+                    "to the object.",
+                    script_class_name,
+                    e,
+                )
+
+        object.__setattr__(self, "real_obj", real_obj)
+
+    def __getattribute__(self, name):
         try:
-            with _disable_current_modes():
-                self.real_obj = copy.deepcopy(x)
-        except RuntimeError:
-            log.warning(
-                "Unable to deepcopy the custom object %s. "
-                "Defaulting to the user given object. This might be "
-                "dangerous as side effects may be directly applied "
-                "to the object.",
-                script_class_name,
-            )
-            self.real_obj = x
+            return super().__getattribute__(name)
+        except AttributeError as e:
+            raise AttributeError(
+                f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
+                "implying that you are calling this inside of a fake kernel. "
+                "The fake kernel should not depend on the contents of the "
+                "OpaqueObject at all, so we're erroring out. If this attr is "
+                "a method or constant attribute, you can allow this member access by "
+                "registering it via `register_opaque_type(members=...)`."
+            ) from e
+
+    def __setattr__(self, name, value):
+        raise AttributeError(
+            f"Tried to call __setattr__ with attr '{name}' on a FakeScriptObject, "
+            "implying that you are calling this inside of a fake kernel. "
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
+        )
+
+    def __getitem__(self, key):
+        # This is needed for DeviceMesh support
+        return self.real_obj[key]
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        # Get real_obj without triggering custom __getattribute__
+        self_real = object.__getattribute__(self, "real_obj")
+        if isinstance(other, FakeScriptObject):
+            other_real = object.__getattribute__(other, "real_obj")
+            # For reference types, identity check first
+            if self_real is other_real:
+                return True
+            # Fall back to equality check
+            return self_real == other_real
+        # Compare with the real object directly
+        return self_real == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        # Use real_obj's hash if available, otherwise use object id
+        real_obj = object.__getattribute__(self, "real_obj")
+        try:
+            return hash(real_obj)
+        except TypeError:
+            # Object is not hashable, use identity-based hash
+            return id(real_obj)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "FakeScriptObject":
+        if id(self) in memo:
+            return memo[id(self)]
+        new_obj = FakeScriptObject.__new__(FakeScriptObject)
+        memo[id(self)] = new_obj
+        object.__setattr__(
+            new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo)
+        )
+        object.__setattr__(new_obj, "script_class_name", self.script_class_name)
+        # Disable dispatch modes during deepcopy of real_obj and attribute
+        # access to prevent tensor operations (e.g. storage cloning, property
+        # access on DeviceMesh) from going through proxy tracing or
+        # functionalization.
+        with _disable_current_modes():
+            new_real_obj = copy.deepcopy(self.real_obj, memo)
+            object.__setattr__(new_obj, "real_obj", new_real_obj)
+            for name, value in self.__dict__.items():
+                if name not in ("wrapped_obj", "script_class_name", "real_obj"):
+                    if isinstance(value, FakeScriptMethod):
+                        object.__setattr__(
+                            new_obj,
+                            name,
+                            FakeScriptMethod(new_obj, value.method_name, value.schema),
+                        )
+                    else:
+                        if hasattr(new_real_obj, name):
+                            object.__setattr__(
+                                new_obj, name, getattr(new_real_obj, name)
+                            )
+                        else:
+                            object.__setattr__(new_obj, name, value)
+        return new_obj
+
+
+def maybe_unwrap_fake_script_object(obj: Any) -> Any:
+    """If obj is a FakeScriptObject, return the underlying real object."""
+    if isinstance(obj, FakeScriptObject):
+        return obj.real_obj
+    return obj
 
 
 class FakeScriptMethod:
@@ -36,7 +141,7 @@ class FakeScriptMethod:
         self,
         self_fake_obj: FakeScriptObject,
         method_name: str,
-        schema: Optional[torch.FunctionSchema],
+        schema: torch.FunctionSchema | None,
     ):
         self.self_fake_obj = self_fake_obj
         self.method_name = method_name
@@ -116,73 +221,102 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     if not hasattr(x, "tracing_mode"):
         return False
 
-    assert x.tracing_mode() in [
-        "real",
-        "fake",
-    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    if x.tracing_mode() not in ["real", "fake"]:
+        raise AssertionError(
+            f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+        )
     return x.tracing_mode() == "real"
 
 
 def maybe_to_fake_obj(
-    fake_mode, x: torch.ScriptObject
-) -> Union[FakeScriptObject, torch.ScriptObject]:
+    fake_mode,
+    x: Any,
+) -> FakeScriptObject | torch.ScriptObject:
     import torch.utils._pytree as pytree
-    from torch.utils._python_dispatch import _disable_current_modes
 
     # When tracing with real mode, people should implement meta kernels that can
     # handle the case of real script object + fake tensor inputs.
     if tracing_with_real(x):
         return x
 
-    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
-    # want to call these ops in surrounding dispatch modes when executing it.
-    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
-    # script object execute some operations like clone if allow_non_fake_input flag is set.
-    with _disable_current_modes():
-        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    from torch._library.opaque_object import (
+        FakeOpaqueObject,
+        get_opaque_obj_info,
+        get_opaque_type_name,
+        is_opaque_type,
+        OpaqueTypeStr,
+    )
 
-    _check_valid_flat_script_obj(flat_x)
+    x_type = type(x)
+    if is_opaque_type(x_type):
+        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
-    with fake_mode:
-        from torch._higher_order_ops.utils import _tensor_storage
+        # Set specified members onto the fake object
+        opaque_info = get_opaque_obj_info(x_type)
+        if opaque_info is None:
+            raise AssertionError(f"opaque_info for type {x_type} must not be None")
+        for attr_name in opaque_info.members:
+            with _disable_current_modes():
+                if not hasattr(x, attr_name):
+                    raise TypeError(
+                        f"Opaque object of type '{type_name}' was specified to have member "
+                        f"'{attr_name}', but this doesn't actually exist in the object."
+                    )
+                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
 
-        storage_map = {
-            _tensor_storage(inp): i
-            for i, inp in enumerate(flat_x)
-            if isinstance(inp, torch.Tensor)
-        }
-        alias_map = {
-            i: storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(flat_x)
-            if isinstance(inp, torch.Tensor) and storage_map[_tensor_storage(inp)] != i
-        }
-        if len(alias_map) > 0:
-            log.warning(
-                "Detected script object %s has aliasing relationship among its tensors. "
-                "Flattened obj: %s. Aliasing tensor indices: %s. "
-                "This is not supported and may cause unexpected behavior.",
-                x,
+        return fake_x_wrapped
+    else:
+        # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+        # want to call these ops in surrounding dispatch modes when executing it.
+        # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+        # script object execute some operations like clone if allow_non_fake_input flag is set.
+        with _disable_current_modes():
+            flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+
+        _check_valid_flat_script_obj(flat_x)
+
+        with fake_mode:
+            from torch._higher_order_ops.utils import _tensor_storage
+
+            storage_map = {
+                _tensor_storage(inp): i
+                for i, inp in enumerate(flat_x)
+                if isinstance(inp, torch.Tensor)
+            }
+            alias_map = {
+                i: storage_map[_tensor_storage(inp)]
+                for i, inp in enumerate(flat_x)
+                if isinstance(inp, torch.Tensor)
+                and storage_map[_tensor_storage(inp)] != i
+            }
+            if len(alias_map) > 0:
+                log.warning(
+                    "Detected script object %s has aliasing relationship among its tensors. "
+                    "Flattened obj: %s. Aliasing tensor indices: %s. "
+                    "This is not supported and may cause unexpected behavior.",
+                    x,
+                    flat_x,
+                    alias_map,
+                )
+
+            # This breaks the aliasing relationship among the tensors inside the torchbind object
+            # This is bad but since we don't need to preserve the aliasing relationship anyway and
+            # we state clearly that aliasing relationship is not preserved in the doc so this might be OK.
+            fake_flattened = pytree.tree_map_only(
+                torch.Tensor,
+                lambda t: torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    device=t.device,
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    layout=t.layout,
+                ),
                 flat_x,
-                alias_map,
             )
 
-        # This breaks the aliasing relationship among the tensors inside the torchbind object
-        # This is bad but since we don't need to preserve the aliasing relationship anyway and
-        # we state clearly that aliasing relationship is not preserved in the doc so this might be OK.
-        fake_flattened = pytree.tree_map_only(
-            torch.Tensor,
-            lambda t: torch.empty_strided(
-                t.size(),
-                t.stride(),
-                device=t.device,
-                dtype=t.dtype,
-                requires_grad=t.requires_grad,
-                layout=t.layout,
-            ),
-            flat_x,
-        )
-
-    fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
+        fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
     fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
 
@@ -195,23 +329,24 @@ def maybe_to_fake_obj(
             real_attr = getattr(x, name)  # type: ignore[attr-defined]
 
             # real attr sometimes is not torch.ScriptMethod thus doesn't have schema e.g. __init___ or __eq__
-            method_schema: Optional[torch.FunctionSchema] = None
+            method_schema: torch.FunctionSchema | None = None
             if isinstance(real_attr, torch.ScriptMethod):
                 method_schema = real_attr.schema  # type: ignore[attr-defined]
 
-            setattr(
+            # Bypasses our custom setattr function
+            object.__setattr__(
                 fake_x_wrapped,
                 name,
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            override_skip_list = {"__obj_flatten__", "__getstate__", "__setstate__"}
             if name not in override_skip_list:
                 log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped
 
 
-def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] = None):
+def register_fake_class(qualname, fake_class: HasStaticMethodFromReal | None = None):
     r"""Register a fake implementation for this class.
 
     It's in the same spirit of registering a fake implementation for
@@ -311,7 +446,7 @@ def has_fake_class(full_qualname) -> bool:
     return global_fake_class_registry.has_impl(full_qualname)
 
 
-def find_fake_class(full_qualname) -> Optional[Any]:
+def find_fake_class(full_qualname) -> Any | None:
     if not has_fake_class(full_qualname):
         return None
     return global_fake_class_registry.get_impl(full_qualname)
@@ -333,7 +468,8 @@ def _is_script_object(obj: Any) -> bool:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")
-    assert len(splits) == 5, f"Could not split {full_qualname=}"
+    if len(splits) != 5:
+        raise AssertionError(f"Could not split {full_qualname=}, expected 5 parts")
     _torch, _torch_ns, _classes, ns, class_name = splits
     return ns, class_name
 

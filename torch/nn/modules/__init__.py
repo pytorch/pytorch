@@ -94,6 +94,7 @@ from .loss import (
     HuberLoss,
     KLDivLoss,
     L1Loss,
+    LinearCrossEntropyLoss,
     MarginRankingLoss,
     MSELoss,
     MultiLabelMarginLoss,
@@ -255,6 +256,7 @@ __all__ = [
     "LazyLinear",
     "LeakyReLU",
     "Linear",
+    "LinearCrossEntropyLoss",
     "LocalResponseNorm",
     "LogSigmoid",
     "LogSoftmax",
@@ -331,4 +333,5 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ must be sorted")

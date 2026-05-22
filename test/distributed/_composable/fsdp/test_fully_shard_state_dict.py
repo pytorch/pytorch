@@ -3,7 +3,6 @@
 import copy
 import functools
 from contextlib import nullcontext
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -47,7 +46,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if 16 % self.world_size == 0:
             # TODO: remove this evenness check when FSDP2 supports uneven sharding
-            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361
             self.run_subtests(
                 {
                     "mlp_dim": [16],
@@ -82,7 +81,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             MLP(mlp_dim),
         )
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
@@ -116,6 +115,50 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         self.assertEqual(set(ref_sharded_sd.keys()), set(sharded_sd.keys()))
         for key, value in ref_sharded_sd.items():
             self.assertEqual(value, sharded_sd[key])
+
+    @skip_if_lt_x_gpu(2)
+    def test_cached_state_dict(self):
+        self.run_subtests(
+            {"mlp_dim": [2, 3, 4, 5], "mutate_after_state_dict": [True, False]},
+            self._test_cached_state_dict,
+        )
+
+    def _test_cached_state_dict(self, mlp_dim: int, mutate_after_state_dict: bool):
+        torch.manual_seed(42)
+        model = nn.Linear(mlp_dim, mlp_dim, bias=False)
+        fully_shard(model, reshard_after_forward=True)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        # call .state_dict() once and use `sd` directly to reduce cpu overhead
+        sd = model.state_dict()
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(f"Expected DTensor, got {type(model.weight)}")
+
+        if not mutate_after_state_dict:
+            self.assertTrue(
+                sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                == model.weight._local_tensor.untyped_storage().data_ptr()
+            )
+        else:
+            model = model.cpu()
+            model = model.cuda()
+            self.assertTrue(
+                sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                != model.weight._local_tensor.untyped_storage().data_ptr()
+            )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.rand(mlp_dim, mlp_dim, device="cuda")
+        for _ in range(5):
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            if not mutate_after_state_dict:
+                self.assertTrue(
+                    sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                    == model.weight._local_tensor.untyped_storage().data_ptr()
+                )
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_cpu_offload(self):
@@ -395,8 +438,8 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
         if self.rank == 0:
             self.assertEqual(len(full_sd), len(ref_full_sd))
             self.assertEqual(list(full_sd.keys()), list(ref_full_sd.keys()))
-            for (param_name, param), ref_param in zip(
-                full_sd.items(), ref_full_sd.values()
+            for param, ref_param in zip(
+                full_sd.values(), ref_full_sd.values(), strict=True
             ):
                 self.assertEqual(param.device, torch.device("cpu"))
                 self.assertEqual(param.device, ref_param.device)

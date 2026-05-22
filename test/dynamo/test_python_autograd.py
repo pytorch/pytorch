@@ -1,10 +1,14 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple, TYPE_CHECKING
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 """
@@ -26,14 +30,14 @@ def fresh_name() -> str:
 
 
 class Variable:
-    def __init__(self, value: torch.Tensor, name: Optional[str] = None):
+    def __init__(self, value: torch.Tensor, name: str | None = None):
         self.value = value
         self.name = name or fresh_name()
 
     # We need to start with some tensors whose values were not computed
     # inside the autograd. This function constructs leaf nodes.
     @staticmethod
-    def constant(value: torch.Tensor, name: Optional[str] = None):
+    def constant(value: torch.Tensor, name: str | None = None):
         return Variable(value, name)
 
     def __repr__(self):
@@ -47,7 +51,7 @@ class Variable:
     def __add__(self, rhs: "Variable") -> "Variable":
         return operator_add(self, rhs)
 
-    def sum(self, name: Optional[str] = None) -> "Variable":
+    def sum(self, name: str | None = None) -> "Variable":
         return operator_sum(self, name)
 
     def expand(self, sizes: list[int]) -> "Variable":
@@ -82,7 +86,7 @@ def grad(L, desired_results: list[Variable]) -> list[Variable]:
     # look up dL_dentries. If a variable is never used to compute the loss,
     # we consider its gradient None, see the note below about zeros for more information.
     def gather_grad(entries: list[str]):
-        return [dL_d[entry] if entry in dL_d else None for entry in entries]
+        return [dL_d.get(entry) for entry in entries]
 
     # propagate the gradient information backward
     for entry in reversed(gradient_tape):
@@ -164,7 +168,7 @@ def operator_add(self: Variable, rhs: Variable) -> Variable:
     return r
 
 
-def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
+def operator_sum(self: Variable, name: str | None) -> "Variable":
     r = Variable(torch.sum(self.value), name=name)
     # print(f'{r.name} = {self.name}.sum()')
 
@@ -180,7 +184,7 @@ def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
 
 
 def operator_expand(self: Variable, sizes: list[int]) -> "Variable":
-    assert self.value.dim() == 0  # only works for scalars
+    assert self.value.dim() == 0  # noqa: S101 - only works for scalars
     r = Variable(self.value.expand(sizes))
     # print(f'{r.name} = {self.name}.expand({sizes})')
 

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/GridSamplerUtils.h>
@@ -44,14 +45,14 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <array>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
 // TODO: descriptor checking
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -59,11 +60,11 @@ void setSamplerDescriptor(
     SpatialTransformerDescriptor& desc,
     cudnnDataType_t dataType,
     const at::Tensor& tensor) {
-  int inputSize[4] = {0};
+  std::array<int, 4> inputSize{0};
   for (const auto i : c10::irange(tensor.dim())) {
-    inputSize[i] = (int)tensor.size(i);
+    inputSize[i] = static_cast<int>(tensor.size(i));
   }
-  desc.set(dataType, 4, inputSize);
+  desc.set(dataType, 4, inputSize.data());
 }
 
 void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input) {
@@ -138,6 +139,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   TORCH_CHECK(
       cond_cudnn_grid_sampler(input_t, grid_t),
       "Invalid arguments to cudnn_grid_sampler_backward");
+  globalContext().alertNotDeterministic("cudnn_grid_sampler_backward");
 
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();
@@ -183,10 +185,10 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
       &zero,
       grad_grid_t.data_ptr()));
 
-  return std::tuple<Tensor, Tensor>{grad_input_t, grad_grid_t};
+  return std::tuple<Tensor, Tensor>{
+      std::move(grad_input_t), std::move(grad_grid_t)};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

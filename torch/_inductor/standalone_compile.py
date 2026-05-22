@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import os
 import pickle
 import shutil
+from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
+
+
+DynamicShapesType = Literal["from_example_inputs", "from_tracing_context", "from_graph"]
 
 import torch.fx
+from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
@@ -16,12 +22,17 @@ from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
 from . import config
+from ._functionalize_collectives import (
+    _functionalize_inplace_collectives,
+    _unbox_process_group_torchbinds,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.compiler._cache import CacheInfo
     from torch.fx import GraphModule
@@ -30,9 +41,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class CompiledArtifact:
+class CompiledArtifact(ABC):
     """
-    CompiledArtifact class represents the precompiled inductor artifact that
+    CompiledArtifact class represents the inductor cache artifacts that
     can be invoked in order to avoid repeated compilation.
 
     CompiledArtifact can be obtained by calling standalone_compile(gm, example_inputs)
@@ -45,22 +56,88 @@ class CompiledArtifact:
     binary or unpacked data.
 
     Finally, the CompiledArtifact can be invoked via the __call__ method
-    to execute the precompiled artifact.
+    to execute the cached artifact.
     """
-
-    _compiled_fn: Callable[..., Any]
-    _artifacts: Optional[tuple[bytes, CacheInfo]]
 
     def __init__(
         self,
         compiled_fn: Callable[..., Any],
-        artifacts: Optional[tuple[bytes, CacheInfo]],
+        artifacts: tuple[bytes, CacheInfo] | None,
+    ):
+        self._compiled_fn = compiled_fn
+        self._artifacts = artifacts
+
+    @abstractmethod
+    def __call__(self, *args: Any) -> Any: ...
+
+    @abstractmethod
+    def save(
+        self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> None: ...
+
+    @staticmethod
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact:
+        if format == "unpacked":
+            # If format is unpacked, it must be a CacheCompiledArtifact
+            return CacheCompiledArtifact.load(path=path, format=format)
+
+        assert format == "binary"
+        with open(path, "rb") as file:
+            from torch.utils._appending_byte_serializer import BytesReader
+
+            from .codecache import torch_key
+
+            result_bytes = file.read()
+            reader = BytesReader(result_bytes)
+            header = reader.read_bytes()
+            if header == AOTCompiledArtifact.AOT_HEADER:
+                assert reader.read_bytes() == torch_key()
+                artifact = reader.read_bytes()
+                assert reader.is_finished()
+                return AOTCompiledArtifact.deserialize(artifact)
+            # Otherwise, it's in the CacheCompiledArtifact format
+            elif header == CacheCompiledArtifact.CACHE_HEADER:
+                assert reader.read_bytes() == torch_key()
+                key = reader.read_str()
+                artifact_bytes = reader.read_bytes()
+                assert reader.is_finished()
+                torch.compiler.load_cache_artifacts(artifact_bytes)
+                return CacheCompiledArtifact._load_impl(nullcontext(), key)
+            else:
+                raise RuntimeError(
+                    "Invalid header, expected CacheCompiledArtifact or AOTCompiledArtifact, got: "
+                    + header.decode("utf-8")
+                )
+
+
+class CacheCompiledArtifact(CompiledArtifact):
+    """
+    CompiledArtifact that depends on torch.compiler.save_cache_artifacts
+    """
+
+    CACHE_HEADER = bytes("CacheCompiledArtifact", "utf-8")
+
+    def __init__(
+        self,
+        compiled_fn: Callable[..., Any],
+        artifacts: tuple[bytes, CacheInfo] | None,
     ):
         self._compiled_fn = compiled_fn
         self._artifacts = artifacts
 
     def __call__(self, *args: Any) -> Any:
         return self._compiled_fn(*args)
+
+    def is_saveable(self) -> bool:
+        if self._artifacts is None:
+            return False
+        _, cache_info = self._artifacts
+        # 0 means nothing was saved
+        # >1 means multiple artifacts were saved, which is concerning
+        # (we only expect one)
+        return len(cache_info.aot_autograd_artifacts) == 1
 
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
@@ -71,7 +148,19 @@ class CompiledArtifact:
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
+            if len(cache_info.aot_autograd_artifacts) == 0:
+                raise RuntimeError(
+                    f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
+                    f"This likely means there was something that was not serializable in the "
+                    f"graph passed to standalone_compile. This can generally be fixed by "
+                    f"ensuring that your model only uses constructs that are serializable. "
+                    f"{cache_info}"
+                )
+            if len(cache_info.aot_autograd_artifacts) > 1:
+                raise AssertionError(
+                    f"CompiledArtifact.save failed to save because there was more than one "
+                    f"artifact but we only expected one. {cache_info}"
+                )
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
@@ -83,6 +172,7 @@ class CompiledArtifact:
                 from .codecache import torch_key
 
                 writer = BytesWriter()
+                writer.write_bytes(CacheCompiledArtifact.CACHE_HEADER)
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
@@ -116,9 +206,51 @@ class CompiledArtifact:
                             log.info("Output code written to: %s", output_file)
 
     @staticmethod
-    def load(
-        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    def _load_impl(
+        cache_dir_ctx: AbstractContextManager[Any], key: str
     ) -> CompiledArtifact:
+        with (
+            cache_dir_ctx,
+            config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+        ):
+            with torch._functorch.config.patch(strict_autograd_cache=True):
+                from torch._functorch._aot_autograd.autograd_cache import (
+                    AOTAutogradCache,
+                )
+
+                result = AOTAutogradCache._lookup(
+                    key,
+                    local=True,
+                    remote=False,
+                    args=[],
+                    cache_info={},
+                    aot_config=None,
+                )
+
+            assert result is not None
+            (entry, _) = result
+
+            from .compile_fx import _CompileFxKwargs
+
+            fx_config = _CompileFxKwargs(
+                cudagraphs=BoxedBool(False),
+                boxed_forward_device_index=BoxedDeviceIndex(0),
+            )
+
+            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            with torch._guards.tracing(context):
+                compiled_fn = entry.wrap_post_compile(
+                    [], entry.sanitized_aot_config, fx_config
+                )
+        return CacheCompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+
+    @staticmethod
+    def _prepare_load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> tuple[str, AbstractContextManager[Any]]:
+        """
+        Do format specific prep and loads, return a context manager and key
+        """
         path = normalize_path_separator(path)
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
@@ -137,8 +269,7 @@ class CompiledArtifact:
                 assert reader.is_finished()
 
                 torch.compiler.load_cache_artifacts(artifact_bytes)
-
-                cache_dir_ctx: AbstractContextManager[None] = nullcontext()
+                return key, nullcontext()
             else:
                 assert format == "unpacked"
                 assert os.path.isdir(path)
@@ -148,69 +279,125 @@ class CompiledArtifact:
                 assert len(files) == 1
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
+                return key, cache_dir_ctx
 
-            with (
-                cache_dir_ctx,
-                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-            ):
-                with torch._functorch.config.patch(strict_autograd_cache=True):
-                    from torch._functorch._aot_autograd.autograd_cache import (
-                        AOTAutogradCache,
-                    )
-
-                    entry = AOTAutogradCache._lookup(
-                        key,
-                        local=True,
-                        remote=False,
-                        args=[],
-                        cache_info={},
-                        aot_config=None,
-                    )
-
-                assert entry is not None
-
-                from .compile_fx import _CompileFxKwargs
-
-                fx_config = _CompileFxKwargs(
-                    cudagraphs=BoxedBool(False),
-                    boxed_forward_device_index=BoxedDeviceIndex(0),
-                )
-
-                context = torch._guards.TracingContext(
-                    FakeTensorMode(shape_env=ShapeEnv())
-                )
-                with torch._guards.tracing(context):
-                    compiled_fn = entry.wrap_post_compile(
-                        [], entry.sanitized_aot_config, fx_config
-                    )
-            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+    @staticmethod
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact:
+        key, cache_dir_ctx = CacheCompiledArtifact._prepare_load(
+            path=path, format=format
+        )
+        return CacheCompiledArtifact._load_impl(cache_dir_ctx, key)
 
 
-def standalone_compile(
-    gm: GraphModule,
-    example_inputs: Sequence[InputType],
-    *,
-    dynamic_shapes: Any,
-    options: Any,
-) -> CompiledArtifact:
-    from torch.compiler._cache import CacheArtifactManager
+class AOTCompiledArtifact(CompiledArtifact):
+    """
+    Similar to CompiledArtifact, but the object is a single, bundled precompiled function.
+    This object is always a serializable callable function.
 
-    from .compile_fx import compile_fx
+    This object is essentially a wrapper for BundledAOTAutogradSerializableCallable, which
+    is used by torch._dynamo.aot_compile for AOT Precompilation.
+    """
 
-    ignore_shape_env = False
+    AOT_HEADER = bytes("AOTCompiledArtifact", "utf-8")
+
+    def __init__(
+        self,
+        compiled_fn: Callable[..., Any],
+    ):
+        self.inner_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
+        self._artifacts = (
+            None  # We don't need artifacts, the inner object handles everything
+        )
+
+    @staticmethod
+    def from_bundled_callable(
+        bundled_fn: BundledAOTAutogradSerializableCallable,
+    ) -> AOTCompiledArtifact:
+        return AOTCompiledArtifact(bundled_fn.compiled_fn)
+
+    def __call__(self, *args: Any) -> Any:
+        return self.inner_fn(*args)
+
+    def save(
+        self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> None:
+        if format == "unpacked":
+            raise RuntimeError(
+                "AOTCompiledArtifact does not support unpacked format yet"
+            )
+        result_bytes = self.serialize()
+        from torch.utils._appending_byte_serializer import BytesWriter
+
+        from .codecache import torch_key
+
+        writer = BytesWriter()
+        writer.write_bytes(AOTCompiledArtifact.AOT_HEADER)
+        writer.write_bytes(torch_key())
+        writer.write_bytes(result_bytes)
+
+        from torch._inductor.codecache import write_atomic
+
+        # Save a sentinel file to indicate that this is AOT
+        write_atomic(path, writer.to_bytes())
+
+    def serialize(self) -> bytes:
+        return BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
+            self.inner_fn
+        )
+
+    @staticmethod
+    def deserialize(result_bytes: bytes) -> AOTCompiledArtifact:
+        deserialized = (
+            BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
+                result_bytes
+            )
+        )
+        assert isinstance(deserialized, BundledAOTAutogradSerializableCallable)
+        return AOTCompiledArtifact.from_bundled_callable(deserialized)
+
+    @staticmethod
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact:
+        if format == "unpacked":
+            raise RuntimeError(
+                "AOTCompiledArtifact does not support unpacked format yet"
+            )
+        with open(path, "rb") as file:
+            from torch.utils._appending_byte_serializer import BytesReader
+
+            from .codecache import torch_key
+
+            result_bytes = file.read()
+            reader = BytesReader(result_bytes)
+            header = reader.read_bytes()
+            assert header == AOTCompiledArtifact.AOT_HEADER
+            assert reader.read_bytes() == torch_key()
+            artifact = reader.read_bytes()
+            assert reader.is_finished()
+            return AOTCompiledArtifact.deserialize(artifact)
+
+
+def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
+    # tells compile_fx to ignore the shape_envs on the ambient context
+    # and the graph_module.
+    return dynamic_shapes == "from_example_inputs"
+
+
+def _resolve_fake_mode(
+    gm: GraphModule, dynamic_shapes: DynamicShapesType
+) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # tells compile_fx to ignore the shape_envs on the ambient context
-        # and the graph_module.
-        ignore_shape_env = True
+        return FakeTensorMode(shape_env=ShapeEnv())
     elif dynamic_shapes == "from_tracing_context":
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
         assert context.fake_mode is not None
-        fake_mode = context.fake_mode
+        return context.fake_mode
     elif dynamic_shapes == "from_graph":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,
         # which means that there is at least one Tensor output and the output node
@@ -219,43 +406,88 @@ def standalone_compile(
         assert last_node.op == "output"
         assert len(last_node.args) == 1
 
-        def handle_node(node: torch.fx.Node) -> None:
-            nonlocal fake_mode
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
-                    fake_mode = maybe_tensor.fake_mode
-
         # If gm came from Dynamo, then last_node.args[0] is always a list,
         # even in single-Tensor returns.
         #
         # It's possible to get into a situation where last_node.args[0]
         # is a Node (and not a list!). This happens if you call split_module
         # on the graph. We allow for this case since it is common.
-        if isinstance(last_node.args[0], torch.fx.Node):
-            handle_node(last_node.args[0])
-        else:
-            for node in last_node.args[0]:
-                handle_node(node)
+        nodes = (
+            [last_node.args[0]]
+            if isinstance(last_node.args[0], torch.fx.Node)
+            else last_node.args[0]
+        )
+        for node in nodes:
+            if "example_value" in node.meta:
+                maybe_tensor = node.meta["example_value"]
+                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
+                    return maybe_tensor.fake_mode
 
+        return FakeTensorMode(shape_env=ShapeEnv())
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."
         )
 
-    context = torch._guards.TracingContext(fake_mode)
+
+@contextlib.contextmanager
+def _standalone_context(gm: GraphModule, dynamic_shapes: DynamicShapesType, aot: bool):
+    from torch.compiler._cache import CacheArtifactManager
+
+    fake_mode = _resolve_fake_mode(gm, dynamic_shapes)
+    tracing_context = torch._guards.TracingContext(fake_mode)
     with (
-        torch._guards.tracing(context),
+        torch._guards.tracing(tracing_context),
         CacheArtifactManager.with_fresh_cache(),
         config.patch("triton.autotune_at_compile_time", True),
+        torch._functorch.config.patch("bundled_autograd_cache", aot),
     ):
-        # compile_fx can mutate gm
-        gm = copy.deepcopy(gm)
+        yield
+
+
+def standalone_compile(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    dynamic_shapes: DynamicShapesType,
+    options: Any,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    donate_graph_module: bool = False,
+) -> CompiledArtifact:
+    """
+    Implementation of torch.inductor.standalone_compile
+    """
+    from .compile_fx import compile_fx
+
+    ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
+    with _standalone_context(gm, dynamic_shapes, aot):
+        # compile_fx takes ownership of gm and may mutate it on cache miss.
+        # Deepcopy first so the rewrites below land on the owned copy rather
+        # than the caller's gm. The gm may carry a non-pickleable torchbind
+        # ProcessGroup (or, after a previous unbox, a Python
+        # ``dist.ProcessGroup``); smuggle it through deepcopy as a shared
+        # reference instead of crashing.
+        if not donate_graph_module:
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm = copy.deepcopy(gm)
+        # ``make_fx`` traces ``dist.*`` collectives as opaque ``c10d.{op}_``
+        # calls. Inductor's collective machinery only recognizes the
+        # ``_c10d_functional.{op}`` + ``wait_tensor`` form, so rewrite here
+        # before compile_fx runs. Also unbox any torchbind ProcessGroup
+        # attrs into Python ``dist.ProcessGroup`` so the runtime collective
+        # op accepts them (raw torchbind is rejected).
+        gm = _functionalize_inplace_collectives(gm)
+        gm = _unbox_process_group_torchbinds(gm)
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
         assert callable(compiled_fn)
-
+        if aot:
+            if not hasattr(compiled_fn, "serialize"):
+                raise RuntimeError(
+                    "Compiled function should have serialize method when aot=True"
+                )
+            return AOTCompiledArtifact(compiled_fn)
         artifacts = torch.compiler.save_cache_artifacts()
         if artifacts is None:
             log.warning(
@@ -263,4 +495,21 @@ def standalone_compile(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return CompiledArtifact(compiled_fn, artifacts)
+    return CacheCompiledArtifact(compiled_fn, artifacts)
+
+
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    dynamic_shapes: DynamicShapesType,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+):
+    from . import compile_fx
+
+    ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
+    with _standalone_context(graph, dynamic_shapes, aot):
+        return compile_fx.autograd_cache_key(
+            graph,
+            example_inputs,
+            ignore_shape_env=ignore_shape_env,
+        )

@@ -1,13 +1,11 @@
-# mypy: allow-untyped-defs
 import argparse
 import copy
 import json
-import logging
 import os
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Optional
+from typing import Any, IO, Literal, NamedTuple
 
 import torch
 from torch._logging import trace_structured
@@ -18,7 +16,7 @@ from torch.fx.passes.graph_manipulation import get_size_of_node
 from .graph_drawer import FxGraphDrawer
 from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp
-from .split_utils import split_by_tags
+from .split_utils import move_non_tensor_nodes_on_boundary, split_by_tags
 from .tools_common import (
     CALLABLE_NODE_OPS,
     FxNetAccFusionsFinder,
@@ -38,7 +36,6 @@ __all__ = [
     "NodeEvent",
     "NodeEventTracker",
 ]
-_LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MIN_ACC_MODULE_SIZE = 1
 DEFAULT_SKIP_FUSION = False
@@ -69,6 +66,7 @@ Different modes of the event tracker for local debugging:
 "3": In addition to events dump, track all nodes with more than 1 event recursively and dump to DUMP_PREFIX_nodex.txt
 In addition to the above local dumps, tracker is always enabled and dumps via trace_structured.
 """
+# pyrefly: ignore [bad-assignment]
 TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
     ENV_FX_NET_ACC_SPLITTER_TRACKER_MODE, "0"
 )  # type: ignore[assignment]
@@ -77,11 +75,12 @@ TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
 class _SplitterSettingBase:
     def __init__(
         self,
-        min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
-        skip_fusion=DEFAULT_SKIP_FUSION,
-        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
+        min_acc_module_size: int = DEFAULT_MIN_ACC_MODULE_SIZE,
+        skip_fusion: bool = DEFAULT_SKIP_FUSION,
+        allow_non_tensor: bool = DEFAULT_ALLOW_NON_TENSOR,
         max_acc_splits: int = -1,
-    ):
+        move_non_tensor_nodes_on_boundary: bool = False,
+    ) -> None:
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--min-acc-module-size",
@@ -119,6 +118,16 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
+        parser.add_argument(
+            "--move-non-tensor-nodes-on-boundary",
+            "--move_non_tensor_nodes_on_boundary",
+            required=False,
+            action="store_true",
+            help="AOTI does not support non-tensor nodes on acc->acc, acc->gpu and gpu->acc boundary. "
+            "For non-tensor nodes on acc->acc boundary and acc->gpu, we move the nodes from upstream to downstream. "
+            "For non-tensor nodes on gpu->acc boundary, it is handled by the pre-split process. "
+            "(by method reduce_acc_nodes_non_tensor_input). ",
+        )
         args, _unknown = parser.parse_known_args()
 
         self.min_acc_module_size: int = (
@@ -131,6 +140,11 @@ class _SplitterSettingBase:
             args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
         )
         self.max_acc_splits: int = max_acc_splits
+        self.move_non_tensor_nodes_on_boundary: bool = (
+            args.move_non_tensor_nodes_on_boundary
+            if args.move_non_tensor_nodes_on_boundary
+            else move_non_tensor_nodes_on_boundary
+        )
 
 
 @compatibility(is_backward_compatible=False)
@@ -143,13 +157,13 @@ class NodeEvent:
     """
 
     def __init__(
-        self, source: torch.fx.Node, desc: str, dep: Optional[torch.fx.Node] = None
-    ):
+        self, source: torch.fx.Node, desc: str, dep: torch.fx.Node | None = None
+    ) -> None:
         self.source = source
         self.desc = desc
         self.dep = dep
 
-    def to_str(self):
+    def to_str(self) -> str:
         # source: The name of the subject of the event.
         # desc: description of the event, in the format of <event_type>|<explanation>
         # dep: The name of the cause of this event, which is another node, or #
@@ -163,7 +177,7 @@ class NodeEventTracker:
     Tracks node events during the splitter execution.
     """
 
-    def __init__(self, tracker_mode, dump_prefix):
+    def __init__(self, tracker_mode: int, dump_prefix: str) -> None:
         self.tracker_mode = tracker_mode
         self.dump_prefix = dump_prefix
         # list of events
@@ -172,7 +186,9 @@ class NodeEventTracker:
         self.node_events = {}
         self.writer = print
 
-    def add(self, node: torch.fx.Node, desc: str, dep: Optional[torch.fx.Node] = None):
+    def add(
+        self, node: torch.fx.Node, desc: str, dep: torch.fx.Node | None = None
+    ) -> None:
         """
         Add a new event to the tracker.
         """
@@ -182,7 +198,13 @@ class NodeEventTracker:
             self.node_events[node.name] = []
         self.node_events[node.name].append(len(self.events) - 1)
 
-    def print_node(self, node_name, recursive=False, tab="", writer=None):
+    def print_node(
+        self,
+        node_name: str,
+        recursive: bool = False,
+        tab: str = "",
+        writer: Callable[[str], object] | None = None,
+    ) -> None:
         """
         Print a node and its events.
         @param recursive: if True, print nodes that caused the events on this current node.
@@ -199,30 +221,30 @@ class NodeEventTracker:
                     event.dep.name, recursive=True, tab="| " + tab, writer=writer
                 )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, list[str]]:
         """
         Create dict dump on all events.
         """
         ret: dict[str, list[str]] = {}
-        for name in self.node_events.keys():
+        for name in self.node_events:
             ret[name] = []
             for idx in self.node_events.get(name, []):
                 event = self.events[idx]
                 ret[name].append(event.to_str())
         return ret
 
-    def print_all(self, writer=None):
+    def print_all(self, writer: Callable[[str], object] | None = None) -> None:
         """
         Print all nodes in a list.
         @param writer: function to write to file. If None, use print.
         """
         if not writer:
             writer = self.writer
-        for name in self.node_events.keys():
+        for name in self.node_events:
             writer(f"Node: {name}:")
             self.print_node(name, recursive=False, tab="  ", writer=writer)
 
-    def dump(self):
+    def dump(self) -> None:
         """
         Function to be invoked at the end of the finder execution to printout tracked events specified by the mode.
         """
@@ -236,8 +258,8 @@ class NodeEventTracker:
             payload_fn=lambda: json.dumps(self.to_dict()),
         )
 
-        def writeln(f):
-            def fn(x):
+        def make_writer(f: IO[str]) -> Callable[[str], int]:
+            def fn(x: str) -> int:
                 return f.write(x + "\n")
 
             return fn
@@ -246,16 +268,15 @@ class NodeEventTracker:
         # Mode >=1: Dump all events to file
         if self.tracker_mode >= 1:
             with open(self.dump_prefix + ALL_SUFFIX, "w") as f:
-                self.print_all(writeln(f))
+                self.print_all(make_writer(f))
 
-        def dump_selected_nodes(nodes):
+        def dump_selected_nodes(nodes: list[str]) -> None:
             with open(self.dump_prefix + NODES_SUFFIX, "w") as f:
+                writer = make_writer(f)
                 for node_name in nodes:
-                    writeln(f"===== Tracking node {node_name} =====")
-                    self.print_node(
-                        node_name, recursive=True, tab="|-", writer=writeln(f)
-                    )
-                    writeln(f"===== End of tracking node {node_name} =====")
+                    writer(f"===== Tracking node {node_name} =====")
+                    self.print_node(node_name, recursive=True, tab="|-", writer=writer)
+                    writer(f"===== End of tracking node {node_name} =====")
 
         # Mode 2: Dump specific nodes in recursive manner.
         # Mode 3: Dump all nodes with more than 1 event in recursive manner.
@@ -292,7 +313,7 @@ class FxNetAccNodesFinder:
         module: torch.fx.GraphModule,
         operator_support: OperatorSupportBase,
         allow_non_tensor: bool,
-    ):
+    ) -> None:
         self.module = module
         self.operator_support = operator_support
         self.allow_non_tensor = allow_non_tensor
@@ -300,7 +321,7 @@ class FxNetAccNodesFinder:
 
         self.tracker = NodeEventTracker(int(TRACKER_MODE), DUMP_PREFIX)
 
-    def reduce_acc_nodes_non_tensor_input_helper(self, cpu_worklist: NodeList):
+    def reduce_acc_nodes_non_tensor_input_helper(self, cpu_worklist: NodeList) -> None:
         """
         Transitively excludes nodes from ACC supported set.
         For every node in the worklist:
@@ -319,7 +340,7 @@ class FxNetAccNodesFinder:
                         self.tracker.add(user, "new_cpu_node|non_tensor_output")
                         cpu_worklist.append(user)
 
-    def reduce_acc_nodes_non_tensor_input(self):
+    def reduce_acc_nodes_non_tensor_input(self) -> None:
         """
         Excludes nodes from ACC supported set that have direct
         upstream CPU nodes that produce non-tensor outputs.
@@ -338,7 +359,7 @@ class FxNetAccNodesFinder:
 
         self.reduce_acc_nodes_non_tensor_input_helper(non_tensor_cpu_nodes)
 
-    def reduce_acc_nodes_non_tensor_output(self):
+    def reduce_acc_nodes_non_tensor_output(self) -> None:
         """
         Excludes nodes from ACC supported set that produce non-tensor
         outputs and have downstream CPU nodes.
@@ -396,7 +417,7 @@ class FxNetSplitterInternalError(Exception):
 class Subgraph:
     is_acc: bool
     nodes: NodeList
-    device_ordinal: Optional[int] = None
+    device_ordinal: int | None = None
 
 
 @compatibility(is_backward_compatible=False)
@@ -437,10 +458,10 @@ def generate_inputs_for_submodules(
     """
 
     handles = []
-    results = {}
+    results: dict[str, Any] = {}
     submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
-    def pre_forward(module, module_inputs):
+    def pre_forward(module: torch.nn.Module, module_inputs: tuple[Any, ...]) -> None:
         results[submodule_to_names[module]] = (
             copy.deepcopy(module_inputs) if deepcopy else module_inputs
         )
@@ -450,7 +471,7 @@ def generate_inputs_for_submodules(
             if not isinstance(mod, torch.jit.ScriptModule):
                 handles.append(mod.register_forward_pre_hook(pre_forward))
 
-    def clean_up_handles():
+    def clean_up_handles() -> None:
         for h in handles:
             h.remove()
 
@@ -519,8 +540,8 @@ class _SplitterBase:
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
         return_tuple: bool = False,
-        nodes_finder: Optional[FxNetAccNodesFinder] = None,
-    ):
+        nodes_finder: FxNetAccNodesFinder | None = None,
+    ) -> None:
         """
         Preprocesses graph before splitting:
         - finds nodes supported by ACC,
@@ -529,7 +550,8 @@ class _SplitterBase:
         - builds a map of fused nodes to their fusions.
         As a result we get self.acc_nodes, self.deps and self.fusions.
         """
-        assert isinstance(module, torch.fx.GraphModule)
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(f"Expected GraphModule, got {type(module)}")
 
         self.module = module
         ShapeProp(self.module).propagate(*sample_input)
@@ -547,6 +569,7 @@ class _SplitterBase:
             self.fusions = {}
         else:
             self.fusions = FxNetAccFusionsFinder(module, self.acc_nodes)()
+            self._merge_overlapping_fusions()
 
         # Modify deps to add more deps for fused nodes
         self.deps = self.find_deps()
@@ -589,7 +612,7 @@ class _SplitterBase:
                     deps[user].add(node)
         return deps
 
-    def update_deps_for_fusions(self):
+    def update_deps_for_fusions(self) -> None:
         """
         Updates graph of dependencies so that:
         - nodes from the same fusion depend on the same set of outer nodes,
@@ -603,6 +626,71 @@ class _SplitterBase:
                 for user in fused_neighbor.users:
                     if user not in fusion:
                         self.deps[user].add(node)
+
+    def _merge_overlapping_fusions(self) -> None:
+        """
+        Merge fusion groups that share nodes.
+
+        FxNetAccFusionsFinder can produce overlapping fusion groups when a
+        node is absorbed into multiple groups during expansion. When
+        update_deps_for_fusions() later propagates deps, shared nodes act
+        as bridges between groups, creating bidirectional dependency cycles
+        that crash the splitter with "Subgraph can't be empty".
+
+        This method detects overlapping groups via union-find and merges
+        them into single groups before dep propagation.
+        """
+        if os.environ.get("_SPLITTER_MERGE_OVERLAPPING_FUSIONS", "0") != "1":
+            return
+
+        if not self.fusions:
+            return
+
+        # Collect unique groups by identity.
+        unique_groups: dict[int, NodeSet] = {}
+        for group in self.fusions.values():
+            unique_groups[id(group)] = group
+
+        if len(unique_groups) <= 1:
+            return
+
+        # Map each node to all group IDs it belongs to.
+        node_to_gids: dict[torch.fx.Node, list[int]] = defaultdict(list)
+        for gid, group in unique_groups.items():
+            for node in group:
+                node_to_gids[node].append(gid)
+
+        # Union-find: merge groups that share nodes.
+        parent: dict[int, int] = {gid: gid for gid in unique_groups}
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        needs_merge = False
+        for gids in node_to_gids.values():
+            if len(gids) > 1:
+                root = find(gids[0])
+                for i in range(1, len(gids)):
+                    other = find(gids[i])
+                    if other != root:
+                        parent[other] = root
+                        needs_merge = True
+
+        if not needs_merge:
+            return
+
+        # Build merged groups.
+        merged: dict[int, NodeSet] = defaultdict(set)
+        for gid, group in unique_groups.items():
+            merged[find(gid)].update(group)
+
+        # Rebuild self.fusions so every node points to its merged group.
+        for merged_group in merged.values():
+            for node in merged_group:
+                self.fusions[node] = merged_group
 
     # ===============================================================
     # Helpers for preview
@@ -627,7 +715,7 @@ class _SplitterBase:
 
     def _draw_graph_based_on_node_support(
         self, mod: torch.fx.GraphModule, supported_nodes: NodeList
-    ):
+    ) -> None:
         color_map = {
             "default": "AliceBlue",
             "supported": "chartreuse1",
@@ -635,7 +723,7 @@ class _SplitterBase:
         }
 
         class CustomDrawer(FxGraphDrawer):
-            def _get_node_style(self, node):
+            def _get_node_style(self, node: torch.fx.Node) -> dict[str, str]:
                 template = super()._get_node_style(node)
                 if node in supported_nodes:
                     template["fillcolor"] = color_map["supported"]
@@ -651,14 +739,14 @@ class _SplitterBase:
         # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
         dot_graph.write_raw("node_support.dot")  # type: ignore[attr-defined]
 
-    def node_support_preview(self, dump_graph: bool = False):
+    def node_support_preview(self, dump_graph: bool = False) -> str:
         submodules = dict(self.module.named_modules())
 
         supported_nodes: NodeList = []
         supported_node_types = defaultdict(set)
         unsupported_node_types = defaultdict(set)
 
-        def get_dtype(arg):
+        def get_dtype(arg: torch.fx.Node) -> torch.dtype | None:
             tensor_meta = arg.meta.get("tensor_meta")
             return getattr(tensor_meta, "dtype", None)
 
@@ -718,7 +806,7 @@ class _SplitterBase:
         # Return reports for testing purpose
         return reports
 
-    def split_preview(self, dump_graph: bool = False):
+    def split_preview(self, dump_graph: bool = False) -> str:
         reports = ""
         subgraphs = self.put_nodes_into_subgraphs()
         acc_subgraphs_num = len([g for g in subgraphs if g.is_acc])
@@ -760,16 +848,24 @@ class _SplitterBase:
 
                 submod = getattr(split_mod, node.target)
 
-                def get_submod_inputs(main_mod, submod, example_inputs):
-                    sub_inputs = None
+                def get_submod_inputs(
+                    main_mod: torch.fx.GraphModule,
+                    submod: torch.fx.GraphModule,
+                    example_inputs: Sequence[Any],
+                ) -> tuple[Any, ...]:
+                    sub_inputs: tuple[Any, ...] | None = None
 
-                    def get_inputs(self, inputs):
+                    def get_inputs(
+                        self: torch.nn.Module, inputs: tuple[Any, ...]
+                    ) -> None:
                         nonlocal sub_inputs
                         sub_inputs = inputs
 
                     handle = submod.register_forward_pre_hook(get_inputs)
                     main_mod(*example_inputs)
                     handle.remove()
+                    if sub_inputs is None:
+                        raise AssertionError("Forward pre-hook did not capture inputs")
                     return sub_inputs
 
                 submod_inputs = get_submod_inputs(split_mod, submod, self.sample_input)
@@ -790,7 +886,7 @@ class _SplitterBase:
 
                 reports += "Checking outputs...\n"
 
-                def get_bytes(node: torch.fx.Node):
+                def get_bytes(node: torch.fx.Node) -> None:
                     nonlocal total_output_bytes
                     nonlocal reports
                     if not is_node_output_tensor(node):
@@ -834,7 +930,7 @@ class _SplitterBase:
     # ===============================================================
 
     def find_reverse_deps(
-        self, tag_id: Optional[int] = None
+        self, tag_id: int | None = None
     ) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds reversed topological node dependencies, if tag_id is specified,
@@ -855,7 +951,9 @@ class _SplitterBase:
 
         return result
 
-    def update_reverse_deps_for_fusions(self, deps: dict[torch.fx.Node, NodeSet]):
+    def update_reverse_deps_for_fusions(
+        self, deps: dict[torch.fx.Node, NodeSet]
+    ) -> None:
         processed_node = set()
 
         for node, fusion in self.fusions.items():
@@ -899,7 +997,7 @@ class _SplitterBase:
 
         return parent_nodes
 
-    def extend_acc_subgraph(self, tag: str):
+    def extend_acc_subgraph(self, tag: str) -> None:
         """
         Extend the acc subgraph with `tag` going the reversed topological direction.
         """
@@ -952,13 +1050,22 @@ class _SplitterBase:
         starter_cpu_nodes: NodeSet = set()
         starter_acc_nodes: NodeSet = set()
         for node in self.module.graph.nodes:
+            # edge case, call_function, but with no dependencies
+            if node.op == "call_function" and len(node.all_input_nodes) == 0:
+                if node in self.acc_nodes:
+                    starter_acc_nodes.add(node)
+                else:
+                    starter_cpu_nodes.add(node)
+
             if node.op not in {"placeholder", "get_attr"}:
                 continue
+
             for user in node.users:
                 if user in self.acc_nodes:
                     starter_acc_nodes.add(user)
                 else:
                     starter_cpu_nodes.add(user)
+
         return starter_cpu_nodes, starter_acc_nodes
 
     def put_nodes_into_subgraphs(self) -> list[Subgraph]:
@@ -1054,7 +1161,7 @@ class _SplitterBase:
                     result.append(subgraph)
         return result
 
-    def tag(self, subgraphs: list[Subgraph]):
+    def tag(self, subgraphs: list[Subgraph]) -> None:
         self.tags = []
         for subgraph in subgraphs:
             tag = (
@@ -1082,6 +1189,8 @@ class _SplitterBase:
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
+        if self.settings.move_non_tensor_nodes_on_boundary:
+            move_non_tensor_nodes_on_boundary(subgraphs)
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
@@ -1093,7 +1202,7 @@ class _SplitterBase:
 
     def generate_split_results(self) -> SplitResult:
         split_module = self()
-        submodule_names = []
+        submodule_names: list[str] = []
         for name, _mod in split_module.named_children():
             submodule_names.append(name)
         if (

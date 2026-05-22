@@ -38,11 +38,56 @@
     :members:
 ```
 
-% These are missing documentation. Adding them here until a better place
-% is made in this file.
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.examples.op_benchmark
+
+.. autofunction:: assert_dicts_equal
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.fuzzer
+
+.. autofunction:: prod
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.common
+
+.. autofunction:: select_unit
+
+.. autofunction:: trim_sigfig
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.utils.compile
+
+.. autofunction:: bench_all
+
+.. autofunction:: benchmark_compile
+```
+
+# torch.utils.benchmark.examples
 
 ```{eval-rst}
 .. py:module:: torch.utils.benchmark.examples
+```
+
+# torch.utils.benchmark.examples.spectral_ops_fuzz_test
+
+```{eval-rst}
+.. automodule:: torch.utils.benchmark.examples.spectral_ops_fuzz_test
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.benchmark.examples.spectral_ops_fuzz_test
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    run_benchmark
 ```
 
 ```{eval-rst}

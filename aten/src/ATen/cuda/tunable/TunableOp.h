@@ -29,7 +29,7 @@ template <typename ParamsT>
 class Callable {
   public:
     virtual ~Callable() = default;
-    virtual TuningStatus Call(const ParamsT*) {
+    virtual TuningStatus Call(const ParamsT* /*unused*/) {
       return FAIL;
     }
     virtual TuningStatus IsSupported(const ParamsT* params) {
@@ -235,7 +235,7 @@ class TunableOp {
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
 
-      // calcaulte a reference answer for numerical check
+      // calculate a reference answer for numerical check
       if (do_numerics_check) {
         reference_params = params->DeepCopy(false);
         TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
@@ -267,27 +267,10 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
-        if (do_numerics_check) {
-          ParamsT* numerical_params = params->DeepCopy(false);
-          auto status = candidate->Call(numerical_params);
-          if (status != OK) {
-            numerical_params->Delete();
-            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-            continue;
-          }
-          status = reference_params->NumericalCheck(numerical_params);
-          numerical_params->Delete();
-          if (status != OK) {
-            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-            continue;
-          }
-        }
-        else {
-          auto status = candidate->Call(reusable_params[0]);
-          if (status != OK) {
-            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-            continue;
-          }
+        auto status = candidate->Call(reusable_params[0]);
+        if (status != OK) {
+          TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
         }
 
         // collect a small profile
@@ -308,6 +291,22 @@ class TunableOp {
         if (approx_duration > 1.15 * min_duration_ms) {
           TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
+        }
+
+        if (do_numerics_check) {
+          ParamsT* numerical_params = params->DeepCopy(false);
+          auto status = candidate->Call(numerical_params);
+          if (status != OK) {
+            numerical_params->Delete();
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
+          status = reference_params->NumericalCheck(numerical_params);
+          numerical_params->Delete();
+          if (status != OK) {
+            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
         }
 
         // for warmup does user set max duration, max iters, or both?
@@ -422,6 +421,8 @@ class TunableOp {
 };
 
 struct OpParams {
+  OpParams() = default;
+  OpParams(const OpParams&) = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
   virtual std::string BLASSignature() const = 0;

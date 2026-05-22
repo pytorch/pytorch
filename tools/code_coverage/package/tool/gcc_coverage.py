@@ -21,7 +21,8 @@ def update_gzip_dict(gzip_dict: dict[str, int], file_name: str) -> str:
 def run_target(binary_file: str, test_type: TestType) -> None:
     print_log("start run", test_type.value, "test: ", binary_file)
     start_time = time.time()
-    assert test_type in {TestType.CPP, TestType.PY}
+    if test_type not in {TestType.CPP, TestType.PY}:
+        raise AssertionError(f"Invalid test_type: {test_type}")
     if test_type == TestType.CPP:
         run_cpp_test(binary_file)
     else:

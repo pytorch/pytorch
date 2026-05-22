@@ -16,7 +16,8 @@ import os
 import re
 import sys
 import unittest
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.testing
@@ -35,7 +36,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
+def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
@@ -59,6 +60,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
                 importlib.import_module(need)
             except ImportError:
                 return
+
     run_tests()
 
 
@@ -84,6 +86,8 @@ class TestCase(TorchTestCase):
 
     def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
+        self._prior_nested_graph_breaks = config.nested_graph_breaks
+        config.nested_graph_breaks = True
         super().setUp()
         reset()
         utils.counters.clear()
@@ -93,13 +97,19 @@ class TestCase(TorchTestCase):
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
-            print(k, v.most_common())
+            log.debug("%s %s", k, v.most_common())
         reset()
         utils.counters.clear()
+        torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+        config.nested_graph_breaks = self._prior_nested_graph_breaks
+
+    def before_cuda_memory_leak_check(self) -> None:
+        reset()
+        utils.counters.clear()
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if (
@@ -116,7 +126,7 @@ class TestCase(TorchTestCase):
 
 class CPythonTestCase(TestCase):
     """
-    Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
+    Test class for CPython tests located in "test/cpython/v{Py_version}/*".
 
     This class enables specific features that are disabled by default, such as
     tracing through unittest methods.
@@ -152,8 +162,11 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
+    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
+    # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
+    # pyrefly: ignore [bad-override]
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -164,13 +177,15 @@ class CPythonTestCase(TestCase):
     def compile_fn(
         self,
         fn: Callable[..., Any],
-        backend: Union[str, Callable[..., Any]],
+        backend: str | Callable[..., Any],
         nopython: bool,
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
+
         method = getattr(self, self._testMethodName)
         method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
+
         setattr(self, self._testMethodName, method)
         return fn
 
@@ -178,9 +193,9 @@ class CPythonTestCase(TestCase):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
-        py_ver = re.search(r"/([\d_]+)/", inspect.getfile(test_cls))
+        py_ver = re.search(r"/v([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
-            py_ver = py_ver.group().strip(os.sep).replace("_", "")  # type: ignore[assignment]
+            py_ver = py_ver.group().strip(os.sep).replace("_", "").lstrip("v")  # type: ignore[assignment]
         else:
             return suffix
         return f"CPython{py_ver}-{test_file}-{suffix}"
@@ -193,14 +208,17 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        prefix = os.path.join("dynamo", "cpython") + os.path.sep
-        regex = re.escape(prefix) + r"\d_\d{2}"
         search_path = inspect.getfile(cls)
-        m = re.search(regex, search_path)
+
+        cpython_test_regex = (
+            re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
+        )
+
+        m = re.search(cpython_test_regex, search_path)
         if m:
-            test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
+            test_py_ver = tuple(map(int, m.groups()))
             py_ver = sys.version_info[:2]
-            if py_ver < test_py_ver:
+            if py_ver != test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
                 got = ".".join(map(str, py_ver))
                 raise unittest.SkipTest(
@@ -216,5 +234,16 @@ class CPythonTestCase(TestCase):
         cls._stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 enable_trace_unittest=True,
+                enable_trace_load_build_class=True,
             ),
         )
+
+    @contextlib.contextmanager
+    def subTest(self, *args, **kwargs):
+        # pytest 9.x addSubTest uses typing._GenericAlias calls that
+        # Dynamo cannot trace. Use a no-op subTest instead.
+        yield
+
+    # pyrefly: ignore [implicit-any]
+    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
+        pass

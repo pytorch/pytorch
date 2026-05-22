@@ -65,7 +65,7 @@ struct default_constructible
 
 namespace impl {
   template <typename T>
-  constexpr bool supports_default_construction(const ::strong::default_constructible::modifier<T>*)
+  constexpr bool supports_default_construction(const ::strong::default_constructible::modifier<T>* /*unused*/)
   {
     return true;
   }
@@ -76,7 +76,7 @@ class type : public modifier<M, type<T, Tag, M...>>...
 {
 public:
   template <typename TT = T, typename = std::enable_if_t<std::is_trivially_constructible<TT>{}>>
-  explicit type(uninitialized_t)
+  explicit type(uninitialized_t /*unused*/)
     noexcept
   {
   }
@@ -138,7 +138,7 @@ private:
 
 namespace impl {
   template <typename T, typename Tag, typename ... Ms>
-  constexpr bool is_strong_type_func(const strong::type<T, Tag, Ms...>*) { return true;}
+  constexpr bool is_strong_type_func(const strong::type<T, Tag, Ms...>* /*unused*/) { return true;}
   constexpr bool is_strong_type_func(...) { return false;}
   template <typename T, typename Tag, typename ... Ms>
   constexpr T underlying_type(strong::type<T, Tag, Ms...>*);
@@ -391,25 +391,25 @@ namespace impl
   template <typename T>
   struct require_copy_constructible
   {
-    static constexpr bool value = std::is_copy_constructible<underlying_type_t<T>>::value;
+    static constexpr bool value = std::is_copy_constructible_v<underlying_type_t<T>>;
     static_assert(value, "underlying type must be copy constructible");
   };
   template <typename T>
   struct require_move_constructible
   {
-    static constexpr bool value = std::is_move_constructible<underlying_type_t<T>>::value;
+    static constexpr bool value = std::is_move_constructible_v<underlying_type_t<T>>;
     static_assert(value, "underlying type must be move constructible");
   };
   template <typename T>
   struct require_copy_assignable
   {
-    static constexpr bool value = std::is_copy_assignable<underlying_type_t<T>>::value;
+    static constexpr bool value = std::is_copy_assignable_v<underlying_type_t<T>>;
     static_assert(value, "underlying type must be copy assignable");
   };
   template <typename T>
   struct require_move_assignable
   {
-    static constexpr bool value = std::is_move_assignable<underlying_type_t<T>>::value;
+    static constexpr bool value = std::is_move_assignable_v<underlying_type_t<T>>;
     static_assert(value, "underlying type must be move assignable");
   };
 
@@ -820,7 +820,7 @@ class affine_point<D>::modifier<::strong::type<T, Tag, M...>>
   using base_diff_type = decltype(std::declval<const T&>() - std::declval<const T&>());
 public:
   using difference = std::conditional_t<std::is_same<D, void>{}, strong::type<base_diff_type, Tag, strong::difference>, D>;
-  static_assert(std::is_constructible_v<difference, base_diff_type>, "");
+  static_assert(std::is_constructible_v<difference, base_diff_type> );
   [[nodiscard]]
   friend
   constexpr
@@ -1584,12 +1584,12 @@ namespace std {
 template <typename T, typename Tag, typename ... M>
 struct hash<::strong::type<T, Tag, M...>>
   : std::conditional_t<
-    std::is_base_of<
+    std::is_base_of_v<
       ::strong::hashable::modifier<
         ::strong::type<T, Tag, M...>
       >,
       ::strong::type<T, Tag, M...>
-    >::value,
+    >,
     hash<T>,
     std::false_type>
 {

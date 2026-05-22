@@ -20,6 +20,7 @@ the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import functools
 import io
@@ -29,16 +30,22 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, TYPE_CHECKING
 from typing_extensions import Unpack
+
+import sympy
 
 
 try:
+    import triton.language as tl
     from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
+
+    TritonConstexpr = tl.constexpr
 except ImportError:
 
     class Autotuner:  # type: ignore[no-redef]
@@ -48,6 +55,9 @@ except ImportError:
         pass
 
     class Heuristics:  # type: ignore[no-redef]
+        pass
+
+    class TritonConstexpr:  # type: ignore[no-redef]
         pass
 
 
@@ -89,8 +99,41 @@ from torch.hub import tqdm
 from .. import config
 
 
+def _find_repeat_interleave_constraints(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[str, str]]:
+    """
+    Find repeat_interleave operations with output_size constraints.
+
+    Returns list of (repeats_placeholder_name, output_size_placeholder_name) pairs.
+    These represent constraints where sum(repeats) must equal output_size.
+    """
+    constraints = []
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or "repeat_interleave" not in str(node.target)
+            or not node.args
+        ):
+            continue
+
+        output_size_node = node.kwargs.get("output_size")
+        repeats_node = node.args[0]
+
+        # Both must be FX nodes (not constants) and direct placeholders
+        if (
+            isinstance(repeats_node, torch.fx.Node)
+            and isinstance(output_size_node, torch.fx.Node)
+            and repeats_node.op == "placeholder"
+            and output_size_node.op == "placeholder"
+        ):
+            constraints.append((str(repeats_node.target), str(output_size_node.target)))
+
+    return constraints
+
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.output_code import OutputCode
@@ -101,6 +144,128 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+def _extract_distributed_info(
+    gm: torch.fx.GraphModule,
+) -> dict[str, dict[str, int]]:
+    """
+    Extract process group information from distributed ops in the graph.
+
+    Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
+    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+    """
+    from torch.distributed import GroupName
+    from torch.fx.operator_schemas import normalize_function
+
+    group_info: dict[str, dict[str, int]] = {}
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        opt_args_kwargs = normalize_function(
+            node.target,
+            args=node.args,
+            kwargs=node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is None:
+            continue
+        _, kwargs = opt_args_kwargs
+
+        group_name_ = kwargs.get("group_name")
+        if not isinstance(group_name_, str):
+            continue
+        group_name = typing.cast(GroupName, group_name_)
+
+        if group_name in group_info:
+            continue
+
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+        )
+
+        group_size = _get_group_size_by_name(group_name)
+        pg = _resolve_process_group(group_name)
+        rank = pg.rank()
+        group_info[group_name] = {"size": group_size, "rank": rank}
+
+    return group_info
+
+
+def setup_fake_process_groups(
+    group_info: dict[str, dict[str, int]],
+) -> None:
+    """
+    Set up fake process groups for repro execution.
+
+    Args:
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
+    """
+    import torch.distributed as dist
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    if not group_info:
+        return
+
+    world_size = max(info["size"] for info in group_info.values())
+
+    global_rank = 0
+    for info in group_info.values():
+        if info["size"] == world_size:
+            global_rank = info["rank"]
+            break
+
+    store = FakeStore()
+    dist.init_process_group(
+        backend="fake",
+        rank=global_rank,
+        world_size=world_size,
+        store=store,
+    )
+
+    default_pg = dist.distributed_c10d._get_default_group()
+    torch._C._distributed_c10d._unregister_all_process_groups()
+
+    for group_name, info in group_info.items():
+        group_size = info["size"]
+        if group_size == world_size:
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, default_pg)
+        else:
+            ranks = list(range(group_size))
+            new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, new_pg)
+
+
+def generate_standalone_repro(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    *,
+    save_path: str | None = None,
+) -> str:
+    """
+    Generate a self-contained repro script from an FX graph.
+    """
+    buf = io.StringIO()
+    save_graph_repro(buf, gm, args, "inductor", save_dir=None)
+    repro = buf.getvalue()
+
+    if save_path is not None:
+        with open(save_path, "w") as f:
+            f.write(repro)
+        log.info("Saved standalone repro to %s", save_path)
+
+    return repro
+
+
 use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -124,11 +289,16 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
-        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
+        compiler_fn = functools.partial(
+            unconfigured_compiler_fn,
+            compile_region_name=compile_region_name,
+            **kwargs,
+        )
 
         from torch._functorch.aot_autograd import get_aot_graph_name
 
@@ -136,7 +306,10 @@ def wrap_compiler_debug(
 
         # TODO: why do we need to deepcopy the original graph?
         orig_graph = copy.deepcopy(gm.graph)
-        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after not in ("dynamo", "aot", None):
+            raise AssertionError(
+                f"repro_after must be 'dynamo', 'aot', or None, got {config.repro_after!r}"
+            )
 
         try:
             # Call the compiler_fn - which is either aot_autograd or inductor
@@ -169,9 +342,11 @@ def wrap_compiler_debug(
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
             # we should never hit this branch
-            assert not _kwargs
+            if _kwargs:
+                raise AssertionError(f"Unexpected kwargs: {_kwargs}")
             if config.repro_after != "aot":
-                assert not isinstance(inner_compiled_fn, str)
+                if isinstance(inner_compiled_fn, str):
+                    raise AssertionError("inner_compiled_fn should not be a string")
                 return inner_compiled_fn(real_inputs)
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
@@ -301,12 +476,49 @@ python_binary(
         return ""
 
 
+def generate_custom_triton_kernel(kernel: Any) -> str:
+    res = ""
+    if isinstance(kernel, Autotuner):
+        # pyrefly: ignore [missing-attribute]
+        if isinstance(kernel.fn, Heuristics):
+            res += "ERROR: Repro will not work as intended, "
+            res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+            return res
+
+        config_strs = []
+        # pyrefly: ignore [missing-attribute]
+        for kernel_config in kernel.configs:
+            config_strs.append(f"""triton.Config(
+                    {str(kernel_config.kwargs)},
+                    num_warps={kernel_config.num_warps},
+                    num_stages={kernel_config.num_stages},
+                )""")
+
+        config_str = ",".join(config_strs)
+        res += textwrap.dedent(f"""
+        @triton.autotune(
+            configs=[
+                {config_str}
+            ],
+            key=[]
+        )
+        """).strip()
+
+    # pyrefly: ignore [missing-attribute]
+    src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+    res += "\n@triton.jit\n"
+    res += src_code
+    res += "\n"
+
+    return res
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
     *,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
 ) -> str:
@@ -353,6 +565,20 @@ isolate_fails_code_str = None
 {maybe_fbcode_instructions()}
      """
     )
+    model_str += textwrap.dedent(
+        """
+if "__compile_source__" in globals():
+    import inspect as __after_aot_inspect
+    import linecache as __after_aot_linecache
+    __after_aot_filename = __after_aot_inspect.currentframe().f_code.co_filename
+    __after_aot_linecache.cache[__after_aot_filename] = (
+        len(__compile_source__),
+        None,
+        __compile_source__.splitlines(True),
+        __after_aot_filename,
+    )
+"""
+    )
     if not stable_output:
         model_str += f"# torch version: {torch.version.__version__}\n"
         if hasattr(torch.version, "cuda"):
@@ -364,47 +590,87 @@ isolate_fails_code_str = None
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
     )
-    # Track which grid entry corresponds to the best config
-    for id in kernel_side_table.id_to_kernel:
-        kernel = kernel_side_table.get_kernel(id)
+
+    def get_fn_name(kernel: Any) -> str:
+        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        return fn.__name__.split(".")[-1]
+
+    def write_kernel_dependencies(
+        kernel: Any,
+        written_constexpr_vars: set[str],
+        written_nested_kernels: set[str],
+    ) -> str:
+        """Write out global tl.constexpr vars and nested kernel dependencies."""
+        result = ""
+        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
+            return result
+
+        fn_globals = getattr(jit_fn.fn, "__globals__", {})
+        src = jit_fn.src
+        full_src = src if src.strip().startswith("def ") else "def " + src
+
+        referenced_names: set[str] = set()
+        called_names: set[str] = set()
+        for node in ast.walk(ast.parse(full_src)):
+            if isinstance(node, ast.Name):
+                referenced_names.add(node.id)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called_names.add(node.func.id)
+
+        # Write out global tl.constexpr variables
+        for name in referenced_names:
+            if name in written_constexpr_vars:
+                continue
+            val = fn_globals.get(name)
+
+            if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
+                result += f"{name} = tl.constexpr({val.value})\n"
+            elif isinstance(val, (int, float, str, bool)):
+                result += f"{name} = {val!r}\n"
+            else:
+                continue
+            written_constexpr_vars.add(name)
+
+        # Write out nested kernel dependencies
+        for name in called_names:
+            val = fn_globals.get(name)
+            if not isinstance(val, JITFunction) or val is jit_fn:
+                continue
+            nested_fn_name = get_fn_name(val)
+            if nested_fn_name in written_nested_kernels:
+                continue
+            # Mark as written before recursing to prevent cycles
+            written_nested_kernels.add(nested_fn_name)
+            result += write_kernel_dependencies(
+                val, written_constexpr_vars, written_nested_kernels
+            )
+            result += generate_custom_triton_kernel(val)
+
+        return result
+
+    written_nested_kernels: set[str] = set()
+    written_constexpr_vars: set[str] = set()
+
+    model_str += f"{kernel_side_table_prefix}.reset_table()\n"
+
+    for idx in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(idx)
 
         try:
-            if isinstance(kernel, Autotuner):
-                if isinstance(kernel.fn, Heuristics):
-                    model_str += "ERROR: Repro will not work as intended, "
-                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
-                    break
-
-                config_strs = []
-                for kernel_config in kernel.configs:
-                    config_strs.append(f"""triton.Config(
-                            {str(kernel_config.kwargs)},
-                            num_warps={kernel_config.num_warps},
-                            num_stages={kernel_config.num_stages},
-                        )""")
-
-                config_str = ",".join(config_strs)
-                model_str += textwrap.dedent(f"""
-                @triton.autotune(
-                    configs=[
-                        {config_str}
-                    ],
-                    key=[]
-                )
-                """).strip()
-
-            model_str += "\n@triton.jit\n"
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-            fn_name = (
-                kernel._fn_name
-                if isinstance(kernel, JITFunction)
-                else kernel.fn._fn_name
+            model_str += write_kernel_dependencies(
+                kernel, written_constexpr_vars, written_nested_kernels
             )
-            fn_name = fn_name.split(".")[-1]
+            fn_name = get_fn_name(kernel)
 
-            model_str += src_code
-            model_str += "\n"
-            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+            unique_name = f"{fn_name}_{idx}"
+
+            kernel_code = generate_custom_triton_kernel(kernel)
+            kernel_code = kernel_code.replace(
+                f"def {fn_name}(", f"def {unique_name}(", 1
+            )
+            model_str += kernel_code
+            model_str += f"{kernel_side_table_prefix}.add_kernel({unique_name})\n"
         except AttributeError as e:
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
@@ -415,6 +681,7 @@ isolate_fails_code_str = None
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
+    # pyrefly: ignore [implicit-any]
     used_syms = {}
 
     # Extract from graph placeholders and their corresponding arguments
@@ -427,29 +694,83 @@ isolate_fails_code_str = None
             writer.tensor(placeholder, arg)
         elif arg is None:
             writer.const(placeholder)
+        elif isinstance(arg, FakeScriptObject):
+            writer.opaque(placeholder, arg.script_class_name)
+        elif isinstance(arg, torch._C.Generator):
+            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
-        if isinstance(arg, torch.SymInt):
-            sym_name = str(arg.node)
-            if arg.node.hint is not None:
-                used_syms[sym_name] = arg.node.hint
+
+        if (
+            isinstance(arg, torch.SymInt)
+            # By checking sympy.Symbol, we are excluding any symbolic expressions.
+            # TODO: we may need to solve expressions to extract symbol definitions.
+            and isinstance(arg.node.expr, sympy.Symbol)
+            and arg.node.hint is not None
+        ):
+            used_syms[str(arg.node)] = arg.node.hint
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
-                if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
+                if (
+                    isinstance(dim, torch.SymInt)
+                    and isinstance(dim.node.expr, sympy.Symbol)
+                    and dim.node.hint is not None
+                ):
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
-                if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
+                if (
+                    isinstance(stride, torch.SymInt)
+                    and isinstance(stride.node.expr, sympy.Symbol)
+                    and stride.node.hint is not None
+                ):
                     used_syms[str(stride.node)] = stride.node.hint
-
+            # Extract symbols from storage nbytes (can be a symbolic expression)
+            storage = arg.untyped_storage()
+            nbytes = storage.nbytes()
+            if isinstance(nbytes, torch.SymInt):
+                expr = nbytes.node.expr
+                shape_env = nbytes.node.shape_env
+                for sym in expr.free_symbols:
+                    sym_name = str(sym)
+                    if sym_name not in used_syms and shape_env is not None:
+                        hint = shape_env.backed_var_to_val.get(sym)
+                        if hint is not None:
+                            used_syms[sym_name] = int(hint)
     # Add symbolic variable definitions to the top of the generated code
     if used_syms:
         hint_lines = "\n".join(
             f"{name} = {hint}" for name, hint in sorted(used_syms.items())
         )
         model_str = f"{hint_lines}\n\n{model_str}"
+
+    # Add fixup code for repeat_interleave constraints
+    # When inputs are regenerated randomly, sum(repeats) != output_size
+    # This fixup adjusts the repeats tensor to satisfy the constraint
+    constraints = _find_repeat_interleave_constraints(gm)
+    if constraints:
+        placeholder_to_idx = {name: idx for idx, name in enumerate(placeholder_targets)}
+        for repeats_name, output_size_name in constraints:
+            repeats_idx = placeholder_to_idx.get(repeats_name)
+            output_size_idx = placeholder_to_idx.get(output_size_name)
+            if repeats_idx is not None and output_size_idx is not None:
+                # Guard with hasattr since NopInputReader doesn't have args
+                writer._lines.append(
+                    "# Fixup: ensure sum(repeats) == output_size for repeat_interleave"
+                )
+                writer._lines.append("if hasattr(reader, 'args'):")
+                writer._lines.append(f"    _repeats = reader.args[{repeats_idx}]")
+                writer._lines.append(
+                    f"    _output_size = reader.args[{output_size_idx}]"
+                )
+                writer._lines.append(
+                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                )
+                writer._lines.append("        _n = _repeats.numel()")
+                writer._lines.append("        _repeats.fill_(_output_size // _n)")
+                writer._lines.append("        _repeats[:_output_size % _n] += 1")
 
     load_args_lines = writer.lines()
     load_args_code = "\n".join(load_args_lines)
@@ -466,11 +787,11 @@ def save_graph_repro(
     compiler_name: str,
     *,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     command: str = "run",
-    accuracy: Optional[Union[str, bool]] = None,
-    tracing_mode: Optional[str] = None,
-    check_str: Optional[str] = None,
+    accuracy: str | bool | None = None,
+    tracing_mode: str | None = None,
+    check_str: str | None = None,
     stable_hash: bool = False,
 ) -> None:
     if any(
@@ -485,13 +806,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed info from the graph
+    distributed_info = _extract_distributed_info(gm)
+    has_distributed_ops = len(distributed_info) > 0
 
     fd.write(
         generate_compiler_repro_string(
@@ -517,15 +834,9 @@ def save_graph_repro(
     # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
+            "    from torch._dynamo.repro.after_aot import setup_fake_process_groups\n"
         )
+        fd.write(f"    setup_fake_process_groups({distributed_info!r})\n")
 
     fd.write(
         f"    with torch.no_grad():\n"
@@ -547,7 +858,7 @@ def dump_compiler_graph_state(
     args: Sequence[Any],
     compiler_name: str,
     *,
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: str | bool | None = None,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -592,11 +903,11 @@ def isolate_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
     compiler_name: str,
-    env: Optional[dict[str, Any]] = None,
-    save_dir: Optional[str] = None,
-    accuracy: Optional[Union[bool, str]] = None,
-    tracing_mode: Optional[str] = None,
-    check_str: Optional[str] = None,
+    env: dict[str, Any] | None = None,
+    save_dir: str | None = None,
+    accuracy: bool | str | None = None,
+    tracing_mode: str | None = None,
+    check_str: str | None = None,
 ) -> bool:
     if env is None:
         env = {}
@@ -620,32 +931,35 @@ def isolate_fails(
     #     print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
-    stdout, stderr = TemporaryFile(), TemporaryFile()
-
     if use_buck:
         cmd = BuckTargetWriter(file_name).write(print_msg=False)
     else:
         cmd = [sys.executable, file_name]
+    with (
+        TemporaryFile() as stdout,
+        TemporaryFile() as stderr,
+        subprocess.Popen(
+            cmd,
+            cwd=subdir,
+            stdout=stdout,
+            stderr=stderr,
+            env=new_env,
+        ) as p,
+    ):
+        p.wait()
 
-    p = subprocess.Popen(
-        cmd,
-        cwd=subdir,
-        stdout=stdout,
-        stderr=stderr,
-        env=new_env,
-    )
-    p.wait()
-
-    stdout.seek(0)
-    stderr.seek(0)
-    print(
-        textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "), file=sys.stdout
-    )
-    print(
-        textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "), file=sys.stderr
-    )
-    # print(f"Isolated test failed - {file_name}")
-    return p.returncode != 0
+        stdout.seek(0)
+        stderr.seek(0)
+        print(
+            textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "),
+            file=sys.stdout,
+        )
+        print(
+            textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "),
+            file=sys.stderr,
+        )
+        # print(f"Isolated test failed - {file_name}")
+        return p.returncode != 0
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -654,7 +968,7 @@ def isolate_fails(
 
 
 def inductor_fails(
-    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: Optional[str] = None
+    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
 ) -> bool:
     has_cuda = False
     for arg in args:
@@ -671,16 +985,22 @@ def inductor_fails(
 
     try:
         result = fx_g(*args)
-        assert isinstance(result, (tuple, list))
-        assert not any(isinstance(x, (tuple, list)) for x in result)
+        if not isinstance(result, (tuple, list)):
+            raise AssertionError(
+                f"Expected result to be a tuple or list, got {type(result)}"
+            )
+        if any(isinstance(x, (tuple, list)) for x in result):
+            raise AssertionError("Result should not contain nested tuples or lists")
     except Exception:
         return False
 
     sync()
 
     try:
-        compile_mod = compile_fx_inner(fx_g, args)
-        assert not isinstance(compile_mod, str)
+        compile_args = _get_compile_args(fx_g, args)
+        compile_mod = compile_fx_inner(fx_g, compile_args)
+        if isinstance(compile_mod, str):
+            raise AssertionError("compile_fx_inner should not return a string")
         compile_mod(args)
         sync()
     except Exception as e:
@@ -694,17 +1014,22 @@ def inductor_fails(
 def inductor_accuracy_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
-    check_str: Optional[str] = None,
+    check_str: str | None = None,
     *,
     require_fp64: bool = False,
     ignore_non_fp: bool = False,
 ) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
+    def _compile_with_symbolic_args(
+        gm: torch.fx.GraphModule, inputs: list[Any]
+    ) -> torch.fx.GraphModule:
+        return compile_fx_inner(gm, _get_compile_args(gm, inputs))  # type: ignore[return-value]
+
     return backend_aot_accuracy_fails(
         fx_g,
         args,  # type: ignore[arg-type]
-        compile_fx_inner,  # type: ignore[arg-type]
+        _compile_with_symbolic_args,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -718,11 +1043,101 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def _build_symbolic_wrapper(
+    mod: nn.Module,
+    args: list[Any],
+    symint_exprs: dict[int, str],
+) -> tuple[nn.Module, list[Any]] | None:
+    """Build a wrapper module that preserves symbolic relationships.
+
+    Returns (wrapper_module, wrapper_args) where wrapper_args has carrier
+    tensors in place of free-symbol symints, and the wrapper's forward()
+    extracts SymInts from carrier.size(0), computes derived expressions,
+    and delegates to the inner module.
+
+    Returns None if the expressions don't contain free/derived structure
+    (nothing to do).
+    """
+    import re
+
+    free_sym_re = re.compile(r"^s\d+$")
+    free_positions: dict[int, str] = {}
+    derived_positions: dict[int, str] = {}
+
+    for idx, expr_str in symint_exprs.items():
+        if free_sym_re.fullmatch(expr_str):
+            free_positions[idx] = expr_str
+        else:
+            derived_positions[idx] = expr_str
+
+    if not free_positions:
+        return None
+
+    # Order: carrier tensors first, then all non-symint args in original order
+    free_order = sorted(free_positions.keys())
+    free_sym_names = [free_positions[i] for i in free_order]
+
+    # Precompile derived expressions
+    derived_compiled = {
+        idx: compile(expr_str, f"<derived arg {idx}>", "eval")
+        for idx, expr_str in derived_positions.items()
+    }
+
+    n_args = len(args)
+
+    class _SymIntWrapper(nn.Module):
+        def __init__(self, inner: nn.Module) -> None:
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, *flat_args: Any) -> Any:
+            carriers = flat_args[: len(free_order)]
+            other = flat_args[len(free_order) :]
+
+            syms: dict[str, Any] = {}
+            for i, sym_name in enumerate(free_sym_names):
+                syms[sym_name] = carriers[i].size(0)
+
+            for idx, code in sorted(derived_compiled.items()):
+                derived_positions[idx]  # keep reference
+                syms[f"_derived_{idx}"] = eval(code, {"__builtins__": {}}, syms)
+
+            other_iter = iter(other)
+            rebuilt = []
+            for i in range(n_args):
+                if i in free_positions:
+                    rebuilt.append(syms[free_positions[i]])
+                elif i in derived_positions:
+                    rebuilt.append(syms[f"_derived_{i}"])
+                else:
+                    rebuilt.append(next(other_iter))
+
+            return self.inner(*rebuilt)
+
+    # Build wrapper args: carriers + non-symint args
+    wrapper_args: list[Any] = []
+    for i in free_order:
+        hint = int(args[i]) if not isinstance(args[i], int) else args[i]
+        device = "cpu"
+        for a in args:
+            if isinstance(a, torch.Tensor) and a.is_cuda:
+                device = a.device
+                break
+        wrapper_args.append(torch.empty(hint, dtype=torch.int8, device=device))
+
+    for i, arg in enumerate(args):
+        if i not in free_positions and i not in derived_positions:
+            wrapper_args.append(arg)
+
+    return _SymIntWrapper(mod), wrapper_args
+
+
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
-) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
+) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters())
+    if any(mod.named_parameters()):
+        raise AssertionError("Repro graph should not have any parameters")
     for n, b in mod.named_buffers():
         if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
             log.warning(
@@ -756,11 +1171,44 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
+    # NOTE: symint_exprs (from reader.symint(val, expr=...)) are preserved
+    # in the repro script for documentation. A future improvement could use
+    # _build_symbolic_wrapper to reconstruct algebraic relationships between
+    # free and derived symints, but the arg reordering is fragile across
+    # different graph structures so we skip it for now.
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
+    # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args
+
+
+def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequence[Any]:
+    """Extract FakeTensor/SymInt args from the traced graph for compilation.
+
+    When repro_common traces with tracing_mode='symbolic', the resulting
+    GraphModule's placeholder nodes carry FakeTensor/SymInt metadata.
+    compile_fx_inner needs these (not the concrete args) so that Inductor
+    generates proper symbolic-size bindings in the output code.
+
+    For tracing_mode='real', concrete args are fine — we must NOT extract
+    FakeTensor metadata because different nodes may have FakeTensors from
+    different FakeTensorModes, causing a FakeTensorMode mismatch assertion
+    in Inductor.  We detect symbolic tracing by checking for SymInt values,
+    which only exist when tracing_mode='symbolic'.
+    """
+    placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return args
+    # Only extract metadata if the graph was traced with symbolic mode.
+    # SymInt values in placeholder metadata are the reliable indicator —
+    # FakeTensors appear in both real and symbolic modes, but only symbolic
+    # tracing creates SymInts for integer inputs.
+    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
+    if not has_symint:
+        return args
+    return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
 ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
@@ -837,8 +1285,9 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
+    compile_args = _get_compile_args(mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, args)
+        compiled = compile_fx_inner(mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -859,11 +1308,13 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         intermediate_hook(save_hook),
         tqdm(desc="Saving inductor intermediates", total=total) as pbar,
     ):
-        assert not isinstance(compiled, str)
+        if isinstance(compiled, str):
+            raise AssertionError("compile_fx_inner should not return a string")
         compiled(new_args)  # type: ignore[arg-type]
-        assert not new_args
+        if new_args:
+            raise AssertionError("new_args should be empty after compiled() call")
 
-    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> Optional[str]:
+    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> str | None:
         diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
         diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
 
@@ -887,7 +1338,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
             compiled(new_args)  # type: ignore[arg-type]
-            assert not new_args
+            if new_args:
+                raise AssertionError("new_args should be empty after compiled() call")
 
     class WriterInterp(fx.Interpreter):
         def __init__(self, mod: torch.nn.Module, subdir: str) -> None:
@@ -908,7 +1360,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
-        assert not new_args
+        if new_args:
+            raise AssertionError("new_args should be empty after boxed_run() call")
 
     class ExactReaderInterp(fx.Interpreter):
         def run_node(self, n: torch.fx.Node) -> Any:
@@ -929,7 +1382,8 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
-            assert not new_args
+            if new_args:
+                raise AssertionError("new_args should be empty after boxed_run() call")
 
     # Now that we've saved everything, interp through the eager graph
     # and do comparisons
@@ -955,20 +1409,22 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
                     equal_nan=True,
                     log_error=log_error,
                 ):
-                    assert logged
+                    if not logged:
+                        raise AssertionError("Divergence detected but not logged")
                 pbar.update(1)
             return r
 
     with tqdm(desc="Checking divergence", total=total) as pbar:
         ReaderInterp(mod).boxed_run(args)
-    assert not args
+    if args:
+        raise AssertionError("args should be empty after boxed_run() call")
 
 
 def repro_get_args(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args  # type: ignore[return-value]
+    return mod, args
 
 
 def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
@@ -978,8 +1434,10 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     from torch.cuda import synchronize
 
-    compiled = compile_fx_inner(mod, args)
-    assert not isinstance(compiled, str)
+    compile_args = _get_compile_args(mod, args)
+    compiled = compile_fx_inner(mod, compile_args)
+    if isinstance(compiled, str):
+        raise AssertionError("compile_fx_inner should not return a string")
 
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
@@ -1012,11 +1470,11 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
-    save_dir: Optional[str] = None,
-    tracing_mode: Optional[str] = None,
-    patch_code: Optional[str] = None,
-    check_str: Optional[str] = None,
+    accuracy: bool | str = "",
+    save_dir: str | None = None,
+    tracing_mode: str | None = None,
+    patch_code: str | None = None,
+    check_str: str | None = None,
     **kwargs: Any,
 ) -> Any:
     for k in kwargs:

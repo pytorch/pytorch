@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch._decomp as decomp
@@ -78,13 +78,17 @@ class PhiloxState:
         self.seed = torch.tensor(())
         self.base_offset = torch.tensor(())
         self.relative_offset = 0
-        self.offset_advanced_alteast_once = False
+        self.offset_advanced_at_least_once = False
 
     def validate_state(self):
-        assert self.seed.numel() != 0 and self.base_offset.numel() != 0
+        if self.seed.numel() == 0 or self.base_offset.numel() == 0:
+            raise AssertionError(
+                f"seed and base_offset must not be empty, got "
+                f"seed.numel()={self.seed.numel()}, base_offset.numel()={self.base_offset.numel()}"
+            )
 
     def advance_offset(self, consumed_offset):
-        self.offset_advanced_alteast_once = True
+        self.offset_advanced_at_least_once = True
         self.relative_offset = self.relative_offset + consumed_offset
 
     def set_state(self, seed, base_offset, relative_offset=0):
@@ -153,7 +157,8 @@ class PhiloxStateTracker:
             cls.fwd_state.set_state(seed, offset)
             cls.mark_beginning_of_forward()
         else:
-            assert mode == "backward"
+            if mode != "backward":
+                raise AssertionError(f"mode must be 'backward', got {mode}")
             cls.bwd_state.set_state(seed, offset)
 
     @classmethod
@@ -168,7 +173,7 @@ class PhiloxStateTracker:
         # concat the (seed, offset) to create a tensor for get_rng_state, and
         # then split it back to get (seed, offset) tuple in set_rng_state.
 
-        # TODO: Investigate if there is be a better way to wrap the tuple in a
+        # TODO: Investigate if there is a better way to wrap the tuple in a
         # false Tensor object, and then desugar it later on.
         return cls.running_state.get_state_as_tensor()
 
@@ -200,7 +205,7 @@ class PhiloxStateTracker:
     @classmethod
     def get_updated_fwd_offset(cls):
         # Short circuit if no rand ops were observed
-        if not cls.fwd_state.offset_advanced_alteast_once:
+        if not cls.fwd_state.offset_advanced_at_least_once:
             return cls.fwd_state.base_offset
         return cls.multiple_of_4(
             cls.fwd_state.base_offset + cls.fwd_state.relative_offset
@@ -209,7 +214,7 @@ class PhiloxStateTracker:
     @classmethod
     def get_updated_bwd_offset(cls):
         # Short circuit if no rand ops were observed
-        if not cls.bwd_state.offset_advanced_alteast_once:
+        if not cls.bwd_state.offset_advanced_at_least_once:
             return cls.bwd_state.base_offset
         return cls.multiple_of_4(
             cls.bwd_state.base_offset + cls.bwd_state.relative_offset
@@ -259,7 +264,8 @@ def bernoulli_(self, p=0.5):
 def bernoulli_p(self, p=0.5, *, generator=None):
     if self.device == torch.device("cpu"):
         return NotImplemented
-    assert generator is None
+    if generator is not None:
+        raise AssertionError(f"generator must be None, got {generator}")
     return torch.rand_like(self, dtype=torch.float32) < p
 
 

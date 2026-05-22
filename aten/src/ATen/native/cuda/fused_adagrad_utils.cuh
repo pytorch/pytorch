@@ -52,7 +52,7 @@ struct FusedAdagradMathFunctor {
   using opmath_t = at::opmath_type<scalar_t>;
 
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       FusedOptimizerTensorListMetadata<3>& tl,
       const float* lr_ptr,
       const double& lr,
@@ -104,6 +104,9 @@ struct FusedAdagradMathFunctor {
             found_inf_ptr);
 
         load_store(args[kParamIdx], r_args[kParamIdx], i_start, 0);
+        if (grad_scale_ptr) {
+          load_store(args[kGradIdx], r_args[kGradIdx], i_start, 0);
+        }
         load_store(args[kStateSumIdx], r_args[kStateSumIdx], i_start, 0);
       }
     } else {

@@ -2,7 +2,7 @@
 
 import io
 import sys
-from typing import Optional
+import traceback
 
 import torch
 import torch.distributed as dist
@@ -14,6 +14,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.c10d_logger import _c10d_logger
+from torch.distributed.checkpoint.api import _wrap_exception
 from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.utils import (
@@ -21,6 +22,7 @@ from torch.distributed.checkpoint.utils import (
     _DistWrapper,
     find_state_dict_object,
 )
+from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -45,7 +47,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank):
     shards_metadata = []
     local_shards = []
-    for idx in range(0, world_size * shards_per_rank):
+    for idx in range(world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * 8], shard_sizes=[8], placement=f"rank:{shard_rank}/cpu"
@@ -140,8 +142,47 @@ class TestMedatadaIndex(TestCase):
         self.assertEqual(1, len(_c10d_logger.handlers))
 
 
+class TestWrapException(TestCase):
+    def test_wrap_exception_serializable_via_object_to_tensor(self):
+        """Verify _wrap_exception produces a result that _object_to_tensor can serialize.
+
+        Python 3.13+ adds a _code attribute to FrameSummary containing
+        bytecode objects that cannot be pickled. _wrap_exception must
+        clear these so that _object_to_tensor (used by gather_object and
+        scatter_object_list) succeeds instead of raising
+        "TypeError: cannot pickle code objects".
+        """
+        try:
+            raise ValueError("test error")
+        except ValueError as e:
+            wrapped = _wrap_exception(e)
+
+        # _object_to_tensor / _tensor_to_object are what gather_object
+        # and scatter_object_list use to serialize objects across ranks.
+        # This would raise "TypeError: cannot pickle code objects"
+        # on Python 3.13+ without the fix.
+        byte_tensor, size = _object_to_tensor(wrapped, torch.device("cpu"), None)
+        restored = _tensor_to_object(byte_tensor, size.item(), None)
+
+        self.assertIsInstance(restored[0], ValueError)
+        self.assertEqual(str(restored[0]), "test error")
+        self.assertIsInstance(restored[1], traceback.StackSummary)
+        self.assertGreater(len(restored[1]), 0)
+
+    def test_wrap_exception_preserves_traceback_formatting(self):
+        """Verify that clearing _code does not break traceback formatting."""
+        try:
+            raise RuntimeError("format test")
+        except RuntimeError as e:
+            wrapped = _wrap_exception(e)
+
+        formatted = "".join(traceback.format_list(wrapped[1]))
+        self.assertIn("raise RuntimeError", formatted)
+
+
 class TestReaderView(TestCase):
     def setUp(self):
+        super().setUp()
         buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
         self.front_view = _create_file_view(buffer, 0, 5)
 
@@ -199,7 +240,7 @@ class TestReaderView(TestCase):
 class TestDistWrapper(DTensorTestBase):
     @property
     def world_size(self):
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -219,7 +260,8 @@ class TestDistWrapper(DTensorTestBase):
             if rank % half_world_size == 0
             else None
         )
-        assert gathered_objects == expected_objects
+        if gathered_objects != expected_objects:
+            raise AssertionError(f"Expected {expected_objects}, got {gathered_objects}")
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -241,7 +283,10 @@ class TestDistWrapper(DTensorTestBase):
         )
         scattered_objects = dist_wrapper.scatter_object(objects)
         expected_objects = rank
-        assert scattered_objects == expected_objects
+        if scattered_objects != expected_objects:
+            raise AssertionError(
+                f"Expected {expected_objects}, got {scattered_objects}"
+            )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -255,11 +300,12 @@ class TestDistWrapper(DTensorTestBase):
 
         rank = dist.get_rank()
         # only local rank 1 supplies the payload
-        payload: Optional[int] = rank if rank == 1 else None
+        payload: int | None = rank if rank == 1 else None
 
         result = dist_wrapper.broadcast_object(payload)
         # every rank should receive the value from global rank 1
-        assert result == 1
+        if result != 1:
+            raise AssertionError(f"Expected 1, got {result}")
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -276,14 +322,15 @@ class TestDistWrapper(DTensorTestBase):
         rank = mesh_2d.get_rank()
 
         # only the local coordinator in each subgroup provides payload
-        payload: Optional[int] = rank if dist_wrapper.is_coordinator else None
+        payload: int | None = rank if dist_wrapper.is_coordinator else None
         got = dist_wrapper.broadcast_object(payload)
 
         # ensure we broadcast from the *global* coordinator rank,
         # not the local index.  For rows [0,1] this is global rank 1;
         # for rows [2,3] this is global rank 3.
         expected = dist_wrapper.global_coordinator_rank
-        assert got == expected
+        if got != expected:
+            raise AssertionError(f"Expected {expected}, got {got}")
 
     @with_comms
     @skip_if_lt_x_gpu(2)

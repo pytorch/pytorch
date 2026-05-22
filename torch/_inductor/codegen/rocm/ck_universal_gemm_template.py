@@ -4,7 +4,6 @@ import logging
 import math
 import random
 from collections import namedtuple
-from typing import Optional
 
 import sympy
 
@@ -317,7 +316,7 @@ class CKGemmTemplate(CKTemplate):
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
@@ -417,6 +416,8 @@ class CKGemmTemplate(CKTemplate):
         if op.b_element_dtype != self._TORCH_DTYPE_TO_CK[W_meta.dtype]:
             return None
         if op.c_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
+            return None
+        if self.is_blocked_by_tf32_setting(op):
             return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
@@ -547,10 +548,10 @@ class CKGemmTemplate(CKTemplate):
         # Define the mapping of versions to stages
         version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
         # Get the stages for the given version
-        stages = version_to_stages.get(version, None)
+        stages = version_to_stages.get(version)
         if stages is None:
             # This means we're at stage 2, and this requires computation
-            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
+            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143
             wgp_per_cu = max(4 * warp_size // op.block_size, 1)
             full_mem_band_prefetch_stages = math.ceil(
                 32768
@@ -590,9 +591,11 @@ class CKGemmTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
@@ -612,9 +615,9 @@ class CKGemmTemplate(CKTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes", None)
+        epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         # input nodes:
@@ -937,6 +940,7 @@ class CKGemmTemplate(CKTemplate):
         for o in rops:
             kBatches = self._get_kBatch(o)
             for kBatch in kBatches:
+                # pyrefly: ignore [bad-argument-type]
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), ops))

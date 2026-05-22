@@ -2,7 +2,8 @@
 import contextlib
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import sympy
 
@@ -90,7 +91,7 @@ class FakeTensorUpdater:
 
     def incremental_update(self):
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
-        existing_storages: defaultdict[Optional[int], int] = defaultdict(int)
+        existing_storages: defaultdict[int | None, int] = defaultdict(int)
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
@@ -98,7 +99,7 @@ class FakeTensorUpdater:
             return statically_known_true(sym_eq(new, old))
 
         def is_fake_tensor_same(new, old, *, node):
-            if type(new) != type(old):
+            if type(new) is not type(old):
                 return False
             if isinstance(new, (list, tuple)):
                 if len(new) != len(old):
@@ -146,7 +147,7 @@ class FakeTensorUpdater:
                             (torch._ops.OpOverload, torch._ops.HigherOrderOperator),
                         )
                         or user.target
-                        == torch._inductor.fx_passes.reinplace._generalized_scatter
+                        is torch._inductor.fx_passes.reinplace._generalized_scatter
                     ):
                         return True
                     if isinstance(user.target, torch._ops.HigherOrderOperator):
@@ -200,9 +201,9 @@ class FakeTensorUpdater:
             # tensors from an op.
             return node.op == "call_function" and (
                 isinstance(node.target, torch._ops.OpOverload)
-                or node.target == operator.getitem
+                or node.target is operator.getitem
                 or node.target
-                == torch._inductor.fx_passes.reinplace._generalized_scatter
+                is torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         to_process = OrderedSet[int]()
@@ -238,6 +239,7 @@ class FakeTensorUpdater:
                 symbol_to_path := compute_unbacked_bindings(shape_env, new_fake_tensor)
             ):
                 # Refresh the bindings to the new symbols
+
                 node.meta["unbacked_bindings"] = symbol_to_path
 
             existing_storages[get_node_storage(node)] += 1
@@ -251,7 +253,7 @@ def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node: torch.fx.Node) -> Optional[int]:
+def get_node_storage(node: torch.fx.Node) -> int | None:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):
@@ -313,13 +315,23 @@ def is_node_realized(node: torch.fx.Node) -> bool:
     return False
 
 
-def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
+def count_flops_fx(node: torch.fx.Node) -> int | None:
     if not countable_fx(node) or isinstance(node.target, str):
         return None
     with FakeTensorMode(allow_non_fake_inputs=True):
         success, args, kwargs = get_fake_args_kwargs(node)
 
         if success:
+            # flex_attention HOPs have registered formulas, but invoking them
+            # here can require tracing-only context, e.g. TransformGetItemToIndex.
+            if node.target in (
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.flex_attention_backward,
+            ):
+                flop_formula = flop_registry.get(node.target)
+                if flop_formula is not None:
+                    return flop_formula(*args, **kwargs, out_val=node.meta.get("val"))
+
             with torch.utils.flop_counter.FlopCounterMode(
                 display=False
             ) as flop_counter_mode:

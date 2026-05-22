@@ -37,8 +37,8 @@ static inline ExprPtr newBinaryOpOfType(
     case IRNodeType::kRshift:
       return alloc<Rshift>(lhs, rhs);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      TORCH_INTERNAL_ASSERT(
+          false, "unsupported expr_type: ", static_cast<int>(expr_type));
   }
 }
 
@@ -414,7 +414,7 @@ ExprPtr PolynomialTransformer::mutate(const AddPtr& v) {
   }
 
   // If this is a floating point Add then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Add>(lhs_new, rhs_new);
@@ -598,7 +598,7 @@ ExprPtr PolynomialTransformer::mutate(const SubPtr& v) {
   }
 
   // If this is a floating point Sub then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Sub>(lhs_new, rhs_new);
@@ -885,7 +885,7 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   bool merged{false};
   for (const auto& component : term->variables()) {
     if (auto roundoff = isRoundOff(component, expr)) {
-      vars.push_back(roundoff);
+      vars.push_back(std::move(roundoff));
       merged = true;
     } else {
       vars.push_back(component);
@@ -897,10 +897,10 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   }
 
   if (vars.size() == 1 && immediateEquals(term->scalar(), 1)) {
-    return vars[0];
+    return std::move(vars[0]);
   }
 
-  return alloc<Term>(hasher_, term->scalar(), vars);
+  return alloc<Term>(hasher_, term->scalar(), std::move(vars));
 }
 
 ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
@@ -938,7 +938,7 @@ ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
   }
 
   // If this is a floating point Mul then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Mul>(lhs_new, rhs_new);
@@ -1089,7 +1089,7 @@ ExprPtr PolynomialTransformer::mutate(const DivPtr& v) {
   }
 
   // If this is a floating point Div then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Div>(lhs_new, rhs_new);
@@ -3079,7 +3079,7 @@ bool exprEquals(const ExprPtr& A, const ExprPtr& B) {
       return false;
     }
     return immediateEquals(diff, 0);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return false;
   }
 }

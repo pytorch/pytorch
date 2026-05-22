@@ -43,7 +43,7 @@ namespace c10::xpu {
    * on the device. */                                                         \
   _(max_num_sub_groups)                                                        \
                                                                                \
-  /* a std::vector of size_t containing the set of sub-group sizes  supported  \
+  /* a std::vector of size_t containing the set of sub-group sizes supported   \
    * by the device. */                                                         \
   _(sub_group_sizes)                                                           \
                                                                                \
@@ -129,8 +129,14 @@ namespace c10::xpu {
   /* the device identifier of the Intel GPU, also known as the product ID. */ \
   _(device_id, device_id, 0)                                                  \
                                                                               \
-  /* the device descriptor for device Universal Unique ID, 16 bytes*/         \
-  _(uuid, device_info_uuid, (std::array<unsigned char, 16>{}))
+  /* the device descriptor for device Universal Unique ID, 16 bytes. */       \
+  _(uuid, device_info_uuid, (std::array<unsigned char, 16>{}))                \
+                                                                              \
+  /* the maximum clock rate of device's global memory in MHz. */              \
+  _(memory_clock_rate, memory_clock_rate, 0)                                  \
+                                                                              \
+  /* the maximum bus width between device and memory in bits. */              \
+  _(memory_bus_width, memory_bus_width, 0)
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
@@ -180,20 +186,24 @@ namespace c10::xpu {
   _DEFINE_SYCL_PROP(                     \
       sycl::ext::oneapi::experimental::info::device, property, property)
 
-struct C10_XPU_API DeviceProp {
-  AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP);
+struct C10_XPU_API DeviceProp{
+    AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP)
 
-  // the platform name.
-  DEFINE_PLATFORM_PROP(name, platform_name);
+    // the platform name.
+    DEFINE_PLATFORM_PROP(name, platform_name)
 
-  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
+    // ext properties.
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-  AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
+    // device aspects.
+    AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT)
 
-  AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT);
+    // experimental device aspects.
+    AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT)
 
 #if SYCL_COMPILER_VERSION >= 20250000
-  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP);
+    // experimental device properties.
+    AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP)
 #endif
 };
 

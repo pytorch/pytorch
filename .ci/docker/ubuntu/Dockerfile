@@ -8,6 +8,9 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
+# Allow APT to run as root
+RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
+
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
@@ -28,8 +31,10 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
+ARG PYTHON_FREETHREADED
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
@@ -37,7 +42,6 @@ COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./common/install_magma_conda.sh install_magma_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
-RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
 ARG GCC_VERSION
@@ -52,9 +56,9 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu* install_cusparselt.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 # No effect if cuda not installed
@@ -63,36 +67,7 @@ ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
 ARG CUDA_VERSION
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
-
-# (optional) Install vision packages like OpenCV
-ARG VISION
-COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
-ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
-
-COPY ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
 
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
@@ -100,8 +75,15 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
 COPY ci_commit_pins/timm.txt timm.txt
 COPY ci_commit_pins/torchbench.txt torchbench.txt
+# Only build aoti cpp tests when INDUCTOR_BENCHMARKS is set to True
+ENV BUILD_AOT_INDUCTOR_TEST ${INDUCTOR_BENCHMARKS}
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
+
+ARG INSTALL_MINGW
+COPY ./common/install_mingw.sh install_mingw.sh
+RUN if [ -n "${INSTALL_MINGW}" ]; then bash ./install_mingw.sh; fi
+RUN rm install_mingw.sh
 
 ARG TRITON
 ARG TRITON_CPU
@@ -136,11 +118,41 @@ COPY ci_commit_pins/halide.txt halide.txt
 RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
 
+ARG PALLAS
+ARG TPU
+ARG CUDA_VERSION
+# Install JAX (for Pallas) - with TPU/CUDA support based on args
+# TPU=yes -> install JAX with TPU support
+# PALLAS=yes + CUDA_VERSION -> install JAX with CUDA support
+# PALLAS=yes (no CUDA) -> install JAX CPU-only
+COPY ./common/requirements_tpu.txt requirements_tpu.txt
+COPY ./common/install_jax.sh install_jax.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
+RUN if [ -n "${TPU}" ]; then \
+      bash -c "source ./common_utils.sh && pip_install -r requirements_tpu.txt" && \
+      bash ./install_jax.sh tpu; \
+    elif [ -n "${PALLAS}" ]; then \
+      bash ./install_jax.sh ${CUDA_VERSION:-cpu}; \
+    fi
+RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
+
 ARG ONNX
 # Install ONNX dependencies
 COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
+
+# Build TSan-instrumented CPython for thread sanitizer testing
+ARG TSAN
+COPY ./common/install_cpython.sh install_cpython.sh
+COPY requirements-ci.txt /tmp/requirements-ci.txt
+RUN if [ -n "${TSAN}" ]; then \
+      CC=clang-18 CXX=clang++-18 \
+      CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh && \
+      /opt/python/cp314-cp314t+tsan/bin/pip install -r /tmp/requirements-ci.txt; \
+    fi
+RUN rm -f install_cpython.sh /tmp/requirements-ci.txt
 
 # (optional) Build ACL
 ARG ACL
@@ -175,11 +187,6 @@ RUN rm install_openmpi.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-ARG SKIP_LLVM_SRC_BUILD_INSTALL
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
 
 # AWS specific CUDA build guidance
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"

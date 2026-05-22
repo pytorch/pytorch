@@ -19,7 +19,7 @@ import os
 import tempfile
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -34,11 +34,11 @@ from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
-_NumericType = Union[Number, torch.Tensor, np.ndarray]
-_ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
-_InputArgsType = Union[torch.Tensor, tuple[Any, ...]]
+_NumericType = Number | torch.Tensor | np.ndarray
+_ModelType = torch.nn.Module | torch.jit.ScriptModule
+_InputArgsType = torch.Tensor | tuple[Any, ...]
 _InputKwargsType = Mapping[str, Any]
-_OutputsType = Union[Sequence[_NumericType], Sequence]
+_OutputsType = Sequence[_NumericType] | Sequence
 
 
 class OnnxBackend(enum.Enum):
@@ -209,10 +209,11 @@ def _compare_onnx_pytorch_outputs_in_np(
     onnx_outs: _OutputsType,
     pt_outs: _OutputsType,
     options: VerificationOptions,
-):
-    assert len(onnx_outs) == len(pt_outs), (
-        f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
-    )
+) -> None:
+    if len(onnx_outs) != len(pt_outs):
+        raise AssertionError(
+            f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
+        )
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
@@ -239,18 +240,21 @@ def _compare_onnx_pytorch_outputs_in_np(
             if acceptable_error_percentage:
                 error_percentage = 1 - np.sum(
                     np.isclose(ort_out, pt_out, rtol=options.rtol, atol=options.atol)
-                ) / np.prod(ort_out.shape)
+                ) / np.prod(ort_out.shape)  # pyrefly: ignore [missing-attribute]
                 if error_percentage <= acceptable_error_percentage:
                     warnings.warn(
                         f"Suppressed AssertionError:\n{e}.\n"
                         f"Error percentage {error_percentage} "
-                        f"within acceptable range {acceptable_error_percentage}."
+                        f"within acceptable range {acceptable_error_percentage}.",
+                        stacklevel=2,
                     )
                     continue
+            # pyrefly: ignore [missing-attribute]
             if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
-                warnings.warn("ONNX output is quantized")
+                warnings.warn("ONNX output is quantized", stacklevel=2)
+            # pyrefly: ignore [missing-attribute]
             if pt_out.dtype == np.uint8 or pt_out.dtype == np.int8:
-                warnings.warn("PyTorch output is quantized")
+                warnings.warn("PyTorch output is quantized", stacklevel=2)
             raise
 
 
@@ -258,7 +262,7 @@ def _compare_onnx_pytorch_outputs(
     onnx_outs: _OutputsType,
     pt_outs: Any,
     options: VerificationOptions,
-):
+) -> None:
     """
     Compare ONNX and PyTorch outputs.
 
@@ -367,7 +371,8 @@ def _try_clone_model(model):
         return copy.deepcopy(model)
     except Exception:
         warnings.warn(
-            "Failed to clone model. Model state might be mutated during verification."
+            "Failed to clone model. Model state might be mutated during verification.",
+            stacklevel=2,
         )
         return model
 
@@ -379,7 +384,7 @@ def _compare_onnx_pytorch_model(
     input_kwargs: _InputKwargsType | None,
     additional_test_inputs: Sequence[_InputArgsType] | None,
     options: VerificationOptions,
-):
+) -> None:
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
     Args:
@@ -397,7 +402,7 @@ def _compare_onnx_pytorch_model(
     """
     onnx_session = _onnx_backend_session(onnx_model_f, options.backend)
 
-    def compare_onnx_pytorch_model_with_input(input_args, input_kwargs):
+    def compare_onnx_pytorch_model_with_input(input_args, input_kwargs) -> None:
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
         pt_model_copy = _try_clone_model(pt_model)
@@ -439,7 +444,7 @@ def verify(
     use_external_data: bool = False,
     additional_test_inputs: Sequence[_InputArgsType] | None = None,
     options: VerificationOptions | None = None,
-):
+) -> None:
     """Verify model export to ONNX against original PyTorch model.
 
     .. deprecated:: 2.7

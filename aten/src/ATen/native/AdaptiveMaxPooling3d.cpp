@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <tuple>
 
 #include <ATen/native/AdaptivePooling.h>
 
@@ -93,7 +92,7 @@ namespace {
 // 5d tensor B x D x T x H x W
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_single_out_frame(
+void adaptive_max_pool3d_single_out_frame(
           const scalar_t *input_p,
           scalar_t *output_p,
           int64_t *ind_p,
@@ -170,7 +169,7 @@ static void adaptive_max_pool3d_single_out_frame(
 }
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_out_frame(
+void adaptive_max_pool3d_out_frame(
           const scalar_t *input_data,
           scalar_t *output_data,
           int64_t *indices_data,
@@ -202,7 +201,7 @@ static void adaptive_max_pool3d_out_frame(
 }
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_backward_single_out_frame(
+void adaptive_max_pool3d_backward_single_out_frame(
           scalar_t *gradInput_p,
           const scalar_t *gradOutput_p,
           const int64_t *ind_p,
@@ -241,7 +240,7 @@ static void adaptive_max_pool3d_backward_single_out_frame(
 }
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_backward_out_frame(
+void adaptive_max_pool3d_backward_out_frame(
           scalar_t *gradInput_data,
           const scalar_t *gradOutput_data,
           const int64_t *indices_data,
@@ -312,8 +311,8 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
         input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
           auto input_data = input.const_data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
-          auto indices_data = indices.data_ptr<int64_t>();
+          auto output_data = output.mutable_data_ptr<scalar_t>();
+          auto indices_data = indices.mutable_data_ptr<int64_t>();
 
           adaptive_max_pool3d_single_out_frame<scalar_t>(
               input_data,
@@ -335,8 +334,8 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
         input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
           auto input_data = input.const_data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
-          auto indices_data = indices.data_ptr<int64_t>();
+          auto output_data = output.mutable_data_ptr<scalar_t>();
+          auto indices_data = indices.mutable_data_ptr<int64_t>();
 
           adaptive_max_pool3d_out_frame<scalar_t>(
               input_data,
@@ -405,7 +404,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
         input.scalar_type(), "adaptive_max_pool3d_backward", [&] {
           /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
           const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
           const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 
@@ -425,7 +424,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
         input.scalar_type(), "adaptive_max_pool3d_backward", [&] {
           /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
           const scalar_t* gradOutput_data = gradOutput_.const_data_ptr<scalar_t>();
           const int64_t* indices_data = indices.const_data_ptr<int64_t>();
 

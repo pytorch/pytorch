@@ -3,8 +3,8 @@
 import contextlib
 import functools
 import unittest
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -89,15 +89,17 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self,
         *,
         no_sync: bool,
-        setup_func: Optional[Callable] = None,
+        setup_func: Callable | None = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
         checkpoint: bool = False,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
+        if device_type == "xpu":
+            torch.use_deterministic_algorithms(True, warn_only=True)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
@@ -249,6 +251,28 @@ class ReplicateTest(MultiProcessInductorTestCase):
     def test_compile_backward_only(self):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
+    def test_ddp_optimizer_splits_graph(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+
+        model = Net()
+        compiled_model = torch.compile(replicate(model), fullgraph=False)
+
+        input = torch.randn([1, DIM])
+        loss = compiled_model(input).sum()
+
+        with compiled_autograd._enable(compiler_fn()):
+            loss.backward()
+
+        self.assertGreater(counters["inductor"]["ddp_buckets"], 0)
+
+        dist.destroy_process_group()
+
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
             dist.init_process_group(
@@ -364,6 +388,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
+        super().setUp()
         # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
@@ -7,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
+
+from check_wheel_tags import check_mac_wheel_minos, check_wheel_platform_tag
 
 import torch
 import torch._dynamo
@@ -24,6 +27,7 @@ channel = os.getenv("MATRIX_CHANNEL")
 package_type = os.getenv("MATRIX_PACKAGE_TYPE")
 target_os = os.getenv("TARGET_OS", sys.platform)
 BASE_DIR = Path(__file__).parent.parent.parent
+PYTORCH_ROOT = BASE_DIR.parent
 
 is_cuda_system = gpu_arch_type == "cuda"
 NIGHTLY_ALLOWED_DELTA = 3
@@ -44,6 +48,15 @@ MODULES = [
         "repo_name": "audio",
     },
 ]
+
+
+def get_modules_for_package(package: str) -> list:
+    if package == "all":
+        return MODULES
+    elif package == "torch_torchvision":
+        return [m for m in MODULES if m["name"] == "torchvision"]
+    else:
+        return []
 
 
 class Net(nn.Module):
@@ -104,8 +117,8 @@ def check_version(package: str) -> None:
                 f"Torch version mismatch, expected {stable_version} for channel {channel}. But its {torch.__version__}"
             )
 
-        if release_version and package == "all":
-            for module in MODULES:
+        if release_version and package in ["all", "torch_torchvision"]:
+            for module in get_modules_for_package(package):
                 imported_module = importlib.import_module(module["name"])
                 module_version = imported_module.__version__
                 if not module_version.startswith(release_matrix[module["name"]]):
@@ -135,8 +148,8 @@ def check_nightly_binaries_date(package: str) -> None:
             f"the binaries are from {date_t_str} and are more than {NIGHTLY_ALLOWED_DELTA} days old!"
         )
 
-    if package == "all":
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"]:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             module_version = imported_module.__version__
             date_m_str = re.findall("dev\\d+", module_version)
@@ -183,10 +196,15 @@ def test_cuda_gds_errors_captured() -> None:
         print("Testing test_cuda_gds_errors_captured")
         with NamedTemporaryFile() as f:
             torch.cuda.gds.GdsFile(f.name, os.O_CREAT | os.O_RDWR)
+        # cuFile >= 1.17 (CUDA 13.2+) compat mode: registration succeeds
+        # without nvidia-fs driver, falling back to POSIX I/O
+        if major_version > 13 or (major_version == 13 and minor_version >= 2):
+            print("GDS handle registered successfully via compatibility mode")
+            cuda_exception_missed = False
     except RuntimeError as e:
         expected_error = "cuFileHandleRegister failed"
         if re.search(expected_error, f"{e}"):
-            print(f"Caught CUDA exception with success: {e}")
+            print(f"Caught expected CUDA exception: {e}")
             cuda_exception_missed = False
         else:
             raise e
@@ -196,7 +214,7 @@ def test_cuda_gds_errors_captured() -> None:
         )
 
 
-def find_pypi_package_version(package: str) -> Optional[str]:
+def find_pypi_package_version(package: str) -> str | None:
     from importlib import metadata
 
     dists = metadata.distributions()
@@ -204,6 +222,89 @@ def find_pypi_package_version(package: str) -> Optional[str]:
         if dist.metadata["Name"].startswith(package):
             return dist.version
     return None
+
+
+def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
+
+    Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS and extracts the cudnn version
+    for the given CUDA version (e.g. "12.6").
+    """
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
+    if not matrix_script.exists():
+        print(f"Warning: {matrix_script} not found, skipping cuDNN version check")
+        return None
+
+    content = matrix_script.read_text()
+    # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
+    # and extract major.minor.patch (dropping the build number)
+    pattern = (
+        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
+    )
+    match = re.search(pattern, content)
+    if match:
+        return match.group(1)
+    return None
+
+
+def get_expected_cudnn_version_windows(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version from cuda_install.bat for Windows.
+
+    Reads the batch file and extracts EXPECTED_CUDNN_VERSION for the given
+    CUDA version (e.g. "12.6" maps to CUDA_VER 126).
+    """
+    bat_file = (
+        PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
+    if not bat_file.exists():
+        print(f"Warning: {bat_file} not found, skipping cuDNN version check")
+        return None
+
+    content = bat_file.read_text()
+    # Convert "12.6" to "126" to match batch file's CUDA_VER format
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    # Match: if %CUDA_VER% EQU 126 ( ... set EXPECTED_CUDNN_VERSION=9.10.2 )
+    pattern = (
+        rf"if %CUDA_VER% EQU {re.escape(cuda_ver_nodot)}\s*\("
+        r"[\s\S]*?set EXPECTED_CUDNN_VERSION=(\d+\.\d+\.\d+)"
+    )
+    match = re.search(pattern, content)
+    if match:
+        return match.group(1)
+    return None
+
+
+def check_cudnn_version(cuda_version: str, actual_cudnn_version: str) -> None:
+    """Validate cuDNN version matches expected version from build config files."""
+    if sys.platform in ["linux", "linux2"]:
+        expected = get_expected_cudnn_version_linux(cuda_version)
+        source = "generate_binary_build_matrix.py"
+    elif sys.platform == "win32":
+        expected = get_expected_cudnn_version_windows(cuda_version)
+        source = "cuda_install.bat"
+    else:
+        print(f"cuDNN version check not supported on platform {sys.platform}")
+        return
+
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected cuDNN version for CUDA {cuda_version} "
+            f"from {source}, skipping validation"
+        )
+        return
+
+    if not actual_cudnn_version.startswith(expected):
+        raise RuntimeError(
+            f"cuDNN version mismatch for CUDA {cuda_version}. "
+            f"Loaded: {actual_cudnn_version} Expected: {expected} (from {source})"
+        )
+    print(
+        f"cuDNN version check passed: {actual_cudnn_version} matches "
+        f"expected {expected} from {source}"
+    )
 
 
 def cudnn_to_version_str(cudnn_version: int) -> str:
@@ -235,8 +336,8 @@ def smoke_test_cuda(
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
 
-    if package == "all" and is_cuda_system:
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"] and is_cuda_system:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             # TBD for vision move extension module to private so it will
             # be _extention.
@@ -247,12 +348,12 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    # torch.compile is available on macos-arm64 and Linux for python 3.8-3.13
-    if (
-        torch_compile_check == "enabled"
-        and sys.version_info < (3, 14, 0)
-        and target_os in ["linux", "linux-aarch64", "macos-arm64", "darwin"]
-    ):
+    if torch_compile_check == "enabled" and target_os in [
+        "linux",
+        "linux-aarch64",
+        "macos-arm64",
+        "darwin",
+    ]:
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
 
     if torch.cuda.is_available():
@@ -271,6 +372,20 @@ def smoke_test_cuda(
         print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
+
+        torch_cudnn_compile_version = torch._C._cudnn.getCompileVersion()
+        print(f"Torch cuDNN compile-time version: {torch_cudnn_compile_version}")
+        torch_cudnn_runtime_version = tuple(
+            [int(x) for x in torch_cudnn_version.split(".")]
+        )
+        if torch_cudnn_runtime_version != torch_cudnn_compile_version:
+            raise RuntimeError(
+                "cuDNN runtime version doesn't match comple version. "
+                f"Loaded: {torch_cudnn_runtime_version} "
+                f"Expected: {torch_cudnn_compile_version}"
+            )
+
+        check_cudnn_version(gpu_arch_ver, torch_cudnn_version)
 
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
@@ -297,7 +412,8 @@ def smoke_test_conv2d() -> None:
     m = nn.Conv2d(16, 33, 3, stride=2)
     # non-square kernels and unequal stride and with padding
     m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-    assert m is not None
+    if m is None:
+        raise AssertionError("Conv2d with non-square kernels returned None")
     # non-square kernels and unequal stride and with padding and dilation
     basic_conv = nn.Conv2d(
         16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
@@ -311,7 +427,8 @@ def smoke_test_conv2d() -> None:
         x = torch.randn(1, 3, 24, 24, device="cuda")
         with torch.cuda.amp.autocast():
             out = conv(x)
-        assert out is not None
+        if out is None:
+            raise AssertionError("Conv2d with cuda autocast returned None")
 
         supported_dtypes = [torch.float16, torch.float32, torch.float64]
         for dtype in supported_dtypes:
@@ -319,26 +436,33 @@ def smoke_test_conv2d() -> None:
             conv = basic_conv.to(dtype).cuda()
             input = torch.randn(20, 16, 50, 100, device="cuda").type(dtype)
             output = conv(input)
-            assert output is not None
+            if output is None:
+                raise AssertionError(f"Conv2d with cuda for {dtype} returned None")
 
 
 def test_linalg(device="cpu") -> None:
     print(f"Testing smoke_test_linalg on {device}")
     A = torch.randn(5, 3, device=device)
     U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    assert (
+    if not (
         U.shape == A.shape
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U @ torch.diag(S) @ Vh)
 
     U, S, Vh = torch.linalg.svd(A)
-    assert (
+    if not (
         U.shape == torch.Size([5, 5])
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD full_matrices shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U[:, :3] @ torch.diag(S) @ Vh)
 
     A = torch.randn(7, 5, 3, device=device)
@@ -351,6 +475,18 @@ def test_linalg(device="cpu") -> None:
             print(f"Testing smoke_test_linalg with cuda for {dtype}")
             A = torch.randn(20, 16, 50, 100, device=device, dtype=dtype)
             torch.linalg.svd(A)
+
+
+def test_sdpa(device="cpu", dtype=torch.float16) -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
+    Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
+    """
+    print(f"Testing SDPA on {device} using type {dtype}")
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
+    attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
+    rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
+    if rc.isnan().any().item() is not False:
+        raise AssertionError("SDPA output contains NaN values")
 
 
 def smoke_test_compile(device: str = "cpu") -> None:
@@ -386,8 +522,8 @@ def smoke_test_compile(device: str = "cpu") -> None:
 
 
 def smoke_test_nvshmem() -> None:
-    if not torch.cuda.is_available():
-        print("CUDA is not available, skipping NVSHMEM test")
+    if not torch.cuda.is_available() or target_os == "windows":
+        print("Windows platform or CUDA is not available, skipping NVSHMEM test")
         return
 
     # Check if NVSHMEM is compiled in current build
@@ -396,7 +532,9 @@ def smoke_test_nvshmem() -> None:
     except ImportError:
         # Not built with NVSHMEM support.
         # torch is not compiled with NVSHMEM prior to 2.9
-        if torch.__version__ < "2.9":
+        from torch.torch_version import TorchVersion
+
+        if TorchVersion(torch.__version__) < (2, 9):
             return
         else:
             # After 2.9: NVSHMEM is expected to be compiled in current build
@@ -408,9 +546,9 @@ def smoke_test_nvshmem() -> None:
     print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
 
 
-def smoke_test_modules():
+def smoke_test_modules(package: str):
     cwd = os.getcwd()
-    for module in MODULES:
+    for module in get_modules_for_package(package):
         if module["repo"]:
             if not os.path.exists(f"{cwd}/{module['repo_name']}"):
                 print(f"Path does not exist: {cwd}/{module['repo_name']}")
@@ -448,7 +586,7 @@ def parse_args():
         "--package",
         help="Package to include in smoke testing",
         type=str,
-        choices=["all", "torchonly"],
+        choices=["all", "torch_torchvision", "torchonly"],
         default="all",
     )
     parser.add_argument(
@@ -487,13 +625,15 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+    test_sdpa()
 
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
+        test_sdpa("cuda")
 
-    if options.package == "all":
-        smoke_test_modules()
+    if options.package in ["all", "torch_torchvision"]:
+        smoke_test_modules(options.package)
 
     smoke_test_cuda(
         options.package,
@@ -503,6 +643,9 @@ def main() -> None:
     )
 
     smoke_test_nvshmem()
+
+    check_wheel_platform_tag()
+    check_mac_wheel_minos()
 
 
 if __name__ == "__main__":

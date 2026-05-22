@@ -115,12 +115,12 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
 }
 
 inline bool THPUtils_unpackBool(PyObject* obj) {
-  if (obj == Py_True) {
+  if (Py_IsTrue(obj)) {
     return true;
-  } else if (obj == Py_False) {
+  } else if (Py_IsFalse(obj)) {
     return false;
   } else {
-    throw std::runtime_error("couldn't convert python object to boolean");
+    TORCH_CHECK(false, "couldn't convert python object to boolean");
   }
 }
 
@@ -199,13 +199,11 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking DeviceIndex");
-  }
-  if (value > std::numeric_limits<c10::DeviceIndex>::max() ||
-      value < std::numeric_limits<c10::DeviceIndex>::min()) {
-    throw std::runtime_error("Overflow when unpacking DeviceIndex");
-  }
+  TORCH_CHECK(overflow == 0, "Overflow when unpacking DeviceIndex");
+  TORCH_CHECK(
+      value <= std::numeric_limits<c10::DeviceIndex>::max() &&
+          value >= std::numeric_limits<c10::DeviceIndex>::min(),
+      "Overflow when unpacking DeviceIndex");
   return (c10::DeviceIndex)value;
 }
 

@@ -19,19 +19,22 @@ using namespace at;
 using namespace torch;
 
 PyObject* THPGeneratorClass = nullptr;
+static bool generatorMetaclassSet = false;
 
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
-  auto type = (PyTypeObject*)THPGeneratorClass;
+  auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
+  self_->weakreflist = nullptr;
   return self.release();
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
+  PyObject_ClearWeakRefs(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
@@ -44,12 +47,17 @@ static PyObject* THPGenerator_pynew(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      generatorMetaclassSet,
+      "torch.Generator() cannot be called before the opaque metaclass is set. "
+      "This is a bug — torch._prims.rng_prims must be imported first.");
   static torch::PythonArgParser parser({"Generator(Device device=None)"});
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
-  THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
+  THPGeneratorPtr self(
+      reinterpret_cast<THPGenerator*>(type->tp_alloc(type, 0)));
 
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
@@ -60,14 +68,14 @@ static PyObject* THPGenerator_pynew(
                       .getNewGenerator(device.index());
   }
 
-  return (PyObject*)self.release();
+  return reinterpret_cast<PyObject*>(self.release());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  auto& gen = ((THPGenerator*)_self)->cdata;
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -88,7 +96,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
             "expected a torch.ByteTensor, but got {}",
             Py_TYPE(_new_state)->tp_name));
   }
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
@@ -96,8 +104,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.set_state(new_state_tensor);
 
-  Py_INCREF(self);
-  return (PyObject*)self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -115,7 +122,7 @@ static uint64_t unpack_uint64(PyObject* pyobj) {
       unsigned_obj = *(reinterpret_cast<uint64_t*>(&obj));
     } else {
       // If any other type of exception happened, rethrow it
-      throw;
+      throw; // @allow-raw-throw
     }
   }
   return unsigned_obj;
@@ -125,7 +132,7 @@ static PyObject* THPGenerator_graphSafeGetState(
     PyObject* _self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto& gen = ((THPGenerator*)_self)->cdata;
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -138,21 +145,20 @@ static PyObject* THPGenerator_graphSafeSetState(
     PyObject* _self,
     PyObject* _state) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.graphsafe_set_state(THPGenerator_Unwrap(_state));
 
-  Py_INCREF(self);
-  return (PyObject*)self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto& gen = ((THPGenerator*)_self)->cdata;
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -163,7 +169,7 @@ static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(seed),
@@ -174,14 +180,13 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_current_seed(unsigned_seed);
-  Py_INCREF(self);
-  return (PyObject*)self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(offset),
@@ -192,15 +197,14 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_offset(unsigned_offset);
-  Py_INCREF(self);
-  return (PyObject*)self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   std::scoped_lock<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
@@ -209,14 +213,14 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   return THPUtils_packUInt64(self->cdata.get_offset());
   END_HANDLE_TH_ERRORS
 }
@@ -229,12 +233,12 @@ static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
 
 static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
   if (!ret)
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
 
   py::object torch_module = py::module::import("torch");
   py::object torch_generator = torch_module.attr("Generator");
@@ -242,14 +246,14 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
 
   auto args = THPObjectPtr{PyTuple_New(1)};
   if (!args)
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
 
   PyTuple_SET_ITEM(args.get(), 0, THPGenerator_get_device(self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 1, args.release());
 
   auto state = THPObjectPtr{PyTuple_New(3)};
   if (!state)
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
 
   c10::DeviceType device_type = gen.device().type();
   PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
@@ -269,7 +273,7 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
   HANDLE_TH_ERRORS
   THPGenerator_manualSeed(_self, PyTuple_GET_ITEM(state, 0));
   auto& offset = PyTuple_GET_ITEM(state, 1);
-  if (offset != Py_None) {
+  if (!Py_IsNone(offset)) {
     THPGenerator_setOffset(_self, offset);
   }
   THPGenerator_setState(_self, PyTuple_GET_ITEM(state, 2));
@@ -279,7 +283,11 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
-    {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
+    {"device",
+     reinterpret_cast<getter>(THPGenerator_get_device),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -332,7 +340,7 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPGenerator_methods, /* tp_methods */
@@ -348,12 +356,43 @@ static PyTypeObject THPGeneratorType = {
     THPGenerator_pynew, /* tp_new */
 };
 
+static PyObject* THPGenerator_pySetMetaclass(
+    PyObject* /* unused */,
+    PyObject* metaclass) {
+  if (generatorMetaclassSet) {
+    Py_RETURN_NONE;
+  }
+  if (!PyType_Check(metaclass)) {
+    PyErr_SetString(PyExc_TypeError, "metaclass must be a type");
+    return nullptr;
+  }
+  Py_INCREF(metaclass);
+  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)metaclass);
+  generatorMetaclassSet = true;
+  // Swapping the metaclass changes __module__ (Python resolves it via the
+  // metaclass). Reset it so pickle can find the class at torch._C.Generator.
+  auto module_name = THPObjectPtr(PyUnicode_FromString("torch._C"));
+  if (!module_name)
+    return nullptr;
+  if (PyDict_SetItemString(
+          THPGeneratorType.tp_dict, "__module__", module_name) < 0)
+    return nullptr;
+  Py_RETURN_NONE;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static PyMethodDef THPGenerator_moduleMethods[] = {
+    {"_set_generator_metaclass", THPGenerator_pySetMetaclass, METH_O, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
+
 bool THPGenerator_init(PyObject* module) {
-  THPGeneratorClass = (PyObject*)&THPGeneratorType;
-  if (PyType_Ready(&THPGeneratorType) < 0)
+  THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
+  if (PyModule_AddType(module, &THPGeneratorType) < 0)
     return false;
-  Py_INCREF(&THPGeneratorType);
-  PyModule_AddObject(module, "Generator", (PyObject*)&THPGeneratorType);
+  // Register _set_generator_metaclass on torch._C so Python code can
+  // late-bind OpaqueBaseMeta as Generator's metaclass (see rng_prims.py).
+  if (PyModule_AddFunctions(module, THPGenerator_moduleMethods) < 0)
+    return false;
   return true;
 }
 
@@ -373,11 +412,11 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
   }
 
   if (auto obj = pyobj(gen)) {
-    Py_INCREF(obj);
-    return obj;
+    return Py_NewRef(obj);
   }
 
-  return THPGenerator_NewWithVar((PyTypeObject*)THPGeneratorClass, gen);
+  return THPGenerator_NewWithVar(
+      reinterpret_cast<PyTypeObject*>(THPGeneratorClass), gen);
 }
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {
@@ -395,7 +434,7 @@ at::Generator THPGenerator_Unwrap(PyObject* state) {
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
-    auto g = (THPGenerator*)obj;
+    auto g = reinterpret_cast<THPGenerator*>(obj);
     new (&g->cdata) Generator(std::move(gen));
     set_pyobj(g->cdata, obj);
   }

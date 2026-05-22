@@ -16,7 +16,9 @@
 #endif
 
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
@@ -162,6 +164,20 @@ at::Tensor multimem_all_reduce_(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_all_reduce",
+      input.numel(),
+      input.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "multimem_all_reduce_: input must be contiguous.");
   TORCH_CHECK(
@@ -213,55 +229,82 @@ at::Tensor multimem_all_reduce_(
 }
 
 template <typename T, int alignment>
-static __global__ void multimem_one_shot_all_reduce_kernel(
+static __global__ void multimem_one_shot_reduce_kernel(
     T* input_mc_ptr,
     T* output_ptr,
     size_t numel,
     uint32_t** signal_pads,
     size_t rank,
-    size_t world_size) {
+    size_t world_size,
+    int64_t root) {
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
   sync_remote_blocks<false, true>(signal_pads, rank, world_size);
   __syncthreads();
 
-  auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
-  auto stride = blockDim.x * gridDim.x * numel_per_thread;
-  for (size_t i = offset; i < numel; i += stride) {
-    auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
-    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
+  if (rank == root) {
+    auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
+    auto stride = blockDim.x * gridDim.x * numel_per_thread;
+    for (size_t i = offset; i < numel; i += stride) {
+      auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
+      at::native::memory::st_vec<alignment>(output_ptr + i, vec);
+    }
   }
 
   __syncthreads();
   sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_one_shot_all_reduce_out(
+at::Tensor multimem_one_shot_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
+    int64_t root,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_one_shot_reduce",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(),
-      "multimem_one_shot_all_reduce: input must be contiguous.");
-  TORCH_CHECK(
-      out.is_contiguous(),
-      "multimem_one_shot_all_reduce: output must be contiguous.");
-  TORCH_CHECK(
-      out.sizes() == input.sizes(),
-      "multimem_one_shot_all_reduce: input/output size mismatch.");
+      "multimem_one_shot_reduce: input must be contiguous.");
   TORCH_CHECK(
       reduce_op == "sum",
-      "multimem_one_shot_all_reduce: only sum is supported for now.");
+      "multimem_one_shot_reduce: only sum is supported for now.");
 
   auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
-      "multimem_one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+      "multimem_one_shot_reduce: input must be allocated with empty_strided_p2p().");
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
-      "multimem_one_shot_all_reduce: requires multicast support.");
+      "multimem_one_shot_reduce: requires multicast support.");
+
+  int rank = symm_mem->get_rank();
+  int world_size = symm_mem->get_world_size();
+  TORCH_CHECK(
+      root >= 0 && root < world_size,
+      "multimem_one_shot_reduce: root must be in [0, world_size).")
+
+  if (rank == root) {
+    TORCH_CHECK(
+        out.is_contiguous(),
+        "multimem_one_shot_reduce: output must be contiguous.");
+    TORCH_CHECK(
+        out.sizes() == input.sizes(),
+        "multimem_one_shot_reduce: input/output size mismatch.");
+  }
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_one_shot_all_reduce");
@@ -281,7 +324,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
   AT_DISPATCH_FLOAT_AND_BFLOAT16(
       input.scalar_type(), "multimem_one_shot_all_reduce", [&]() {
         DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
-          multimem_one_shot_all_reduce_kernel<scalar_t, k_alignment>
+          multimem_one_shot_reduce_kernel<scalar_t, k_alignment>
               <<<num_blocks,
                  num_threads,
                  0,
@@ -292,12 +335,23 @@ at::Tensor multimem_one_shot_all_reduce_out(
                   input.numel(),
                   reinterpret_cast<uint32_t**>(
                       symm_mem->get_signal_pad_ptrs_dev()),
-                  symm_mem->get_rank(),
-                  symm_mem->get_world_size());
+                  rank,
+                  world_size,
+                  root);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
   return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  auto group = c10d::resolve_process_group(group_name);
+  int root = group->getRank();  // each rank reduces to itself
+  return multimem_one_shot_reduce_out(input, reduce_op, root, group_name, out);
 }
 
 at::Tensor multimem_one_shot_all_reduce(
@@ -336,6 +390,20 @@ at::Tensor multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_all_gather",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   auto symm_mem = c10d::symmetric_memory::rendezvous(out, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
@@ -450,6 +518,20 @@ at::Tensor one_shot_all_reduce_out_impl(
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::one_shot_all_reduce",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "one_shot_all_reduce: input must be contiguous.");
   TORCH_CHECK(
@@ -707,6 +789,20 @@ at::Tensor two_shot_all_reduce_impl(
     std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::two_shot_all_reduce",
+      input.numel(),
+      input.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "two_shot_all_reduce: input must be contiguous.");
   TORCH_CHECK(
@@ -831,6 +927,20 @@ at::Tensor reduce_scatter_out(
     std::string group_name,
     bool split_last_dim,
     at::Tensor output) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::reduce_scatter",
+      input.numel(),
+      output.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "reduce_scatter: input must be contiguous.");
   TORCH_CHECK(
@@ -1063,6 +1173,17 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
   return output;
 }
+
+at::Tensor multimem_one_shot_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t root,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
 } // namespace
 #endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 
@@ -1115,7 +1236,7 @@ at::Tensor memset32_(
       count,
       at::cuda::getCurrentCUDAStream()));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
+  C10_CUDA_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
                                    val,
                                    count,
                                    at::cuda::getCurrentCUDAStream()));
@@ -1172,7 +1293,7 @@ at::Tensor stream_write_value32_(
       val,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipStreamWriteValue32(
+  C10_CUDA_CHECK(hipStreamWriteValue32(
                                       at::cuda::getCurrentCUDAStream(),
                                       reinterpret_cast<void*>(addr),
                                       val,
@@ -1211,6 +1332,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("multimem_one_shot_all_reduce", ::multimem_one_shot_all_reduce);
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
+  m.impl(
+      "multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);

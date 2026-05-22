@@ -1318,7 +1318,7 @@ class OpKernel_aten__to_copy : public C10Kernel {
     }
   }
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     const auto& self = KernelInput(0).toTensor();
     auto& out = KernelOutput(0);
 
@@ -1423,5 +1423,34 @@ C10_REGISTER_TYPED_CLASS(
     StaticallyDispatchedCPUKernelRegistry,
     "torch.ops.aten._to_copy.default",
     OpKernel_aten__to_copy)
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.where.ScalarOther",
+    aten_where_ScalarOther,
+    {
+      const auto& condition = KernelInput(0).toTensor();
+      const auto& self = KernelInput(1).toTensor();
+      const auto& other = KernelInput(2).toScalar();
+
+      KernelOutput(0) = at::where(condition, self, other);
+    })
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.repeat_interleave.self_Tensor",
+    aten_repeat_interleave_self_Tensor,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      const auto& repeats = KernelInput(1).toTensor();
+      std::optional<int64_t> dim = std::nullopt;
+      if (!KernelInput(2).isNone()) {
+        dim = KernelInput(2).toInt();
+      }
+      std::optional<int64_t> output_size = std::nullopt;
+      if (!KernelInput(3).isNone()) {
+        output_size = KernelInput(3).toInt();
+      }
+
+      KernelOutput(0) = at::repeat_interleave(self, repeats, dim, output_size);
+    })
 
 } // namespace torch::nativert

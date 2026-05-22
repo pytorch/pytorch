@@ -18,6 +18,66 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.api
+```
+
+```{eval-rst}
+.. autofunction:: get_env_variable_or_raise
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.distributed
+```
+
+```{eval-rst}
+.. autofunction:: get_free_port
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.log_level
+```
+
+```{eval-rst}
+.. autofunction:: get_log_level
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.logging
+```
+
+```{eval-rst}
+.. autofunction:: get_logger
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: register_rendezvous_handler
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters_or_parameter_groups
+```
+
+```{eval-rst}
+.. autofunction:: get_params_to_average
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed
+```
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
@@ -51,7 +111,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
+| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 | barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -59,14 +119,14 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 ### Backends that come with PyTorch
 
-PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+PyTorch distributed package supports Linux (stable), macOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
 included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
 :::{note}
-As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+As of PyTorch v1.8, Windows supports all collective communications backends but NCCL,
 If the `init_method` argument of {func}`init_process_group` points to a file it must adhere
 to the following schema:
 
@@ -221,6 +281,16 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+.. autofunction:: torch.distributed.distributed_c10d.batch_isend_irecv
+.. autofunction:: torch.distributed.distributed_c10d.destroy_process_group
+.. autofunction:: torch.distributed.distributed_c10d.is_backend_available
+.. autofunction:: torch.distributed.distributed_c10d.irecv
+.. autofunction:: torch.distributed.distributed_c10d.is_gloo_available
+.. autofunction:: torch.distributed.distributed_c10d.is_initialized
+.. autofunction:: torch.distributed.distributed_c10d.is_mpi_available
+.. autofunction:: torch.distributed.distributed_c10d.is_nccl_available
+.. autofunction:: torch.distributed.distributed_c10d.is_torchelastic_launched
+.. autofunction:: torch.distributed.distributed_c10d.is_ucc_available
 ```
 
 ```{eval-rst}
@@ -333,11 +403,27 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_config
+```
+
+```{eval-rst}
 .. autofunction:: get_rank
 ```
 
 ```{eval-rst}
 .. autofunction:: get_world_size
+```
+
+```{eval-rst}
+.. autofunction:: get_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: get_node_local_rank
+```
+
+```{eval-rst}
+.. autofunction:: get_pg_count
 ```
 
 ## Shutdown
@@ -385,6 +471,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
+```
+
+```{eval-rst}
 .. autofunction:: get_group_rank
 ```
 
@@ -395,6 +485,14 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```{eval-rst}
 .. autofunction:: get_process_group_ranks
 
+```
+
+```{eval-rst}
+.. autofunction:: split_group
+```
+
+```{eval-rst}
+.. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
 ## DeviceMesh
@@ -519,6 +617,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: all_reduce_coalesced
+```
+
+```{eval-rst}
 .. autofunction:: reduce
 ```
 
@@ -532,6 +634,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: all_gather_object
+```
+
+```{eval-rst}
+.. autofunction:: all_gather_coalesced
 ```
 
 ```{eval-rst}
@@ -649,6 +755,33 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
+
+## Optimization with Symmetric Memory
+
+### Copy Engine Collectives
+
+When NCCL collective operations are performed on symmetric memory tensors with
+the zero-CTA policy, data movement is offloaded to the GPU's copy engines (DMA
+engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
+SMs for compute work, enabling better overlap of communication and computation.
+
+For setup instructions, requirements, and examples, see
+[Copy Engine Collectives](copy-engine-collectives) in the Symmetric Memory documentation.
+
+### Higher-Precision Reduction
+
+When NCCL collectives such as ``reduce_scatter`` and ``all_reduce`` operate on
+symmetric memory tensors, NCCL's symmetric kernel implementation automatically
+performs internal reduction with higher precision (e.g., BF16/FP16 in → FP32
+accumulate → BF16/FP16 out). This improves numerical accuracy without any code
+changes to the collective call.
+
+For details on scope, supported domains, and version requirements, see
+[Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
+
 ## Multi-GPU collective functions
 
 :::{warning}
@@ -721,6 +854,85 @@ the new backend.
 The support of third-party backend is experimental and subject to change.
 :::
 
+## TorchComms backend
+
+[TorchComms](https://github.com/meta-pytorch/torchcomms) is an optional
+communication backend for ``torch.distributed``. When enabled, it
+overrides the normal backend instantiation in {func}`init_process_group`
+so that all process groups are created through TorchComms instead of
+the built-in ``ProcessGroup`` implementations.
+
+:::{note}
+TorchComms is experimental and must be installed separately.
+The ``torchcomms`` package must be importable for the flags below to
+take effect.
+:::
+
+### Enabling TorchComms
+
+Set the ``TORCH_DISTRIBUTED_USE_TORCHCOMMS`` environment variable
+before calling {func}`init_process_group`:
+
+```bash
+export TORCH_DISTRIBUTED_USE_TORCHCOMMS=1
+```
+
+Or set the config flag programmatically:
+
+```python
+import torch.distributed.config as dist_config
+
+dist_config.use_torchcomms = True
+```
+
+The ``backend`` argument to {func}`init_process_group` (e.g. ``"nccl"``,
+``"gloo"``) is still respected -- it is forwarded to TorchComms, which
+selects the corresponding vendor plugin. No other application code
+changes are required; all ``torch.distributed`` collective APIs continue
+to work as before.
+
+### Behavior when enabled
+
+When TorchComms is enabled, {func}`init_process_group` changes its
+backend instantiation path for every device/backend pair in the process
+group (except the ``fake`` backend, which is always handled natively):
+
+1. A TorchComms communicator is created via ``torchcomms.new_comm()``
+   using the requested backend string and device.
+2. The communicator is wrapped in a ``_BackendWrapper`` that implements
+   the ``c10d::Backend`` C++ interface, making it a drop-in replacement
+   for the native ``ProcessGroup`` backends.
+3. A ``FlightRecorderHook`` is automatically registered on the
+   communicator. The hook respects the ``TORCH_FR_BUFFER_SIZE`` and
+   ``TORCH_NCCL_TRACE_BUFFER_SIZE`` environment variables for
+   configuring the trace buffer size.
+4. {func}`destroy_process_group` calls ``finalize()`` on TorchComms
+   communicators during cleanup.
+5. {func}`split_group` creates sub-communicators through TorchComms'
+   native splitting rather than constructing a new process group from
+   scratch.
+
+### Eager initialization
+
+TorchComms communicators are eagerly initialized during
+{func}`init_process_group` and only support a single backend device per
+group. The ``device_id`` argument must be specified at initialization
+time:
+
+```python
+dist.init_process_group(backend="nccl", device_id=torch.device("cuda", local_rank))
+```
+
+### Point-to-point operation concurrency
+
+Each TorchComms process group maps 1:1 to a single underlying
+communicator. Point-to-point operations (``send``/``recv``) issued on
+the same group and stream are **not guaranteed to run concurrently**.
+Code that relies on concurrent point-to-point operations must either:
+
+- Use the batched P2P APIs ({func}`batch_isend_irecv`), or
+- Issue the operations on separate groups or communicators.
+
 (distributed-launch)=
 
 ## Launch utility
@@ -731,7 +943,22 @@ multiple processes per node for distributed training.
 
 ```{eval-rst}
 .. automodule:: torch.distributed.launch
+```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.launch
+```
+
+```{eval-rst}
+.. autofunction:: launch
+```
+
+```{eval-rst}
+.. autofunction:: main
+```
+
+```{eval-rst}
+.. autofunction:: parse_args
 ```
 
 ## Spawn utility
@@ -973,6 +1200,24 @@ In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `T
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
 
+
+### torch.distributed.debug HTTP Server
+
+The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
+be started by calling {func}`torch.distributed.debug.start_debug_server`. This
+allows users to collect data across all workers at runtime.
+
+```{eval-rst}
+.. automodule:: torch.distributed.debug
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :special-members: __init__
+    :member-order: bysource
+
+```
+
+
 ## Logging
 
 In addition to explicit debugging support via {func}`torch.distributed.monitored_barrier` and `TORCH_DISTRIBUTED_DEBUG`, the underlying C++ library of `torch.distributed` also outputs log
@@ -1185,6 +1430,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.collective_utils
+
+.. autofunction:: torch.distributed.collective_utils.all_gather_object_enforce_type
 ```
 
 ```{eval-rst}
@@ -1333,6 +1580,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.launcher.api
+
+.. autofunction:: torch.distributed.launcher.api.launch_agent
 ```
 
 ```{eval-rst}

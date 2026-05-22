@@ -1,10 +1,10 @@
-#include <filesystem>
-#include <sstream>
+// @allow-raw-throw
 #include <unordered_map>
 
-#include <ATen/core/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
-#include <caffe2/utils/threadpool/WorkersPool.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
@@ -46,32 +46,6 @@ class ResponseImpl : public Response {
   httplib::Response& res_;
 };
 
-std::string jsonStrEscape(const std::string& str) {
-  std::ostringstream ostream;
-  for (char ch : str) {
-    if (ch == '"') {
-      ostream << "\\\"";
-    } else if (ch == '\\') {
-      ostream << "\\\\";
-    } else if (ch == '\b') {
-      ostream << "\\b";
-    } else if (ch == '\f') {
-      ostream << "\\f";
-    } else if (ch == '\n') {
-      ostream << "\\n";
-    } else if (ch == '\r') {
-      ostream << "\\r";
-    } else if (ch == '\t') {
-      ostream << "\\t";
-    } else if (ch <= '\x1f') {
-      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-              << static_cast<int>(ch);
-    } else {
-      ostream << ch;
-    }
-  }
-  return ostream.str();
-}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
@@ -86,20 +60,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   server_.Get(
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
-        std::ostringstream body;
-        body << "[";
-        bool first = true;
-        for (const auto& name : getHandlerNames()) {
-          if (!first) {
-            body << ",";
-          }
-          first = false;
-
-          body << "\"" << jsonStrEscape(name) << "\"";
-        }
-        body << "]";
-
-        res.set_content(body.str(), "application/json");
+        res.set_content(
+            nlohmann::json(getHandlerNames()).dump(), "application/json");
       });
   server_.Post(
       "/handler/:handler",
@@ -144,30 +106,32 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   if (port == -1) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
-
-    if (std::filesystem::exists(hostOrFile)) {
-      throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
-    }
+    TORCH_CHECK(
+        !c10::filesystem::exists(hostOrFile),
+        fmt::format("{} already exists", hostOrFile));
 
     C10D_WARNING("Server listening to UNIX {}", hostOrFile);
-    if (!server_.bind_to_port(hostOrFile, 80)) {
-      throw std::runtime_error(fmt::format("Error binding to {}", hostOrFile));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, 80),
+        fmt::format("Error binding to {}", hostOrFile));
+  } else if (port == 0) {
+    C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
+    port_ = server_.bind_to_any_port(hostOrFile);
+    TORCH_CHECK(
+        port_ >= 0, fmt::format("Error binding to {}:{}", hostOrFile, port));
   } else {
     C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
-    if (!server_.bind_to_port(hostOrFile, port)) {
-      throw std::runtime_error(
-          fmt::format("Error binding to {}:{}", hostOrFile, port));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, port),
+        fmt::format("Error binding to {}:{}", hostOrFile, port));
+    port_ = port;
   }
 
   serverThread_ = std::thread([this]() {
     c10::setThreadName("pt_workerserver");
 
     try {
-      if (!server_.listen_after_bind()) {
-        throw std::runtime_error("failed to listen");
-      }
+      TORCH_CHECK(server_.listen_after_bind(), "failed to listen");
     } catch (std::exception& e) {
       C10D_ERROR("Error while running server: {}", e.what());
       throw;

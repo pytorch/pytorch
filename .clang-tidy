@@ -59,18 +59,24 @@ performance-*,
 -performance-enum-size,
 readability-container-size-empty,
 readability-delete-null-pointer,
-readability-duplicate-include
+readability-duplicate-include,
+readability-named-parameter,
 readability-misplaced-array-index,
-readability-redundant*
+readability-redundant*,
 readability-simplify-subscript-expr,
+readability-static-definition-in-anonymous-namespace
 readability-string-compare,
 -readability-redundant-access-specifiers,
 -readability-redundant-control-flow,
+-readability-redundant-inline-specifier,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
+LineFilter:
+  - name: '/usr/include/.*'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
   cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
   misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h;IListRef.h'
+  performance-inefficient-vector-operation.VectorLikeClasses: '::std::vector;::c10::SmallVector'
 ...

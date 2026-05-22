@@ -1,8 +1,11 @@
 #include <cuda_fp16.h>
 #include <type_traits>
+#include <cmath>
+#include <limits>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -19,7 +22,7 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 #define build_grouped_gemm
 #endif
 
@@ -382,7 +385,7 @@ __global__ void add_padding_3(
 
 template <typename T>
 void add_padding_kernelLauncher(
-    T* input, // [batch_size x None]
+    const T* input, // [batch_size x None]
     T* output, // [batch_size x max(input.nested_size(1)) x inner_size]
     T padding_value,
     const int* offsets,
@@ -434,7 +437,7 @@ void add_padding_kernelLauncher(
 }
 
 template void add_padding_kernelLauncher<double>(
-    double* input,
+    const double* input,
     double* output,
     double padding_value,
     const int* offsets,
@@ -445,7 +448,7 @@ template void add_padding_kernelLauncher<double>(
     const int output_batch_size);
 
 template void add_padding_kernelLauncher<float>(
-    float* input,
+    const float* input,
     float* output,
     float padding_value,
     const int* offsets,
@@ -456,7 +459,7 @@ template void add_padding_kernelLauncher<float>(
     const int output_batch_size);
 
 template void add_padding_kernelLauncher<c10::Half>(
-    c10::Half* input,
+    const c10::Half* input,
     c10::Half* output,
     c10::Half padding_value,
     const int* offsets,
@@ -598,7 +601,7 @@ DEVICE_INLINE bool walk_down_tensor_storage_tree_(
     const int flattened_jagged_idx,
     const StackArray<int64_t>& jagged_dims,
     const StackArray<index_t*>& x_offsets) {
-  // compute coorindates
+  // compute coordinates
   int jagged_coords[NUM_JAGGED_DIM];
   int j_temp = flattened_jagged_idx;
 #pragma unroll
@@ -1450,12 +1453,11 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
   Tensor padded_values_view =
       D_folded ? padded_values.unsqueeze(-1) : padded_values;
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
+  AT_DISPATCH_V2(
       values.scalar_type(),
       "jagged_to_padded_dense",
-      [&] {
+      AT_WRAP([&] {
+        scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());  // Clamp infinite sentinels to dtype min/max to avoid overflow
         jagged_dense_elementwise_dense_output_<scalar_t>(
             values_canonicalized,
             offsets.vec(),
@@ -1464,8 +1466,10 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
            [] __device__(scalar_t x, scalar_t /*unused*/) -> scalar_t {
               return x;
             },
-            static_cast<scalar_t>(padding_value));
-      });
+            fill_value);
+      }),
+      AT_EXPAND(AT_ALL_TYPES),
+      kBool, kHalf, kBFloat16);
 
   return padded_values;
 }

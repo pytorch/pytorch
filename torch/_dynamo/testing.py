@@ -23,8 +23,8 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Generator, Sequence
+from typing import Any, overload, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -45,7 +45,7 @@ from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import CompileCounterInt, same
 
 
-np: Optional[types.ModuleType] = None
+np: types.ModuleType | None = None
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -60,7 +60,7 @@ log = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 
 
-def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+def clone_me(x: torch.Tensor | None) -> torch.Tensor | None:
     if x is None:
         return None
     return x.detach().clone().requires_grad_(x.requires_grad)
@@ -85,6 +85,12 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
     torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
     return gm.graph, region_tracker  # type: ignore[union-attr]
+
+
+def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
 
 
 def collect_results(
@@ -145,11 +151,11 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
+    out: list[Any] | tuple[Any, ...] | dict[Any, Any],
 ) -> float: ...
 
 
-def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
+def reduce_to_scalar_loss(out: Any) -> torch.Tensor | float:
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
@@ -202,7 +208,8 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            code_options={},
+            # The nop-insertion path does not inspect code object attributes.
+            code_options={},  # type: ignore[arg-type]
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,
@@ -227,7 +234,7 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.frame_count: int | CompileCounterInt = 0
         self.clear()
 
     def __call__(
@@ -249,7 +256,7 @@ class CompileCounter:
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.frame_count: int | CompileCounterInt = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
         self.clear()
@@ -347,10 +354,27 @@ def remove_trailing_space(code: str) -> str:
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
+def _squash_blank_lines(code: str) -> str:
+    lines = code.split("\n")
+    result: list[str] = []
+    saw_blank = False
+    for line in lines:
+        if line.strip() == "":
+            if saw_blank:
+                continue
+            saw_blank = True
+        else:
+            saw_blank = False
+        result.append(line)
+    return "\n".join(result)
+
+
 def normalize_gm(gm_str: str) -> str:
     # strip comments as comments have path to files which may differ from
     # system to system.
-    return remove_trailing_space(strip_comment(gm_str))
+    stripped = strip_comment(gm_str)
+    no_trailing = remove_trailing_space(stripped)
+    return _squash_blank_lines(no_trailing)
 
 
 def empty_line_normalizer(code: str) -> str:
@@ -365,8 +389,8 @@ def standard_test(
     self: Any,
     fn: Callable[..., Any],
     nargs: int,
-    expected_ops: Optional[int] = None,
-    expected_ops_dynamic: Optional[int] = None,
+    expected_ops: int | None = None,
+    expected_ops_dynamic: int | None = None,
     expected_frame_count: int = 1,
 ) -> None:
     if not config.assume_static_by_default and expected_ops_dynamic is not None:
@@ -417,7 +441,7 @@ def rand_strided(
     size: Sequence[int],
     stride: Sequence[int],
     dtype: torch.dtype = torch.float32,
-    device: Union[str, torch.device] = "cpu",
+    device: str | torch.device = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
     needed_size = extra_size
@@ -427,7 +451,11 @@ def rand_strided(
             sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
         )
     if dtype.is_floating_point:
-        if dtype.itemsize == 1:
+        if dtype == torch.float4_e2m1fn_x2:
+            buffer = torch.randint(
+                0, 256, (needed_size,), dtype=torch.uint8, device=device
+            ).view(torch.float4_e2m1fn_x2)
+        elif dtype.itemsize == 1:
             """
             normal distribution kernel is not implemented for fp8..
             Workaround that by creating a fp16 tensor and then cast.
@@ -467,7 +495,7 @@ def make_test_cls_with_patches(
     cls_prefix: str,
     fn_suffix: str,
     *patches: Any,
-    xfail_prop: Optional[str] = None,
+    xfail_prop: str | None = None,
     decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x,
 ) -> type:
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
@@ -496,6 +524,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
+    # pyrefly: ignore [bad-return, bad-argument-type]
     return unittest.skip(fn)
 
 
@@ -503,6 +532,12 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
+
+
+def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+    if sys.version_info >= (3, 13) or sys.version_info < (3, 12):
+        return unittest.skip("Requires Python 3.12")(fn)
+    return fn
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -515,13 +550,6 @@ def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
-
-
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 10):
-        return fn
-    else:
-        return unittest.skip("Requires Python 3.10+")(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
@@ -558,3 +586,28 @@ def _skipped_function_for_test_reconstruct(
     f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
     return f(*args, **kwargs)
+
+
+_testing_invoke_subgraph_inductor_compile_captured_gms = None
+
+
+@contextlib.contextmanager
+def _testing_capture_invoke_subgraph_inductor_compile_gms() -> Generator[
+    list[torch.fx.GraphModule]
+]:
+    """
+    Context manager to capture graph modules compiled by invoke_subgraph_inductor_compile.
+
+    Usage:
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            # code that triggers invoke_subgraph_inductor_compile
+            pass
+        # captured_gms will contain the list of captured graph modules
+    """
+    global _testing_invoke_subgraph_inductor_compile_captured_gms
+    # pyrefly: ignore [implicit-any]
+    _testing_invoke_subgraph_inductor_compile_captured_gms = []
+    try:
+        yield _testing_invoke_subgraph_inductor_compile_captured_gms
+    finally:
+        _testing_invoke_subgraph_inductor_compile_captured_gms = None

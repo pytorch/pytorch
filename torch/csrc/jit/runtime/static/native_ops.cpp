@@ -3,13 +3,8 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <ATen/CPUFunctions.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/ScalarOps.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/ssize.h>
@@ -537,7 +532,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
       } else {
         TORCH_CHECK(
             in1_i,
-            "dytpe cannot be None when copy is True for aten::to.prim_dtype");
+            "dtype cannot be None when copy is True for aten::to.prim_dtype");
         p_node->Output(0) = at::native::to(in0_t, *in1_i, in2_i, in3_i);
       }
     };

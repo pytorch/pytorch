@@ -6,8 +6,10 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import warnings
 from collections import namedtuple
+from functools import cached_property
 from os.path import abspath, exists
 
 import torch
@@ -51,7 +53,7 @@ def _reassign_parameters(model):
 def setup_torchbench_cwd():
     original_dir = abspath(os.getcwd())
 
-    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    os.environ["KALDI_ROOT"] = tempfile.gettempdir()  # avoids some spam
     for torchbench_dir in (
         "./torchbenchmark",
         "../torchbenchmark",
@@ -75,29 +77,7 @@ def setup_torchbench_cwd():
     return original_dir
 
 
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            if elem is not None:
-                assert isinstance(elem, dict)
-                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
+process_train_model_output = {}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -147,6 +127,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
+    def skip_models_for_xpu(self):
+        return self._skip["device"]["xpu"]
+
+    @property
     def skip_models_for_freezing_cuda(self):
         return self._skip["freezing"]["cuda"]
 
@@ -191,6 +175,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["dtype"]["force_fp16_for_bf16_models"]
 
     @property
+    def amp_dtype_bfloat16(self):
+        return self._config["dtype"]["amp_dtype_bfloat16"]
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return self._accuracy["skip"]["large_models"]
@@ -220,20 +208,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "vision_maskrcnn",
         }
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {
-            "basic_gnn_edgecnn",
-            "drq",
-            "hf_Reformer",
-            "DALLE2_pytorch",
-            "hf_BigBird",
-            "detectron2_maskrcnn_r_50_fpn",
-            "detectron2_maskrcnn_r_101_fpn",
-            "vision_maskrcnn",
-            "doctr_reco_predictor",
-            "hf_T5_generate",
-        }
+    @cached_property
+    def _fb_models_available(self):
+        """This property exists because importing IS_FBCODE causes some models to be
+        frozen out of setting certain config flags."""
+        return importlib.util.find_spec("torchbenchmark.models.fb") is not None
 
     def load_model(
         self,
@@ -249,11 +228,14 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
+
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",
-            f"torchbenchmark.models.fb.{model_name}",
         ]
+        if self._fb_models_available:
+            candidates.append(f"torchbenchmark.models.fb.{model_name}")
+
         for c in candidates:
             try:
                 module = importlib.import_module(c)
@@ -372,7 +354,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # See https://github.com/pytorch/benchmark/issues/1561
         if model_name == "maml_omniglot":
             batch_size = 5
-            assert example_inputs[0].shape[0] == batch_size
+            if example_inputs[0].shape[0] != batch_size:
+                raise AssertionError(
+                    f"Expected batch size {batch_size}, but got {example_inputs[0].shape[0]}"
+                )
         if model_name == "vision_maskrcnn":
             batch_size = 1
         # global current_name, current_device
@@ -395,10 +380,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             and hasattr(model.config, "use_cache")
         ):
             model.config.use_cache = False
-        if model_name == "hf_T5_generate":
-            model.model.config.use_cache = False
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(benchmark.name, model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
@@ -429,13 +412,25 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             yield model_name
 
     def pick_grad(self, name, is_training):
-        if is_training or name in ("maml",):
+        if is_training or name == "maml":
             return torch.enable_grad()
         else:
             return torch.no_grad()
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in self._require_larger_multiplier_for_smaller_tensor
+
+    def use_iou_for_bool_accuracy(self, name):
+        iou_models = self._tolerance.get("use_iou_for_bool_masks", [])
+        return name in iou_models
+
+    def get_iou_threshold(self, name):
+        iou_thresholds = self._tolerance.get("iou_thresholds", {})
+        return iou_thresholds.get(name, 0.99)
+
+    def get_accuracy_check_runs(self, name):
+        accuracy_check_runs = self._tolerance.get("accuracy_check_runs", {})
+        return accuracy_check_runs.get(name, 1)
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4

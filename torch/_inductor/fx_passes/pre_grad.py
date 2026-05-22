@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import itertools
 import logging
 import types
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -14,16 +14,19 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.passes.graph_transform_observer import (
+    GraphTransformObserver as GraphTransformObserverBase,
+)
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
+from ..custom_graph_pass import get_custom_graph_passes
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
@@ -32,7 +35,18 @@ from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
 
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="pre_grad_passes"
+)
+GraphTransformObserver = functools.partial(
+    GraphTransformObserverBase, subsystem="pre_grad_passes"
+)
+
 log = logging.getLogger(__name__)
+
+apply_gumbel_max_trick_pass = PatternMatcherPass(
+    pass_name="apply_gumbel_max_trick_pass"
+)
 
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     pass_name="efficient_conv_bn_eval_pass"
@@ -157,15 +171,19 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 
 @init_once_fakemode
-def lazy_init():
-    from . import efficient_conv_bn_eval, split_cat  # noqa: F401
+def lazy_init(input_device: torch.device | None = None):
+    from . import (  # noqa: F401  # noqa: F401
+        apply_gumbel_max_trick,
+        efficient_conv_bn_eval,
+        split_cat,
+    )
 
     if config.is_fbcode():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
 def _get_pass_name_func(p):
-    if isinstance(p, PatternMatcherPass):
+    if isinstance(p, PatternMatcherPassBase):
         pass_name = p.pass_name
         pass_func = p.apply
     elif isinstance(p, types.FunctionType):
@@ -181,8 +199,8 @@ def _get_pass_name_func(p):
 def _run_pre_dispatch_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
-    add_passes: Optional[str] = None,
-    remove_passes: Optional[str] = None,
+    add_passes: str | None = None,
+    remove_passes: str | None = None,
 ) -> None:
     # order matters
     default_pass_list = [
@@ -255,21 +273,22 @@ def _run_pre_dispatch_passes(
                 f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
             )
 
-    # Remove noops at the end, which may be generated other passes.
-    pass_execution_and_save(
-        remove_noop_pass,
-        gm,
-        example_inputs,
-        "[Pre grad(predispatch IR)]Apply remove_noop pass",
-    )
+    if "remove_noop" not in remove_passes_list:
+        # Remove noops at the end, which may be generated other passes.
+        pass_execution_and_save(
+            remove_noop_pass,
+            gm,
+            example_inputs,
+            "[Pre grad(predispatch IR)]Apply remove_noop pass",
+        )
     shape_prop(gm)
 
 
 def pre_grad_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
-    add_passes: Optional[str] = None,
-    remove_passes: Optional[str] = None,
+    add_passes: str | None = None,
+    remove_passes: str | None = None,
 ) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
@@ -294,14 +313,16 @@ def pre_grad_passes(
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
+            numpy_compat_normalization(gm.graph)
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
-            numpy_compat_normalization(gm.graph)
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
+                lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
+            )
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
@@ -326,11 +347,18 @@ def pre_grad_passes(
                         ),
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
+            GraphTransformObserver(gm, "efficient_conv_bn_eval_pass").apply_graph_pass(
+                efficient_conv_bn_eval_pass.apply
+            )
+            GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
+                apply_gumbel_max_trick_pass.apply
+            )
 
-    if config.pre_grad_custom_pass is not None:
-        with GraphTransformObserver(gm, "pre_grad_custom_pass"):
-            config.pre_grad_custom_pass(gm.graph)
+    for pre_grad_custom_pass in get_custom_graph_passes(config.pre_grad_custom_pass):
+        GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
+            pre_grad_custom_pass
+        )
+
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -404,16 +432,20 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
     """
-
-    class IdentityRemover(torch.fx.Transformer):
-        def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
-                assert len(args) == 1
-                return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
-
-    return IdentityRemover(gm).transform()
+    graph = gm.graph
+    work_done = False
+    for module_name, module in gm.named_modules():
+        if type(module) is nn.Identity:
+            for node in list(graph.find_nodes(op="call_module", target=module_name)):
+                assert len(node.args) == 1
+                input_node = node.args[0]
+                node.replace_all_uses_with(input_node)
+                graph.erase_node(node)
+                work_done = True
+    if work_done:
+        graph.lint()
+        gm.recompile()
+    return gm
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:
@@ -498,6 +530,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 conv = conv_bn_fusion.conv_module
                 bn = conv_bn_fusion.bn_module
 
+                # pyrefly: ignore [bad-argument-type]
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
                     replace_node_module(bn_node.args[0], modules, fused_conv)
@@ -585,8 +618,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
                     fused_conv.weight,
                     fused_conv.bias,
+                    # pyrefly: ignore [bad-argument-type]
                     bn_running_mean,
+                    # pyrefly: ignore [bad-argument-type]
                     bn_running_var,
+                    # pyrefly: ignore [bad-argument-type]
                     bn_eps,
                     bn_weight,
                     bn_bias,
@@ -604,7 +640,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 class NormalizedLinearNode:
     def __init__(self, node: torch.fx.Node) -> None:
         assert node.op == "call_function"
-        assert node.target in [torch.nn.functional.linear]
+        assert node.target is torch.nn.functional.linear
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
@@ -623,7 +659,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None  # type: ignore[return-value]
+            return self.node.kwargs.get("bias", None)  # type: ignore[return-value]
 
 
 class NormalizedMatmulNode:
@@ -690,11 +726,23 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
+                arg_not_provided = object()
 
-                def cat_args(tensors, dim=0):
-                    return tensors, dim
+                def cat_args(
+                    tensors,
+                    dim=arg_not_provided,
+                    axis=arg_not_provided,
+                    out=None,
+                ):
+                    if dim is arg_not_provided:
+                        dim = 0
+                    if axis is not arg_not_provided:
+                        dim = axis
+                    return tensors, dim, out
 
-                tensors, dim = cat_args(*node.args, **node.kwargs)
+                tensors, dim, out = cat_args(*node.args, **node.kwargs)
+                if out is not None or dim is None:
+                    continue
                 new_kwargs = {
                     name: val for name, val in user.kwargs.items() if name != "input"
                 }
@@ -723,7 +771,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 input_node = node.kwargs["input"]
             if (
                 input_node.op == "call_function"
-                and input_node.target == torch.nn.functional.linear
+                and input_node.target is torch.nn.functional.linear
             ):
                 normalized = NormalizedLinearNode(input_node)
                 input = normalized.get_input()
@@ -748,7 +796,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
 ) -> torch.Tensor:
     if bias is None:
         return torch.matmul(weight, input.transpose(-1, -2))
@@ -845,7 +893,7 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
 ) -> torch.Tensor:
     if bias is None:
         return torch.matmul(input.transpose(-1, -2), weight.t())

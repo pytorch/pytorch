@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import struct
 import unittest
 
@@ -126,6 +127,8 @@ SPECIAL_NUMBERS = {
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
+FLOAT8_DTYPES_SATURATE_ON_OVERFLOW = [torch.float8_e4m3fn]
+
 
 def _int_bits_to_float(x):
     y = struct.unpack("!f", struct.pack("!I", x))[0]
@@ -177,9 +180,15 @@ def simulate_fp8_precision(input, variant):
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    # Replace overflows with inf/NaN as appropriate (no saturation)
-    have_inf = variant in FLOAT8_DTYPES_WITH_INF
-    vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
+    # Replace overflows: inf for types that have it, saturate to max for types
+    # that use satfinite semantics, NaN otherwise
+    overflow = vals > torch.finfo(variant).max
+    if variant in FLOAT8_DTYPES_WITH_INF:
+        vals[overflow] = torch.inf
+    elif variant in FLOAT8_DTYPES_SATURATE_ON_OVERFLOW:
+        vals[overflow] = torch.finfo(variant).max
+    else:
+        vals[overflow] = torch.nan
 
     return vals * signs
 
@@ -275,7 +284,7 @@ class TestFloat8Dtype(TestCase):
         IMO simpler to special case e8m0 here.
         """
 
-        for biased_exponent in range(0, 256):
+        for biased_exponent in range(256):
             # iterate through all the possible options of guard, round, sticky bits
             # for the current exponent
             for grs in range(8):
@@ -329,7 +338,10 @@ class TestFloat8Dtype(TestCase):
             tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
             tensor_fp8 = tensor_int.view(dtype)
             if number_name == "nan":
-                assert tensor_fp8.isnan()
+                if not tensor_fp8.isnan():
+                    raise AssertionError(
+                        f"Expected NaN for {number_name}, got {tensor_fp8}"
+                    )
             else:
                 tensor_fp32 = tensor_fp8.float()
                 ref_tensor_fp32 = torch.tensor(
@@ -406,6 +418,13 @@ class TestFloat4Dtype(TestCase):
 
         # can view uint8 as float4_e2m1fn_x2
         x2.view(torch.float4_e2m1fn_x2)
+
+        # can do equality comparisons
+        x3 = copy.deepcopy(x1)
+        self.assertEqual(x1, x3, atol=0, rtol=0)
+
+        # can call contiguous on a dim1 slice (calls `copy_` under the hood)
+        x1[:, 0:2048].contiguous()
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(

@@ -3,9 +3,9 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: F401,PYI054
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import EllipsisType
-from typing import Any, Callable, Literal, overload, TypeVar
+from typing import Any, Literal, overload, TypeVar
 
 import torch
 from torch import (

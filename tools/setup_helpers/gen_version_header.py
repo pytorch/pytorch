@@ -1,7 +1,3 @@
-# Ideally, there would be a way in Bazel to parse version.txt
-# and use the version numbers from there as substitutions for
-# an expand_template action. Since there isn't, this silly script exists.
-
 from __future__ import annotations
 
 import argparse

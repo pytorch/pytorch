@@ -83,7 +83,7 @@ def _quantize_weight(float_wt, observer):
             torch.qint8,
         )
         qweight = _clamp_weights(qweight, observer, wt_scale, wt_zp)
-    elif observer.qscheme in [torch.per_channel_affine_float_qparams]:
+    elif observer.qscheme == torch.per_channel_affine_float_qparams:
         qweight = torch.quantize_per_channel(
             float_wt,
             wt_scale.to(torch.float),

@@ -11,7 +11,6 @@ import logging
 import operator
 from collections import defaultdict, deque
 from collections.abc import Generator, Iterable
-from typing import Optional
 
 import torch
 import torch.fx
@@ -31,7 +30,7 @@ UsageIndex = tuple[int, int]
 
 log = logging.getLogger(__name__)
 
-last_node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None
+last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -324,10 +323,11 @@ def _create_subgraph(
     return subgraph, external_node_usages, node_usage_to_tuple_elems, ind_to_tuple_spec
 
 
-def _stable_topological_sort(
+def _stable_topological_sort_impl(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
-) -> None:
+    do_sort: bool = True,
+) -> bool:
     # Nodes are in exactly one of these four collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
@@ -352,7 +352,8 @@ def _stable_topological_sort(
 
         if node.target == "output":
             outputs.add(node)
-            assert not node.users, "output nodes should have no users"
+            if node.users:
+                raise AssertionError("output nodes should have no users")
             continue
 
         waiting_for = [
@@ -366,7 +367,7 @@ def _stable_topological_sort(
             waiting[waiting_for[-1]].append(node)
         else:
             ready.add(node)
-            if cursor and cursor.next is not node:
+            if cursor and cursor.next is not node and do_sort:
                 cursor.append(node)
             cursor = node
             # Mark the nodes that have been waiting for this node to finish as
@@ -374,7 +375,24 @@ def _stable_topological_sort(
             pending.extend(reversed(waiting.pop(node, ())))
 
     ready.update(outputs)
-    assert not waiting and len(ready) == len(graph.nodes)
+    return not waiting and len(ready) == len(graph.nodes)
+
+
+def _stable_topological_sort(
+    graph: torch.fx.Graph,
+    node_to_additional_deps: dict[Node, OrderedSet[Node]],
+) -> None:
+    if not _stable_topological_sort_impl(graph, node_to_additional_deps):
+        raise AssertionError("stable topological sort failed")
+
+
+def _has_cycle(
+    graph: torch.fx.Graph,
+    node_to_additional_deps: dict[Node, OrderedSet[Node]],
+) -> bool:
+    return not _stable_topological_sort_impl(
+        graph, node_to_additional_deps, do_sort=False
+    )
 
 
 def _populate_additional_deps(
@@ -439,8 +457,10 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
+
                 elif user < node:
                     node_to_additional_deps[node].add(user)
+
                 elif user > node:
                     node_to_additional_deps[user].add(node)
 
@@ -475,7 +495,8 @@ def _has_aliasing(
             continue
         if out_node:
             example_value = out_node.meta["example_value"]
-            assert not isinstance(example_value, list)
+            if isinstance(example_value, list):
+                raise AssertionError("expected example_value to not be a list")
             if isinstance(example_value, torch.Tensor):
                 storage = StorageWeakRef(example_value._typed_storage())
                 if storage in output_storages:
@@ -510,7 +531,7 @@ def _is_tuple_node(node: Node) -> bool:
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
     for user in node.users:
-        if user.target == operator.getitem and isinstance(user.args[1], int):
+        if user.target is operator.getitem and isinstance(user.args[1], int):
             yield user
 
 
@@ -532,7 +553,8 @@ def _create_getitem_nodes(
     node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
 ) -> tuple[list[Node], dict[tuple[int, ...], int]]:
     tup = node.meta["example_value"]
-    assert isinstance(tup, tuple), "_get_getitem_children expects tuple"
+    if not isinstance(tup, tuple):
+        raise AssertionError("_get_getitem_children expects tuple")
 
     getitem_nodes: list[Node] = []
     queue = deque([(e, (i,), subgraph_tuple_node) for i, e in enumerate(tup)])
@@ -565,7 +587,8 @@ def _replace_tuple_outputs(
     invoke_subgraph_node: Node,
     graph: torch.fx.Graph,
 ) -> OrderedSet[Node]:
-    assert _is_tuple_node(node), "_replace_tuple_outputs expects a tuple node"
+    if not _is_tuple_node(node):
+        raise AssertionError("_replace_tuple_outputs expects a tuple node")
 
     queue = deque((c, (c.args[1],)) for c in _get_children_getitems(node))
     erased_nodes: OrderedSet[Node] = OrderedSet()

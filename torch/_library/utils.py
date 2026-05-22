@@ -2,11 +2,12 @@
 import dataclasses
 import inspect
 import sys
-from collections.abc import Iterable, Iterator
-from typing import Any, Callable, Literal, Optional, overload, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, Literal, overload
 
 import torch
 import torch.utils._pytree as pytree
+import torchgen
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
 
@@ -70,16 +71,32 @@ def lookup_op(qualname: str) -> OpOverload:
 
 
 def is_builtin(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     return op.namespace in {"aten", "prim", "prims"}
 
 
-def is_functional_schema(schema: Any) -> bool:
+def is_out(op: OpOverload) -> bool:
+    """Returns True if the operator has "out" semantics: its mutable arguments
+    are write-only output buffers that are not read from."""
+    return torch.Tag.out in op.tags
+
+
+def is_inplace(op: OpOverload) -> bool:
+    """Returns True if the operator has inplace semantics: it mutates its first
+    positional argument and returns it."""
+    return torch.Tag.inplace in op.tags
+
+
+def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
     An operator is functional if:
     - it does not mutate any of its inputs
-    - it does not return a view on any of its inputs
+    - If no view are allowed
+        - it does not return a view on any of its inputs
+    - If valid views are allowed
+        - it is not a view or a view with a single input Tensor and single output Tensor
     - it has at least one return
     """
 
@@ -90,8 +107,31 @@ def is_functional_schema(schema: Any) -> bool:
         is_non_mutating_view = len(rets) > 0 and any(
             r.alias_info is not None and not r.alias_info.is_write for r in rets
         )
+        num_tensor_inputs = 0
+        num_tensor_outputs = 0
+
+        if isinstance(schema, torch.FunctionSchema):
+            for arg in schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    num_tensor_inputs += 1
+
+            for ret in schema.returns:
+                if isinstance(ret.type, torch.TensorType):
+                    num_tensor_outputs += 1
+
+        elif isinstance(schema, torchgen.model.FunctionSchema):
+            for argument in schema.arguments.flat_non_out:
+                if argument.type.is_tensor_like():
+                    num_tensor_inputs += 1
+
+            for ret_arg in schema.returns:
+                if ret_arg.type.is_tensor_like():
+                    num_tensor_outputs += 1
+
         if is_non_mutating_view:
-            return False
+            return allow_valid_view and (
+                num_tensor_inputs == 1 and num_tensor_outputs == 1
+            )
         if not schema.returns:
             return False
         return True
@@ -104,7 +144,8 @@ def is_functional_schema(schema: Any) -> bool:
 
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
-    assert isinstance(schema, FunctionSchema)
+    if not isinstance(schema, FunctionSchema):
+        raise AssertionError(f"schema must be FunctionSchema, got {type(schema)}")
     return is_functional(schema)
 
 
@@ -135,7 +176,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
@@ -187,7 +228,10 @@ def zip_schema(
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
     that is, (args, kwargs) must be bindable to the schema (args, kwargs).
     """
-    assert len(schema.arguments) >= len(args) + len(kwargs)
+    if len(schema.arguments) < len(args) + len(kwargs):
+        raise AssertionError(
+            f"schema has {len(schema.arguments)} arguments but got {len(args)} args and {len(kwargs)} kwargs"
+        )
     for i in range(len(schema.arguments)):
         info = schema.arguments[i]
         if info.kwarg_only:
@@ -215,7 +259,10 @@ def hop_schema_from_fx_node(node):
     def _collect_example_val(node):
         meta_val = node.meta.get("val", None)
         if meta_val is None:
-            assert node.op == "get_attr"
+            if node.op != "get_attr":
+                raise AssertionError(
+                    f"node.op must be 'get_attr' when val is None, got {node.op!r}"
+                )
             meta_val = getattr(node.graph.owning_module, node.target)
         return meta_val
 
@@ -244,12 +291,19 @@ def hop_schema_from_fx_node(node):
 
 
 def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     if is_builtin(op):
         # We control the built-ins. These may (in rare cases)
         # do input metadata mutation (which we have banned on custom ops)
         return False
     schema = op._schema
+    if is_out(op):
+        # Tag.out ops have a trivial fake impl: return the out= args in order.
+        return True
+    if is_inplace(op):
+        # Tag.inplace ops have a trivial fake impl: return the mutated first arg.
+        return True
     # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
     if not schema.is_mutable:
         return False
@@ -257,6 +311,25 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
         return False
     # If the op returns nothing, then it has a trivial fake impl.
     return True
+
+
+def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
+    """Generate the result of a trivial fake impl for the given op.
+
+    For ops with no returns: returns None.
+    For Tag.out ops: returns the out= kwargs in declaration order.
+    For Tag.inplace ops: returns the first positional arg.
+    """
+    if is_out(op):
+        schema = op._schema
+        _, out_kwarg_names = mutated_args_kwargs(schema)
+        out_args = tuple(kwargs[name] for name in out_kwarg_names)
+        if len(out_args) == 1:
+            return out_args[0]
+        return out_args
+    if is_inplace(op):
+        return args[0]
+    return None
 
 
 def requires_set_python_module() -> bool:
@@ -269,7 +342,10 @@ def requires_set_python_module() -> bool:
 
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
-    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    if not isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode):
+        raise AssertionError(
+            f"curr_mode must be TorchDispatchMode, got {type(curr_mode)}"
+        )
     args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
     # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
     # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -311,7 +387,7 @@ def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     )
 
 
-def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
+def get_device_arg_index(schema: _C.FunctionSchema) -> int | None:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
@@ -341,13 +417,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
+    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = id(tensor.untyped_storage())
-        if id(tensor.untyped_storage()) in storages:
+        key = tensor.untyped_storage()._cdata
+        if tensor.untyped_storage()._cdata in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "
@@ -512,7 +588,7 @@ def get_layout_constraint_tag(
 @overload
 def get_layout_constraint_tag(
     fn: Any, *, with_default: Literal[False]
-) -> Optional[_C.Tag]: ...
+) -> _C.Tag | None: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):
@@ -527,3 +603,106 @@ def get_layout_constraint_tag(fn, *, with_default=True):
 
         return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
     return None
+
+
+# List of random functions that should be treated as impure
+_RANDOM_FUNCTIONS = {
+    torch.rand,
+    torch.randn,
+    torch.randint,
+    torch.randperm,
+    torch.rand_like,
+    torch.randn_like,
+    torch.randint_like,
+    torch.normal,
+    torch.poisson,
+    torch.bernoulli,
+    torch.multinomial,
+}
+
+
+def is_impure(
+    op: Callable,
+    *,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
+    impure_random: bool = True,
+) -> bool:
+    """
+    An operator is impure if it:
+    - Mutates its inputs (has a mutable schema)
+    - Has nondeterministic/random behavior that mutates RNG state
+    - Is explicitly marked as effectful via torch.library._register_effectful_op
+
+    Args:
+        op: The operator to check (function, OpOverload, HigherOrderOperator, etc.)
+        args: Optional arguments that would be passed to the callable
+        kwargs: Optional keyword arguments that would be passed to the callable
+        impure_random: Whether to treat random operations as impure (default: True)
+
+    Returns:
+        bool: True if the callable has side effects, False otherwise
+    """
+    # Import here to avoid circular dependencies
+    from torch._higher_order_ops.effects import _get_effect
+    from torch.fx.node import _side_effectful_functions
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        if op in _side_effectful_functions:
+            return True
+        default = getattr(op, "default", None)
+        if default is not None:
+            return is_impure(
+                default, args=args, kwargs=kwargs, impure_random=impure_random
+            )
+
+    if isinstance(op, torch._ops.OpOverload):
+        schema = getattr(op, "_schema", None)
+        if schema is not None and schema.is_mutable:
+            return True
+
+        if op in _side_effectful_functions:
+            return True
+
+        if _get_effect(op) is not None:
+            return True
+
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        if op in (
+            torch.ops.higher_order.auto_functionalized,
+            torch.ops.higher_order.auto_functionalized_v2,
+        ):
+            # Check if the auto-functionalized operator (the first argument) is
+            # side-effectful
+            if args and len(args) > 0:
+                return args[0] in _side_effectful_functions
+
+        if _get_effect(op) is not None:
+            return True
+
+        if op in _side_effectful_functions:
+            return True
+
+        return False
+
+    # Impure since it mutates RNG state
+    if impure_random and getattr(op, "_nondeterministic_seeded", False):
+        return True
+
+    # Handle Python random functions that don't have _nondeterministic_seeded
+    # but still affect global RNG state (issue #151524)
+    # These should be impure regardless of impure_random setting to maintain
+    # consistency between eager and compiled execution
+    # All random operations are impure to ensure consistent behavior
+    # between eager and compiled execution, regardless of generator usage
+    if op in _RANDOM_FUNCTIONS:
+        return True
+
+    schema = getattr(op, "_schema", None)
+    if schema is not None and schema.is_mutable:
+        return True
+
+    if op in _side_effectful_functions:
+        return True
+
+    return False

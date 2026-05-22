@@ -132,6 +132,14 @@ using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
+// Mirrors `libkineto::GenericTraceActivity::Flow`. Used during post processing
+// to embed Kineto events into the broader profiler tree structure.
+struct Flow {
+  uint32_t id{0};
+  uint32_t type{0};
+  uint32_t start{0};
+};
+
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
   ProfilerVoidEventStub device_event_end_ = nullptr;
@@ -178,6 +186,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
+  std::string metadata_json_;
+  Flow flow;
 };
 
 template <>
@@ -353,22 +363,14 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::Kineto> {
-  // Mirrors `libkineto::GenericTraceActivity::Flow`. This information is used
-  // during post processing to properly embed Kineto events into the broader
-  // profiler tree structure. End users are not generally expected to use these
-  // fields directly, but they are available for debugging.
-  struct Flow {
-    uint32_t id{0};
-    uint32_t type{0};
-    uint32_t start{0};
-  };
-
   std::string name_;
   int64_t duration_ns_{0};
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
-  std::weak_ptr<Result> linked_activity_{};
+  std::weak_ptr<Result> linked_activity_;
+  std::string metadata_json_;
+  extra_meta_t extra_meta_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
@@ -378,12 +380,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   template <typename T>
-  decltype(auto) visit(T&& visitor) {
+  auto visit(T&& visitor) {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T>
-  decltype(auto) visit(T&& visitor) const {
+  auto visit(T&& visitor) const {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
@@ -445,7 +447,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 
   template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>&) {
+  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
     return E;
   }
 };
@@ -687,21 +689,22 @@ class TORCH_API RecordQueue {
 };
 
 TORCH_API bool get_record_concrete_inputs_enabled();
-TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_concrete_inputs_enabled_val(bool);
+TORCH_API void set_record_concrete_inputs_enabled_fn(
+    std::function<bool()> /*fn*/);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool /*val*/);
 
 TORCH_API bool get_fwd_bwd_enabled();
-TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
-TORCH_API void set_fwd_bwd_enabled_val(bool);
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_fwd_bwd_enabled_val(bool /*val*/);
 
 TORCH_API bool get_cuda_sync_enabled();
-TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
-TORCH_API void set_cuda_sync_enabled_val(bool);
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_cuda_sync_enabled_val(bool /*val*/);
 
 // Comms related RecordFunctions will record information about tensor storage
 // locations.
 TORCH_API bool get_record_tensor_addrs_enabled();
-TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_tensor_addrs_enabled_val(bool);
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool /*val*/);
 
 } // namespace torch::profiler::impl

@@ -248,7 +248,7 @@ def sctype_from_string(s):
     """Normalize a string value: a type 'name' or a typecode or a width alias."""
     if s in _names:
         return _names[s]
-    if s in _name_aliases.keys():
+    if s in _name_aliases:
         return _name_aliases[s]
     if s in _typecodes:
         return _typecodes[s]
@@ -382,7 +382,7 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     Notes
     ------------
-    This functions has a side effect: it sets the global state with the provided dtypes.
+    This function has a side effect: it sets the global state with the provided dtypes.
 
     The complex dtype has bit width of at least twice the width of the float
     dtype, i.e. it's complex128 for float64 and complex64 for float32.
@@ -408,8 +408,6 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     if int_dtype in ["numpy", "pytorch"]:
         int_dtype = torch.int64
-    else:
-        int_dtype = int_dtype
 
     new_defaults = _dtypes_impl.DefaultDTypes(
         float_dtype=float_dtype, complex_dtype=complex_dtype, int_dtype=int_dtype
@@ -449,6 +447,6 @@ def issubdtype(arg1, arg2):
 
 
 __all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype", "sctypes"]
-__all__ += list(_names.keys())  # noqa: PLE0605
-__all__ += list(_name_aliases.keys())  # noqa: PLE0605
+__all__ += list(_names.keys())
+__all__ += list(_name_aliases.keys())
 __all__ += _abstract_dtypes  # noqa: PLE0605

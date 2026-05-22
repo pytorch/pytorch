@@ -15,10 +15,11 @@ import time
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -47,7 +48,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Blueprint information about a particular type of worker.
+    """
+    Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -74,35 +76,50 @@ class WorkerSpec:
              takes precedence over ``redirects`` settings.
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                 that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                 that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                            When enabled, LOCAL_RANK is set to 0 for all workers and
+                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                            assigned GPU at device index 0.
     """
 
     role: str
     local_world_size: int
     rdzv_handler: rdzv.RendezvousHandler
-    fn: Optional[Callable] = None
+    fn: Callable | None = None
     # TODO @kiuk - make entrypoint a required field
-    entrypoint: Union[Callable, str, None] = None
+    entrypoint: Callable | str | None = None
     args: tuple = ()
     max_restarts: int = 3
     monitor_interval: float = 0.1
-    master_port: Optional[int] = None
-    master_addr: Optional[str] = None
-    local_addr: Optional[str] = None
+    master_port: int | None = None
+    master_addr: str | None = None
+    local_addr: str | None = None
     event_log_handler: str = "null"
-    numa_options: Optional[NumaOptions] = None
+    numa_options: NumaOptions | None = None
+    duplicate_stdout_filters: list[str] | None = None
+    duplicate_stderr_filters: list[str] | None = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
-        assert self.local_world_size > 0
-        assert self.monitor_interval > 0
+        if self.local_world_size <= 0:
+            raise AssertionError
+        if self.monitor_interval <= 0:
+            raise AssertionError
 
         if self.fn:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
+                stacklevel=2,
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
-        assert self.entrypoint
+        if not self.entrypoint:
+            raise AssertionError
 
     def get_entrypoint_name(self):
         """Get the entry point name.
@@ -113,7 +130,8 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
-            assert self.entrypoint is not None
+            if self.entrypoint is None:
+                raise AssertionError
             return self.entrypoint.__qualname__
 
 
@@ -441,12 +459,19 @@ class SimpleElasticAgent(ElasticAgent):
     such as one particular type of worker role.
     """
 
-    def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
+    def __init__(
+        self,
+        spec: WorkerSpec,
+        exit_barrier_timeout: float = 300,
+        shutdown_timeout: int = 30,
+    ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
         self._exit_barrier_timeout = exit_barrier_timeout
+        self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
+        self._in_exit_barrier: bool = False
 
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
         return self._worker_group
@@ -479,11 +504,14 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+    ) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
+            timeout: Time to wait for graceful shutdown before sending SIGKILL
         """
         raise NotImplementedError
 
@@ -723,12 +751,12 @@ class SimpleElasticAgent(ElasticAgent):
             logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
-            self._shutdown(e.sigval)
+            self._shutdown(e.sigval, timeout=self._shutdown_timeout)
             shutdown_called = True
             raise
         finally:
             if not shutdown_called:
-                self._shutdown()
+                self._shutdown(timeout=self._shutdown_timeout)
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
 
@@ -750,8 +778,17 @@ class SimpleElasticAgent(ElasticAgent):
             failure = result.failures.get(worker.global_rank)
             state: str = self._get_worker_state(worker, result)
             raw_error = json.dumps(failure.error_file_data) if failure else None
+            exit_code = failure.exitcode if failure else None
+            worker_pid = failure.pid if failure else None
             record(
-                self._construct_event(state, EventSource.WORKER, worker, raw_error),
+                self._construct_event(
+                    state=state,
+                    source=EventSource.WORKER,
+                    worker=worker,
+                    raw_error=raw_error,
+                    exit_code=exit_code,
+                    worker_pid=worker_pid,
+                ),
                 self._worker_group.spec.event_log_handler,
             )
 
@@ -784,9 +821,11 @@ class SimpleElasticAgent(ElasticAgent):
         self,
         state: str,
         source: EventSource,
-        worker: Optional[Worker] = None,
-        raw_error: Optional[str] = None,
-        duration_ms: Optional[float] = None,
+        worker: Worker | None = None,
+        raw_error: str | None = None,
+        duration_ms: float | None = None,
+        exit_code: int | None = None,
+        worker_pid: int | None = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec
@@ -798,6 +837,8 @@ class SimpleElasticAgent(ElasticAgent):
             md["local_rank"] = (worker.local_rank,)
             md["role_rank"] = (worker.role_rank,)
             md["role_world_size"] = (worker.role_world_size,)
+            md["exit_code"] = (exit_code,)
+            md["worker_pid"] = (worker_pid,)
             global_rank = worker.global_rank
             worker_id = str(worker.id)
         else:
@@ -877,7 +918,8 @@ class SimpleElasticAgent(ElasticAgent):
         rdzv_handler = spec.rdzv_handler
 
         while True:
-            assert self._worker_group.state != WorkerState.INIT
+            if self._worker_group.state == WorkerState.INIT:
+                raise AssertionError
             time.sleep(monitor_interval)
             run_result = self._monitor_workers(self._worker_group)
             state = run_result.state
@@ -947,6 +989,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._exit_barrier_timeout,
         )
         start = time.time()
+        self._in_exit_barrier = True
         try:
             store_util.barrier(
                 store=self._store,
@@ -966,3 +1009,5 @@ class SimpleElasticAgent(ElasticAgent):
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start,
             )
+        finally:
+            self._in_exit_barrier = False

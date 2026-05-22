@@ -23,7 +23,7 @@ import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -38,13 +38,26 @@ T = TypeVar("T")
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .symbolic_convert import InstructionTranslatorBase
 
 
 Node = torch.fx.Node
 Region = list[Node]
 IdenticalNodes = list[Node]
-GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+GlobalStateKey = tuple[
+    bool,
+    bool,
+    int,
+    tuple[bool, bool],
+    tuple[bool, bool],
+    torch.dtype,
+    bool,
+    bool,
+    bool,
+    bool,
+]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
@@ -116,7 +129,7 @@ def _extract_args(arg: Any) -> Any:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
+) -> tuple[tuple[str, ...], tuple[Any | None, ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
@@ -161,8 +174,8 @@ def get_global_state_key() -> GlobalStateKey:
 # of a node
 class BackwardBfsArgIter:
     def __init__(self, origin: Node) -> None:
-        self._cur: Optional[Node] = origin
-        self._queue: deque[Optional[Node]] = deque()
+        self._cur: Node | None = origin
+        self._queue: deque[Node | None] = deque()
 
     @staticmethod
     def create(origin: Node) -> BackwardBfsArgIter:
@@ -170,10 +183,11 @@ class BackwardBfsArgIter:
         it.add_children(origin)
         # pop the origin node, since it is the origin of
         # the region and does not need to be considered for addition
-        assert it.next()
+        if not it.next():
+            raise AssertionError("expected origin node to be popped from iterator")
         return it
 
-    def next(self) -> Optional[Node]:
+    def next(self) -> Node | None:
         ret = self._cur
         if not self._queue:
             self._cur = None
@@ -181,7 +195,7 @@ class BackwardBfsArgIter:
             self._cur = self._queue.popleft()
         return ret
 
-    def peek(self) -> Optional[Node]:
+    def peek(self) -> Node | None:
         return self._cur
 
     def add_children(self, node: Node) -> None:
@@ -219,7 +233,7 @@ class GraphRegionTracker:
         self.input_pickler = InputPickler()
 
     def _hash_node(
-        self, filename: str, lineno: int, instruction_pointer: Optional[int], node: Node
+        self, filename: str, lineno: int, instruction_pointer: int | None, node: Node
     ) -> str:
         from torch._inductor.codecache import sha256_hash
 
@@ -318,8 +332,10 @@ class GraphRegionTracker:
         # the reason for this is that we will necessarily create the largest groups first.
         for group in self.hash_to_duplicates.values():
             if len(group) > 1:
+                # pyrefly: ignore [implicit-any]
                 region_group = []
                 min_rank = math.inf
+
                 for node in group:
                     # some nodes aren't in the topo ranking?
                     if node in topological_ranking:
@@ -366,7 +382,8 @@ class RegionWrapper:
     def __init__(
         self, region: Region, node_to_recursive_ancestors: dict[Node, set[Node]]
     ) -> None:
-        assert len(region) == 1, "all regions should start with one node"
+        if len(region) != 1:
+            raise AssertionError("all regions should start with one node")
         node = region[0]
         self.node_to_recursive_ancestors = node_to_recursive_ancestors
         self.iter = BackwardBfsArgIter.create(node)
@@ -374,7 +391,7 @@ class RegionWrapper:
         self.ancestors = set(node_to_recursive_ancestors[node])
         self.region = region
 
-    def next_candidate(self) -> Optional[Node]:
+    def next_candidate(self) -> Node | None:
         return self.iter.next()
 
     def will_inclusion_create_cycle(self, node: Node) -> bool:
@@ -402,7 +419,8 @@ def fully_expand_region_group(
     debug_log("expanding new region group: %s", regions)
 
     # All regions should start with 1 node
-    assert all(len(region) == 1 for region in regions)
+    if not all(len(region) == 1 for region in regions):
+        raise AssertionError("all regions should start with one node")
     region_wrappers = [
         RegionWrapper(region, node_to_recursive_ancestors) for region in regions
     ]
@@ -454,9 +472,10 @@ def fully_expand_region_group(
             debug_log("--------------------")
 
         if add_to_all_regions:
-            assert len(region_wrappers) == len(nodes_to_add), (
-                "Number of nodes to add must equal the number of regions"
-            )
+            if len(region_wrappers) != len(nodes_to_add):
+                raise AssertionError(
+                    "Number of nodes to add must equal the number of regions"
+                )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)
                 debug_log("adding %s's children", node)

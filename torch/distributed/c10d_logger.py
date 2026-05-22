@@ -9,7 +9,8 @@
 
 import functools
 import logging
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -44,6 +45,7 @@ def _get_logging_handler(
     return (log_handler, log_handler_name)
 
 
+# pyrefly: ignore [unknown-name]
 global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 

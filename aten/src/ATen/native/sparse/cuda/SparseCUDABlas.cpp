@@ -16,8 +16,8 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
 
-  int i_nnz = (int)nnz;
-  int i_m = (int)m;
+  int i_nnz = static_cast<int>(nnz);
+  int i_m = static_cast<int>(m);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
@@ -202,7 +202,7 @@ void CreateIdentityPermutation(int64_t nnz, int *P) {
   TORCH_CHECK((nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
-  int i_nnz = (int)nnz;
+  int i_nnz = static_cast<int>(nnz);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseCreateIdentityPermutation(handle, i_nnz, P);
@@ -213,9 +213,9 @@ void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *csrRow
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <=",
     INT_MAX);
-  int i_m = (int)m;
-  int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_m = static_cast<int>(m);
+  int i_n = static_cast<int>(n);
+  int i_nnz = static_cast<int>(nnz);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
@@ -226,9 +226,9 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
-  int i_m = (int)m;
-  int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_m = static_cast<int>(m);
+  int i_n = static_cast<int>(n);
+  int i_nnz = static_cast<int>(nnz);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
@@ -242,9 +242,9 @@ void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRow
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
-  int i_m = (int)m;
-  int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_m = static_cast<int>(m);
+  int i_n = static_cast<int>(n);
+  int i_nnz = static_cast<int>(nnz);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
@@ -255,9 +255,9 @@ void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "XcoosortByRow only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
-  int i_m = (int)m;
-  int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_m = static_cast<int>(m);
+  int i_n = static_cast<int>(n);
+  int i_nnz = static_cast<int>(nnz);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));

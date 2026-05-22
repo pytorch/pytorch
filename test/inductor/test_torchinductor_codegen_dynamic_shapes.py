@@ -87,13 +87,19 @@ def check_codegen(
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
         self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
-    assert called, "Ran graph without calling compile_fx"
+    if not called:
+        raise AssertionError("Ran graph without calling compile_fx")
 
     torch._dynamo.reset()
 
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    #
+    # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
+    #
+    "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # Failed to find dynamic for loop variable (no kernels generated)
     #
@@ -104,14 +110,31 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
+    "test_as_strided_on_views_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_resize_overlapping_strides_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_complex_conv2d_conj_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    # XPU always convert conv1d to conv2d and can not match the expected codegen result.
+    "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange2_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
+    "test_arange7_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
@@ -148,8 +171,22 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    # Fallback ops (data-dependent output size) route to ATen eager — no
+    # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
+    "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # test_amp_update_scale does not use self.common(), so check_codegen() is
+    # never triggered — the test calls torch.compile() directly and passes.
+    # No TestFailure entry needed.
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -161,7 +198,6 @@ test_failures = {
     "test_compar_dynamic_shapes": TestFailure(("cpu",)),
     "test_complex_from_real_imag_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_const_int32_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_conv2d_backward_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
@@ -175,6 +211,12 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unsafe_chunk_empty_tensor_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_max_unpool_empty_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_bucketize_nd_tiling_False_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_nd_tiling_True_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu",)),
@@ -184,6 +226,12 @@ test_failures = {
     "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
+    "test_searchsorted_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
+    "test_bucketize_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -191,12 +239,6 @@ test_failures = {
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
-        ("cpu", "cuda")
-    ),
-    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
-    ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -268,6 +310,7 @@ test_failures = {
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_uniform_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -355,7 +398,10 @@ test_failures = {
     "test_profiler_mark_wrapper_call_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
-    "test_rand_like_deterministic_dynamic_shapes": TestFailure(
+    "test_rand_like_deterministic_combo_kernels_False_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_rand_like_deterministic_combo_kernels_True_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu",)),
@@ -393,6 +439,12 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_bucketize_scalar_with_options_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 add_test_failures(test_failures, dynamic_shapes_test_failures)

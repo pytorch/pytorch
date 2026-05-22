@@ -6,6 +6,7 @@
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/Logging.h>
 
 namespace at::mps {
@@ -21,6 +22,14 @@ bool MPSHooks::hasMPS() const {
 
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
   switch (major) {
+    case 26:
+      switch (minor) {
+        case 0:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+        default:
+          TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.0+");
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+      }
     case 15:
       switch (minor) {
         case 0:
@@ -70,7 +79,10 @@ void MPSHooks::commitStream() const {
 }
 
 void* MPSHooks::getCommandBuffer() const {
-  return at::mps::getDefaultMPSStream()->commandBuffer();
+  auto stream = at::mps::getDefaultMPSStream();
+  // Release pending computeCommandEncoder, as extensions is likely to allocate new one
+  stream->endKernelCoalescing();
+  return stream->commandBuffer();
 }
 
 void* MPSHooks::getDispatchQueue() const {
@@ -79,6 +91,7 @@ void* MPSHooks::getDispatchQueue() const {
 
 void MPSHooks::emptyCache() const {
   at::mps::getIMPSAllocator()->emptyCache();
+  at::native::mps::MPSGraphCache::getInstance()->clear();
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {
@@ -142,7 +155,7 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
-  return at::mps::getIMPSAllocator(true);
+  return at::mps::getIMPSAllocator();
 }
 
 using at::MPSHooksRegistry;

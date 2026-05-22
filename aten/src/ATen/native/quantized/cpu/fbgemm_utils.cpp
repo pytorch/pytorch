@@ -237,7 +237,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
               D,
               H,
               W,
-              src_contig.data_ptr<scalar_t>(),
+              src_contig.const_data_ptr<scalar_t>(),
               dst.data_ptr<scalar_t>());
         });
   }
@@ -353,7 +353,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
               D,
               H,
               W,
-              src_contig.data_ptr<scalar_t>(),
+              src_contig.const_data_ptr<scalar_t>(),
               dst.data_ptr<scalar_t>());
         });
     return dst;
@@ -543,9 +543,9 @@ int register_embedding_params() {
 
 namespace {
 
-[[maybe_unused]] static auto conv2d_params = register_conv_params<2>();
-[[maybe_unused]] static auto conv3d_params = register_conv_params<3>();
-[[maybe_unused]] static auto linear_params = register_linear_params();
-[[maybe_unused]] static auto embedding_params = register_embedding_params();
+[[maybe_unused]] auto conv2d_params = register_conv_params<2>();
+[[maybe_unused]] auto conv3d_params = register_conv_params<3>();
+[[maybe_unused]] auto linear_params = register_linear_params();
+[[maybe_unused]] auto embedding_params = register_embedding_params();
 
 } // namespace

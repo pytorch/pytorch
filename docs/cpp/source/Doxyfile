@@ -34,6 +34,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
+                         ../../../aten/src/ATen/cuda/CUDAContextLight.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
                          ../../../aten/src/ATen/cudnn/Types.h \
@@ -48,7 +49,9 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../build/aten/src/ATen/Functions.h \
                          ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
+                         ../../../c10/core/DeviceGuard.h \
                          ../../../c10/core/DeviceType.h \
+                         ../../../c10/core/Stream.h \
                          ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/OptionalArrayRef.h \
@@ -68,6 +71,11 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
                          ../../../torch/csrc/stable/library.h \
+                         ../../../torch/csrc/stable/ops.h \
+                         ../../../torch/csrc/stable/tensor_struct.h \
+                         ../../../torch/csrc/stable/device_struct.h \
+                         ../../../torch/csrc/stable/accelerator.h \
+                         ../../../torch/csrc/stable/macros.h \
                          ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!
@@ -95,7 +103,8 @@ GENERATE_XML           = YES
 # Set to NO if you do not want the Doxygen program listing included.
 # NOTE: setting to NO may result in unrecovered file relationships
 #       (which file defined which compound)
-XML_PROGRAMLISTING     = YES
+# Setting to NO to prevent inline code from polluting documentation
+XML_PROGRAMLISTING     = NO
 ################################################################################
 # Doxygen preprocessor / parser control.                                       #
 ################################################################################
@@ -106,6 +115,12 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
+# Use FILTER_PATTERNS to preprocess HIDDEN_NAMESPACE macros only for torch/csrc/stable files.
+# Doxygen's PREDEFINED doesn't work reliably because it finds the actual macro definitions
+# in the included headers. Using sed with capture groups to generically handle any namespace.
+# Also replace TORCH_FEATURE_VERSION conditionals with #if 1 so all functions are documented.
+# Note: 3-arg patterns must come before 2-arg patterns for correct matching.
+FILTER_PATTERNS        = */torch/csrc/stable/*.h="sed -E -e 's/HIDDEN_NAMESPACE_BEGIN\(([^,]+), ([^,]+), ([^)]+)\)/namespace \1 { namespace \2 { namespace \3 {/g' -e 's/HIDDEN_NAMESPACE_END\(([^,]+), ([^,]+), ([^)]+)\)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN\(([^,]+), ([^)]+)\)/namespace \1 { namespace \2 {/g' -e 's/HIDDEN_NAMESPACE_END\(([^,]+), ([^)]+)\)/} }/g' -e 's/#if TORCH_FEATURE_VERSION >= TORCH_VERSION_[0-9_]*/#if 1/g' -e 's/#if TORCH_FEATURE_VERSION < TORCH_VERSION_[0-9_]*/#if 1/g' -e 's/#endif \/\/ TORCH_FEATURE_VERSION.*/#endif/g'"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
@@ -118,8 +133,16 @@ EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
-EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::*
+EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::* torch::nested*
 # EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
+
+# Don't include inline source code in documentation
+INLINE_SOURCES         = NO
+# Don't include code bodies in detailed description
+SOURCE_BROWSER         = NO
+# Don't reference source files
+REFERENCES_LINK_SOURCE = NO
+VERBATIM_HEADERS       = NO
 ################################################################################
 # Docstring control / customization.                                           #
 ################################################################################
@@ -137,10 +160,21 @@ JAVADOC_AUTOBRIEF      = YES
 #      *
 #      * \endrst
 #      */
+# Or with /// style:
+#     /// \rst
+#     /// .. code-block:: cpp
+#     ///
+#     ///     int main() {
+#     ///         return 0;
+#     ///     }
+#     ///
+#     /// \endrst
+#
 # NOTE:
 #     1. \rst and \endrst must be on their own line.
-#     2. leading-asterisk required.
-ALIASES                = "rst=\verbatim embed:rst:leading-asterisk"
+#     2. For /// comments, use leading-slashes; for /** */ use leading-asterisk
+#     3. PyTorch uses /// style comments primarily
+ALIASES                = "rst=\verbatim embed:rst:leading-slashes"
 ALIASES               += "endrst=\endverbatim"
 ################################################################################
 # Warning suppression.                                                         #

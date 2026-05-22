@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+import math
+
+
 try:
     import halide as hl  # type: ignore[import-untyped, import-not-found]
 except ImportError:
@@ -21,7 +24,7 @@ else:
 def _pair_uniform_to_normal(u1, u2):
     """Box-Muller transform"""
     u1 = hl.max(hl.f32(1.0e-7), u1)
-    th = hl.f32(6.283185307179586) * u2
+    th = hl.f32(math.tau) * u2
     r = hl.sqrt(hl.f32(-2.0) * hl.log(u1))
     return r * hl.cos(th), r * hl.sin(th)
 
@@ -96,6 +99,40 @@ def randint(seed, offset, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
 def rand(seed, offset, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
     source = randint(seed, offset, n_rounds)
     return _uint_to_uniform_float(source)
+
+
+def rand_eager_kernel(seed, offset_blocks, tid, VEC, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
+    inv = hl.cast(hl.Float(32), 1.0 / 4294967296.0)  # 2^-32
+    half = hl.cast(hl.Float(32), 0.5) * inv
+
+    tid_u64 = hl.cast(hl.UInt(64), tid)
+    VEC_u64 = hl.cast(hl.UInt(64), VEC)
+    subseq = tid_u64 // VEC_u64
+    which4 = (tid_u64 % VEC_u64) // hl.cast(hl.UInt(64), 4)
+    lane = tid_u64 % hl.cast(hl.UInt(64), 4)
+
+    offblk = hl.cast(hl.UInt(64), offset_blocks) + which4
+
+    c0 = hl.cast(hl.UInt(32), offblk & hl.cast(hl.UInt(64), 0xFFFFFFFF))
+    c1 = hl.cast(
+        hl.UInt(32),
+        (offblk >> hl.cast(hl.UInt(64), 32)) & hl.cast(hl.UInt(64), 0xFFFFFFFF),
+    )
+    c2 = hl.cast(hl.UInt(32), subseq & hl.cast(hl.UInt(64), 0xFFFFFFFF))
+    c3 = hl.cast(
+        hl.UInt(32),
+        (subseq >> hl.cast(hl.UInt(64), 32)) & hl.cast(hl.UInt(64), 0xFFFFFFFF),
+    )
+
+    u0, u1, u2, u3 = halide_philox(seed, c0, c1, c2, c3, n_rounds)
+
+    v01 = hl.select(lane == hl.cast(hl.UInt(64), 0), u0, u1)
+    v23 = hl.select(lane == hl.cast(hl.UInt(64), 2), u2, u3)
+    rand_int = hl.select(
+        (lane == hl.cast(hl.UInt(64), 0)) | (lane == hl.cast(hl.UInt(64), 1)), v01, v23
+    )
+
+    return hl.cast(hl.Float(32), 1.0) - (hl.cast(hl.Float(32), rand_int) * inv + half)
 
 
 def randn(seed, offset):

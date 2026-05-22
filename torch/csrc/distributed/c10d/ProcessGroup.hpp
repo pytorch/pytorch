@@ -11,7 +11,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.
@@ -794,7 +793,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) {
-    static at::Tensor tensor;
+    at::Tensor tensor;
     // TODO: if nccl was specified then use it
     auto device = opts.device;
     if (device.has_value()) {
@@ -841,6 +840,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   bool hasBackends() {
     return !deviceTypeToBackendType_.empty();
+  }
+
+  bool hasBackendForDeviceType(c10::DeviceType deviceType) {
+    return deviceTypeToBackendType_.find(deviceType) !=
+        deviceTypeToBackendType_.end();
   }
 
   void setBackend(
@@ -978,6 +982,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
+  bool getUsePgForSymmMemRendezvous() const {
+    return getDefaultBackend()->getUsePgForSymmMemRendezvous();
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
+  }
+
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
@@ -985,7 +997,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const std::optional<std::chrono::milliseconds>& timeout,
       const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& name,
-      const std::optional<std::string>& groupDesc);
+      const std::optional<std::string>& groupDesc,
+      const std::optional<std::vector<c10::Device>>& devices = std::nullopt);
 
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
@@ -1015,7 +1028,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
-  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  // This mapping is ordered, as splitGroup must call split on the underlying
+  // backends in a consistent order.
+  std::map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>

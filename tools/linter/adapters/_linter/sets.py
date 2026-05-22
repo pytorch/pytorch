@@ -5,7 +5,7 @@ import token
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from . import EMPTY_TOKENS
+from . import is_empty
 from .bracket_pairs import bracket_pairs
 
 
@@ -41,6 +41,7 @@ class LineWithSets:
         t = self.tokens[i]
         after = i < len(self.tokens) - 1 and self.tokens[i + 1]
         if t.string == "Set" and t.type == token.NAME:
+            # pyrefly: ignore [bad-return]
             return after and after.string == "[" and after.type == token.OP
         return (
             (t.string == "set" and t.type == token.NAME)
@@ -66,7 +67,7 @@ class LineWithSets:
             if brace_end := self.bracket_pairs.get(i):
                 # Skip to the end of a subexpression
                 i = brace_end
-            elif t.type not in EMPTY_TOKENS:
+            elif not is_empty(t):
                 empty = False
             i += 1
         return not empty

@@ -150,16 +150,16 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 // BFDOT. Deferring that for now to get the NEON/ASIMD BFDOT path
 // working.
 #if __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
 // https://gcc.gnu.org/gcc-10/changes.html
 // https://godbolt.org/z/cdGG7vn8o
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && defined(__clang__) && __clang_major__ > 15
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && defined(__clang__) && __clang_major__ > 15
 #else // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
@@ -212,7 +212,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::Half>& b,
     const vec::Vectorized<float>& acc_low,
     const vec::Vectorized<float>& acc_high) {
-#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE)
+#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE256)
   return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
 #else
   const auto [a_float_low, a_float_high] = convert_half_float(a);
@@ -233,7 +233,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 
 // Return a + b_low * c_low + b_high * c_high
 vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE256)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
@@ -428,10 +428,11 @@ void fp16_gemv_trans(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0);
 #if !defined(__aarch64__) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
   if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    return;
   }
 #endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+  fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
 
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
@@ -465,7 +466,7 @@ void bf16_gemv_trans(
   at::BFloat16* y,
   const int incy) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-  return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
 
 float fp16_dot(

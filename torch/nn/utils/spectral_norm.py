@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 import torch
 import torch.nn.functional as F
@@ -185,8 +185,6 @@ class SpectralNorm:
         return fn
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormLoadStateDictPreHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -244,8 +242,6 @@ class SpectralNormLoadStateDictPreHook:
                 state_dict[weight_key + "_v"] = v
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormStateDictHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -268,7 +264,7 @@ def spectral_norm(
     name: str = "weight",
     n_power_iterations: int = 1,
     eps: float = 1e-12,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> T_module:
     r"""Apply spectral normalization to a parameter in the given module.
 
@@ -332,6 +328,7 @@ def spectral_norm(
         else:
             dim = 0
     SpectralNorm.apply(module, name, n_power_iterations, dim, eps)
+
     return module
 
 

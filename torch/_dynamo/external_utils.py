@@ -22,7 +22,8 @@ Key functionality groups:
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -71,7 +72,7 @@ def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 def call_hook(
-    hook: Callable[..., Optional[torch.Tensor]], *args: Any, **kwargs: Any
+    hook: Callable[..., torch.Tensor | None], *args: Any, **kwargs: Any
 ) -> torch.Tensor:
     """
     Used by compiled autograd to handle hook returning None.
@@ -97,6 +98,7 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
         out = f(*args, **kwargs)
+        # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
 
     return wrap
@@ -126,7 +128,7 @@ def call_backward(
     backward_c_function: torch.autograd.function.BackwardCFunction,
     saved_tensors: list[torch.Tensor],
     *args: Any,
-) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+) -> torch.Tensor | tuple[torch.Tensor, ...]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
     grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
@@ -193,6 +195,10 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # this function is in external_utils so that convert_frame doesn't skip it.
     @functools.wraps(fn)
     def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch.compiler.is_exporting():
+            raise RuntimeError(
+                "Non-recursive torch.compiler.disable is not supported with torch.export."
+            )
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper
@@ -213,7 +219,7 @@ def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[
 
 # Use only on ints marked dynamic via torch.empty(0, integer)
 # Currently only way to mark ints as dynamic: https://github.com/pytorch/pytorch/issues/129623
-def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
+def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
     if isinstance(x, torch.Tensor):
         # x.size() is expected to be [0, dynamic_int]
         return x.size(1)

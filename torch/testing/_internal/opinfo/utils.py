@@ -59,10 +59,14 @@ class _dynamic_dispatch_dtypes(_dispatch_dtypes):
 
 def get_supported_dtypes(op, sample_inputs_fn, device_type):
     # Returns the supported dtypes for the given operator and device_type pair.
-    assert device_type in ["cpu", "cuda"]
+    if device_type not in ["cpu", "cuda"]:
+        raise AssertionError(
+            f"Expected device_type in ['cpu', 'cuda'], got {device_type!r}"
+        )
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
-            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!"
+            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
+            stacklevel=2,
         )
         return _dynamic_dispatch_dtypes(())
 
@@ -76,7 +80,8 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
             # We raise a warning, so that user knows that this was the case
             # and can investigate if there was an issue with the `sample_inputs_fn`.
             warnings.warn(
-                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}"
+                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}",
+                stacklevel=2,
             )
             continue
 
@@ -230,7 +235,10 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if "mask" in keys:
             mask = kwargs.pop("mask")
             if mask is not None:
-                assert mask.layout == torch.strided
+                if mask.layout != torch.strided:
+                    raise AssertionError(
+                        f"Expected mask.layout == torch.strided, got {mask.layout}"
+                    )
                 kwargs["where"] = mask.cpu().numpy()
 
         if "identity" in keys:

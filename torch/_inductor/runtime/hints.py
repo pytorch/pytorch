@@ -5,21 +5,38 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Optional, Union
 
+import torch
 from torch.utils._triton import has_triton_package
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 4096,
+    "X": 8192 if torch.version.hip else 4096,
     "Y": 1024,
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
+TRITON_DOT_MIN_BLOCK = 16
+
+
+def native_matmul_block_numel(
+    kwargs: typing.Mapping[str, int], r0_block: int | None = None
+) -> int:
+    return (
+        kwargs.get("XBLOCK", 1)
+        * kwargs.get("YBLOCK", 1)
+        * kwargs.get("ZBLOCK", 1)
+        * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
+    )
+
+
+def native_matmul_persistent_rblock(r0_block: int) -> int:
+    return max(r0_block, TRITON_DOT_MIN_BLOCK)
 
 
 class ReductionHint(Enum):
@@ -47,6 +64,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -69,6 +87,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -88,15 +107,27 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
-            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
+            # pyrefly: ignore [not-iterable]
+            # Build attr dict merging divisibility and pointer_range per arg index,
+            # since a single arg can carry both attributes.
+            result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
+            for x in pointer_range_32 or ():
+                key = (x,)
+                if key in result:
+                    result[key].append(["tt.pointer_range", 32])
+                else:
+                    result[key] = [["tt.pointer_range", 32]]
+            return result
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
+        # pyrefly: ignore [invalid-argument]
         "AttrsDescriptor",
-        ["divisible_by_16", "equal_to_1"],
-        defaults=[(), ()],
+        ["divisible_by_16", "equal_to_1", "pointer_range_32"],
+        defaults=[(), (), ()],
     )
 
 
@@ -130,10 +161,11 @@ class DeviceProperties(typing.NamedTuple):
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
-    major: Optional[int] = None
-    regs_per_multiprocessor: Optional[int] = None
-    max_threads_per_multi_processor: Optional[int] = None
-    warp_size: Optional[int] = None
+    major: int | None = None
+    regs_per_multiprocessor: int | None = None
+    max_threads_per_multi_processor: int | None = None
+    max_threads_per_block: int | None = None
+    warp_size: int | None = None
 
     @classmethod
     @functools.cache
@@ -167,6 +199,7 @@ class DeviceProperties(typing.NamedTuple):
             max_threads_per_multi_processor=getattr(
                 props, "max_threads_per_multi_processor", None
             ),
+            max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
 
@@ -174,10 +207,10 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    shape: Optional[list[str]] = None
-    stride: Optional[list[str]] = None
-    offset: Optional[str] = None
-    alias_of: Optional[str] = None
+    shape: list[str] | None = None
+    stride: list[str] | None = None
+    offset: str | None = None
+    alias_of: str | None = None
 
     def bindings_type(self) -> str:
         if self.ctype in ("at::Half*", "at::BFloat16*"):
@@ -201,9 +234,9 @@ class HalideInputSpec(typing.NamedTuple):
 class HalideMeta(typing.NamedTuple):
     argtypes: list[HalideInputSpec]
     target: str
-    scheduler: Optional[str] = None
-    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
-    cuda_device: Optional[int] = None
+    scheduler: str | None = None
+    scheduler_flags: dict[str, int | str] | None = None
+    cuda_device: int | None = None
 
     def args(self) -> list[str]:
         """Command line args to pass to halide generator"""

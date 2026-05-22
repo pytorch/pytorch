@@ -181,7 +181,7 @@ class TestGraphTransformObserver(TestCase):
 
     @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
     def test_graph_transform_observer_replace(self):
-        # the node sohuld should not be duplicated
+        # the node should should not be duplicated
         class Model(torch.nn.Module):
             def forward(self, x):
                 y = x + 1

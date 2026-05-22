@@ -59,7 +59,7 @@ constexpr uint64_t getDefaultMaxThreadsPerBlock() {
 #ifdef USE_ROCM
 #define SKIP_SORTED_INDICES 32
 template <typename scalar_t, int SZ>
-__global__ void indexing_backward_kernel(
+__global__ void indexing_backward_kernel_many_indices(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
   using opmath_t = at::opmath_type<scalar_t>;
@@ -254,7 +254,8 @@ __global__ void indexing_backward_kernel_stride_1(
     }
   }
 }
-#else
+#endif
+
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -333,6 +334,7 @@ __global__ void indexing_backward_kernel(
   }
 }
 
+#ifndef USE_ROCM
 template <typename scalar_t>
 __global__ void indexing_backward_kernel_stride_1(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -512,11 +514,17 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if(__builtin_amdgcn_processor_is("gfx942") ||
+       __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #endif
@@ -708,6 +716,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       dim3 block(warp_size, indices_per_block);
 
 #ifdef USE_ROCM
+      dim3 new_grid_many_indices(ceil_div(num_indices, (int64_t) (indices_per_block * warp_size)),
+      grid.y == 1 ? std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size))) : grid.y,
+      grid.z);
       dim3 new_grid(ceil_div(num_indices, (int64_t) (indices_per_block * warp_size)), grid.y, grid.z);
       size_t smem_dups_size = indices_per_block * warp_size * sizeof(int64_t);
 #define KERNEL_GRID new_grid
@@ -780,11 +791,43 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kBool,
             kBFloat16);
         } else {
+#ifdef USE_ROCM
+          if (num_indices >= 200000)
+            AT_DISPATCH_V2(
+              expandedValue.scalar_type(),
+              "indexing_backward_many_indices",
+              AT_WRAP([&] {
+                indexing_backward_kernel_many_indices<scalar_t, UNROLL><<<new_grid_many_indices, block, smem_dups_size, stream>>>(
+                  sorted_indices.const_data_ptr<int64_t>(),
+                  orig_indices.const_data_ptr<int64_t>(),
+                  expandedValue.const_data_ptr<scalar_t>(),
+                  src_.mutable_data_ptr<scalar_t>(),
+                  num_indices,
+                  sliceSize,
+                  strideBefore,
+                  nElemBefore,
+                  accumulate);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }),
+              AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+              // AT_EXPAND(AT_FLOAT8_TYPES),
+              // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+              // should not be supported here, then reenable AT_FLOAT8_DTYPES
+              kFloat8_e4m3fn,
+              kFloat8_e5m2,
+              kFloat8_e4m3fnuz,
+              kFloat8_e5m2fnuz,
+              kComplexHalf,
+              kHalf,
+              kBool,
+              kBFloat16);
+          else
+#endif
           AT_DISPATCH_V2(
             expandedValue.scalar_type(),
             "indexing_backward",
             AT_WRAP([&] {
-              indexing_backward_kernel<scalar_t, UNROLL><<<KERNEL_GRID, block, KERNEL_SMEM, stream>>>(
+              indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
                 sorted_indices.const_data_ptr<int64_t>(),
                 orig_indices.const_data_ptr<int64_t>(),
                 expandedValue.const_data_ptr<scalar_t>(),
@@ -1574,7 +1617,7 @@ void index_select_out_cuda_impl(
 
   // SmallIndexKernel is more performant when the number of indices is small, and pre-loading
   // the index reduces memory accesses. When the number of indices is large, we avoid that
-  // and increase parallellism by calling gather_out which is a generalization of index_select
+  // and increase parallelism by calling gather_out which is a generalization of index_select
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index) &&
@@ -1758,36 +1801,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   return masked_fill__cuda(self, mask, value.item());
 }
 
-namespace {
-
-// ForwardIt: only legacy random access iterator is supported.
-template<class ForwardIt, class T, bool is_lower = true>
-static __host__ __device__ __forceinline__
-ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
-    ForwardIt it;
-    typename std::iterator_traits<ForwardIt>::difference_type count, step;
-    // NOTE: std::distance(first, last) compiles but produces wrong results here,
-    // so only legacy random access iterators are safe in this code.
-    count = last - first;
-
-    while (count > 0) {
-      it = first;
-      step = count / 2;
-      // avoiding std::advance(it, step),
-      // although it does work unlike std::distance
-      it += step;
-      if (is_lower ? *it < value : value >= *it) {
-        first = ++it;
-        count -= step + 1;
-      }
-      else {
-        count = step;
-      }
-    }
-    return first;
-}
-
-}
 
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   const auto ndim = self.dim();
@@ -1879,12 +1892,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
               [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
-                auto* lb = find_bound<const index_t*, index_t, true>(
+                auto* lb = at::cuda::detail::find_bound<const index_t*, index_t, true>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
-                auto* ub = find_bound<const index_t*, index_t, false>(
+                auto* ub = at::cuda::detail::find_bound<const index_t*, index_t, false>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val

@@ -1,4 +1,5 @@
 #include <c10/util/Enumerate.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 
 #include <torch/nativert/executor/ExecutionFrame.h>
@@ -120,7 +121,7 @@ void ExecutionFrame::updateMovableOutputs() {
       auto id = (*valuePtr)->id();
 
       /*
-          values are not moveable if:
+          values are not movable if:
           1. they are persistent
           2. they are inputs (since inputs are borrowed)
           3. the value will be moved in a later (right-more) output
@@ -137,8 +138,8 @@ void ExecutionFrame::updateMovableOutputs() {
 ExecutionFrame::ExecutionFrame(
     const Graph& graph,
     size_t numValues,
-    const std::vector<ValueId>&,
-    const std::vector<ValueId>&)
+    const std::vector<ValueId>& /*unused*/,
+    const std::vector<ValueId>& /*unused*/)
     : graph_(graph) {
   allValues_.resize(numValues);
 }
@@ -156,11 +157,8 @@ void ExecutionFrame::setBorrowedIValue(ValueId id, c10::IValue ivalue) {
 
 at::Tensor ExecutionFrame::getTensor(ValueId id) const {
   const auto& ivalue = getIValue(id);
-  if (C10_LIKELY(ivalue.isTensor())) {
-    return ivalue.toTensor();
-  } else {
-    throw std::runtime_error("getTensor called on non-tensor value");
-  }
+  TORCH_CHECK(ivalue.isTensor(), "getTensor called on non-tensor value");
+  return ivalue.toTensor();
 }
 
 std::vector<c10::IValue> ExecutionFrame::tryMoveUserOutputs() {

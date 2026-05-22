@@ -8,6 +8,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
@@ -56,6 +57,8 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 namespace at {
 class Tensor;
@@ -235,12 +238,30 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
+// same as Python's FakeTensorMode
+// storing shape env and converter from Python, we'll use these later
+// to implement sym ints, real tensor conversion, etc
+// this doesn't have caching because we're not implementing it
+// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+struct C10_API FakeTensorMode {
+  std::shared_ptr<c10::SafePyObject> shape_env_;
+  std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+
+  FakeTensorMode(
+      std::shared_ptr<c10::SafePyObject> shape_env,
+      std::shared_ptr<c10::SafePyObject> converter)
+      : shape_env_(std::move(shape_env)),
+        fake_tensor_converter_(std::move(converter)) {}
+};
+
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
+  std::optional<c10::Device> fake_device_ = std::nullopt;
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
 
   ExtraMeta() = default;
   ~ExtraMeta() = default;
@@ -255,12 +276,10 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
-    if (other.custom_data_ptr_error_msg_) {
-      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    }
-    if (other.custom_storage_error_msg_) {
-      custom_storage_error_msg_ = other.custom_storage_error_msg_;
-    }
+    custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    fake_device_ = other.fake_device_;
+    fake_tensor_mode_ = other.fake_tensor_mode_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -359,7 +378,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled = DISABLED) {}
+  VariableVersion(Disabled /*unused*/ = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -522,21 +541,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   // See Note [Enum ImplType]
   TensorImpl(
-      ImplType,
+      ImplType /*unused*/,
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
   TensorImpl(
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
       std::optional<c10::Device> device_opt);
 
@@ -563,9 +582,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // from under us.
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
-      std::optional<c10::Device>);
+      std::optional<c10::Device> /*device_opt*/);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -1129,6 +1148,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kMeta;
   }
 
+  bool is_fake() const {
+    return key_set_.has(DispatchKey::Fake);
+  }
+
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1425,6 +1448,34 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool is_conj() const {
     constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
     return key_set_.has_all(conjugate_ks);
+  }
+
+  /**
+   * Transmute this meta tensor into a fake tensor
+   * The underlying device_opt_ stays as Meta for dispatch routing
+   * and fake device is stored in ExtraMeta and returned by device()
+   * via the device_policy_ mechanism
+   * also converting backend key from Meta to Fake and adding Fake key
+   * to DispatchKeySet
+   */
+
+  // this is the fast path: caller guarantees fake_device already has a valid
+  // index
+  void set_fake_device(c10::Device fake_device);
+
+  // Normalizes the device index then calls set_fake_device.
+  // use when the device might lack an index ("cuda" vs "cuda:0").
+  void set_and_normalize_fake_device(c10::Device fake_device);
+
+  void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
+    get_extra_meta().fake_tensor_mode_ = std::move(mode);
+  }
+
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->fake_tensor_mode_;
   }
 
   /**
@@ -2064,10 +2115,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // be ignored.
 
   /**
-   * One TensorImpl can be copied to another TensorImpl if they have the same
-   * DispatchKeySet. The only two special cases (for legacy reason) are:
-   * CPU is compatible with CUDA and SparseCPU is
-   * compatible with SparseCUDA.
+   * One TensorImpl can be copied to another TensorImpl if
+   * - They have the same DispatchKeySet.
+   * - Or both have DispatchKey::Dense and a supported dense backend
+   *   (CPU, CUDA, MPS, HIP, XPU, HPU, MTIA)
+   * - Or both have DispatchKey::Sparse and a supported sparse backend
+   *   (CPU, CUDA, MPS, HIP, XPU)
+   * - Or both have DispatchKey::SparseCsr
+   * For PrivateUse1 backend, user can implement their own
+   * `_has_compatible_shallow_copy_type` operator.
+   * See OpenRegMinimal.cpp for an example of overriding this operator.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
@@ -2175,6 +2232,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   const impl::PyObjectSlot* pyobj_slot() const {
     return &pyobj_slot_;
   }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
 
  private:
   // See NOTE [std::optional operator usage in CUDA]
@@ -3077,6 +3138,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
 
+namespace detail {
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
+
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Changed the size of TensorImpl?  If the size went down, good for
@@ -3244,7 +3318,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
     are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),    4,  FieldNameEnum::pyobj_slot_>();
     is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3269,7 +3343,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
     is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3303,3 +3377,5 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

@@ -20,12 +20,24 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
-from torch._guards import ChainedSource, Guard, GuardSource, Source
+from torch import device as device_type
+from torch._guards import (
+    ChainedSource,
+    dataclass_with_cached_hash,
+    Guard,
+    GuardSource,
+    Source,
+)
 
 from . import utils
-from .bytecode_transformation import create_call_function, create_instruction
+from .bytecode_transformation import (
+    create_binary_subscr,
+    create_build_tuple,
+    create_call_function,
+)
 
 
 if TYPE_CHECKING:
@@ -98,7 +110,7 @@ def is_constant_source(source: Source) -> bool:
     if isinstance(source, ConstantSource):
         return True
     try:
-        if source.guard_source() == GuardSource.CONSTANT:
+        if source.guard_source == GuardSource.CONSTANT:
             return True
     except NotImplementedError:
         pass
@@ -106,14 +118,32 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source) -> str:
-    try:
-        return source.name()
-    except NotImplementedError:
+def _get_source_debug_name(source: Source | None) -> str:
+    if source is None:
         return "<unknown source>"
+    else:
+        try:
+            return source.name
+        except NotImplementedError:
+            return "<unknown source>"
 
 
-@dataclasses.dataclass(frozen=True)
+def _esc_str(s: Any, apply_repr: bool = False) -> str:
+    """
+    Escapes curly brackets for format strings.
+    e.g. "frozenset({0})" becomes "frozenset({{0}})".
+    This is used by _name_template for example, because it's
+    expected to return a format string, but we may wish to include
+    strings that should not be accidentally formatted.
+    """
+    if apply_repr:
+        s = repr(s)
+    else:
+        s = str(s)
+    return s.replace("{", "{{").replace("}", "}}")
+
+
+@dataclass_with_cached_hash(frozen=True)
 class LocalSource(Source):
     local_name: str
 
@@ -122,7 +152,7 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: Optional[frozenset[str]] = None
+    dynamism: frozenset[str] | None = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
@@ -135,58 +165,91 @@ class LocalSource(Source):
         else:
             codegen.append_output(codegen.create_load(self.local_name))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.local_name
+
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.LOCAL
 
-    def name(self) -> str:
-        return f"L[{repr(self.local_name)}]"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"L[{_esc_str(self.local_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
+class TempLocalSource(Source):
+    # like LocalSource, but cannot be guarded on
+    local_name: str
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    @property
+    def guard_source(self) -> GuardSource:
+        return GuardSource.TEMP_LOCAL
+
+    @property
+    def _name_template(self) -> str:
+        raise NotImplementedError(
+            "Cannot create guard on TempLocalSource - this is an internal Dynamo bug. Please file an issue on GitHub."
+        )
+
+
+@dataclass_with_cached_hash(frozen=True)
 class SyntheticLocalSource(Source):
     local_name: str
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(self.local_name))
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.SYNTHETIC_LOCAL
 
-    def name(self) -> str:
-        return f"SYNTHETIC_LOCAL[{self.local_name!r}]"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"SYNTHETIC_LOCAL[{_esc_str(self.local_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.RANDOM_VALUE
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(codegen.tx.output.random_values_var))
         codegen.append_output(codegen.create_load_const(self.random_call_index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
-    def name(self) -> str:
-        return f"random_value_{self.random_call_index}"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"random_value_{_esc_str(self.random_call_index)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.global_name
+
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
-    def name(self) -> str:
-        return f"G[{repr(self.global_name)}]"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"G[{_esc_str(self.global_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -198,114 +261,139 @@ class GlobalWeakRefSource(Source):
         )
         codegen.extend_output(create_call_function(0, False))
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
-    def name(self) -> str:
-        return f"G[{repr(self.global_name)}]()"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"G[{_esc_str(self.global_name, apply_repr=True)}]()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class WeakRefCallSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.base))
         codegen.extend_output(create_call_function(0, False))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}()"
+    @property
+    def _name_template(self) -> str:
+        return "{0}()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CallFunctionNoArgsSource(WeakRefCallSource):
     pass
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
     def __post_init__(self) -> None:
-        assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
+        if not self.base:
+            raise AssertionError(
+                "Can't construct an AttrSource without a valid base source"
             )
-            object.__setattr__(self, "member", member_parts[-1])
+        if "." in self.member:
+            raise AssertionError(
+                f"AttrSource member must not contain '.', got {self.member!r}. "
+                "Use OutputGraph.get_chained_attr_source() for dotted paths."
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
+        if self.member.isidentifier():
+            return f"{base}.{self.member}"
+        else:
+            return f"getattr({base}, {self.member!r})"
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         if not self.member.isidentifier():
-            return f"getattr({self.base.name()}, {self.member!r})"
-        return f"{self.base.name()}.{self.member}"
+            return f"getattr({{0}}, {_esc_str(self.member, apply_repr=True)})"
+        return f"{{0}}.{_esc_str(self.member)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
+class CellContentsSource(AttrSource):
+    """
+    Source for closure cell contents that also stores the freevar name.
+    This allows guard failure messages to show which variable the closure cell refers to.
+    """
+
+    freevar_name: str = dataclasses.field(default="")
+
+    def __post_init__(self) -> None:
+        if not self.base:
+            raise AssertionError(
+                "Can't construct a CellContentsSource without a valid base source"
+            )
+        if self.member != "cell_contents":
+            raise AssertionError(
+                "CellContentsSource should only be used for cell_contents"
+            )
+
+
+@dataclass_with_cached_hash(frozen=True)
 class GenericAttrSource(ChainedSource):
     member: str
 
     def __post_init__(self) -> None:
-        assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
+        if not self.base:
+            raise AssertionError(
+                "Can't construct a GenericAttrSource without a valid base source"
             )
-            object.__setattr__(self, "member", member_parts[-1])
+        if "." in self.member:
+            raise AssertionError(
+                f"GenericAttrSource member must not contain '.', got {self.member!r}. "
+                "Use OutputGraph.get_chained_attr_source() for dotted paths."
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"object.__getattribute__({self.base.name()}, {self.member!r})"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return (
+            f"object.__getattribute__({{0}}, {_esc_str(self.member, apply_repr=True)})"
+        )
 
 
 # Represents obj.__dict__ where obj is a type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__dict__"))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
         # guard accessor, we are use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
         # registers that its working on a dict object.
-        return f"dict({self.base.name()}.__dict__)"
+        return "dict({0}.__dict__)"
 
 
 # Represents obj.__mro__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__mro__"))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.__mro__"
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__mro__"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class LocalCellSource(Source):
     """
     Conceptually, this class is `LocalSource` for cell objects implicitly
@@ -325,38 +413,34 @@ class LocalCellSource(Source):
 
 
 # Represents obj.__code__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CodeSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__code__"))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.__code__"
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__code__"
 
 
 # Represents obj.__closure__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ClosureSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__closure__"))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.__closure__"
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__closure__"
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going
 # through the Python bytecodes. Therefore, we use a separate source for grad
 # field.
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GradSource(ChainedSource):
     member: str = "grad"
 
@@ -364,21 +448,20 @@ class GradSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.{self.member}"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"{{0}}.{_esc_str(self.member)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ParamBufferSource(AttrSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source]
 
 
 # Special AttrSource to differentiate module._buffers or module._parameters
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedParamBufferSource(AttrSource):
     pass
 
@@ -392,15 +475,18 @@ class UnspecializedParamBufferSource(AttrSource):
 # symbolicized / fake-ified to avoid invalid specialization during view replay. This source
 # is useful for symbols utilized in the middle of the view chain that are not expected to be
 # present within the final view shape metadata.
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class EphemeralSource(Source):
-    desc: Optional[str] = None
+    desc: str | None = None
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.EPHEMERAL
 
-    def name(self) -> str:
-        return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        desc = ": " + self.desc if self.desc is not None else ""
+        return f"<ephemeral{_esc_str(desc)}>"
 
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         raise NotImplementedError
@@ -409,16 +495,14 @@ class EphemeralSource(Source):
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class SkipGuardSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         self.base.reconstruct(codegen)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return self.base.name()
+    @property
+    def _name_template(self) -> str:
+        return "{0}"
 
 
 class TensorProperty(enum.Enum):
@@ -434,25 +518,32 @@ class TensorProperty(enum.Enum):
         elif self is TensorProperty.STORAGE_OFFSET:
             return "storage_offset"
         else:
-            raise AssertionError(f"unhandled {self}")
+            raise AssertionError(f"unhandled {_esc_str(self)}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TensorPropertySource(ChainedSource):
     prop: TensorProperty
-    idx: Optional[int] = None  # None for STORAGE_OFFSET
+    idx: int | None = None  # None for STORAGE_OFFSET
 
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("TensorPropertySource base must not be None")
         if self.prop is TensorProperty.STORAGE_OFFSET:
-            assert self.idx is None
+            if self.idx is not None:
+                raise AssertionError(
+                    "idx must be None for STORAGE_OFFSET TensorProperty"
+                )
         else:
-            assert self.idx is not None
+            if self.idx is None:
+                raise AssertionError(
+                    f"idx must not be None for {self.prop} TensorProperty"
+                )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from(
-                utils.__name__, f"call_{self.prop.method_name()}"
+                utils.__name__, f"call_{_esc_str(self.prop.method_name())}"
             )
         )
         codegen(self.base)
@@ -463,154 +554,180 @@ class TensorPropertySource(ChainedSource):
             create_call_function(2 if self.idx is not None else 1, False)
         )
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         if self.prop is TensorProperty.SIZE:
-            return f"{self.base.name()}.size()[{self.idx}]"
+            return f"{{0}}.size()[{_esc_str(self.idx)}]"
         elif self.prop is TensorProperty.STRIDE:
-            return f"{self.base.name()}.stride()[{self.idx}]"
+            return f"{{0}}.stride()[{_esc_str(self.idx)}]"
         elif self.prop is TensorProperty.STORAGE_OFFSET:
-            assert self.idx is None
-            return f"{self.base.name()}.storage_offset()"
+            if self.idx is not None:
+                raise AssertionError(
+                    "idx must be None for STORAGE_OFFSET TensorProperty"
+                )
+            return "{0}.storage_offset()"
         else:
-            raise AssertionError(f"unhandled {self.prop}")
+            raise AssertionError(f"unhandled {_esc_str(self.prop)}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class IndexedSource(ChainedSource):
     idx: int
 
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("IndexedSource base must not be None")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"({self.idx}, {self.base.name()})"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"({_esc_str(self.idx)}, {{0}})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("NegateSource base must not be None")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
         # NB: use method call so that function stripping regexes work
-        return f"{self.base.name()}.__neg__()"
+        return "{0}.__neg__()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConvertIntSource(ChainedSource):
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("ConvertIntSource base must not be None")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"cast_symbool_to_symint_guardless({self.base.name()})"
+    @property
+    def _name_template(self) -> str:
+        return "cast_symbool_to_symint_guardless({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
+class DynamicScalarSource(ChainedSource):
+    is_int: bool
+
+    def __post_init__(self) -> None:
+        if self.base is None:
+            raise AssertionError("DynamicScalarSource base must not be None")
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Integer casting at reconstruction helps reduce the amount of DynamicInts returned
+        # to the user, in favor of plain ints.
+        # For example, a compiled region that only does int arithmetic could return a
+        # DynamicInt without the casting here.
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "int"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "int({0})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("FlattenScriptObjectSource base must not be None")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.__obj_flatten__()"
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__obj_flatten__()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ScriptObjectQualifiedNameSource(ChainedSource):
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError(
+                "ScriptObjectQualifiedNameSource base must not be None"
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}._type().qualified_name()"
+    @property
+    def _name_template(self) -> str:
+        return "{0}._type().qualified_name()"
 
 
 class AttrProxySource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"{self.base.name()}.get_base()"
+    @property
+    def _name_template(self) -> str:
+        return "{0}.get_base()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DefaultsSource(ChainedSource):
-    idx_key: Union[int, str]
+    idx_key: int | str
     is_kw: bool = False
     field: str = dataclasses.field(init=False, repr=False, compare=False)
     _name: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        assert self.base, (
-            "Base must be a valid source in order to properly track and guard this Defaults to its origin."
-        )
+        if not self.base:
+            raise AssertionError(
+                "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+            )
         if self.is_kw:
-            assert isinstance(self.idx_key, str)
+            if not isinstance(self.idx_key, str):
+                raise AssertionError(
+                    f"idx_key must be a str for keyword defaults, got {type(self.idx_key)}"
+                )
             object.__setattr__(self, "field", "__kwdefaults__")
             object.__setattr__(
-                self, "_name", f"{self.base.name()}.{self.field}['{self.idx_key}']"
+                self,
+                "_name",
+                f"{{0}}.{_esc_str(self.field)}['{_esc_str(self.idx_key)}']",
             )
         else:
-            assert isinstance(self.idx_key, int)
+            if not isinstance(self.idx_key, int):
+                raise AssertionError(
+                    f"idx_key must be an int for positional defaults, got {type(self.idx_key)}"
+                )
             object.__setattr__(self, "field", "__defaults__")
             object.__setattr__(
-                self, "_name", f"{self.base.name()}.{self.field}[{self.idx_key}]"
+                self, "_name", f"{{0}}.{_esc_str(self.field)}[{_esc_str(self.idx_key)}]"
             )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.field))
         codegen.append_output(codegen.create_load_const(self.idx_key))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         return self._name
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GetItemSource(ChainedSource):
     index: Any
     index_is_slice: bool = False
 
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("GetItemSource base must not be None")
         if isinstance(self.index, slice):
             # store the hashable version of the slice so the whole GetItemSource is hashable
             super().__setattr__("index", self.index.__reduce__())
@@ -622,33 +739,32 @@ class GetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        codegen.append_output(create_binary_subscr())
 
     def unpack_slice(self) -> slice:
-        assert self.index_is_slice
+        if not self.index_is_slice:
+            raise AssertionError("unpack_slice called but index is not a slice")
         slice_class, slice_args = self.index
         return slice_class(*slice_args)
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         # Index can be of following types
         # 1) index is a slice - example 1:4
         # 2) index is a constant - example string, integer
-        assert not isinstance(self.index, Source)
+        if isinstance(self.index, Source):
+            raise AssertionError(
+                f"GetItemSource index must not be a Source, got {type(self.index)}"
+            )
         if self.index_is_slice:
-            return f"{self.base.name()}[{self.unpack_slice()!r}]"
+            return f"{{0}}[{_esc_str(self.unpack_slice(), apply_repr=True)}]"
         else:
-            return f"{self.base.name()}[{self.index!r}]"
+            return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
     index: Any
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -658,25 +774,26 @@ class ConstDictKeySource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         # The list creation will be CSE'd by PyExprCSEPass
-        return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
+        return f"list(dict.keys({{0}}))[{_esc_str(self.index, apply_repr=True)}]"
 
     def is_dict_key(self) -> bool:
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NonSerializableSetGetItemSource(ChainedSource):
     index: int
 
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
 
-        assert ConstantVariable.is_literal(self.index)
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        if not ConstantVariable.is_literal(self.index):
+            raise AssertionError(
+                f"NonSerializableSetGetItemSource index must be a literal, got {self.index!r}"
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -686,18 +803,19 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({self.base.name()})[{self.index!r}]"
+        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
 
     def is_dict_key(self) -> bool:
         return False
 
 
 # Used to access an item from the dictionary
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DictGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -705,12 +823,12 @@ class DictGetItemSource(ChainedSource):
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
 
-        assert isinstance(
+        if not isinstance(
             self.index, ConstDictKeySource
-        ) or ConstantVariable.is_literal(self.index)
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        ) and not ConstantVariable.is_literal(self.index):
+            raise AssertionError(
+                f"DictGetItemSource index must be a ConstDictKeySource or literal, got {self.index!r}"
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Load dict
@@ -721,20 +839,29 @@ class DictGetItemSource(ChainedSource):
             codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
-    def name(self) -> str:
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        base = self.base.reconstruct_pycode(codegen)
         if isinstance(self.index, ConstDictKeySource):
-            return f"{self.base.name()}[{self.index.name()}]"
+            index = self.index.reconstruct_pycode(codegen)
         else:
-            return f"{self.base.name()}[{self.index!r}]"
+            index = repr(self.index)
+        return f"{base}[{index}]"
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        if isinstance(self.index, ConstDictKeySource):
+            return f"{{0}}[{_esc_str(self.index.name)}]"
+        else:
+            return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
 
 # Same as DictGetItemSource but used for dict.__getitem__ calls to ensure that
 # torch.compile does not run the overridden __getitem__ method
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DictSubclassGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -742,12 +869,12 @@ class DictSubclassGetItemSource(ChainedSource):
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
 
-        assert isinstance(
+        if not isinstance(
             self.index, ConstDictKeySource
-        ) or ConstantVariable.is_literal(self.index)
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        ) and not ConstantVariable.is_literal(self.index):
+            raise AssertionError(
+                f"DictSubclassGetItemSource index must be a ConstDictKeySource or literal, got {self.index!r}"
+            )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # reconstruct dict.__getitem__(dct, key)
@@ -768,14 +895,15 @@ class DictSubclassGetItemSource(ChainedSource):
 
         codegen.extend_output(create_call_function(2, False))
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
-            return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
+            return f"dict.__getitem__({{0}}, {_esc_str(self.index.name)})"
         else:
-            return f"{self.base.name()}[{self.index!r}]"
+            return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ListGetItemSource(GetItemSource):
     """
     Same as GetItemSource with reconstruct and name overridden to be list specific.
@@ -803,20 +931,24 @@ class ListGetItemSource(GetItemSource):
 
         codegen.extend_output(create_call_function(2, False))
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         # Index can be of following types
         # 1) index is a slice - example 1:4
         # 2) index is a constant - example string, integer
-        assert not isinstance(self.index, Source)
+        if isinstance(self.index, Source):
+            raise AssertionError(
+                f"ListGetItemSource index must not be a Source, got {type(self.index)}"
+            )
         if self.index_is_slice:
             raise RuntimeError(
                 "List[slice] is a temporary object and should not have a source"
             )
         else:
-            return f"list.__getitem__({self.base.name()}, {self.index!r})"
+            return f"list.__getitem__({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -826,24 +958,25 @@ class TupleIteratorGetItemSource(GetItemSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
-    def name(self) -> str:
-        return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return (
+            f"___tuple_iterator_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
+        )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NamedTupleFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("_fields"))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"___namedtuple_fields({self.base.name()})"
+    @property
+    def _name_template(self) -> str:
+        return "___namedtuple_fields({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DataclassFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -852,114 +985,123 @@ class DataclassFieldsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"___dataclass_fields({self.base.name()})"
+    @property
+    def _name_template(self) -> str:
+        return "___dataclass_fields({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeSource(ChainedSource):
     def __post_init__(self) -> None:
-        assert self.base is not None
+        if self.base is None:
+            raise AssertionError("TypeSource base must not be None")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return f"type({self.base.name()})"
+    @property
+    def _name_template(self) -> str:
+        return "type({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class OptimizerSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
-
-    def name(self) -> str:
-        return self.base.name()
+    @property
+    def _name_template(self) -> str:
+        return "{0}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return self.base.reconstruct_pycode(codegen)
+
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source]
 
-    def name(self) -> str:
-        return self.base.name()
+    @property
+    def _name_template(self) -> str:
+        return "{0}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedNNModuleSource(NNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalStateSource(Source):
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
         return ""
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
-class TorchSource(Source):
-    """Points to the actual `torch` module - used instead of GlobalSource
-    in case the user has overridden `torch` in their local namespace"""
+@dataclass_with_cached_hash(frozen=True)
+class ImportSource(Source):
+    """Points to an imported module - used instead of GlobalSource
+    in case the user has overridden the module name in their local namespace"""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    module_name: str
+
+    def __post_init__(self) -> None:
         from .guards import GuardBuilder, install_guard
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    def name(self) -> str:
-        return "__import__('torch')"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"__import__('{self.module_name}')"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
-                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
-                codegen.create_import_name("torch"),
+                create_build_tuple(0),  # fromlist
+                codegen.create_import_name(self.module_name),
             ]
         )
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 
-    def name(self) -> str:
-        return f"___get_torch_function_mode_stack_at({self._get_index()})"
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"___get_torch_function_mode_stack_at({_esc_str(self._get_index())})"
 
     def _get_index(self) -> int:
         from .variables.torch_function import TorchFunctionModeStackVariable
@@ -975,34 +1117,35 @@ class TorchFunctionModeStackSource(Source):
         codegen.extend_output([codegen.create_load_const(self._get_index())])
         codegen.extend_output(create_call_function(1, False))
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConstantSource(Source):
     source_name: str
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.source_name, add=False))
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.CONSTANT
 
-    def name(self) -> str:
+    @functools.cached_property
+    def _name_template(self) -> str:
         return self.source_name
 
     def make_guard(self, fn: Any) -> Any:
         raise NotImplementedError
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NumpyTensorSource(ChainedSource):
-    def name(self) -> str:
-        return f"___from_numpy({self.base.name()})"
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+    @property
+    def _name_template(self) -> str:
+        return "___from_numpy({0})"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
@@ -1010,59 +1153,84 @@ class NumpyTensorSource(ChainedSource):
         codegen.extend_output(create_call_function(1, False))
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class SubclassAttrListSource(ChainedSource):
-    def name(self) -> str:
-        return f"{self.base.name()}.__tensor_flatten__()[0]"
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__tensor_flatten__()[0]"
 
 
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class FloatTensorSource(ChainedSource):
-    def name(self) -> str:
-        return f"___as_tensor({self.base.name()})"
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+    @property
+    def _name_template(self) -> str:
+        return "___as_tensor({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CallMethodItemSource(ChainedSource):
-    def name(self) -> str:
-        return f"{self.base.name()}.item()"
-
-    def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+    @property
+    def _name_template(self) -> str:
+        return "{0}.item()"
 
 
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ShapeEnvSource(Source):
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
         return ""
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.SHAPE_ENV
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
+class CurrentStreamSource(Source):
+    device: device_type
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"___get_current_stream(torch.device('{_esc_str(self.device.type)}', {_esc_str(self.device.index)}))"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        num_args = 1
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "get_current_stream")
+        )
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
+        codegen.extend_output([codegen.create_load_const(self.device.type)])
+        if self.device.index is not None:
+            num_args += 1
+            codegen.extend_output([codegen.create_load_const(self.device.index)])
+        codegen.extend_output(create_call_function(num_args, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
+
+
+@dataclass_with_cached_hash(frozen=True)
 class BackwardStateSource(Source):
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
         return ""
 
+    @property
     def guard_source(self) -> GuardSource:
         return GuardSource.BACKWARD_STATE
 
 
+@functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
-) -> Optional[str]:
+) -> str | None:
     if isinstance(source, ChainedSource):
         return get_local_source_name(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
@@ -1072,15 +1240,18 @@ def get_local_source_name(
     return source.local_name
 
 
+@functools.lru_cache
 def is_from_local_source(source: Source, *, only_allow_input: bool = False) -> bool:
     return get_local_source_name(source, only_allow_input=only_allow_input) is not None
 
 
+@functools.lru_cache
 def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
-def get_global_source_name(source: Source) -> Optional[str]:
+@functools.lru_cache
+def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
     if not isinstance(source, GlobalSource):
@@ -1088,6 +1259,7 @@ def get_global_source_name(source: Source) -> Optional[str]:
     return source.global_name
 
 
+@functools.lru_cache
 def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
@@ -1098,6 +1270,7 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+@functools.lru_cache
 def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ClosureSource):
         return True
@@ -1106,10 +1279,13 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+@functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
+    if source == target:
+        return True
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
-    return source == target
+    return False
 
 
 @functools.lru_cache

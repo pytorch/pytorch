@@ -38,6 +38,7 @@ enum class C10_API_ENUM ProfilerState {
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
+  KINETO_PRIVATEUSE1, // use Kineto with registered IActivityProfiler
   KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
@@ -63,6 +64,7 @@ struct TORCH_API ExperimentalConfig {
       bool profile_all_threads = false,
       bool capture_overload_names = false,
       bool record_python_gc_info = false,
+      bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
   explicit operator bool() const;
@@ -108,6 +110,10 @@ struct TORCH_API ExperimentalConfig {
    * determine if gc collect is slowing down your profile.
    */
   bool record_python_gc_info;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
 
   /*
    * A custom_profiler_config option is introduced to allow custom backends

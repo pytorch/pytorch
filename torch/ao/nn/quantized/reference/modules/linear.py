@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -26,9 +26,9 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         in_features: int,
         out_features: int,
         bias_: bool = True,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        weight_qparams: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(in_features, out_features, bias_, device, dtype)
         self._init_weight_qparams(weight_qparams, device)

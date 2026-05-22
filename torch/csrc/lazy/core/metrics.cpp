@@ -1,11 +1,9 @@
 #include <torch/csrc/lazy/core/metrics.h>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/util.h>
 
 #include <algorithm>
 #include <chrono>
@@ -411,7 +409,7 @@ std::string CreateMetricReport(
 
   static std::string fall_back_counter_prefix = "aten::";
   arena->ForEachCounter([&ss](const std::string& name, CounterData* data) {
-    if (name.rfind(fall_back_counter_prefix, 0) == 0) {
+    if (name.starts_with(fall_back_counter_prefix)) {
       // it might emit duplicated counter if user also specified exact aten
       // counter in the `counter_names` but it should be very rare.
       EmitCounterInfo(name, data, &ss);

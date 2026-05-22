@@ -8,6 +8,7 @@
 #include <c10/util/Logging.h>
 #include "c10/core/CPUAllocator.h"
 #include "c10/util/irange.h"
+#include "caffe2/serialize/in_memory_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 
 namespace caffe2 {
@@ -175,10 +176,15 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
 
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
   std::vector<uint8_t> dst1(size1), dst2(size2);
   for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
-    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
 
     ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
     ASSERT_EQ(ret, size1);
@@ -519,7 +525,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
   std::tie(data_ptr, size) = reader.getRecord("key1", &overrideAllocator);
   EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
   EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes);
-  // allcoate with base allocator
+  // allocate with base allocator
   std::tie(data_ptr, size) = reader.getRecord("key1");
   EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
   EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
@@ -611,10 +617,15 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
 
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
   std::vector<uint8_t> dst1(size1), dst2(size2);
   for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
-    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
 
     ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
     ASSERT_EQ(ret, size1);
@@ -678,6 +689,34 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   ASSERT_EQ(totalReadSize, tensorDataSizeInBytes);
   // clean up
   remove(fileName);
+}
+
+TEST(MemoryReadAdapterTest, ClampsReadsToBufferSize) {
+  constexpr size_t kBufSize = 64;
+  std::vector<uint8_t> buf(kBufSize, 0xAA);
+  MemoryReadAdapter adapter(buf.data(), static_cast<off_t>(kBufSize));
+  ASSERT_EQ(adapter.size(), kBufSize);
+
+  std::array<uint8_t, 32> out{};
+
+  // pos straddles end: read starts at 48, only 16 bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(48, out.data(), out.size()), 16u);
+  for (size_t i = 0; i < 16; ++i) {
+    EXPECT_EQ(out[i], 0xAA);
+  }
+
+  // pos at end: zero bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize, out.data(), out.size()), 0u);
+
+  // pos past end: still zero; no OOB memcpy.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize + 1024, out.data(), out.size()), 0u);
+
+  // In-bounds read returns full count.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(0, out.data(), out.size()), out.size());
 }
 
 } // namespace

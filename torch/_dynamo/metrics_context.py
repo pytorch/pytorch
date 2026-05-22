@@ -18,8 +18,9 @@ from __future__ import annotations
 import heapq
 import logging
 import time
-from typing import Any, Callable, Optional, TYPE_CHECKING
-from typing_extensions import Self, TypeAlias
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, TypeAlias
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ class TopN:
     Helper to record a list of metrics, keeping only the top N "most expensive" elements.
     """
 
-    def __init__(self, at_most: int = 25):
+    def __init__(self, at_most: int = 25) -> None:
         self.at_most = at_most
         self.heap: list[tuple[int, Any]] = []
 
@@ -53,13 +54,13 @@ class TopN:
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, dict[str, Any], Optional[type[BaseException]], Optional[BaseException]],
+    [int, int, dict[str, Any], type[BaseException] | None, BaseException | None],
     None,
 ]
 
 
 class MetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Use this class as a contextmanager to create a context under which to accumulate
         a set of metrics, e.g., metrics gathered during a compilation. On exit of the
@@ -86,15 +87,16 @@ class MetricsContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
         _traceback: Any,
     ) -> None:
         """
         At exit, call the provided on_exit function.
         """
         self._level -= 1
-        assert self._level >= 0
+        if self._level < 0:
+            raise AssertionError("MetricsContext level cannot become negative")
         if self._level == 0:
             try:
                 end_time_ns = time.time_ns()
@@ -206,7 +208,7 @@ class MetricsContext:
 
 
 class RuntimeMetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Similar to MetricsContext, but used to gather the runtime metrics that are
         decoupled from compilation, where there's not a natural place to insert a
@@ -217,7 +219,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
+        self, metric: str, value: int, extra: dict[str, Any] | None = None
     ) -> None:
         """
         Increment a metric by a given amount.

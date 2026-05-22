@@ -185,4 +185,7 @@ bool custom_op_called() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_op_called", &custom_op_called, "check if our custom function was called");
+    m.def("is_available", []() { return true; });
+    m.def("device_count", []() { return 1; });
+    m.def("current_device", []() { return 0; });
 }

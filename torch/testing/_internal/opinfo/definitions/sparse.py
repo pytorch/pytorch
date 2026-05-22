@@ -3,8 +3,9 @@
 import os
 
 import torch
-from torch.testing import make_tensor  # noqa: F401
-from torch.testing._internal.opinfo.core import (  # noqa: F401
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import highest_precision_float
+from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     ErrorInput,
     generate_elementwise_binary_tensors,
@@ -171,7 +172,8 @@ def sample_inputs_sparse_reduction(
                 dtype=inp.dtype,
                 device=inp.device,
             )
-            assert not inp.is_coalesced()
+            if inp.is_coalesced():
+                raise AssertionError("Expected inp to not be coalesced")
             yield SampleInput(
                 inp.requires_grad_(requires_grad),
                 args=sample_input.args,
@@ -204,7 +206,7 @@ def _validate_sample_input_sparse_reduction(op_info, sample, check_validate=Fals
     if op_info.name == "sum":
         sample = _validate_sample_input_sparse_reduction_sum(sample)
 
-    if op_info.name in {"masked.sum"}:
+    if op_info.name == "masked.sum":
         mask = sample.kwargs.get("mask", UNSPECIFIED)
         if (
             mask not in {None, UNSPECIFIED}
@@ -768,8 +770,9 @@ def _sample_inputs_sparse_like_fns(
             tensor, args=(), kwargs=dict(device=device, dtype=dtype, layout=layout)
         )
 
-        if dtype is not torch.float64:
-            yield SampleInput(tensor, args=(), kwargs=dict(dtype=torch.float64))
+        hpf = highest_precision_float(device)
+        if dtype is not hpf:
+            yield SampleInput(tensor, args=(), kwargs=dict(dtype=hpf))
 
         if torch.cuda.is_available():
             other_device = "cuda" if tensor.device.type == "cpu" else "cpu"
@@ -792,12 +795,16 @@ def _sample_inputs_sparse_like_fns(
 
 
 def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False):
-    if sample.input.layout in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    } and op_info.name not in {"zeros_like"}:
+    if (
+        sample.input.layout
+        in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }
+        and op_info.name != "zeros_like"
+    ):
         if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
             return ErrorInput(
                 sample,

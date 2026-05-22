@@ -1,6 +1,6 @@
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <c10/util/irange.h>
-#include <climits>
+#include <limits>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -45,7 +45,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  auto qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
+  auto qvalue = fbgemm::Quantize<typename T::underlying>(
       value,
       static_cast<int32_t>(zero_point),
       static_cast<float>(scale),
@@ -60,12 +60,12 @@ void quantize_vec(
     const float* src,
     T* dst,
     size_t count) {
-  fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
+  fbgemm::Quantize<typename T::underlying>(
       src,
       (typename T::underlying*)dst,
       count,
       fbgemm::TensorQuantizationParams{
-          (float)scale, (int32_t)zero_point, precision});
+          static_cast<float>(scale), static_cast<int32_t>(zero_point), precision});
 }
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)

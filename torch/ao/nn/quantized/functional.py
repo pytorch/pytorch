@@ -2,7 +2,6 @@
 r"""Functional interface (quantized)."""
 
 import warnings
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -222,7 +221,7 @@ def conv1d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv1d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -294,7 +293,7 @@ def conv2d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv2d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -370,7 +369,7 @@ def conv3d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv3d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -439,9 +438,9 @@ def interpolate(
 def linear(
     input: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor] = None,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    bias: Tensor | None = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
 ) -> Tensor:
     r"""
     Applies a linear transformation to the incoming quantized data:
@@ -558,8 +557,8 @@ def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
     inplace: bool = False,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
 ):
     r"""
     Quantized version of the.
@@ -577,7 +576,8 @@ def leaky_relu(
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if scale is not None and zero_point is not None:
-        assert not inplace, "Cannot rescale with `inplace`"
+        if inplace:
+            raise AssertionError("Cannot rescale with `inplace`")
         output = torch._empty_affine_quantized(
             input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype
         )
@@ -724,7 +724,8 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
     """
     warnings.warn(
-        "nn.quantized.functional.upsample is deprecated. Use nn.quantized.functional.interpolate instead."
+        "nn.quantized.functional.upsample is deprecated. Use nn.quantized.functional.interpolate instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
@@ -749,7 +750,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn(
-        "nn.quantized.functional.upsample_bilinear is deprecated. Use nn.quantized.functional.interpolate instead."
+        "nn.quantized.functional.upsample_bilinear is deprecated. Use nn.quantized.functional.interpolate instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
@@ -774,6 +776,7 @@ def upsample_nearest(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn(
-        "nn.quantized.functional.upsample_nearest is deprecated. Use nn.quantized.functional.interpolate instead."
+        "nn.quantized.functional.upsample_nearest is deprecated. Use nn.quantized.functional.interpolate instead.",
+        stacklevel=2,
     )
     return interpolate(input, size, scale_factor, mode="nearest")

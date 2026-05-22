@@ -35,6 +35,7 @@ class GeneralizedPareto(Distribution):
         concentration (float or Tensor): Concentration parameter of the distribution
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "loc": constraints.real,
         "scale": constraints.positive,
@@ -142,6 +143,7 @@ class GeneralizedPareto(Distribution):
         return self.loc
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
+    # pyrefly: ignore [bad-override]
     def support(self):
         lower = self.loc
         upper = torch.where(

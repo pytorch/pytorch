@@ -93,7 +93,10 @@ class TestLiteScriptModule(TestCase):
             buffer = io.BytesIO(exported_module)
             buffer.seek(0)
 
-            assert b"callstack_debug_map.pkl" in exported_module
+            if b"callstack_debug_map.pkl" not in exported_module:
+                raise AssertionError(
+                    "Expected callstack_debug_map.pkl in exported module"
+                )
 
             mobile_module = _load_for_lite_interpreter(buffer)
             with self.assertRaisesRegex(
@@ -437,7 +440,7 @@ class TestLiteScriptModule(TestCase):
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         self.assertTrue("self.val and val are same" in error_message)
 

@@ -1,19 +1,26 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
-from collections.abc import KeysView
+import warnings
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
+from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
 from .schemas import AOTConfig, FakifiedFlatArgs
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, KeysView
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -25,12 +32,54 @@ def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
+    shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> FakifiedFlatArgs:
+) -> tuple[FakifiedFlatArgs, list[int]]:
+    """Convert real tensor inputs into fake tensors for AOT autograd tracing.
+
+    Called at compile time (not runtime) to produce the fake inputs that AOT
+    autograd traces through. Each real tensor is converted to a FakeTensor
+    via ``fake_mode.from_tensor``, preserving shape, dtype, device, and
+    symbolic shape information from the ShapeEnv. Non-tensor inputs (ints,
+    SymInts, ScriptObjects) are converted or passed through as appropriate.
+
+    Tensor subclass inputs (DTensor, etc.) are fakified recursively by
+    walking their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are
+    resolved via ``trigger_wait()`` before fakification so they don't appear
+    in the traced metadata (see below).
+
+    Called from ``aot_function``, ``aot_module_simplified``, and
+    ``aot_export_module`` — anywhere AOT autograd needs fake inputs before
+    graph capture.
+
+    Returns:
+        A tuple of (fakified_args, act_input_indices) where act_input_indices
+        records which positions held AsyncCollectiveTensors. These indices are
+        stored on ViewAndMutationMeta so that the runtime wrapper can emit
+        direct trigger_wait() calls on those positions.
+    """
+    # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
+    # eager-mode wrappers for async collective overlap; if they leak into the
+    # traced graph as input types, AOT autograd records them in
+    # SubclassCreationMeta for output tangent metadata. At runtime, autograd
+    # produces plain tensor tangents, causing a type mismatch. Unwrapping
+    # here prevents ACT from appearing in the traced metadata.
+    try:
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+    except ImportError:
+        AsyncCollectiveTensor = None
+
+    act_input_indices: list[int] = []
+    if AsyncCollectiveTensor is not None:
+        for i, a in enumerate(flat_args):
+            if isinstance(a, AsyncCollectiveTensor):
+                act_input_indices.append(i)
+                flat_args[i] = a.trigger_wait()
+
     with fake_mode:
 
-        def convert(idx, x):
+        def convert(idx: int, x: Any) -> Any:
+            nonlocal ignore_shape_env
             if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
@@ -40,23 +89,47 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source), hint=x, source=source
+                        shape_env.create_symbol(x, source, positive=x >= 0),
+                        hint=x,
+                        source=source,
                     )
-            if isinstance(x, torch.ScriptObject):
+            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                assert x.fake_mode is fake_mode
+                # In the case of cross compilation we will have example inputs
+                # with a different fake mode than our tracing fake mode.
+                # In these cases we want to clone the fake tensor into our
+                # inner fake mode.
+                if x.fake_mode is not fake_mode:
+                    return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    assert all(
-                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                    )
+                # See if all inner tensors are FakeTensors from this mode
+                all_this_fake = True
+                for a in attrs:
+                    match getattr(x, a):
+                        case FakeTensor() as v:
+                            if v.fake_mode is not fake_mode:
+                                # FakeTensor subclass from a different mode.
+                                # Fall through to refakify.
+                                all_this_fake = False
+                                break
+                        case torch.Tensor():
+                            all_this_fake = False
+                            break
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
+
+                if all_this_fake:
                     return x
 
             # see note [Tensor Fakification and Symbol Caching]
@@ -88,12 +161,14 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
+        return FakifiedFlatArgs(
+            [convert(idx, x) for idx, x in enumerate(flat_args)]
+        ), act_input_indices
 
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> tuple[FakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -104,8 +179,11 @@ def construct_fake_mode(
 
 
 def _try_get_metadata_from_dynamo(
-    mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
-) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
+    mod: torch.nn.Module,
+    param_keys: KeysView[str],
+    full_args_num: int,
+    full_args_descs: list[DifferentiableAOTInput],
+) -> tuple[list[torch._guards.Source | None] | None, list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -127,22 +205,33 @@ def _try_get_metadata_from_dynamo(
 
     if not hasattr(mod, "_param_name_to_source"):
         # is from export
-        return None, []
+        static_input_indices = [
+            i
+            for i, node in enumerate(full_args_descs)
+            if isinstance(node, (ParamAOTInput, BufferAOTInput))
+        ]
+        return None, static_input_indices
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
     # Additionally, we mark static indices for cudagraphs.
-    param_name_to_source = mod._param_name_to_source
+    param_name_to_source = cast(
+        dict[str, torch._guards.Source], mod._param_name_to_source
+    )
     seen_sources = set()
 
-    aot_autograd_arg_pos_to_source = []
+    aot_autograd_arg_pos_to_source: list[torch._guards.Source | None] = []
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
+        if name not in param_name_to_source:
+            raise AssertionError(f"{name} not found in param_name_to_source")
         source = param_name_to_source[name]
-        assert source not in seen_sources, source
+        if source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
+        if source is None:
+            raise AssertionError(f"source must not be None for {name}")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -152,15 +241,17 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
+        if not hasattr(node, "_dynamo_source"):
+            raise AssertionError(f"node {node} must have _dynamo_source attribute")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources, source
+        if source is not None and source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
-        source_name = source.name() if source else str(source)
+        source_name = source.name if source else str(source)
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,
@@ -180,12 +271,15 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    if full_args_num != len(aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
+        )
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 
 @contextmanager
-def _detect_attribute_assignment(mod: torch.nn.Module):
+def _detect_attribute_assignment(mod: torch.nn.Module) -> Generator[None, None, None]:
     # Do not allow assignment of tensor attributes during export unless
     # the attribute is registered as a buffer.
 
@@ -217,14 +311,29 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         *NN_MODULE_LAZY_STD_ATTRS,
     }
 
-    def _get_attributes(mod):
+    def _get_attributes(mod: torch.nn.Module) -> dict[str, Any]:
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
+
+    def _get_all_module_attributes(mod: torch.nn.Module) -> dict[str, dict[str, Any]]:
+        # return attributes from all modules and submodules
+        result = {}
+        for name, submodule in mod.named_modules():
+            result[name] = _get_attributes(submodule)
+        return result
+
+    def _restore_all_module_attributes(
+        mod: torch.nn.Module, snapshot: dict[str, dict[str, Any]]
+    ) -> None:
+        # restore attributes to all modules and submodules
+        for name, submodule in mod.named_modules():
+            if name in snapshot:
+                submodule.__dict__.update(snapshot[name])
 
     # save state of attributes before enter
     snapshot = pytree.tree_map(
         lambda x: x,
-        _get_attributes(mod),
+        _get_all_module_attributes(mod),
         is_leaf=lambda x: type(x) in _pytree_subclasses_that_lose_info,
     )
     try:
@@ -232,53 +341,81 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
     finally:
         # after exit, compare state of attributes with snapshot
         # to detect which tensor attributes were assigned
-        assigned_tensor_attributes = []
 
-        def _collect_assigned_tensor_attributes(kp, v, _v):
-            if _v is not v:
-                attr, *rest = kp
-                if isinstance(v, torch.Tensor):
-                    assigned_tensor_attributes.append(
-                        f"self.{attr.key}{pytree.keystr(rest)}"
-                    )
-                # TODO(avik): Assigning all other types are allowed right now.
-                # Maybe in the future we want to limit this to primitive types?
-            return v
+        def _collect_assigned_tensor_attributes(
+            snapshot: dict[str, dict[str, Any]], new_attrs: dict[str, dict[str, Any]]
+        ) -> list[str]:
+            assigned_tensor_attributes = []
 
-        new_attrs = _get_attributes(mod)
-        if len(new_attrs) != len(snapshot):
-            added_attrs = new_attrs.keys() - snapshot.keys()
-            deleted_attrs = snapshot.keys() - new_attrs.keys()
+            def _compare_values(path: str, old_val: Any, new_val: Any) -> None:
+                """Recursively compare values, handling containers."""
+                # Same object, no change
+                if old_val is new_val:
+                    return
 
-            if len(added_attrs) > 0:
-                raise ValueError(
-                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` "
-                    f"API and must be initialized at model.__init__ "
-                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                )
+                if old_val is None or new_val is None:
+                    if isinstance(new_val, torch.Tensor):
+                        assigned_tensor_attributes.append(path)
+                    return
 
-            if len(deleted_attrs) > 0:
-                raise ValueError(
-                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` "
-                    f"API and must be initialized at model.__init__ "
-                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                )
+                # Check if it's a tensor that was reassigned
+                if isinstance(new_val, torch.Tensor):
+                    assigned_tensor_attributes.append(path)
+                    return
 
-        pytree.tree_map_with_path(
-            _collect_assigned_tensor_attributes, snapshot, new_attrs
+                # Handle dict containers
+                if isinstance(old_val, dict) and isinstance(new_val, dict):
+                    all_keys = set(old_val.keys()) | set(new_val.keys())
+                    for key in all_keys:
+                        old_item = old_val.get(key)
+                        new_item = new_val.get(key)
+                        _compare_values(f"{path}[{key!r}]", old_item, new_item)
+                    return
+
+                # Handle list/tuple containers
+                if isinstance(old_val, (list, tuple)) and isinstance(
+                    new_val, (list, tuple)
+                ):
+                    # Different lengths = mutation happened
+                    max_len = max(len(old_val), len(new_val))
+                    for i in range(max_len):
+                        old_item = old_val[i] if i < len(old_val) else None
+                        new_item = new_val[i] if i < len(new_val) else None
+                        _compare_values(f"{path}[{i}]", old_item, new_item)
+                    return
+
+                # For other types, just check if they're different objects
+                # (we don't care about non-tensor mutations)
+
+            for module_name in snapshot.keys() | new_attrs.keys():
+                old_module_attrs = snapshot.get(module_name, {})
+                new_module_attrs = new_attrs.get(module_name, {})
+
+                for attr_name in old_module_attrs.keys() | new_module_attrs.keys():
+                    module_prefix = f"self.{module_name}." if module_name else "self."
+                    full_path = f"{module_prefix}{attr_name}"
+
+                    old_val = old_module_attrs.get(attr_name)
+                    new_val = new_module_attrs.get(attr_name)
+                    _compare_values(full_path, old_val, new_val)
+
+            return assigned_tensor_attributes
+
+        new_attrs = _get_all_module_attributes(mod)
+        assigned_tensor_attributes = _collect_assigned_tensor_attributes(
+            snapshot, new_attrs
         )
         # restore state of all attributes (including, e.g., of primitive types)
-        mod.__dict__.update(snapshot)
+        _restore_all_module_attributes(mod, snapshot)
 
         if assigned_tensor_attributes:
             if len(assigned_tensor_attributes) > 1:
                 noun, verb = "attributes", "were"
             else:
                 noun, verb = "attribute", "was"
-            raise ValueError(
+            warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer).",
+                stacklevel=2,
             )

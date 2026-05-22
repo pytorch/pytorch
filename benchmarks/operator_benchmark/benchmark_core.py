@@ -8,7 +8,7 @@ import platform
 import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 import benchmark_utils
 
@@ -18,6 +18,7 @@ import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+from torch.utils.benchmark import Timer
 
 
 """Performance microbenchmarks.
@@ -111,6 +112,17 @@ def _build_test(
                     keep_config = False
                     break
 
+            if "mps" in attr.values():
+                if not torch.backends.mps.is_available():
+                    keep_config = False
+                    break
+
+            # same for 'xpu': skip configs that target XPU on machines without XPU support
+            if "xpu" in attr.values():
+                if not torch.xpu.is_available():
+                    keep_config = False
+                    break
+
             test_attrs.update(attr)
 
         if not keep_config:
@@ -120,7 +132,8 @@ def _build_test(
             raise ValueError("Missing tags in configs")
 
         op = bench_op()
-        assert op is not None, "Can't create test"
+        if op is None:
+            raise AssertionError("Can't create test: bench_op() returned None")
         # op_name_function is a dictionary which has op_name and op_function.
         # an example of op_name_function is:
         # {'op_name' : 'abs', 'op_function' : torch.abs}
@@ -265,7 +278,13 @@ class BenchmarkRunner:
                 print(
                     f"{mode} Execution Time (us) : {results['reported_run_time_us'][0]:.3f}"
                 )
-                print(f"Peak Memory (KB) : {results['peak_memory']}\n")
+                print(f"Peak Memory (KB) : {results['peak_memory']}")
+                # Calculate and print memory bandwidth if operator provides memory traffic
+                if results.get("memory_bandwidth_gb_s") is not None:
+                    print(
+                        f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}"
+                    )
+                print()
 
     def _perf_result_to_dict(self, results, test_case):
         """This function is the parallel of _print_perf_result, which instead of
@@ -285,6 +304,8 @@ class BenchmarkRunner:
             "latency unit": "us",
             "peak memory": results["peak_memory"],
             "memory unit": "KB",
+            "memory bandwidth": results.get("memory_bandwidth_gb_s"),
+            "memory bandwidth unit": "GB/s",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
@@ -296,12 +317,13 @@ class BenchmarkRunner:
             break_idxs = [-1]
             curr_brackets = []
             for i, c in enumerate(s):
-                if c in open_to_close.keys():
+                if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
-                    assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
-                        "ERROR: not able to parse the string!"
-                    )
+                    if not curr_brackets or open_to_close[curr_brackets[-1]] != c:
+                        raise AssertionError(
+                            f"ERROR: not able to parse the string! Mismatched bracket '{c}'"
+                        )
                     curr_brackets.pop()
                 elif c == "," and (not curr_brackets):
                     break_idxs.append(i)
@@ -342,27 +364,51 @@ class BenchmarkRunner:
 
     def _launch_forward(self, test_case, iters, print_per_iter):
         """Use Python's timeit module to measure execution time (unit: second)."""
-        cuda_sync = "cuda" in test_case.test_config.test_name
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
-        forward_time = timeit.timeit(
-            functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+
+        if not gpu_sync:
+            forward_time = timeit.timeit(
+                functools.partial(func, iters, print_per_iter, gpu_sync), number=1
+            )
+            return forward_time
+        timer = Timer(
+            stmt="func(iters, print_per_iter, gpu_sync)",
+            globals={
+                "func": func,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "gpu_sync": gpu_sync,
+            },
         )
-        return forward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
+        test_case.run_forward(num_runs=1, print_per_iter=False, gpu_sync=gpu_sync)
         test_case._output_mean()
-        backward_time = timeit.timeit(
-            functools.partial(test_case.run_backward, iters, print_per_iter), number=1
+
+        timer = Timer(
+            stmt="test_case.run_backward(iters, print_per_iter, gpu_sync)",
+            globals={
+                "test_case": test_case,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "gpu_sync": gpu_sync,
+            },
         )
-        return backward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
@@ -373,19 +419,26 @@ class BenchmarkRunner:
         curr_test_total_time = 0
         time_trace = []
         peak_memory = 0
-        sample_input = next(iter(test_case.op_bench.inputs.values()))
-        device = sample_input.device
-        device_module = torch.get_device_module(device.type)
+        input_values = test_case.op_bench.inputs.values()
+        device, device_module = None, None
+        if input_values and isinstance(next(iter(input_values)), torch.Tensor):
+            # The device and device module information are crucial for memory metric calculation,
+            # In case of ops where inputs are integers (not tensor), memory metrics need not be calculated.
+            sample_input = next(iter(input_values))
+            device = sample_input.device
+            device_module = torch.get_device_module(device.type)
         # TODO: add support for cpu memory measurement
         while True:
-            if hasattr(device_module, "reset_peak_memory_stats"):
-                device_module.reset_peak_memory_stats(device)
+            if device_module is not None:
+                if hasattr(device_module, "reset_peak_memory_stats"):
+                    device_module.reset_peak_memory_stats(device)
             run_time_sec = launch_test(test_case, iters, print_per_iter)
-            if hasattr(device_module, "synchronize"):
-                device_module.synchronize(device)
+            if device_module is not None:
+                device_module.synchronize()
             # Memory measurement process
-            if hasattr(device_module, "max_memory_allocated"):
-                peak_memory = device_module.max_memory_allocated(device)
+            if device_module is not None:
+                if hasattr(device_module, "max_memory_allocated"):
+                    peak_memory = device_module.max_memory_allocated(device)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
@@ -533,6 +586,7 @@ class BenchmarkRunner:
             run_type = perf_item.get("run")
             latency = perf_item.get("latency", 0)
             peak_memory = perf_item.get("peak memory", 0)
+            memory_bandwidth = perf_item.get("memory bandwidth", 0)
             device = perf_item.get("device", "unknown")
             dtype = perf_item.get("dtype", "torch.float").split(".")[1]
             runtime = perf_item.get("runtime", None)
@@ -560,11 +614,14 @@ class BenchmarkRunner:
                 else "unknown"
             )
 
+            # Extract operator name from test_name
+            operator_name = test_name.split("_")[0]
+
             # Create the record
             @dataclass
             class BenchmarkInfo:
                 name: str
-                mode: Optional[str]
+                mode: str | None
                 dtype: str
                 extra_info: dict[str, Any]
 
@@ -573,13 +630,14 @@ class BenchmarkRunner:
                 name: str
                 type: str
                 origins: list[str]
+                extra_info: dict[str, Any]
 
             @dataclass
             class MetricInfo:
                 name: str
                 unit: str
                 benchmark_values: list[float]
-                target_value: Optional[float]
+                target_value: float | None
 
             @dataclass
             class BenchmarkRecord:
@@ -598,10 +656,14 @@ class BenchmarkRunner:
                         "device": device,
                         "arch": device_arch,
                         "use_compile": use_compile,
+                        "operator_name": operator_name,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                    name=test_name,
+                    type="micro-benchmark",
+                    origins=["pytorch"],
+                    extra_info={"operator_name": operator_name},
                 ),
                 metric=MetricInfo(
                     name="latency",
@@ -622,6 +684,16 @@ class BenchmarkRunner:
             )
             records.append(asdict(record_memory))
 
+            # Add record for memory bandwidth
+            record_memory_bandwidth = copy.deepcopy(record_latency)
+            record_memory_bandwidth.metric = MetricInfo(
+                name="memory bandwidth",
+                unit="GB/s",
+                benchmark_values=[memory_bandwidth],
+                target_value=None,
+            )
+            records.append(asdict(record_memory_bandwidth))
+
         # Write all records to the output file
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
@@ -637,6 +709,7 @@ class BenchmarkRunner:
             "run_backward",
             "Execution Time",
             "Peak Memory (KB)",
+            "Memory Bandwidth (GB/s)",
         ]
 
         if self.args.output_json or self.args.output_json_for_dashboard:
@@ -683,6 +756,17 @@ class BenchmarkRunner:
                 result_dict = dict()
                 result_dict["reported_run_time_us"] = [r[0] for r in results]
                 result_dict["peak_memory"] = results[0][1]
+
+                # Calculate memory bandwidth if operator provides memory traffic
+                memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
+                if memory_traffic_bytes is not None:
+                    execution_time_s = result_dict["reported_run_time_us"][0] / 1e6
+                    result_dict["memory_bandwidth_gb_s"] = (
+                        memory_traffic_bytes / execution_time_s / 1e9
+                    )
+                else:
+                    result_dict["memory_bandwidth_gb_s"] = None
+
                 self._print_perf_result(results=result_dict, test_case=test_case)
 
                 # output results to csv
@@ -701,6 +785,7 @@ class BenchmarkRunner:
                         test_case.test_config.run_backward,
                         result_dict["reported_run_time_us"][0],
                         result_dict["peak_memory"],
+                        result_dict["memory_bandwidth_gb_s"],
                     ],
                 )
                 if self.args.output_json or self.args.output_json_for_dashboard:

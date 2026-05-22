@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Tests implemented in this file are relying on GitHub GraphQL APIs
 # In order to avoid test flakiness, results of the queries
 # are cached in gql_mocks.json
@@ -7,18 +8,21 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+from __future__ import annotations
+
 import gzip
 import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Optional
+from typing import Any
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
+    _find_non_matching_files,
     _revlist_to_prs,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
@@ -32,6 +36,8 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
+    MergeRuleFailedError,
+    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -146,8 +152,8 @@ def mock_revert(
     pr: GitHubPR,
     *,
     dry_run: bool = False,
-    comment_id: Optional[int] = None,
-    reason: Optional[str] = None,
+    comment_id: int | None = None,
+    reason: str | None = None,
 ) -> None:
     pass
 
@@ -285,6 +291,31 @@ class TestTryMerge(TestCase):
         merge_rules = read_merge_rules(repo, "pytorch", "pytorch")
         self.assertGreater(len(merge_rules), 1)
 
+    def test_negative_pattern_excludes_subpath(self, *args: Any) -> None:
+        "Patterns prefixed with '-' exclude matching files from a rule."
+        patterns = [".ci/**", "-.ci/docker/**", ".github/**"]
+        files = [
+            ".ci/test.sh",
+            ".ci/docker/Dockerfile",
+            ".ci/docker/common/install_onnx.sh",
+            ".github/workflows/lint.yml",
+            "torch/foo.py",
+        ]
+        non_matching = _find_non_matching_files(patterns, files)
+        self.assertEqual(
+            sorted(non_matching),
+            [
+                ".ci/docker/Dockerfile",
+                ".ci/docker/common/install_onnx.sh",
+                "torch/foo.py",
+            ],
+        )
+
+    def test_negative_pattern_no_negatives(self, *args: Any) -> None:
+        "Without negative patterns, behavior matches the positive-only case."
+        files = [".ci/test.sh", "torch/foo.py"]
+        self.assertEqual(_find_non_matching_files([".ci/**"], files), ["torch/foo.py"])
+
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
         "Tests that PR passes merge rules"
@@ -419,7 +450,8 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 76123)
         approved_by = pr.get_approved_by()
         self.assertGreater(len(approved_by), 0)
-        assert pr._reviews is not None  # to pacify mypy
+        if pr._reviews is None:  # to pacify mypy
+            raise AssertionError("pr._reviews is None")
         self.assertGreater(len(pr._reviews), 100)
 
     def get_co_authors(self, *args: Any) -> None:
@@ -434,15 +466,13 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 105260)
         conclusions = pr.get_checkrun_conclusions()
         self.assertEqual(len(conclusions), 221)
-        self.assertTrue(
-            "pull / linux-docs / build-docs-cpp-false" in conclusions.keys()
-        )
+        self.assertTrue("pull / linux-docs / build-docs-cpp-false" in conclusions)
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successful status"""
         pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
-        lint_checks = [name for name in conclusions.keys() if "Lint" in name]
+        lint_checks = [name for name in conclusions if "Lint" in name]
         self.assertTrue(len(lint_checks) > 0)
         self.assertTrue(
             all(conclusions[name].status == "SUCCESS" for name in lint_checks)
@@ -587,6 +617,23 @@ class TestTryMerge(TestCase):
             # making another query
             self.assertEqual(mock_merge_base, pr.get_merge_base())
             mocked_gh_fetch_merge_base.assert_called_once()
+
+    def test_app_can_revert(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 164660)
+        repo = DummyGitRepo()
+        app_comment_id, impostor_comment_id = 3375785595, 3377647892
+        # Check that app can revert
+        self.assertIsNotNone(validate_revert(repo, pr, comment_id=app_comment_id))
+        # But impostor can not
+        self.assertRaises(
+            PostCommentError,
+            lambda: validate_revert(repo, pr, comment_id=impostor_comment_id),
+        )
+        # Despite it's name being the name of the bot
+        self.assertEqual(
+            pr.get_comment_by_id(impostor_comment_id).author_login,
+            "pytorch-auto-revert",
+        )
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -1093,6 +1140,70 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "Approved by: \n"
             "ghstack dependencies: #106032, #106033, #106034\n"
         )
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_wraps_parent_rule_error(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """
+        When a stacked dependency PR fails the merge-rule check, the error
+        raised by merge_ghstack_into should identify the failing PR number
+        and preserve the original exception subclass.
+        """
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+
+        inner_msg = "Approvers from one of the following sets are needed"
+        mock_find_matching_merge_rule.side_effect = MergeRuleFailedError(inner_msg)
+
+        with self.assertRaises(MergeRuleFailedError) as cm:
+            top_pr.merge_ghstack_into(mock_repo, True)
+
+        self.assertIn("#106034", str(cm.exception))
+        self.assertIn(inner_msg, str(cm.exception))
+        self.assertNotIsInstance(cm.exception, MandatoryChecksMissingError)
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_preserves_mandatory_checks_subclass(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """The wrapping must preserve MandatoryChecksMissingError so callers
+        that catch it specifically (e.g. for retry behavior) keep working."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        mock_find_matching_merge_rule.side_effect = MandatoryChecksMissingError(
+            "1 mandatory check(s) failed"
+        )
+
+        with self.assertRaises(MandatoryChecksMissingError) as cm:
+            top_pr.merge_ghstack_into(mock_repo, True)
+
+        self.assertIn("#106034", str(cm.exception))
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

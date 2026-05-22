@@ -6,7 +6,7 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
+from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -18,8 +18,22 @@ from ..utils._ordered_set import OrderedSet
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add"]]
+AtomicMode = Literal[
+    "atomic_add",
+    "atomic_max",
+    "atomic_min",
+    "atomic_and",
+    "atomic_or",
+    "atomic_xor",
+    "atomic_cas",
+    "atomic_xchg",
+]
+StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -30,6 +44,7 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
+    "dot",
     "xor_sum",
     "online_softmax_reduce",
 ]
@@ -71,7 +86,7 @@ class OpsHandler(Generic[T]):
     all the metaprogramming has run.
     """
 
-    def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
+    def constant(self, value: bool | float | int, dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         raise NotImplementedError
 
@@ -81,6 +96,12 @@ class OpsHandler(Generic[T]):
 
     def rand(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
+        raise NotImplementedError
+
+    def rand_eager(
+        self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
+    ) -> T:
+        """Computes inductor_prims.random with mode="rand_eager".  offset has dtype int32."""
         raise NotImplementedError
 
     def randn(self, seed: T, offset: T) -> T:
@@ -123,7 +144,7 @@ class OpsHandler(Generic[T]):
         self,
         x: T,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> T:
         """
@@ -227,7 +248,7 @@ class OpsHandler(Generic[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, tuple[T, ...]]:
+    ) -> T | tuple[T, ...]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -281,10 +302,19 @@ class OpsHandler(Generic[T]):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: T,
+        extra_meta: dict[str, Any],
+    ) -> None:
         raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -373,6 +403,9 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def log2(self, x0: T) -> T:
+        raise NotImplementedError
+
+    def ldexp(self, x0: T, n: T) -> T:
         raise NotImplementedError
 
     def nextafter(self, x0: T, x1: T) -> T:
@@ -540,6 +573,10 @@ class OpsHandler(Generic[T]):
     def fma(self, x: T, y: T, z: T) -> T:
         raise NotImplementedError
 
+    def mul_rn(self, x: T, y: T) -> T:
+        """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
+        raise NotImplementedError
+
     def igamma(self, x: T, y: T) -> T:
         raise NotImplementedError
 
@@ -659,6 +696,11 @@ class OpsHandler(Generic[T]):
         do Python-style (int, int) -> float division, use int_truediv"""
         raise NotImplementedError
 
+    def div_rn(self, x0: T, x1: T) -> T:
+        """Division with round-to-nearest rounding mode.  Used for matching
+        eager CUDA semantics where division uses IEEE round-to-nearest."""
+        raise NotImplementedError
+
     def int_truediv(self, x0: T, x1: T) -> T:
         """True division between integers.  This is NOT the same as promoting
         to float and doing integer division, there is a bespoke algorithm for
@@ -687,14 +729,19 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     # triton-only
+    def dot(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
+    # triton-only
     def inline_asm_elementwise(
         self,
         *inputs: T,
         asm: str,
-        constraints: Optional[str] = None,
+        constraints: str | None = None,
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> T:
         raise NotImplementedError
 
@@ -791,9 +838,6 @@ class DefaultHandler(OpsHandler[Any]):
             if target in OP_NAMES:
                 setattr(cls, target, impl)
 
-    def device_assert_async(self, cond, msg):
-        return None
-
 
 DefaultHandler._init_cls()
 
@@ -809,6 +853,7 @@ class NoopHandler(DefaultHandler):
         return None
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x) -> tuple[None, None]:
         return (None, None)
 
@@ -821,6 +866,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.S.Zero
 
@@ -918,6 +964,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
@@ -936,11 +983,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
-
-    def device_assert_async(self, cond, msg):
-        return None
 
 
 class KernelFormatterHandler(DefaultHandler):
@@ -996,8 +1041,8 @@ class KernelFormatterHandler(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, tuple[str, ...]],
-    ) -> Union[str, tuple[str, ...]]:
+        value: str | tuple[str, ...],
+    ) -> str | tuple[str, ...]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -1007,9 +1052,6 @@ class KernelFormatterHandler(DefaultHandler):
     def getvalue(self, result):
         self._output.writeline(f"return {result}")
         return self._output.getvalue()
-
-    def device_assert_async(self, cond, msg: str):
-        return f"ops.device_assert_async({cond}, {msg})"
 
 
 class WrapperHandler(DefaultHandler):
@@ -1088,8 +1130,8 @@ class OpCounterCSE(DefaultHandler):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         """
         See [Note: Inductor bucketize op]
@@ -1117,7 +1159,7 @@ class OpCounterCSE(DefaultHandler):
 
 
 class ExtractConstantsHandler(NoopHandler):
-    def __init__(self, device: Optional[torch.device]):
+    def __init__(self, device: torch.device | None):
         self.device = device
 
     def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
@@ -1137,7 +1179,7 @@ class SimpleCSEHandler(WrapperHandler):
 
     def __init__(self, inner: Any):
         super().__init__(inner)
-        self.cse_cache: dict[str, Union[Any, tuple[Any, ...]]] = {}
+        self.cse_cache: dict[str, Any | tuple[Any, ...]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
@@ -1158,3 +1200,8 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
+
+    def device_assert_async(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

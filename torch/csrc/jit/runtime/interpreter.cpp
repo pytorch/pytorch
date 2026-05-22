@@ -1,17 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
-#include <c10/core/thread_pool.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -40,7 +33,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
-#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -213,7 +205,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     out << "Stack:\n";
     for (const auto& val : stack) {
       out << val;
-      out << "\n";
+      out << '\n';
     }
   }
 
@@ -779,9 +771,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
-                Stack(stack.end() - inst.N, stack.end()),
+                pop(stack, static_cast<size_t>(inst.N)),
                 getDistAutogradContextId());
-            drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
           }
@@ -801,7 +792,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
-            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto args = pop(stack, static_cast<size_t>(inst.N));
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
             aw->setFn(
@@ -822,7 +813,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   }
                   return c10::ivalue::Tuple::create(jit::last(s, n_out));
                 });
-            drop(stack, inst.N);
             push(stack, std::move(aw));
           }
             INST_NEXT;
@@ -929,7 +919,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << class_name << ": " << msg << "\n";
+    ss << class_name << ": " << msg << '\n';
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
@@ -942,7 +932,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           not_implemented_error->caller());
     } else {
       if (get_cpp_stacktraces_enabled()) {
-        ss << e.what() << "\n";
+        ss << e.what() << '\n';
       }
       throw std::runtime_error(ss.str());
     }
@@ -1143,7 +1133,7 @@ std::vector<std::string> currentModuleHierarchy() {
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
-  out << *code.pImpl->graph_ << "\n";
+  out << *code.pImpl->graph_ << '\n';
   code.pImpl->dump(out);
   return out;
 }

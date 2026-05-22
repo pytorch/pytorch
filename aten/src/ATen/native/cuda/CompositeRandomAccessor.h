@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/CompositeRandomAccessorCommon.h>
+#include <thrust/swap.h>
 #include <thrust/tuple.h>
 
 namespace at { namespace native {
@@ -24,7 +25,7 @@ void swap(
   references_holder<Values, References> rh1,
   references_holder<Values, References> rh2
 ) {
-  return thrust::swap(rh1.data(), rh2.data());
+  thrust::swap(rh1.data(), rh2.data());
 }
 
 template <int N, typename Values, typename References>

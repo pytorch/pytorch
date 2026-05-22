@@ -272,8 +272,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-Engine::Engine()
-    : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : non_reentrant_device_thread_count_(0) {}
 
 Engine::~Engine() {
   stop();
@@ -399,7 +398,7 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
-// The current graph task's exec_info is being used to trim unnecessary edegs
+// The current graph task's exec_info is being used to trim unnecessary edges
 // during node evaluation, see `Node.task_should_compute_output()` function.
 const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info() {
@@ -646,7 +645,7 @@ void Engine::reentrant_thread_init() {
 
 void Engine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const std::shared_ptr<Node>& fn,
+    const c10::intrusive_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
 }
@@ -664,7 +663,7 @@ GraphTask::GraphTask(
     bool exit_on_error)
     : keep_graph_(keep_graph),
       graph_roots_(std::move(graph_roots)),
-      owner_(NO_DEVICE),
+
       reentrant_depth_(reentrant_depth),
       exit_on_error_(exit_on_error),
       cpu_ready_queue_(std::move(cpu_ready_queue)),
@@ -707,9 +706,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
 }
 
 void GraphTask::exec_post_processing() {
-  if (!not_ready_.empty()) {
-    throw std::runtime_error("could not compute gradients for some functions");
-  }
+  TORCH_CHECK(
+      not_ready_.empty(), "could not compute gradients for some functions");
 
   // set the thread_local current_graph_task_ as more callbacks can be installed
   // by existing final callbacks.
@@ -782,7 +780,8 @@ void GraphTask::exec_post_processing() {
   }
 }
 
-void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
+void GraphTask::set_exception_without_signal(
+    const c10::intrusive_ptr<Node>& fn) {
   if (!has_error_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack(fn->name());
@@ -792,7 +791,7 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
 
 void GraphTask::set_exception(
     std::exception_ptr eptr,
-    const std::shared_ptr<Node>& fn) {
+    const c10::intrusive_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
     future_result_->setError(std::move(eptr));
@@ -949,15 +948,17 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
-        grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+
+    if (metadata.grad_dtype().has_value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        grad = grad.to(metadata.grad_dtype().value());
+      }
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(ss.str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -1065,8 +1066,19 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Locally set the current stream to func's associated stream
-  auto opt_parent_stream = (*func).stream();
+  // The parent stream was cached on the InputBuffer by InputBuffer::add()
+  // as the consuming node's canonical stream (possibly overridden by the
+  // stale-capture path when a stale non-capturing node stream collides
+  // with a capturing producer). Reading the cached value here keeps the
+  // override decision in one place and avoids re-running the detection
+  // per node visit. For code paths where InputBuffer::add() was never
+  // called with an accelerator input (e.g. CPU-only backward), fall back
+  // to the node's canonical stream. See
+  // InputBuffer::opt_overridden_consumer_stream for the invariant.
+  auto opt_parent_stream = inputs.opt_overridden_consumer_stream.has_value()
+      ? inputs.opt_overridden_consumer_stream
+      : func->stream();
+
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   // Ensure that the incoming gradients are ready
@@ -1103,7 +1115,6 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1149,12 +1160,13 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' returned nan values in its " << i
-           << "th output.";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(
+          !output.defined() || !isnan(output)._is_any_true().item<bool>(),
+          "Function '",
+          fn.name(),
+          "' returned nan values in its ",
+          i,
+          "th output.");
     }
   }
 
@@ -1175,7 +1187,7 @@ void Engine::evaluate_function(
 
     if (it == dependencies.end()) {
       auto name = next.function->name();
-      throw std::runtime_error(std::string("dependency not found for ") + name);
+      TORCH_CHECK(false, "dependency not found for ", name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
       is_ready = true;
@@ -1194,10 +1206,12 @@ void Engine::evaluate_function(
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next.function->num_inputs());
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          next.function->stream(),
+          next.function.get());
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1210,10 +1224,12 @@ void Engine::evaluate_function(
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
 
-      // Accumulates into buffer
-      auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          next.function->stream(),
+          next.function.get());
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1302,7 +1318,7 @@ auto Engine::execute(
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
-  TORCH_CHECK_VALUE(
+  TORCH_INTERNAL_ASSERT(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");
 
   // A fresh first time Engine::execute call should start on the CPU device,
@@ -1328,9 +1344,12 @@ auto Engine::execute(
 
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
-  auto graph_root = skip_dummy_node
-      ? root_edges.at(0).function
-      : std::make_shared<GraphRoot>(root_edges, inputs);
+  c10::intrusive_ptr<Node> graph_root;
+  if (skip_dummy_node) {
+    graph_root = root_edges.at(0).function;
+  } else {
+    graph_root = c10::make_intrusive<GraphRoot>(root_edges, inputs);
+  }
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
@@ -1366,7 +1385,8 @@ auto Engine::execute(
         root_edges.at(0).input_nr,
         std::move(input),
         input_stream,
-        opt_next_stream);
+        opt_next_stream,
+        root_edges.at(0).function.get());
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));
@@ -1397,7 +1417,7 @@ void Engine::initialize_device_threads_pool() {
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
+    c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.

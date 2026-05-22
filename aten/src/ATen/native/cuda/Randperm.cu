@@ -37,7 +37,7 @@ namespace at::native {
 // threshold probability for having non-duplicate keys, then it can be proved that[1]
 // the number of bits required is: ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
 //
-// Then after sort, we lauch a separate kernel that additionally shuffles any islands
+// Then after sort, we launch a separate kernel that additionally shuffles any islands
 // of values whose keys matched. The algorithm of this kernel is as follows:
 // Each thread reads its key and the keys of its neighbors to tell if it's part of an island.
 // For each island, the first thread in the island sees a key match at index i+1 but not index i-1.
@@ -113,7 +113,7 @@ Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor&
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      auto* range_data = reinterpret_cast<const dtype*>(range.data_ptr());
+      auto* range_data = reinterpret_cast<const dtype*>(range.const_data_ptr());
       at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
         keys.const_data_ptr<int64_t>(), keys_out,
         range_data, shuffled_data_,

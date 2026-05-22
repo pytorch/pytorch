@@ -1,14 +1,14 @@
-# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
-
-from typing import Optional
 
 import torch
 from torch import Tensor
 
 
-def is_sparse(A):
-    """Check if tensor A is a sparse COO tensor. All other sparse storage formats (CSR, CSC, etc...) will return False."""
+def is_sparse(A: Tensor) -> bool:
+    """Check if tensor A is a sparse COO tensor.
+
+    All other sparse storage formats (CSR, CSC, etc...) will return False.
+    """
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
 
@@ -18,7 +18,7 @@ def is_sparse(A):
     raise TypeError(error_str)
 
 
-def get_floating_dtype(A):
+def get_floating_dtype(A: Tensor) -> torch.dtype:
     """Return the floating point dtype of tensor A.
 
     Integer types map to float32.
@@ -29,7 +29,7 @@ def get_floating_dtype(A):
     return torch.float32
 
 
-def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
+def matmul(A: Tensor | None, B: Tensor) -> Tensor:
     """Multiply two matrices.
 
     If A is None, return B. A can be sparse or dense. B is always
@@ -42,22 +42,22 @@ def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
     return torch.matmul(A, B)
 
 
-def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
+def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
     """Return bilinear form of matrices: :math:`X^T A Y`."""
     return matmul(X.mT, matmul(A, Y))
 
 
-def qform(A: Optional[Tensor], S: Tensor):
+def qform(A: Tensor | None, S: Tensor) -> Tensor:
     """Return quadratic form :math:`S^T A S`."""
     return bform(S, A, S)
 
 
-def basis(A):
+def basis(A: Tensor) -> Tensor:
     """Return orthogonal basis of A columns."""
     return torch.linalg.qr(A).Q
 
 
-def symeig(A: Tensor, largest: Optional[bool] = False) -> tuple[Tensor, Tensor]:
+def symeig(A: Tensor, largest: bool | None = False) -> tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering."""
     if largest is None:
         largest = False

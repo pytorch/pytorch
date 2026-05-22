@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -19,6 +19,16 @@ from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
+
+try:
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+except ImportError:
+    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
+    # main / PR's tests are sometimes run against the previous day's nightly which won't
+    # have this function.
+    def parse_cmd_line_args():
+        pass
 
 
 if TYPE_CHECKING:
@@ -83,6 +93,7 @@ def pytest_addoption(parser: Parser) -> None:
 
 
 def pytest_configure(config: Config) -> None:
+    parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -133,7 +144,10 @@ class _NodeReporterReruns(_NodeReporter):
             # Super here instead of the actual code so we can reduce possible divergence
             super().append_skipped(report)
         else:
-            assert isinstance(report.longrepr, tuple)
+            if not isinstance(report.longrepr, tuple):
+                raise AssertionError(
+                    f"Expected report.longrepr to be tuple, got {type(report.longrepr)}"
+                )
             filename, lineno, skipreason = report.longrepr
             skipreason = skipreason.removeprefix("Skipped: ")
             details = f"{filename}:{lineno}: {skipreason}"
@@ -154,8 +168,9 @@ class LogXMLReruns(LogXML):
         if hasattr(report, "wasxfail"):
             reporter._add_simple("skipped", "xfail-marked test passes unexpectedly")
         else:
-            assert report.longrepr is not None
-            reprcrash: Optional[ReprFileLocation] = getattr(
+            if report.longrepr is None:
+                raise AssertionError("Expected report.longrepr to not be None")
+            reprcrash: ReprFileLocation | None = getattr(
                 report.longrepr, "reprcrash", None
             )
             if reprcrash is not None:
@@ -176,8 +191,8 @@ class LogXMLReruns(LogXML):
                 reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
                 report.longrepr = (fspath, lineno, reason)
 
-    def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
-        nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
+    def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
+        nodeid: str | TestReport = getattr(report, "nodeid", report)
         # Local hack to handle xdist report order.
         workernode = getattr(report, "node", None)
 
@@ -218,7 +233,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
+def pytest_pycollect_makemodule(module_path, parent) -> Module:
     if parent.config.getoption("--use-main-module"):
         mod = Module.from_parent(parent, path=module_path)
         mod._getobj = MethodType(lambda x: sys.modules["__main__"], mod)
@@ -227,7 +242,7 @@ def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_report_teststatus(report, config):
-    # Add the test time to the verbose output, unforunately I don't think this
+    # Add the test time to the verbose output, unfortunately I don't think this
     # includes setup or teardown
     pluggy_result = yield
     if not isinstance(report, pytest.TestReport):
@@ -295,13 +310,18 @@ class StepcurrentPlugin:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.report_status = ""
-        assert config.cache is not None
+        if config.cache is None:
+            raise AssertionError("Expected config.cache to not be None")
         self.cache: pytest.Cache = config.cache
-        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun: Optional[str] = self.cache.get(self.directory, None)
+        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{directory}/lastrun"
+        self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
+
+        self.made_failing_xml_location = f"{directory}/made_failing_xml"
+        self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
@@ -331,15 +351,17 @@ class StepcurrentPlugin:
                 del items[1:]
             config.hook.pytest_deselected(items=deselected)
 
-    def pytest_report_collectionfinish(self) -> Optional[str]:
+    def pytest_report_collectionfinish(self) -> str | None:
         if self.config.getoption("verbose") >= 0 and self.report_status:
             return f"stepcurrent: {self.report_status}"
         return None
 
     def pytest_runtest_protocol(self, item, nextitem) -> None:
         self.lastrun = item.nodeid
-        self.cache.set(self.directory, self.lastrun)
+        self.cache.set(self.lastrun_location, self.lastrun)
 
     def pytest_sessionfinish(self, session, exitstatus):
         if exitstatus == 0:
-            self.cache.set(self.directory, self.initial_val)
+            self.cache.set(self.lastrun_location, self.initial_val)
+        if exitstatus != 0:
+            self.cache.set(self.made_failing_xml_location, True)

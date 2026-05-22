@@ -3,7 +3,7 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
 
 import sympy
 
@@ -13,6 +13,10 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = ["InputDim"]
@@ -35,7 +39,8 @@ def _convert_to_int(val):
 
 
 def _convert_range_to_int(range: ValueRanges):
-    assert isinstance(range, ValueRanges)
+    if not isinstance(range, ValueRanges):
+        raise AssertionError(f"expected ValueRanges, got {type(range)}")
     min_val = _convert_to_int(range.lower)
     max_val = _convert_to_int(range.upper)
     return min_val, max_val
@@ -220,7 +225,7 @@ def _get_existing_inline_assertions(
             lhs = maybe_get_symint(lhs)
             rhs = maybe_get_symint(rhs)
 
-            if compare_op == operator.ge:
+            if compare_op is operator.ge:
                 lhs, rhs = rhs, lhs
 
             if isinstance(lhs, sympy.Symbol) and isinstance(rhs, int):

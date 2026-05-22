@@ -1,5 +1,4 @@
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -58,7 +57,7 @@ void InternedStringsTable::addMapping(PyObject* obj, at::Dimname dimname) {
 } // namespace torch
 
 bool THPUtils_checkDimname(PyObject* obj) {
-  return obj == Py_None || THPUtils_checkString(obj);
+  return Py_IsNone(obj) || THPUtils_checkString(obj);
 }
 
 // To avoid ambiguity with IntArrayRef, we parse obj as a DimnameList if
@@ -79,7 +78,7 @@ bool THPUtils_checkDimnameList(PyObject* obj) {
 }
 
 at::Dimname THPDimname_parse(PyObject* obj) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return at::Dimname::wildcard();
   }
 

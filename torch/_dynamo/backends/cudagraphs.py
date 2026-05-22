@@ -23,8 +23,8 @@ Key components:
 
 import functools
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 import torch.fx
@@ -103,7 +103,7 @@ def get_device_node_mapping(
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
     aot_model: torch.fx.GraphModule, num_fixed: int
-) -> Optional[str]:
+) -> str | None:
     mutation_indices = find_input_mutations(aot_model.graph) - set(range(num_fixed))
     if not mutation_indices:
         return None
@@ -112,7 +112,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     return get_mutation_stack_trace(placeholders, mutation_indices)
 
 
-def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> Optional[str]:
+def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | None:
     if not config.cudagraph_backend_support_input_mutation:
         if mut_skip := check_for_mutation_ignore_cuda_graph_managed_tensor(
             aot_model, num_fixed
@@ -132,13 +132,17 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> Optional[
 
 def get_device_index(gm: torch.fx.GraphModule) -> int:
     device = next(iter(get_device_node_mapping(gm)))
-    assert device.type == "cuda"
+    if device.type != "cuda":
+        raise AssertionError(f"Expected CUDA device, got {device.type}")
     return device.index
 
 
-def get_stack_traces(gm: torch.fx.GraphModule) -> list[Optional[str]]:
+def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
     output = output_node(gm)
-    assert len(output.args) == 1
+    if len(output.args) != 1:
+        raise AssertionError(
+            f"Expected output node to have 1 arg, got {len(output.args)}"
+        )
     args = output.args[0]
     if not hasattr(args, "__iter__"):
         return []
@@ -175,7 +179,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             range(fixed),
             device_index=boxed_device_index.value,
             is_backward=False,
-            is_inference=False,  # Q: should forward is_inference here?
+            is_inference=is_inference,
             stack_traces=get_stack_traces(aot_model),
             placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),
@@ -203,9 +207,11 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             manager = torch._inductor.cudagraph_trees.get_manager(
                 device_idx, create_if_none_exists=False
             )
-            assert manager is not None
+            if manager is None:
+                raise AssertionError("cudagraph manager must exist for backward")
 
             def fn(inputs: list[Any]) -> Any:
+                # pyrefly: ignore [missing-attribute]
                 manager.set_to_running_backward()
                 return aot_model(inputs)
 
@@ -261,7 +267,10 @@ def cudagraphs_inner(
     copy_inputs: bool = True,
 ) -> Callable[..., Sequence[Any]]:
     """This isn't registered as a backend, but is used in some benchmarks"""
-    assert isinstance(inputs, (list, tuple))
+    if not isinstance(inputs, (list, tuple)):
+        raise AssertionError(
+            f"Expected inputs to be a list or tuple, got {type(inputs)}"
+        )
     if copy_inputs:
         static_inputs = [torch.zeros_like(x) for x in inputs]
     else:
@@ -285,7 +294,10 @@ def cudagraphs_inner(
         static_outputs = (static_outputs,)
 
     def run(*new_inputs: Any) -> Sequence[Any]:
-        assert len(static_inputs) == len(new_inputs)
+        if len(static_inputs) != len(new_inputs):
+            raise AssertionError(
+                f"Expected {len(static_inputs)} inputs, got {len(new_inputs)}"
+            )
         if copy_inputs:
             for dst, src in zip(static_inputs, new_inputs):
                 dst.copy_(src)

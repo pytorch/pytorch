@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 
 # Standard library
 from itertools import chain
-from typing import Union
 from torch._C import TensorType
 
 import io
@@ -62,7 +61,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
         return t.detach().clone().requires_grad_(require_grad)
 
     def clone_inputs(preserve_requires_grad: bool):
-        inputs: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+        inputs: list[torch.Tensor | list[torch.Tensor]] = []
 
         for arg in args:
             if isinstance(arg, torch.Tensor):
@@ -135,7 +134,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
-        for g2, g2_test in zip(grads2, grads2_test):
+        for g2, g2_test in zip(grads2, grads2_test, strict=True):
             if g2 is None and g2_test is None:
                 continue
             self.assertEqual(g2, g2_test, atol=5e-4, rtol=1e-4)
@@ -284,7 +283,7 @@ class JitCommonTestCase(TestCase):
             self.assertEqual(should_autodiff_node,
                              found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
-    def checkShapeAnalysis(self, out_sizes: Union[list[int], list[list[int]]],
+    def checkShapeAnalysis(self, out_sizes: list[int] | list[list[int]],
                            traced_graph, assert_propagation, constant_prop=True):
         # repropagte input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()

@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/node.h>
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
@@ -48,8 +49,6 @@ namespace torch::autograd {
 inline bool isDifferentiableType(at::ScalarType t) {
   return isFloatingType(t) || isComplexType(t);
 }
-
-struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -108,30 +107,35 @@ namespace impl {
 
 // WARNING: This may return a nullptr.  If you require AutogradMeta to return
 // a materialized structure, use materialize_autograd_meta instead.
-TORCH_API AutogradMeta* get_autograd_meta(const at::TensorBase&);
+TORCH_API AutogradMeta* get_autograd_meta(const at::TensorBase& /*self*/);
 
 // WARNING: This will return a nullptr if the Tensor is not a view.
-TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase&);
+TORCH_API DifferentiableViewMeta* get_view_autograd_meta(
+    const at::TensorBase& /*self*/);
 
 // Returns the current autograd meta, materializing it if it was previously
 // none.  This counts as a *mutating* operation, so do not call it on
 // "read-only" operators; in particular, this is NOT thread safe
-TORCH_API AutogradMeta* materialize_autograd_meta(const at::TensorBase&);
+TORCH_API AutogradMeta* materialize_autograd_meta(
+    const at::TensorBase& /*self*/);
 
 /// Set the gradient accumulator of the `Variable`. This is only applicable to
 /// leaf variables. Interior variables should call `set_gradient_edge()`.
 TORCH_API void set_grad_accumulator(
-    const Variable&,
-    std::weak_ptr<Node> grad_accumulator);
+    const Variable& /*self*/,
+    c10::weak_intrusive_ptr<Node> grad_accumulator);
 
 /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
 /// if it still exists. If the gradient accumulator function has been
 /// destroyed, returns a `nullptr`.
-TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(const Variable&);
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
+    const Variable& /*self*/);
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
+    const at::TensorBase& /*self*/);
 
 /// Gets the gradient accumulator of the `Variable` if it has one, or else
 /// create one on the fly and return it.
-TORCH_API std::shared_ptr<Node> grad_accumulator(const Variable&);
+TORCH_API c10::intrusive_ptr<Node> grad_accumulator(const Variable& /*self*/);
 
 /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
 /// gradient function if this is an interior `Variable`, or the gradient
@@ -141,7 +145,7 @@ TORCH_API std::shared_ptr<Node> grad_accumulator(const Variable&);
 /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
 /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
 /// `set_grad_accumulator` to set the accumulator.
-TORCH_API Edge gradient_edge(const Variable&);
+TORCH_API Edge gradient_edge(const Variable& /*self*/);
 
 /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
 /// `Variable`.
@@ -149,7 +153,7 @@ TORCH_API Edge gradient_edge(const Variable&);
 /// and never the `grad_accumulator`. For the latter, use
 /// `set_grad_accumulator`. This allows late construction of an interior
 /// `Variable`.
-TORCH_API void set_gradient_edge(const Variable&, Edge edge);
+TORCH_API void set_gradient_edge(const Variable& /*self*/, Edge edge);
 
 // Autograd Graph Interaction
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -160,37 +164,54 @@ TORCH_API void set_gradient_edge(const Variable&, Edge edge);
 /// For View Variables:
 /// Called after in-place modifications. Modifies the grad_fn of the base
 /// Variable.
-TORCH_API void rebase_history(const Variable&, Edge gradient_edge);
+TORCH_API void rebase_history(const Variable& /*self*/, Edge gradient_edge);
 
 /// Gets the raw gradient function pointer, whatever it currently is.
-TORCH_API Node* grad_fn_unsafe(const Variable&);
+TORCH_API Node* grad_fn_unsafe(const Variable& /*self*/);
 
 /// Increments the version count of this `Variable`.
-TORCH_API void bump_version(const Variable&);
+TORCH_API void bump_version(const Variable& /*self*/);
 TORCH_API void set_version_counter(
-    const Variable&,
+    const Variable& /*self*/,
     const c10::VariableVersion& version_counter);
 
 /// Retrieves this `Variable`s version counter.
-TORCH_API const c10::VariableVersion& version_counter(const Variable&);
+TORCH_API const c10::VariableVersion& version_counter(const Variable& /*self*/);
 
-TORCH_API void set_name(const Variable&, const std::string& name);
+TORCH_API void set_name(const Variable& /*self*/, const std::string& name);
 
 TORCH_API void add_hook(
-    const at::TensorBase&,
+    const at::TensorBase& /*self*/,
     std::unique_ptr<FunctionPreHook> hook);
-TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
-TORCH_API void clear_hooks(const at::TensorBase&);
+TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(
+    const Variable& /*self*/);
+TORCH_API void clear_hooks(const at::TensorBase& /*self*/);
 
 TORCH_API void set_post_acc_grad_hooks(
-    const at::TensorBase&,
+    const at::TensorBase& /*self*/,
     std::unique_ptr<PostAccumulateGradHook> dict);
 TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
-    const Variable&);
+    const Variable& /*self*/);
 
 TORCH_API void create_cpp_hook(
-    const at::TensorBase&,
+    const at::TensorBase& /*self*/,
     bool is_retains_grad_hooks = false);
+
+inline bool is_tensor_stealable(
+    const at::Tensor& new_grad,
+    size_t num_expected_refs = 1) {
+  size_t use_count = new_grad.use_count();
+  if (use_count <= num_expected_refs) {
+    return true;
+  }
+  if (use_count >= 2 &&
+      new_grad.unsafeGetTensorImpl()->pyobj_slot()->has_unique_reference()) {
+    // The Python wrapper, if it exists, also has a reference to the Tensor.
+    num_expected_refs++;
+  }
+  return use_count <= num_expected_refs;
+}
+
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,8 +227,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
-  std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  c10::intrusive_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_accumulator_;
 
   // This field is used to store all the forward AD gradients
   // associated with this AutogradMeta (and the Tensor it corresponds to)
@@ -253,6 +274,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
 
+  // The dtype of the grad field; when nullopt, defaults to tensor's dtype.
+  std::optional<at::ScalarType> grad_dtype_;
+
+  // When true, allows gradient dtype to be different from tensor dtype,
+  // bypassing dtype casting and validation in the autograd engine.
+  bool allow_grad_dtype_mismatch_{false};
+
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
   // fw_grad() and set_fw_grad()
@@ -293,12 +321,18 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
+  std::optional<at::ScalarType> grad_dtype(const at::TensorBase& self) const;
+
+  void set_grad_dtype(
+      const std::optional<at::ScalarType>& grad_dtype,
+      const at::TensorBase& self);
+
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-
+        grad_accumulator_(c10::intrusive_ptr<Node>()),
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
@@ -359,12 +393,12 @@ struct TORCH_API ViewFunc {
   /// must match the number of SymInts in the saved state (i.e. the size of the
   /// list returned by get_symints()).
   /// NOLINTNEXTLINE(performance-unnecessary-value-param)
-  virtual void set_symints(std::vector<c10::SymInt>) {}
+  virtual void set_symints(std::vector<c10::SymInt> /*unused*/) {}
   /// Sets the values of any Tensors in the saved state. The input vector size
   /// must match the number of Tensors in the saved state (i.e. the size of the
   /// list returned by get_tensors()).
   /// NOLINTNEXTLINE(performance-unnecessary-value-param)
-  virtual void set_tensors(std::vector<at::Tensor>) {}
+  virtual void set_tensors(std::vector<at::Tensor> /*unused*/) {}
 };
 
 /// ViewFunc that represents a chain of two ViewFuncs.
@@ -382,10 +416,13 @@ struct ChainedViewFunc : public ViewFunc {
   size_t num_tensors() const override {
     return first->num_tensors() + second->num_tensors();
   }
-  at::Tensor operator()(const at::Tensor&) const override;
+  at::Tensor operator()(
+      const at::Tensor& /*input_base*/ /*unused*/) const override;
   std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = std::nullopt,
-      std::optional<std::vector<at::Tensor>> = std::nullopt) const override;
+      std::optional<std::vector<c10::SymInt>> /*symints*/ /*unused*/ =
+          std::nullopt,
+      std::optional<std::vector<at::Tensor>> /*tensors*/ /*unused*/ =
+          std::nullopt) const override;
 
  private:
   std::unique_ptr<ViewFunc> first;
@@ -396,12 +433,13 @@ struct ChainedViewFunc : public ViewFunc {
 struct ErroringViewFunc : public ViewFunc {
   ErroringViewFunc(std::string error_msg) : error_msg(std::move(error_msg)) {}
   ~ErroringViewFunc() override = default;
-  at::Tensor operator()(const at::Tensor&) const override {
+  at::Tensor operator()(const at::Tensor& /*unused*/) const override {
     TORCH_CHECK(false, error_msg);
   }
   std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = std::nullopt,
-      std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
+      std::optional<std::vector<c10::SymInt>> /*unused*/ = std::nullopt,
+      std::optional<std::vector<at::Tensor>> /*unused*/ =
+          std::nullopt) const override {
     return std::make_unique<ErroringViewFunc>(error_msg);
   }
 
@@ -615,7 +653,7 @@ struct TORCH_API ViewInfo {
 /// Such views include:
 ///   1. Views created from .detach()
 ///   2. Views that are non-differentiable by its nature.
-///      E.g., `sparse_tensor.indices()` is a integral view on a (possibly)
+///      E.g., `sparse_tensor.indices()` is an integral view on a (possibly)
 ///      floating point tensor.
 ///      See top of `derivatives.yaml` on how to specify that outputs of a
 ///      function are non-differentiable.
@@ -835,16 +873,25 @@ inline Variable make_variable_differentiable_view(
 inline Variable make_variable_non_differentiable_view(
     const Variable& base,
     const at::Tensor& data,
-    bool allow_tensor_metadata_change = true) {
+    bool allow_tensor_metadata_change = true,
+    bool is_fresh_tensor = false) {
   if (data.defined()) {
-    // Currently all of non-differentiable view ops(detach/_indices/_values)
-    // share the same TensorImpl as their base Tensor. Thus a new TensorImpl
-    // allocation here is required.
+    // If we already allocated a new tensor, no need to
+    // shallow_copy_and_detach here. (See #163671 history; we tried to
+    // fan out to _indices and _values and ran into a SparseTensorImpl
+    // can of worms.)
+    if (is_fresh_tensor) {
+      auto* data_impl = data.unsafeGetTensorImpl();
+      data_impl->set_version_counter(impl::version_counter(base));
+      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      data_impl->set_autograd_meta(nullptr);
+      return data;
+    }
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/impl::version_counter(base),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(nullptr);
-    return Variable(data_impl_copy);
+    return Variable(std::move(data_impl_copy));
   }
   return Variable();
 }
@@ -862,7 +909,7 @@ inline Variable make_variable(
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    if (data.getIntrusivePtr().use_count() == 1 &&
+    if (impl::is_tensor_stealable(data) &&
         data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -903,25 +950,30 @@ inline Variable make_variable(
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
         data_impl_copy.get(), false, std::move(gradient_edge)));
-    return Variable(data_impl_copy);
+    return Variable(std::move(data_impl_copy));
   }
   return Variable();
 }
 
 struct VariableHooks final : at::impl::VariableHooksInterface {
-  at::TensorBase tensor_data(const at::TensorBase&) const override;
-  at::TensorBase variable_data(const at::TensorBase&) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(
-      const at::TensorBase&) const override;
+  at::TensorBase tensor_data(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
+  at::TensorBase variable_data(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
   unsigned _register_hook(
-      const at::TensorBase&,
+      const at::TensorBase& /*self*/ /*unused*/,
       std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
-  void remove_hook(const at::TensorBase&, unsigned pos) const override;
-  bool is_view(const at::TensorBase&) const override;
-  const at::TensorBase& base(const at::TensorBase&) const override;
-  const std::string& name(const at::TensorBase&) const override;
-  bool is_leaf(const at::TensorBase&) const override;
-  int64_t output_nr(const at::TensorBase&) const override;
+  void remove_hook(const at::TensorBase& /*self*/ /*unused*/, unsigned pos)
+      const override;
+  bool is_view(const at::TensorBase& /*self*/ /*unused*/) const override;
+  const at::TensorBase& base(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
+  const std::string& name(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
+  bool is_leaf(const at::TensorBase& /*self*/ /*unused*/) const override;
+  int64_t output_nr(const at::TensorBase& /*self*/ /*unused*/) const override;
   void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
       const override;
   at::TensorBase data(const at::TensorBase& self) const override;
@@ -940,6 +992,12 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet dispatch_keys,
       torch::jit::Stack* stack) const override;
+  std::optional<c10::ScalarType> grad_dtype(
+      const at::TensorBase& /*self*/ /*unused*/) const override;
+  void set_grad_dtype(
+      const at::TensorBase& /*self*/ /*unused*/,
+      const std::optional<c10::ScalarType>& /*grad_dtype*/ /*unused*/)
+      const override;
 };
 
 namespace utils {

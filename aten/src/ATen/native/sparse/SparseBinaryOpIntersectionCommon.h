@@ -31,7 +31,7 @@ using at::sparse::get_sparse_impl;
 
 // ForwardIt: only legacy random access iterator is supported.
 template<class ForwardIt, class T, bool is_lower = true>
-static FUNCAPI INLINE
+FUNCAPI INLINE
 ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
     ForwardIt RESTRICT it;
     typename std::iterator_traits<ForwardIt>::difference_type count, step;
@@ -297,8 +297,8 @@ void _sparse_binary_op_intersection_kernel_impl(
   std::tie(sorted_hash, argsort_hash) = [&]() -> std::tuple<Tensor, Tensor> {
     if (probably_coalesced.is_coalesced()) {
       // NOTE: argsort.dtype == nnz_arange.dtype
-      const auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
-      return std::make_tuple(probably_coalesced_indices_hash, argsort);
+      auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
+      return std::make_tuple(probably_coalesced_indices_hash, std::move(argsort));
     } else {
       // NOTE: we want argsort.dtype == nnz_arange.dtype,
       // but sort() produces indices of type int64_t,

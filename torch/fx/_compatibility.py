@@ -1,5 +1,6 @@
 import textwrap
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 
 _BACK_COMPAT_OBJECTS: dict[Any, None] = {}
@@ -15,6 +16,7 @@ def compatibility(is_backward_compatible: bool) -> Callable[[_T], _T]:
         def mark_back_compat(fn: _T) -> _T:
             docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
             docstring += """
+
 .. note::
     Backwards-compatibility for this API is guaranteed.
 """
@@ -29,6 +31,7 @@ def compatibility(is_backward_compatible: bool) -> Callable[[_T], _T]:
         def mark_not_back_compat(fn: _T) -> _T:
             docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
             docstring += """
+
 .. warning::
     This API is experimental and is *NOT* backward-compatible.
 """

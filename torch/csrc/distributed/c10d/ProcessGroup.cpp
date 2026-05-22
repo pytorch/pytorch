@@ -1,4 +1,3 @@
-#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
@@ -7,11 +6,6 @@
 #include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 namespace c10d {
 
@@ -57,10 +51,11 @@ std::string opTypeToString(OpType opType) {
       return "COALESCED";
     case OpType::_ALLREDUCE_SPARSE:
       return "_ALLREDUCE_SPARSE";
+    case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
+      return "REDUCE_SCATTER_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
-  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
@@ -81,7 +76,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   ProcessGroup::BackendType backendType{ProcessGroup::BackendType::UNDEFINED};
   try {
     backendType = deviceTypeToBackendType_.at(deviceType);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(
         false, "No backend type associated with device type ", deviceType);
   }
@@ -163,9 +158,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::chrono::milliseconds>& timeout,
     const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
     const std::optional<std::string>& name,
-    const std::optional<std::string>& desc) {
+    const std::optional<std::string>& desc,
+    const std::optional<std::vector<c10::Device>>& devices) {
   TORCH_CHECK(
-      ranks.size() > 0,
+      !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
       ranks.size() <= static_cast<size_t>(size_),
@@ -174,6 +170,26 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
+  std::set<c10::DeviceType> deviceTypeFilter;
+  for (const auto& d : devices.value_or(std::vector<c10::Device>{})) {
+    deviceTypeFilter.insert(d.type());
+  }
+  if (!deviceTypeFilter.empty()) {
+    for (const auto& deviceType : deviceTypeFilter) {
+      TORCH_CHECK(
+          deviceTypeToBackendType_.count(deviceType) != 0,
+          "Requested device type for splitGroup is not present in the parent process group: ",
+          deviceType);
+    }
+    auto defaultBackendIt = std::find_if(
+        deviceTypeToBackendType_.begin(),
+        deviceTypeToBackendType_.end(),
+        [&](const auto& p) { return p.second == backendType_; });
+    TORCH_CHECK(
+        defaultBackendIt != deviceTypeToBackendType_.end() &&
+            deviceTypeFilter.count(defaultBackendIt->first) != 0,
+        "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
   std::vector<int> sorted_ranks = ranks;
   std::sort(sorted_ranks.begin(), sorted_ranks.end());
   c10::intrusive_ptr<ProcessGroup> newGroup;
@@ -190,12 +206,17 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
 
+    if (!deviceTypeFilter.empty() && deviceTypeFilter.count(deviceType) == 0) {
+      continue;
+    }
+
     auto parentBackend = getBackend(deviceType);
     auto backendOpts =
         opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
@@ -403,7 +424,27 @@ void register_work(
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
+  // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+
+  // If no work found in current thread's registry, search all registries.
+  // This handles the case where wait() is called from a different thread
+  // than where the collective was initiated (e.g., user-created threads).
+  if (works.empty()) {
+    auto result = RankLocal<WorkRegistry>::find_across_all(
+        [&tensor](WorkRegistry& registry)
+            -> std::optional<std::vector<c10::intrusive_ptr<c10d::Work>>> {
+          auto w = registry.pop_works(tensor);
+          if (!w.empty()) {
+            return w;
+          }
+          return std::nullopt;
+        });
+    if (result.has_value()) {
+      works = std::move(result.value());
+    }
+  }
+
   for (const auto& work : works) {
     work->wait();
   }

@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
-@unittest.skipIf(sys.version_info < (3, 10), "Requires Python 3.10")
 class TestUnion(JitTestCase):
     """
     This class tests the functionality of `Union`.
@@ -127,8 +126,8 @@ class TestUnion(JitTestCase):
             scripted(1)
 
     def test_union_in_class_constructor(self):
-        @torch.jit.script  # noqa: B903
-        class A:  # noqa: B903
+        @torch.jit.script
+        class A:
             def __init__(self, x: int | str) -> None:
                 self.x = x
 

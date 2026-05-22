@@ -116,12 +116,13 @@ class Vectorized<int64_t> : public Vectorizedi {
     __at_align__ int64_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int64_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -132,7 +133,8 @@ class Vectorized<int64_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int64_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int64_t));
     }
   }
   const int64_t& operator[](int idx) const = delete;
@@ -194,7 +196,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int32_t v) {
     values = _mm256_set1_epi32(v);
   }
@@ -266,12 +268,13 @@ class Vectorized<int32_t> : public Vectorizedi {
     __at_align__ int32_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int32_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -282,7 +285,8 @@ class Vectorized<int32_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int32_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int32_t));
     }
   }
   const int32_t& operator[](int idx) const = delete;
@@ -412,7 +416,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int16_t v) {
     values = _mm256_set1_epi16(v);
   }
@@ -566,12 +570,13 @@ class Vectorized<int16_t> : public Vectorizedi {
     __at_align__ int16_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int16_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -582,7 +587,8 @@ class Vectorized<int16_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int16_t));
     }
   }
   const int16_t& operator[](int idx) const = delete;
@@ -642,7 +648,7 @@ class Vectorized8 : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() {}
+  Vectorized8() = default;
   Vectorized8(T v) {
     values = _mm256_set1_epi8(v);
   }
@@ -905,7 +911,7 @@ class Vectorized8 : public Vectorizedi {
     // Because loadu(const void* ptr, T count) requires zero initialization for
     // upper 128 bits. However, by using _mm256_castsi128_si256, the upper 128
     // bits of the result are undefined.
-    // TODO<leslie> We can use _mm256_zextsi128_si256 in the furture,
+    // TODO<leslie> We can use _mm256_zextsi128_si256 in the future,
     // since gcc 9.3 doesn't support it now.
     __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr));
     return _mm256_castsi128_si256(input_128);
@@ -914,12 +920,12 @@ class Vectorized8 : public Vectorizedi {
     __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(T));
+    std::memcpy(tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -935,7 +941,8 @@ class Vectorized8 : public Vectorizedi {
       } else {
         __at_align__ T tmp_values[size()];
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-        std::memcpy(ptr, tmp_values, count * sizeof(T));
+        std::memcpy(
+            ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(T));
       }
     }
   }
@@ -1740,7 +1747,7 @@ Vectorized<int16_t> inline shift_256_16(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 16-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.
@@ -1844,7 +1851,7 @@ Vectorized<int16_t> inline shift_256_16(
     c0 = _mm256_srav_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_1_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%2==1.
   __m256i a1 = _mm256_and_si256(a, keep_1);
   __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
@@ -1875,7 +1882,7 @@ Vectorized<T> inline shift_256_8(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 8-bit elements, and considering quadruples of
-  // neighboring elements.  Specifially, a mask named "ctl_M_N" (M,N
+  // neighboring elements.  Specifically, a mask named "ctl_M_N" (M,N
   // in [0,1,2,3], and M!=N) is set so that shuffle will move element
   // with index M from input quadruple into element with index N in
   // output quadruple, and other elements in output quadruple will be
@@ -2180,7 +2187,7 @@ Vectorized<T> inline shift_256_8(
     c0 = _mm256_srlv_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_3_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==1.
   __m256i a1 = _mm256_shuffle_epi8(a, ctl_1_3);
   __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
@@ -2193,7 +2200,7 @@ Vectorized<T> inline shift_256_8(
     c1 = _mm256_srlv_epi32(a1, b1);
   c1 = _mm256_shuffle_epi8(c1, ctl_3_1);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==2.
   __m256i a2 = _mm256_shuffle_epi8(a, ctl_2_3);
   __m256i b2 = _mm256_shuffle_epi8(b, ctl_2_0);
@@ -2206,7 +2213,7 @@ Vectorized<T> inline shift_256_8(
     c2 = _mm256_srlv_epi32(a2, b2);
   c2 = _mm256_shuffle_epi8(c2, ctl_3_2);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==3.
   __m256i a3 = _mm256_and_si256(a, keep_3);
   __m256i b3 = _mm256_shuffle_epi8(b, ctl_3_0);

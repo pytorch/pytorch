@@ -40,7 +40,7 @@ inline int start_index(int out_idx, int out_len, int in_len) {
    * This function computes the start index on input matrix.
    */
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::floor((float)(out_idx * in_len) / out_len);
+  return static_cast<int>(std::floor(static_cast<float>(out_idx * in_len) / out_len));
 }
 
 inline int end_index(int out_idx, int out_len, int in_len) {
@@ -49,13 +49,13 @@ inline int end_index(int out_idx, int out_len, int in_len) {
    * This function computes the end index on input matrix.
    */
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::ceil((float)((out_idx + 1) * in_len) / out_len);
+  return static_cast<int>(std::ceil(static_cast<float>((out_idx + 1) * in_len) / out_len));
 }
 
 // adaptive avg pool for 2D and 3D inputs
 template <typename scalar_t>
-static void adaptive_avg_pool_single_out_frame(
-    scalar_t* input_p,
+void adaptive_avg_pool_single_out_frame(
+    const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeC,
     int64_t isizeD, // Set to 1 for 2D
@@ -92,7 +92,7 @@ static void adaptive_avg_pool_single_out_frame(
             float kDHWr = kDHr / kW;
 
             /* local pointers */
-            scalar_t* ip = input_p +
+            const scalar_t* ip = input_p +
                            c * istrideC +
                            istartD * istrideD +
                            istartH * istrideH +
@@ -220,7 +220,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
     output = at::_empty_affine_quantized(
         output_shape, input.options(), input.q_scale(), input.q_zero_point());
     auto input_contig = input.contiguous();
-    auto input_data = input_contig.data_ptr<scalar_t>();
+    auto input_data = input_contig.const_data_ptr<scalar_t>();
     auto output_data = output.data_ptr<scalar_t>();
     auto in_stride = input_contig.strides();
 

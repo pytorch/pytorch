@@ -1,6 +1,4 @@
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
@@ -12,6 +10,7 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
+#include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
@@ -146,7 +145,7 @@ std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
   cs_str.reserve(cs.size());
   for (const auto& entry : cs) {
     std::stringstream loc;
-    loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
+    loc << entry.filename << '(' << entry.line << "): " << entry.funcname;
     cs_str.push_back(loc.str());
   }
   return cs_str;
@@ -311,11 +310,11 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
   } else {
     ss.str("");
     if (isString) {
-      ss << "\"";
+      ss << '"';
     }
     ss << val;
     if (isString) {
-      ss << "\"";
+      ss << '"';
     }
     std::string mystr = ss.str();
 
@@ -374,24 +373,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-static constexpr int32_t kTruncatLength = 30;
+static constexpr int32_t kTruncateLength = 30;
 
 template <typename ListLikeType>
 static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
-  if (truncate && list.size() > kTruncatLength) {
+  if (truncate && list.size() > kTruncateLength) {
     if (with_escaped_quotes == true) {
       auto x = fmt::format(
           "\"[{}, ..., {}]\"",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     } else {
       auto x = fmt::format(
           "[{}, ..., {}]",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     }
@@ -511,7 +510,24 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
       }
     }
+
+    auto seqNum = debugInfo->getSequenceNumber();
+    if (seqNum >= 0) {
+      map.emplace(kSeqNum, std::to_string(seqNum));
+
+      size_t comms_id = c10::get_hash(
+          debugInfo->getProcessGroupName(),
+          seqNum,
+          debugInfo->getIsP2P(),
+          globalRankStart,
+          globalRankStride,
+          debugInfo->getWorldSize());
+      map.emplace(kCommsId, std::to_string(comms_id));
+    }
   }
+
+  map.emplace(
+      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
 
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;
@@ -935,7 +951,7 @@ int getTensorStartHint(const at::Tensor& t) {
 bool checkFunctionOutputsForLogging(const at::RecordFunction& fn) {
   const auto& outputs = fn.outputs();
   auto num_outputs = fn.num_outputs();
-  VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
+  VLOG(2) << "outputs: " << num_outputs << ' ' << outputs.size() << '\n';
   // We have two cases: for unboxed kernel, we have num_outputs ==
   // outputs.size() for boxed kernel using stack, there could be more elements
   // on the stack from previous ops.
@@ -949,7 +965,7 @@ bool checkFunctionOutputsForLogging(const at::RecordFunction& fn) {
 bool checkFunctionInputsForLogging(const at::RecordFunction& fn) {
   auto num_inputs = fn.num_inputs();
   const auto inputs = fn.inputs();
-  VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
+  VLOG(2) << "inputs: " << num_inputs << ' ' << inputs.size() << '\n';
   // We have two cases: for unboxed kernel, we have num_inputs ==
   // inputs.size() for boxed kernel using stack, there could be more elements
   // on the stack from previous ops.

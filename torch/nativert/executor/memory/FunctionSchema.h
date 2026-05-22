@@ -3,6 +3,8 @@
 #include <ATen/core/function_schema.h>
 #include <torch/nativert/executor/OpKernelKind.h>
 
+#include <utility>
+
 namespace torch::nativert {
 
 struct InputOutputIdxPair {
@@ -15,12 +17,12 @@ using AliasingSpec = std::vector<InputOutputIdxPair>;
 class FunctionSchema {
  public:
   explicit FunctionSchema(
-      const c10::FunctionSchema& schema,
+      c10::FunctionSchema schema,
       AliasingSpec&& aliasing_spec = {},
       OpKernelKind kernel_kind = OpKernelKind::kInterpreterFallbackKernel)
       : aliasing_spec_(std::move(aliasing_spec)),
         kernel_kind_(kernel_kind),
-        c10_fn_schema_(schema) {}
+        c10_fn_schema_(std::move(schema)) {}
 
   c10::FunctionSchema& base_schema() {
     return c10_fn_schema_;

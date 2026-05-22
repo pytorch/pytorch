@@ -1,6 +1,8 @@
 import contextlib
 import logging
-from typing import Any, Callable, cast, Optional, TypeVar
+import os
+from collections.abc import Callable
+from typing import Any, cast, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -25,7 +27,6 @@ from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     create_epilogue_with_attr,
-    DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
@@ -40,19 +41,27 @@ GEMM_TEMPLATE = r"""
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs=Y_list, aliases=aliases)}}
 {
-    {{kernel.maybe_codegen_profile()}}
+    {{kernel.maybe_codegen_profile(template.get_kernel_prefix_name())}}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
+    {%- set use_dynamic_threads = ((config.cpp.threads < 1) and (num_threads == cpu_count)) or config.cpp.dynamic_threads %}
+    {%- if use_dynamic_threads %}
+    #pragma omp parallel
+    {%- else %}
     #pragma omp parallel num_threads({{num_threads}})
+    {%- endif %}
     {
-        {{ template.codegen_multi_threads_params()|indent(8, false) }}
+        {{ micro_gemm.codegen_init(kernel) }}
+        #pragma omp for schedule(static, 1)
+        for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+            {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
-{%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- endif %}
 {%- set acc_buf_name_list=[] %}
 {%- set acc_buf_name_prefix = "local_acc_buf_" %}
 {%- for gemm_idx in range(0, gemm_grouped_num, 1) %}
@@ -132,8 +141,14 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+{%- if num_threads > 1 %}
+        }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
+{%- else %}
+        {{ micro_gemm.codegen_finalize(kernel) }}
+    }
+{%- endif %}
 }
 """
 
@@ -159,8 +174,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         beta: int = 1,
         alpha: int = 1,
         has_bias: bool = False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,
         gemm_grouped_num: int = 1,
     ) -> None:
         """
@@ -183,12 +198,14 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         )
         self.act_mapping = act_mapping
         self.gemm_grouped_num = gemm_grouped_num
+        # pyrefly: ignore [bad-override]
         self.output_node: list[ir.Buffer] = [
             ir.Buffer(name="buf_out" + str(idx), layout=layout)
             for idx in range(gemm_grouped_num)
         ]
 
     @classmethod
+    # pyrefly: ignore [bad-override]
     def add_choices(
         cls,
         choices: list[ChoiceCaller],
@@ -198,9 +215,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         alpha: int = 1,
         has_bias: tuple[bool, ...] = (False, False),
         trans_w: bool = False,
-        input_indices: Optional[list[int]] = None,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,  # gemm idx to its act buf
+        input_indices: list[int] | None = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,  # gemm idx to its act buf
     ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
@@ -231,6 +248,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 if isinstance(inputs[idx], torch.Tensor):
                     W = inputs[idx]
                     assert isinstance(W, torch.Tensor), "W must be a torch.Tensor"
+                    # pyrefly: ignore [unsupported-operation]
                     new_inputs[idx] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
@@ -246,8 +264,10 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 new_input = new_inputs[wgt_idx]
                 new_inputs[wgt_idx] = transpose_w(new_input, trans_w)
             for bias_idx in range(bias_start_idx, len(new_inputs)):
+                # pyrefly: ignore [bad-argument-type]
                 new_bias = expand_bias(new_inputs[bias_idx], X)
                 assert new_bias is not None
+                # pyrefly: ignore [unsupported-operation]
                 new_inputs[bias_idx] = new_bias
             return new_inputs, layout_or_out
 
@@ -308,7 +328,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 W_tensor = []
                 for W_node in W_nodes:
                     assert W_node.get_name() in V.graph.constants
+                    # pyrefly: ignore [bad-argument-type]
                     W_tensor.append(V.graph.constants[W_node.get_name()])
+                # pyrefly: ignore [unsupported-operation]
                 new_input_nodes[wgt_start_idx : wgt_start_idx + gemm_grouped_num] = (
                     W_tensor  # type: ignore[assignment]
                 )
@@ -324,6 +346,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                     template_buffer.inputs[idx] = (
                         ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
                     )
+
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -344,12 +367,15 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         template.maybe_append_choice(choices)
         return template
 
+    def get_kernel_prefix_name(self) -> str:
+        return f"grouped_gemm_g{self.gemm_grouped_num}m{self.m}n{self.n}k{self.k}"
+
     def render(  # type: ignore[override,return,no-untyped-def]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         assert self.act_mapping
@@ -362,6 +388,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         cur_idx = bias_start_idx
         for inp_idx in range(self.gemm_grouped_num):
             inp = None
+            # pyrefly: ignore [bad-index, index-error]
             if self.has_bias[inp_idx]:
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1
@@ -402,14 +429,18 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
-        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        L1_cache_size = torch.cpu.get_capabilities().get(
+            "l1d_cache_size", 0
+        )  # per core cache size in Bytes
         assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
 
-        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        L2_cache_size = torch.cpu.get_capabilities().get(
+            "l2_cache_size", 0
+        )  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         epilogues: list[ir.IRNode] = []
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] = []
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_grouped_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -423,7 +454,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             "epilogue_creator is not supported yet in Grouped GEMM Template"
         )
 
-        kernel_args: dict[str, Optional[ir.IRNode]] = {}
+        kernel_args: dict[str, ir.IRNode | None] = {}
         for x_idx in range(wgt_start_idx):
             kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
         for w_idx in range(self.gemm_grouped_num):
@@ -478,7 +509,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             acc_buf_dtype=torch.float,
-            DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             config=config,
@@ -492,6 +522,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
             Y_2d_list=Y_2d_list,
             multi_output_buffers=multi_output_buffers,
+            cpu_count=os.cpu_count(),
         )
         with contextlib.ExitStack() as stack:
             stack.enter_context(

@@ -69,6 +69,10 @@ class MemoryBudgetTest(TestCase):
         super().setUp()
         torch.set_default_device("cuda")
 
+    def tearDown(self):
+        torch.set_default_device(None)
+        super().tearDown()
+
     def test_rematerializes_cheap(self):
         def f(x, w):
             x = x.cos()
@@ -106,7 +110,7 @@ class MemoryBudgetTest(TestCase):
             return f(x, ws)
 
         _, eager_flops = get_mem_and_flops(call)
-        for budget in range(0, 11):
+        for budget in range(11):
             mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
             if budget <= 5:
                 # We start saving the matmuls
@@ -251,7 +255,7 @@ class MemoryBudgetTest(TestCase):
             return f(x, ws)
 
         expected = call()
-        for budget in range(0, 11):
+        for budget in range(11):
             memory_budget = budget / 10
             torch._dynamo.reset()
             with config.patch(activation_memory_budget=memory_budget):

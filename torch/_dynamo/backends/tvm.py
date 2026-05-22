@@ -26,8 +26,10 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Callable
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Optional
+from typing import Any
 
 import torch
 from torch import fx
@@ -45,11 +47,12 @@ def tvm(
     gm: fx.GraphModule,
     example_inputs: list[torch.Tensor],
     *,
-    options: Optional[MappingProxyType[str, Any]] = None,
+    options: MappingProxyType[str, Any] | None = None,
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    assert options is not None
+    if options is None:
+        raise AssertionError("options must not be None")
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -77,36 +80,19 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
+        # pyrefly: ignore [missing-import]
         from tvm import auto_scheduler
 
-        log_file = tempfile.NamedTemporaryFile()
-
-        if not os.path.exists(log_file):
-            tasks, task_weights = auto_scheduler.extract_tasks(
-                mod["main"], params, target
-            )
-            if len(tasks) != 0:
-                tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
-                if not os.path.exists(log_file):
-                    assert trials > 0
-                    tune_option = auto_scheduler.TuningOptions(
-                        num_measure_trials=trials,
-                        measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                        early_stopping=2000,
-                    )
-                    try:
-                        tuner.tune(tune_option)
-                    except Exception:
-                        if os.path.exists(log_file):
-                            os.unlink(log_file)
-                        raise
-
-        with auto_scheduler.ApplyHistoryBest(log_file):
-            with tvm.transform.PassContext(
+        with (
+            tempfile.NamedTemporaryFile() as log_file,
+            auto_scheduler.ApplyHistoryBest(log_file),
+            tvm.transform.PassContext(
                 opt_level=opt_level, config={"relay.backend.use_auto_scheduler": True}
-            ):
-                lib = relay.build(mod, target=target, params=params)
+            ),
+        ):
+            lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
+        # pyrefly: ignore [missing-import]
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:
@@ -118,7 +104,8 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
-            assert trials > 0
+            if trials <= 0:
+                raise AssertionError(f"trials must be positive, got {trials}")
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
@@ -167,7 +154,7 @@ def tvm(
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
-        active_inputs = {name for name, _ in shape_info.items()}
+        active_inputs = set(shape_info.keys())
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:
@@ -204,7 +191,7 @@ def has_tvm() -> bool:
 @functools.cache
 def llvm_target() -> str:
     if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
+        cpuinfo = Path("/proc/cpuinfo").read_text()
         if "avx512" in cpuinfo:
             return "llvm -mcpu=skylake-avx512"
         elif "avx2" in cpuinfo:

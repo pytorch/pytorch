@@ -117,7 +117,7 @@ def md_kv_table(rows: Iterable[Mapping[str, str | int | float]]) -> str:
     Render a list of dicts as a Markdown table using Jinja template.
     """
     rows = list(rows)
-    cols = list({k for r in rows for k in r.keys()})
+    cols = list({k for r in rows for k in r})
     md = _TPL_TABLE.render(cols=cols, rows=rows).strip() + "\n"
     return md
 

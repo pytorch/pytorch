@@ -61,7 +61,7 @@
 constexpr float EPSILON = 1e-12;
 
 namespace {
-  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
     if (reduction == at::Reduction::Mean) {
       return unreduced.mean();
     } else if (reduction == at::Reduction::Sum) {
@@ -489,6 +489,9 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
     .add_const_input(input)
     .add_const_input(target)
     .add_const_input(grad_output)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;

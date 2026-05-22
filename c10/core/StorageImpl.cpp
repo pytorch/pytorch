@@ -3,6 +3,18 @@
 
 namespace c10 {
 
+void StorageImpl::incref_pyobject() const noexcept {
+  pyobj_slot_.incref();
+}
+
+void StorageImpl::decref_pyobject() const noexcept {
+  pyobj_slot_.decref();
+}
+
+bool StorageImpl::try_incref_pyobject() const noexcept {
+  return pyobj_slot_.try_incref();
+}
+
 // The array to save function pointer for custom storageImpl create.
 static std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;

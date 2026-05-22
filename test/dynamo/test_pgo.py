@@ -11,7 +11,11 @@ import torch._dynamo.test_case
 import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    normalize_gm,
+)
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch.testing._internal.common_utils import IS_WINDOWS
@@ -62,6 +66,13 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         force_nn_module_property_static_shapes=False,
     )
     def test_whitelist_suggestion(self):
+        from torch._dynamo.pgo import (
+            _collect_dynamic_sources,
+            _collect_missing_sources,
+            get_code_state,
+            render_code_state,
+        )
+
         cnts = CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
@@ -83,14 +94,18 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         ]
 
         def check_whitelist(sources_):
-            state = torch._dynamo.pgo.render_code_state(
-                torch._dynamo.pgo.get_code_state()
-            )
+            state = render_code_state(get_code_state())
             whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(
                 1
             )
             for src in sources_:
                 self.assertTrue(src in whitelist)
+
+        def check_num_missing_whitelist(expected):
+            frame_state = next(iter(get_code_state().values()))
+            all_dynamic_sources = _collect_dynamic_sources(frame_state)
+            missing_whitelist = _collect_missing_sources(all_dynamic_sources)
+            self.assertEqual(len(missing_whitelist), expected)
 
         # check growing whitelist
         f = Foo()
@@ -107,11 +122,13 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f.attr = torch.randn(8)
         f(torch.randn(8, 8), torch.randn(8))
         check_whitelist(sources)
+        check_num_missing_whitelist(5)
 
         # now use suggested whitelist
         self.reset()
         cnts.clear()
-        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
+        code_state = get_code_state()
+        state = render_code_state(code_state)
         whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
         with torch.compiler.config.patch(dynamic_sources=whitelist):
             f = Foo()
@@ -121,6 +138,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f.attr = torch.randn(8)
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
+            check_num_missing_whitelist(0)
 
     def test_no_empty_graph_allowlist(self):
         @torch._dynamo.disable
@@ -358,15 +376,18 @@ def run(cnt):
         path2 = normalize_path_separator(os.path.join(temp_dir2.name, "example.py"))
         cnts = CompileCounter()
 
-        assert path1 != path2
+        if path1 == path2:
+            raise AssertionError("Expected path1 != path2")
 
         def write_load_and_run(path):
             with open(path, "w") as file:
                 file.write(content)
             spec = importlib.util.spec_from_file_location("example", path1)
-            assert spec is not None
+            if spec is None:
+                raise AssertionError("Expected spec to not be None")
             module = importlib.util.module_from_spec(spec)
-            assert spec.loader is not None
+            if spec.loader is None:
+                raise AssertionError("Expected spec.loader to not be None")
             spec.loader.exec_module(module)
             module.run(cnts)
 
@@ -443,59 +464,62 @@ def run(cnt):
             f(t(2, 4), t(2, 2))
             f(t(4, 2), t(2, 2))
 
-            # with default remote (dynamic x) + extra remote (dynamic y),
-            # we should be able to wobble x & y with no recompiles.
+            # with both default remote present, we ignore extra remote.
             self.reset()
             cnts.clear()
             with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
                 f(t(2, 2), t(2, 2))
-                f(t(2, 4), t(4, 2))
-                f(t(4, 2), t(2, 4))
+                f(t(6, 8), t(2, 2))
                 self.assertEqual(cnts.frame_count, 1)
+                f(t(2, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 2)
 
-    def test_profile_merges(self):
-        from torch._dynamo.pgo import auto_dynamic, merge_pgo_entry
+    def test_factory_created_functions_separate_pgo_state(self):
+        cc_backend = CompileCounterWithBackend(backend="aot_eager")
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(ints, t_scalar, tensors):
-            # arbitrary compute
-            return ints[0] + ints[1], t_scalar + 1, [t + 1 for t in tensors]
+        def wrap_compile(func):
+            @torch.compile(backend=cc_backend, fullgraph=True)
+            def _func(x):
+                return func(x)
 
-        # single static run
-        f(
-            [0, 2],
-            torch.tensor(0),
-            [
-                torch.randn(2),
-                torch.randn(2, 2),
-                torch.randn(4, 4),
-            ],
+            return _func
+
+        def impl_a(x):
+            return x.view(-1)
+
+        def impl_b(x):
+            return x.sum()
+
+        compiled_a = wrap_compile(impl_a)
+        compiled_b = wrap_compile(impl_b)
+
+        # Call with different shapes - they should NOT share PGO state
+        compiled_a(torch.randn(2, 3))  # shape (2, 3)
+        compiled_b(torch.randn(5, 7))  # shape (5, 7)
+
+        actual = normalize_gm(cc_backend.graphs[1].print_readable(print_output=False))
+
+        # If PGO state is properly separated, compiled_b should NOT have
+        # been triggered to use dynamic shapes based on compiled_a's shapes
+        # This should result in 2 separate static compilations
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[5, 7]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        return (sum_1,)
+""",
         )
-        # collect profiles
-        profile = next(
-            iter(torch._dynamo.pgo.get_code_state().values())
-        ).automatic_dynamic
-        i0, i1 = profile["L['ints'][0]"], profile["L['ints'][1]"]
-        ts = profile["L['t_scalar]"]
-        t0, t1, t2 = (
-            profile["L['tensors'][0]"],
-            profile["L['tensors'][1]"],
-            profile["L['tensors'][2]"],
-        )
-        # merging same scalar, or tensor into scalar -> no-op
-        merge_pgo_entry(i0, i0)
-        merge_pgo_entry(ts, i0)
-        merge_pgo_entry(t0, i0)
-        self.assertEqual(i0.scalar, 0)
-        # merging different scalars -> dynamic
-        merge_pgo_entry(i1, i0)
-        self.assertEqual(i0.scalar, auto_dynamic)
-        # merging different rank tensors -> static
-        merge_pgo_entry(t0, t2)
-        self.assertEqual(t2.size, (4, 4))
-        # merging same rank tensors -> dynamic
-        merge_pgo_entry(t1, t2)
-        self.assertEqual(t2.size, (auto_dynamic, auto_dynamic))
+
+        # Verify no dynamic shapes were introduced incorrectly
+        # by checking that calling with same shapes doesn't recompile
+        cc_backend.clear()
+        compiled_a(torch.randn(2, 3))
+        compiled_b(torch.randn(5, 7))
+        self.assertEqual(cc_backend.frame_count, 0)  # No recompilation needed
 
 
 if __name__ == "__main__":

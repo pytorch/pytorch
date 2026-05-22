@@ -158,6 +158,7 @@ class BaseDataScheduler:
                     "initialization. Please, make sure to call `data_sparsifier.step()` before "
                     "`scheduler.step()`.",
                     UserWarning,
+                    stacklevel=2,
                 )
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
@@ -167,6 +168,7 @@ class BaseDataScheduler:
                     "You have to make sure you run the data_sparsifier.step() BEFORE any "
                     "calls to the scheduler.step().",
                     UserWarning,
+                    stacklevel=2,
                 )
         self._step_count += 1
 

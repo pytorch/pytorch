@@ -904,22 +904,18 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   return args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER);
 }
 
+// since mvlgamma_ has different signature from its
+// out and functional variant, we explicitly
+// define it (instead of using structured kernel).
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  mvlgamma_check(self, p);
-  Tensor args = native::arange(
-      -p *HALF  + HALF,
-      HALF,
-      HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
-  args = args.add(self.unsqueeze(-1));
-  const auto p2_sub_p = static_cast<double>(p * (p - 1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
+  return at::mvlgamma_out(self, self, p);
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+  TORCH_CHECK(
+    self.device() == result.device(),
+    "Expected tensors to be on the same device, but found ", self.device(), " and ", result.device()
+  );
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
       at::can_cast(out.scalar_type(), result.scalar_type()),
@@ -944,7 +940,7 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
 
   at::frexp_out(mantissa, exponent, self);
-  return std::tuple<Tensor, Tensor>(mantissa, exponent);
+  return std::tuple<Tensor, Tensor>(std::move(mantissa), std::move(exponent));
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,

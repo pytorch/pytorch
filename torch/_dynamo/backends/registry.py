@@ -60,10 +60,9 @@ optimized_model = torch.compile(model, backend="my_compiler")
 
 import functools
 import logging
-import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from importlib.metadata import EntryPoint
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Protocol
 
 import torch
 from torch import fx
@@ -78,13 +77,14 @@ class CompiledFn(Protocol):
 
 CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
-_BACKENDS: dict[str, Optional[EntryPoint]] = {}
+_BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
+_default_backend: str | CompilerFn = "inductor"
 
 
 def register_backend(
-    compiler_fn: Optional[CompilerFn] = None,
-    name: Optional[str] = None,
+    compiler_fn: CompilerFn | None = None,
+    name: str | None = None,
     tags: Sequence[str] = (),
 ) -> Callable[..., Any]:
     """
@@ -101,9 +101,11 @@ def register_backend(
     if compiler_fn is None:
         # @register_backend(name="") syntax
         return functools.partial(register_backend, name=name, tags=tags)  # type: ignore[return-value]
-    assert callable(compiler_fn)
+    if not callable(compiler_fn):
+        raise AssertionError(f"compiler_fn must be callable, got {type(compiler_fn)}")
     name = name or compiler_fn.__name__
-    assert name not in _COMPILER_FNS, f"duplicate name: {name}"
+    if name in _COMPILER_FNS:
+        raise AssertionError(f"duplicate name: {name}")
     if compiler_fn not in _BACKENDS:
         _BACKENDS[name] = None
     _COMPILER_FNS[name] = compiler_fn
@@ -117,7 +119,7 @@ register_experimental_backend = functools.partial(
 )
 
 
-def lookup_backend(compiler_fn: Union[str, CompilerFn]) -> CompilerFn:
+def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
     """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
         if compiler_fn not in _BACKENDS:
@@ -147,7 +149,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type:
 
     backends = [
         name
-        for name in _BACKENDS.keys()
+        for name in _BACKENDS
         if name not in _COMPILER_FNS
         or not exclude_tags_set.intersection(_COMPILER_FNS[name]._tags)  # type: ignore[attr-defined]
     ]
@@ -163,7 +165,8 @@ def _lazy_import() -> None:
 
     from ..repro.after_dynamo import dynamo_minifier_backend
 
-    assert dynamo_minifier_backend is not None
+    if dynamo_minifier_backend is None:
+        raise AssertionError("dynamo_minifier_backend failed to load")
 
     _discover_entrypoint_backends()
 
@@ -174,12 +177,53 @@ def _discover_entrypoint_backends() -> None:
     from importlib.metadata import entry_points
 
     group_name = "torch_dynamo_backends"
-    if sys.version_info < (3, 10):
-        eps = entry_points()
-        eps = eps[group_name] if group_name in eps else []
-        eps_dict = {ep.name: ep for ep in eps}
-    else:
-        eps = entry_points(group=group_name)
-        eps_dict = {name: eps[name] for name in eps.names}
+    eps = entry_points(group=group_name)
+    # pyrefly: ignore [bad-index]
+    eps_dict = {name: eps[name] for name in eps.names}
     for backend_name in eps_dict:
         _BACKENDS[backend_name] = eps_dict[backend_name]
+
+
+def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
+    """
+    Check if the given compiler function is a registered backend.
+    Custom backends (user-provided callables not in the registry) return False.
+    """
+    # Ensure backends are loaded
+    _lazy_import()
+
+    # Check if it's directly a registered backend function
+    if compiler_fn in _COMPILER_FNS.values():
+        return True
+
+    # Check for _TorchCompileInductorWrapper or _TorchCompileWrapper
+    # These have a compiler_name attribute that identifies the backend
+    if hasattr(compiler_fn, "compiler_name"):
+        compiler_name = compiler_fn.compiler_name
+        if compiler_name in _BACKENDS or compiler_name in _COMPILER_FNS:
+            return True
+
+    # Check if the wrapper has a compiler_fn attribute (e.g., _TorchCompileWrapper)
+    if hasattr(compiler_fn, "compiler_fn"):
+        return compiler_fn.compiler_fn in _COMPILER_FNS.values()
+
+    return False
+
+
+def set_default_backend(backend: str | CompilerFn | None) -> None:
+    """Set the default backend used by torch.compile when no backend is explicitly specified.
+
+    Pass None to reset to the default ("inductor").
+    """
+    global _default_backend
+    if backend is None:
+        _default_backend = "inductor"
+        return
+    if not isinstance(backend, str) and not callable(backend):
+        raise TypeError(f"backend must be a string or callable, got {type(backend)}")
+    _default_backend = backend
+
+
+def get_default_backend() -> str | CompilerFn:
+    """Return the current default backend for torch.compile."""
+    return _default_backend

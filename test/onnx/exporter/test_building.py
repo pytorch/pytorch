@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import numpy as np
+import onnx_ir as ir
 import onnxscript
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _tensors
@@ -14,6 +14,7 @@ from torch.testing._internal import common_utils
 
 class TestOpRecorder(common_utils.TestCase):
     def setUp(self):
+        super().setUp()
         self.opset_version = 17
         self.opset = onnxscript.values.Opset("", self.opset_version)
         self.recorder = _building.OpRecorder(opset=self.opset, constant_farm={})
@@ -32,35 +33,6 @@ class TestOpRecorder(common_utils.TestCase):
             producer_name="pytorch",
             producer_version=torch.__version__,
         )
-
-    def test_skippable_castlike_is_ommited(self):
-        input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
-        input_x.dtype = ir.DataType.FLOAT
-
-        input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
-        input_y.dtype = ir.DataType.FLOAT
-
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
-            cast = self.opset.CastLike(input_y, input_x)
-            _ = self.opset.Add(input_x, cast)
-
-        self.assertEqual(len(tracer.nodes), 1)
-        self.assertEqual(tracer.nodes[0].op_type, "Add")
-
-    def test_castlike_is_replaced_with_cast_when_it_is_traced(self):
-        input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
-        input_x.dtype = ir.DataType.FLOAT
-
-        input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
-        input_y.dtype = ir.DataType.INT64
-
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
-            cast = self.opset.CastLike(input_y, input_x)
-            _ = self.opset.Add(input_x, cast)
-
-        self.assertEqual(len(tracer.nodes), 2)
-        self.assertEqual(tracer.nodes[0].op_type, "Cast")
-        self.assertEqual(tracer.nodes[1].op_type, "Add")
 
     def test_python_constant_added_as_constant_nodes(self):
         input_x = _tensors.SymbolicTensor(

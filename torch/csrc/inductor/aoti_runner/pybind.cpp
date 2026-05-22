@@ -51,7 +51,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerCpu::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer);
+          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerCpu::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
@@ -62,6 +66,12 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
+      .def(py::init<
+           const std::string&,
+           int,
+           const std::string&,
+           const std::string&,
+           const bool>())
       .def(
           "run",
           &AOTIModelContainerRunnerCuda::run,
@@ -87,11 +97,23 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"),
           py::arg("user_managed") = false)
       .def(
+          "update_constant_buffer_from_cpu",
+          static_cast<void (AOTIModelContainerRunnerCuda::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
+              &AOTIModelContainerRunnerCuda::update_constant_buffer_from_cpu),
+          py::arg("tensor_map"),
+          py::arg("use_inactive"),
+          py::arg("validate_full_updates"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerCuda::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer);
+          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerCuda::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
 #ifdef USE_XPU
   py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
@@ -127,12 +149,23 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"),
           py::arg("user_managed") = false)
       .def(
+          "update_constant_buffer_from_cpu",
+          static_cast<void (AOTIModelContainerRunnerXpu::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
+              &AOTIModelContainerRunnerXpu::update_constant_buffer_from_cpu),
+          py::arg("tensor_map"),
+          py::arg("use_inactive"),
+          py::arg("validate_full_updates"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerXpu::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
-
+          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerXpu::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
 #if defined(USE_MPS) && defined(__APPLE__) && \
     !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
@@ -163,12 +196,23 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"),
           py::arg("user_managed") = false)
       .def(
+          "update_constant_buffer_from_cpu",
+          static_cast<void (AOTIModelContainerRunnerMps::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
+              &AOTIModelContainerRunnerMps::update_constant_buffer_from_cpu),
+          py::arg("tensor_map"),
+          py::arg("use_inactive"),
+          py::arg("validate_full_updates"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerMps::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerMps::free_inactive_constant_buffer);
-
+          &AOTIModelContainerRunnerMps::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerMps::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
 
   m.def(

@@ -4,7 +4,6 @@
 
 import math
 from collections.abc import MutableMapping
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -71,13 +70,12 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(
-    lr: float, adjust_lr_fn: Optional[str], param_shape: torch.Size
-) -> float:
+def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
+        # pyrefly: ignore [no-matching-overload]
         adjusted_ratio = math.sqrt(max(1, A / B))
     elif adjust_lr_fn == "match_rms_adamw":
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
@@ -97,7 +95,7 @@ class Muon(Optimizer):
         ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
-        adjust_lr_fn: Optional[str] = None,
+        adjust_lr_fn: str | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -140,7 +138,7 @@ class Muon(Optimizer):
         params_with_grad: list[Tensor],
         grads: list[Tensor],
         muon_momentum_bufs: list[Tensor],
-    ):
+    ) -> bool:
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -275,6 +273,29 @@ Muon.__doc__ = (
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
             If not specified, we will default to use "original". (default: None)
 
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Muon only supports 2D params; use a standard optimizer
+        >>> # such as AdamW for biases, embeddings, and other non-2D
+        >>> # parameters.
+        >>> muon_params = [
+        ...     p for p in model.parameters() if p.ndim == 2
+        ... ]
+        >>> other_params = [
+        ...     p for p in model.parameters() if p.ndim != 2
+        ... ]
+        >>> optim_muon = torch.optim.Muon(
+        ...     muon_params, lr=0.02, momentum=0.95
+        ... )
+        >>> optim_adamw = torch.optim.AdamW(
+        ...     other_params, lr=3e-4, weight_decay=0.01
+        ... )
+        >>> optim_muon.zero_grad()
+        >>> optim_adamw.zero_grad()
+        >>> loss_fn(model(input), target).backward()
+        >>> optim_muon.step()
+        >>> optim_adamw.step()
+
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
     .. _Muon is Scalable for LLM Training:
@@ -296,7 +317,7 @@ def _single_tensor_muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: Optional[str],
+    adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -326,7 +347,7 @@ def muon(
     grads: list[Tensor],
     muon_momentum_bufs: list[Tensor],
     *,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     lr: float,
     weight_decay: float,
     momentum: float,
@@ -334,9 +355,9 @@ def muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: Optional[str],
+    adjust_lr_fn: str | None,
     has_complex: bool,
-):
+) -> None:
     r"""Functional API that performs Muon algorithm computation.
 
     See :class:`~torch.optim.Muon` for details.

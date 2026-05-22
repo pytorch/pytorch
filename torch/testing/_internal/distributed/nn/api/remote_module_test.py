@@ -477,11 +477,13 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         for remote_module in self._create_remote_module_iter(
             dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
         ):
-            with TemporaryFileName() as fname:
-                with self.assertRaisesRegex(
+            with (
+                TemporaryFileName() as fname,
+                self.assertRaisesRegex(
                     torch.jit.Error, "can only be pickled when using RPC"
-                ):
-                    torch.save(remote_module, fname)
+                ),
+            ):
+                torch.save(remote_module, fname)
 
 
 class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):

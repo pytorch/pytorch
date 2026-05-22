@@ -12,8 +12,6 @@
 #define USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 #endif
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
-
 namespace at {
 namespace cuda {
 namespace solver {
@@ -486,51 +484,6 @@ template <>
 void syevd<c10::complex<double>, double>(
     CUDASOLVER_SYEVD_ARGTYPES(c10::complex<double>, double));
 
-#define CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)             \
-  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
-      int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \
-      syevjInfo_t params
-
-template <class scalar_t, class value_t = scalar_t>
-void syevj_bufferSize(CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevj_bufferSize: not implemented");
-}
-
-template <>
-void syevj_bufferSize<float>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(float, float));
-template <>
-void syevj_bufferSize<double>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(double, double));
-template <>
-void syevj_bufferSize<c10::complex<float>, float>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
-template <>
-void syevj_bufferSize<c10::complex<double>, double>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
-
-#define CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)                        \
-  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
-      int n, scalar_t *A, int lda, value_t *W, scalar_t *work, int lwork,   \
-      int *info, syevjInfo_t params
-
-template <class scalar_t, class value_t = scalar_t>
-void syevj(CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t), "at::cuda::solver::syevj: not implemented");
-}
-
-template <>
-void syevj<float>(CUDASOLVER_SYEVJ_ARGTYPES(float, float));
-template <>
-void syevj<double>(CUDASOLVER_SYEVJ_ARGTYPES(double, double));
-template <>
-void syevj<c10::complex<float>, float>(
-    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<float>, float));
-template <>
-void syevj<c10::complex<double>, double>(
-    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<double>, double));
-
 #define CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)     \
   cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
       int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \
@@ -674,6 +627,66 @@ template <>
 void xsyevd<c10::complex<double>, double>(
     CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<double>, double));
 
+
+
+// cuSOLVER Xgeev (non-Hermitian eigen decomposition, CUDA >= 12.8)
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
+#define CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(scalar_t)                        \
+cusolverDnHandle_t handle, cusolverDnParams_t params,                         \
+cusolverEigMode_t jobvl, cusolverEigMode_t jobvr, int64_t n,                  \
+const scalar_t* A, int64_t lda, const scalar_t* W,                            \
+const scalar_t* VL, int64_t ldvl, const scalar_t* VR, int64_t ldvr,           \
+size_t* workspaceInBytesOnDevice, size_t* workspaceInBytesOnHost
+
+template <class scalar_t>
+void xgeev_bufferSize(
+    CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(scalar_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xgeev_bufferSize: not implemented");
+}
+
+template <>
+void xgeev_bufferSize<float>(CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(float));
+
+template <>
+void xgeev_bufferSize<double>(CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(double));
+
+template <>
+void xgeev_bufferSize<c10::complex<float>>(
+    CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+
+template <>
+void xgeev_bufferSize<c10::complex<double>>(
+    CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+#define CUDASOLVER_XGEEV_ARGTYPES(scalar_t)                                    \
+cusolverDnHandle_t handle, cusolverDnParams_t params,                          \
+cusolverEigMode_t jobvl, cusolverEigMode_t jobvr, int64_t n, scalar_t *A,      \
+int64_t lda, scalar_t *W, scalar_t *VL, int64_t ldvl, scalar_t *VR, int64_t ldvr,\
+scalar_t *bufferOnDevice, size_t workspaceInBytesOnDevice, scalar_t *bufferOnHost,\
+size_t workspaceInBytesOnHost, int *info
+
+template <class scalar_t>
+void xgeev(CUDASOLVER_XGEEV_ARGTYPES(scalar_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xgeev: not implemented");
+}
+
+template <>
+void xgeev<float>(CUDASOLVER_XGEEV_ARGTYPES(float));
+
+template <>
+void xgeev<double>(CUDASOLVER_XGEEV_ARGTYPES(double));
+
+template <>
+void xgeev<c10::complex<float>>(CUDASOLVER_XGEEV_ARGTYPES(c10::complex<float>));
+
+template <>
+void xgeev<c10::complex<double>>(CUDASOLVER_XGEEV_ARGTYPES(c10::complex<double>));
+
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
 #endif // USE_CUSOLVER_64_BIT
 
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
@@ -757,5 +770,3 @@ void xsyevBatched<c10::complex<double>, double>(
 } // namespace solver
 } // namespace cuda
 } // namespace at
-
-#endif // CUDART_VERSION

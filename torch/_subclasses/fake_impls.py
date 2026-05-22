@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
 import functools
 import itertools
@@ -6,7 +6,8 @@ import math
 import operator
 import sys
 from functools import reduce
-from typing import Callable, Union
+from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._custom_op
@@ -15,6 +16,7 @@ import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    canonicalize_dim,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -24,6 +26,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     make_contiguous_strides_for,
+    ShapeType,
 )
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -33,9 +36,21 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
-from torch.fx.operator_schemas import normalize_function
+from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.types import IntLikeType
+
+
+FakeTensorLike = FakeTensor | torch.Tensor
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_T = TypeVar("_T")
 
 pytree = torch.utils._pytree
 
@@ -46,20 +61,22 @@ __all__ = [
     "has_meta",
 ]
 
+# pyrefly: ignore [implicit-any]
 op_implementations_dict = {}
+# pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
 
 aten = torch._ops.ops.aten
 
 
-def ordered_set(*items):
+def ordered_set(*items: _T) -> dict[_T, bool]:
     return dict.fromkeys(items, True)
 
 
 # This function indicates if the backend device
 # supports non-contiguous tensors
-def is_noncontiguous_supported(device):
+def is_noncontiguous_supported(device: torch.device) -> bool:
     return device.type != "hpu"
 
 
@@ -71,15 +88,25 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.default,
     aten.ones_like.out,
     aten.rand_like.default,
+    aten.rand_like.generator,
     aten.rand_like.out,
+    aten.rand_like.generator_out,
     aten.randn_like.default,
+    aten.randn_like.generator,
     aten.randn_like.out,
+    aten.randn_like.generator_out,
     aten.randint_like.default,
+    aten.randint_like.generator,
     aten.randint_like.Tensor,
+    aten.randint_like.Tensor_generator,
     aten.randint_like.Tensor_out,
+    aten.randint_like.Tensor_generator_out,
     aten.randint_like.out,
+    aten.randint_like.generator_out,
     aten.randint_like.low_dtype,
+    aten.randint_like.low_generator_dtype,
     aten.randint_like.low_dtype_out,
+    aten.randint_like.low_generator_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -113,16 +140,17 @@ _device_not_kwarg_ops = ordered_set(
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
 
-def contains_tensor_types(type):
+def contains_tensor_types(type_: Any) -> bool:
     tensor_type = torch._C.TensorType.get()
-    return type.isSubtypeOf(tensor_type) or any(
-        contains_tensor_types(e) for e in type.containedTypes()
+    return type_.isSubtypeOf(tensor_type) or any(
+        contains_tensor_types(e) for e in type_.containedTypes()
     )
 
 
 @functools.cache
-def _is_tensor_constructor(func: OpOverload):
-    assert isinstance(func, OpOverload)
+def _is_tensor_constructor(func: OpOverload) -> bool:
+    if not isinstance(func, OpOverload):
+        raise AssertionError(f"func must be an OpOverload, got {type(func)}")
     schema = func._schema
     if any(contains_tensor_types(arg.type) for arg in schema.arguments):
         return False
@@ -132,18 +160,25 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
-def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
-    def impl_decorator(op_impl):
+def register_op_impl(
+    run_impl_check: Callable[[OpOverload], bool]
+    | OpOverload
+    | list[OpOverload]
+    | tuple[OpOverload, ...],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
         if isinstance(run_impl_check, OpOverload):
-            assert run_impl_check not in op_implementations_dict, (
-                f"duplicate registration: {run_impl_check}"
-            )
+            if run_impl_check in op_implementations_dict:
+                raise AssertionError(f"duplicate registration: {run_impl_check}")
             op_implementations_dict[run_impl_check] = op_impl
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
                 register_op_impl(op)(op_impl)
         else:
-            assert callable(run_impl_check)
+            if not callable(run_impl_check):
+                raise AssertionError(
+                    f"run_impl_check must be callable, got {type(run_impl_check)}"
+                )
             op_implementations_checks.append((run_impl_check, op_impl))
 
         return op_impl
@@ -151,13 +186,12 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
-def _is_op_registered_to_fake_rule(op):
+def _is_op_registered_to_fake_rule(op: OpOverload) -> bool:
     return op in op_implementations_dict
 
 
-def _deregister_op_impl(op):
-    if op in op_implementations_dict:
-        del op_implementations_dict[op]
+def _deregister_op_impl(op: OpOverload) -> None:
+    op_implementations_dict.pop(op, None)
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -165,21 +199,27 @@ def _deregister_op_impl(op):
 
 
 @register_op_impl(op_implementations_dict.__contains__)
-def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
+def dispatch_to_op_implementations_dict(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
 
 
 @register_op_impl(_is_tensor_constructor)
 @register_op_impl([*_like_tensor_constructors])
-def constructors(fake_mode, func, *args, **kwargs):
-    assert func not in _non_kwarg_device_constructors
-    _, new_kwargs = normalize_function(
+def constructors(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    if func in _non_kwarg_device_constructors:
+        raise AssertionError(
+            f"func must not be in _non_kwarg_device_constructors, got {func}"
+        )
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     if "names" in kwargs:
-        raise UnsupportedOperatorException(
-            "torch.compile doesn't support named tensors"
-        )
+        # REASON: "torch.compile doesn't support named tensors"
+        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -200,8 +240,10 @@ def constructors(fake_mode, func, *args, **kwargs):
 
 
 @register_op_impl(aten.is_pinned.default)
-def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+def non_kwarg_is_pinned(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> bool:
+    _, new_kwargs = _normalize_function_or_error(
         func, args, kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
@@ -212,10 +254,46 @@ def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
     return r
 
 
+# Legacy profiler ops return Tensors but don't follow tensor constructor patterns
+# They take string arguments and should not have device/dtype parameters added
+@register_op_impl(torch.ops.profiler._record_function_enter.default)
+def _record_function_enter(
+    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: object | None = None
+) -> FakeTensor:
+    # Call the real implementation to get a real handle tensor
+    with in_kernel_invocation_manager(fake_mode):
+        real_handle = func(name, args)
+    # Create a meta tensor with the same properties as the real handle
+    meta_handle = torch.empty_like(real_handle, device="meta")
+    # Wrap it as a FakeTensor
+    return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
+
+
+@register_op_impl(torch.ops.profiler._record_function_exit.default)
+def _record_function_exit(
+    fake_mode: FakeTensorMode, func: OpOverload, handle: Any
+) -> None:
+    # Exit doesn't return anything and doesn't need to do anything for fake tensors
+    # Just return None (the actual return type is void)
+    pass
+
+
+@register_op_impl(torch.ops.profiler._record_function_enter_new.default)
+def _record_function_enter_new(
+    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: object | None = None
+) -> Any:
+    # Call the real implementation - returns a custom class, not a tensor
+    # Just pass through without wrapping
+    with in_kernel_invocation_manager(fake_mode):
+        return func(name, args)
+
+
 @register_op_impl(aten.to.prim_Device)
 @register_op_impl(aten.to.device)
-def non_kwarg_to(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+def non_kwarg_to(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
         func, args, kwargs, normalize_to_only_use_kwargs=True
     )
     input_device = new_kwargs["device"]
@@ -230,16 +308,18 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-def stride_incorrect_op(op):
+def stride_incorrect_op(op: OpOverload) -> bool:
     return False
 
 
 # These operators have meta implementations with incorrect strides
 @register_op_impl(stride_incorrect_op)
-def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
+def workaround_stride_incorrect_op(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     # This is a workaround for meta implementations with incorrect strides
 
-    def is_symbolic(x):
+    def is_symbolic(x: object) -> bool:
         if isinstance(x, FakeTensor):
             return x._has_symbolic_sizes_strides
         if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -253,7 +333,15 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
         )
         if not require_dynamic:
             flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-            return run_fallback_kernel(fake_mode, func, flat_args, args_spec, None)
+            return run_fallback_kernel(
+                fake_mode,
+                func,
+                flat_args,
+                args_spec,
+                # TODO: refactor to lambda so we don't instantiate extra errors before
+                # calling
+                RuntimeError("Cannot run fallback kernel for stride_incorrect_op"),
+            )
 
     raise UnsupportedOperatorException(func)
 
@@ -261,14 +349,17 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
-def resize_as_(fake_mode, func, *args, **kwargs):
+def resize_as_(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     with in_kernel_invocation_manager(fake_mode):
         return func(*args, **kwargs)
 
 
 @register_op_impl(aten._sparse_coo_tensor_with_dims_and_tensors.default)
-def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
-    # TODO: remove me
+def _sparse_coo_tensor_with_dims_and_tensors(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     return constructors(fake_mode, func, *args, **kwargs)
 
 
@@ -278,21 +369,23 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     and func
     not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
-def dyn_shape(fake_mode, func, *args, **kwargs):
+def dyn_shape(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> None:
     raise DynamicOutputShapeException(func)
 
 
 def _unique(
-    fake_mode,
-    func,
-    arg,
-    dim,
-    sorted=True,
-    return_inverse=False,
-    return_counts=False,
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    dim: int | None,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
     *,
-    unique_consecutive=False,
-):
+    unique_consecutive: bool = False,
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -333,26 +426,32 @@ def _unique(
 
         if dim is None:
             if unique_consecutive:
-                arg.unique_consecutive_memo = nnz
+                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
             else:
-                arg.unique_memo = nnz
+                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
 
     if dim is None:
+        # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty((nnz,))]
     else:
+        # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
     return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
-        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
+        inverse = arg.new_empty(
+            arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
+        )
     else:
-        inverse = arg.new_empty(0)
+        inverse = arg.new_empty(0, dtype=torch.int64)
     ret.append(inverse)
 
     if return_counts or return_if_dim_and_cpu:
-        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+        counts = arg.new_empty(
+            ret[0].shape if dim is None else (ret[0].shape[dim],), dtype=torch.int64
+        )
     else:
-        counts = arg.new_empty(0)
+        counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
     return tuple(ret)
@@ -360,13 +459,24 @@ def _unique(
 
 @register_op_impl(aten._unique2.default)
 def unique2(
-    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
-):
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
 @register_op_impl(aten.select.int)
-def meta_select(fake_mode, func, self, dim, index):
+def meta_select(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dim: int,
+    index: IntLikeType,
+) -> FakeTensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if self.is_sparse:
@@ -380,6 +490,13 @@ def meta_select(fake_mode, func, self, dim, index):
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
@@ -403,14 +520,22 @@ def meta_select(fake_mode, func, self, dim, index):
 
     del new_size[dim]
     del new_stride[dim]
-    assert new_storage_offset is not None
+    if new_storage_offset is None:
+        raise AssertionError("new_storage_offset must not be None")
+    # pyrefly: ignore[bad-return]
     return self.as_strided(new_size, new_stride, new_storage_offset)
 
 
 @register_op_impl(aten.unique_dim.default)
 def unique_dim(
-    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
-):
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    dim: int,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(
         fake_mode,
         func,
@@ -424,7 +549,14 @@ def unique_dim(
 
 
 @register_op_impl(aten.unique_consecutive.default)
-def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+def unique_consecutive(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: int | None = None,
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(
         fake_mode,
         func,
@@ -438,20 +570,25 @@ def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None)
 
 
 # This function is python match of computeStride_impl in TensorUtils.cpp
-def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
+def _compute_stride(
+    old_shape: Sequence[IntLikeType],
+    old_stride: Sequence[IntLikeType],
+    new_shape: Sequence[IntLikeType],
+    size_oblivious: bool = False,
+) -> list[IntLikeType] | None:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
         sym_eq,
     )
 
-    def maybe_guard_or_false(x):
+    def maybe_guard_or_false(x: Any) -> Any:
         if size_oblivious:
             return guard_or_false(x)
 
         return x
 
-    def maybe_guard_or_true(x):
+    def maybe_guard_or_true(x: Any) -> Any:
         if size_oblivious:
             return guard_or_true(x)
 
@@ -463,9 +600,9 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
     numel = reduce(operator.mul, old_shape, 1)
     zero_numel = maybe_guard_or_false(numel == 0)
     if zero_numel and maybe_guard_or_false(sym_eq(old_shape, new_shape)):
-        return old_stride
+        return list(old_stride)
 
-    new_stride = [0] * len(new_shape)
+    new_stride: list[IntLikeType] = [0] * len(new_shape)
 
     if zero_numel:
         for view_d in range(len(new_shape) - 1, -1, -1):
@@ -478,9 +615,10 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
         return new_stride
 
     view_d = len(new_shape) - 1
-    chunk_base_stride = old_stride[-1]
-    tensor_numel = 1
-    view_numel = 1
+    # Annotate type here to support type checking
+    chunk_base_stride: IntLikeType = old_stride[-1]
+    tensor_numel: IntLikeType = 1
+    view_numel: IntLikeType = 1
 
     for tensor_d in range(len(old_shape) - 1, -1, -1):
         tensor_numel *= old_shape[tensor_d]
@@ -511,19 +649,179 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
     return new_stride
 
 
-def _view_has_unbacked_input(a, shape):
-    from torch.fx.experimental.symbolic_shapes import has_hint
+def _optimization_hint_or_none(value: Any) -> int | None:
+    if type(value) is int:
+        return value
+    if isinstance(value, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+        return optimization_hint(value, fallback=None)
+    return None
+
+
+def _hinted_eq(lhs: Any, rhs: Any) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(lhs == rhs):
+        return True
+
+    lhs_hint = _optimization_hint_or_none(lhs)
+    rhs_hint = _optimization_hint_or_none(rhs)
+    if lhs_hint is None or rhs_hint is None or lhs_hint != rhs_hint:
+        return False
+
+    # Hints are not shape semantics. They only show that the equality is true
+    # for the traced example, so record the symbolic equality required for the
+    # view rather than specializing either side to a concrete value.
+    torch._check(lhs == rhs)
+    return True
+
+
+def _is_contiguous_with_hinted_checks(a: torch.Tensor) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
+
+    if guard_or_false(a.numel() < 2):
+        return True
+
+    numel_hint = _optimization_hint_or_none(a.numel())
+    if numel_hint is None:
+        return False
+    if numel_hint < 2:
+        torch._check(a.numel() < 2)
+        return True
+
+    expected_stride = 1
+    expected_stride_max = 1
+    for size, stride in reversed(tuple(zip(a.shape, a.stride()))):
+        if guard_or_false(size == 1):
+            continue
+
+        size_hint = _optimization_hint_or_none(size)
+        if size_hint == 1:
+            torch._check(size == 1)
+            continue
+
+        if not _hinted_eq(stride, expected_stride) and not _hinted_eq(
+            stride, expected_stride_max
+        ):
+            return False
+
+        expected_stride_max *= size if is_nested_int(size) else torch.sym_max(size, 1)
+        expected_stride *= size
+
+    return True
+
+
+def _view_has_unbacked_input(
+    a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
+) -> bool:
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
     shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     return (
-        any(not has_hint(s) for s in a.size())
-        or any(not has_hint(s) for s in a.stride())
-        or any(not has_hint(s) for s in shape)
+        any(not has_guarding_hint(s) for s in a.size())
+        or any(not has_guarding_hint(s) for s in a.stride())
+        or any(not has_guarding_hint(s) for s in shape)
     )
 
 
-def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
+def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
+    """
+    Collect candidate (x, y) pairs whose runtime hints match (so they
+    *could* be equal), then test whether substituting them into the
+    view's numel equation makes the equation symbolically zero.
+    Only commit the equalities (adds the real Eq guards via bool(x == y)
+    which triggers set_replacement) if the substitution actually solves
+    the view validity check.
+
+    This avoids polluting the shape env with spurious guards from probing.
+
+    Returns True if at least one equality was committed.
+
+    Conservative: only considers SymInts that appear as a top-level dim of
+    the input or target (skipping the -1 marker), and skips already-equal
+    pairs, and skips unbacked symbols.
+    """
+    import operator
+    from functools import reduce
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    def _atomic_syms(dims) -> list[torch.SymInt]:
+        """Keep only SymInts whose expr is a single bare *backed* symbol."""
+        out: list[torch.SymInt] = []
+        for s in dims:
+            if not isinstance(s, torch.SymInt):
+                continue
+            expr = s.node.expr
+            free = expr.free_symbols
+            if len(free) != 1 or expr not in free:
+                continue
+            if free_unbacked_symbols(expr):
+                continue
+            out.append(s)
+        return out
+
+    import sympy
+
+    a_syms = _atomic_syms(a.size())
+    target_syms = _atomic_syms(shape)
+    if not a_syms or not target_syms:
+        return False
+
+    # 1) Bucket symbols by hint, deduplicated by sympy expr (one SymInt per
+    #    unique expr per hint).  Each non-trivial bucket is a duck-equality
+    #    class: every member of the class will be set equal to the bucket's
+    #    canonical symbol.  This keeps `subs` and `candidates` perfectly in
+    #    sync so the numel check exactly reflects what we'll commit.
+    from collections import defaultdict
+
+    buckets: dict[int, dict[sympy.Expr, torch.SymInt]] = defaultdict(dict)
+    for s in list(a_syms) + list(target_syms):
+        # setdefault keeps the *first* SymInt seen for each (hint, expr).
+        buckets[s.node.hint].setdefault(s.node.expr, s)
+
+    candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
+    for members in buckets.values():
+        canonical, *rest = members.values()
+        for m in rest:
+            candidates.append((canonical, m))
+
+    if not candidates:
+        return False
+
+    # `subs` is derived from `candidates`, so they cannot drift.
+    subs: dict[sympy.Expr, sympy.Expr] = {
+        m.node.expr: c.node.expr for c, m in candidates
+    }
+
+    # 2) Symbolic test: does the substitution make the view's numel match?
+    def _expr_of(s):
+        return s.node.expr if isinstance(s, torch.SymInt) else s
+
+    try:
+        a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
+        shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
+        diff = sympy.simplify((a_numel - shape_numel).subs(subs))
+        if diff != 0:
+            return False
+    except (TypeError, ValueError, AttributeError, sympy.SympifyError):
+        return False
+
+    # 3) Commit the equalities for real (adds Eq guards, triggers set_replacement).
+    for c, m in candidates:
+        torch._check(c == m)
+    return True
+
+
+def _view_unbacked_meta(
+    a: torch.Tensor,
+    shape: ShapeType | tuple[ShapeType],
+    size_oblivious_enabled: bool = True,
+    allow_copy: bool = False,
+    tried_duck_specialize: bool = False,
+) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -543,7 +841,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
         if _a is a:
             return view_of(a)
         else:
-            return _a
+            return _a  # type: ignore[return-value]
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -554,7 +852,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
         if _a is a:
             return view_of(a)
         else:
-            return _a
+            return _a  # type: ignore[return-value]
 
     shape_numel = reduce(operator.mul, shape, 1)
 
@@ -568,14 +866,14 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
     if is_contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
         strides = make_contiguous_strides_for(shape)
-        return a.as_strided(shape, strides)
+        return a.as_strided(shape, strides)  # type: ignore[return-value]
 
     new_strides = _compute_stride(
         a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
     )
 
     if new_strides is not None:
-        return a.as_strided(shape, new_strides)
+        return a.as_strided(shape, new_strides)  # type: ignore[return-value]
 
     # If we fail to do size oblivious view, and backed_size_oblivious was on,
     # then we redo everything by looking at hints and guarding instead of failing.
@@ -586,26 +884,103 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
         torch.fx.experimental._config.backed_size_oblivious
         or _view_has_unbacked_input(a, shape)
     ):
-        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
+        # Heuristic: before falling through to the specializing recursion
+        # (which often emits Eq(s, 1) via eval_eager), try to discover
+        # cross-symbol equalities between input and target shape symbols.
+        # If a pair (x, y) is True at the runtime hint, the shape env will
+        # record Eq(x, y) and set_replacement unifies them — letting the
+        # size-oblivious view path succeed without specialization on x==1.
+        # But with potential duck specializations which are more general.
+        if (
+            torch.fx.experimental._config.unify_view_symbols_bso_meta
+            and not tried_duck_specialize
+            and try_duck_specialization_first(a, shape)
+        ):
+            return _view_unbacked_meta(
+                a,
+                shape,
+                size_oblivious_enabled=True,
+                allow_copy=allow_copy,
+                tried_duck_specialize=True,
+            )
+
+        if _is_contiguous_with_hinted_checks(a):
+            strides = make_contiguous_strides_for(shape)
+            return a.as_strided(shape, strides)  # type: ignore[return-value]
+
+        return _view_unbacked_meta(
+            a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
+        )
+
+    # When allow_copy=True (i.e., view_copy), define unbacked semantics
+    # as "materialize": clone the input to break aliasing, then reshape.
+    if allow_copy:
+        strides = make_contiguous_strides_for(shape)
+        # pyrefly: ignore[bad-return]
+        return a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(
+    fake_mode: FakeTensorMode, func: OpOverload, a: FakeTensor, *shape: Any
+) -> FakeTensor | Exception:
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    # pyrefly: ignore[bad-argument-count]
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return typing_cast(
+            FakeTensor, view.clone(memory_format=torch.contiguous_format)
+        )
+    else:
+        return _view_meta(
+            fake_mode,
+            func,
+            typing_cast(FakeTensor, a.clone(memory_format=torch.contiguous_format)),
+            *shape,
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
-def _view_meta(fake_mode, func, a, *shape):
+def _view_meta(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    *shape: Any,
+    allow_copy: bool = False,
+) -> FakeTensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return _view_unbacked_meta(a, shape)
+        return typing_cast(
+            FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
+        )
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        return typing_cast(
+            FakeTensor,
+            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
+        )
 
 
 @register_op_impl(aten.view_copy.default)
-def _view_meta_copy(fake_mode, func, a, *shape, out=None):
-    result = _view_meta(fake_mode, func, a, *shape)
+def _view_meta_copy(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    *shape: IntLikeType,
+    out: FakeTensor | None = None,
+) -> FakeTensor:
+    # view_copy is the non-aliasing counterpart of view. Eager may succeed on
+    # cases where a pure view is impossible (e.g. expand -> flatten) by
+    # materializing the result. Match eager by allowing copy-if-needed in meta.
+    result = _view_meta(fake_mode, func, a, *shape, allow_copy=True)
+
     if out is not None:
         return result
 
@@ -616,7 +991,12 @@ def _view_meta_copy(fake_mode, func, a, *shape, out=None):
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
-def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
+def repeat_interleave_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    repeats: FakeTensor,
+    output_size: IntLikeType | None = None,
+) -> FakeTensor:
     if output_size is None:
         if (
             fake_mode.shape_env is None
@@ -631,12 +1011,14 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 
         _constrain_range_for_size(output_size)
         # TODO: consider a memo
-    return repeats.new_empty(output_size)
+    return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
-def local_scalar_dense(fake_mode, func, arg):
+def local_scalar_dense(
+    fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
+) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
     if (r := arg.item_memo) is not None:
         return r
     if fake_mode.shape_env is None or (
@@ -658,12 +1040,14 @@ def local_scalar_dense(fake_mode, func, arg):
 
 
 @register_op_impl(torch.ops.aten.nonzero_numpy.default)
-def nonzero_numpy(fake_mode, func, arg):
+def nonzero_numpy(
+    fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
+) -> list[FakeTensor]:
     return torch.ops.aten.nonzero.default(arg).unbind(1)
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
-def nonzero(fake_mode, func, arg):
+def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> FakeTensor:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -698,7 +1082,7 @@ def nonzero(fake_mode, func, arg):
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
             else:
-                prod_node = math.prod(arg.shape).node
+                prod_node = math.prod(arg.shape).node  # type: ignore[union-attr]
                 prod_range = bound_sympy(
                     prod_node.expr, prod_node.shape_env.var_to_range
                 )
@@ -709,17 +1093,25 @@ def nonzero(fake_mode, func, arg):
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz
-
-    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
+        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
-def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=None):
+def _padded_dense_to_jagged_forward(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    padded: FakeTensor,
+    offsets: list[FakeTensor],
+    total_L: IntLikeType | None = None,
+) -> FakeTensor:
     # only one jagged dim is supported for now
-    assert len(offsets) == 1
+    if len(offsets) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(offsets)} offsets"
+        )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -743,11 +1135,110 @@ def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=No
         _constrain_range_for_size(total_L, min=0, max=maxval)
 
     output_shape = (total_L, *padded.shape[2:])
-    return padded.new_empty(output_shape)
+    return padded.new_empty(output_shape)  # type: ignore[return]
+
+
+def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType | None:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    if guard_or_false(sym_and(index >= 0, index <= size)):
+        return index
+    elif guard_or_false(sym_and(index < 0, index >= -size)):
+        return index + size
+    elif guard_or_false(index < -size):
+        return 0
+    elif guard_or_false(index > size):
+        return size
+    elif guard_or_false(index >= 0):
+        return torch.sym_min(index, size)
+    elif guard_or_false(index < 0):
+        return torch.sym_max(index + size, 0)
+
+    return None
+
+
+@register_op_impl(torch.ops.aten.slice.Tensor)
+def slice_forward(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dim: int = 0,
+    start: int | None = None,
+    end: int | None = None,
+    step: int = 1,
+) -> FakeTensor:
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
+
+    shape_env = fake_mode.shape_env
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    # start, end
+    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
+    end_index = (
+        sizes[dim]
+        if statically_known_true(end == sys.maxsize) or end is None
+        else _compute_slice_index(sizes[dim], end)
+    )
+
+    # size
+    new_size: IntLikeType | None = None
+    if start_index is not None and end_index is not None:
+        if guard_or_false(end_index >= start_index):
+            new_size = (end_index - start_index + step - 1) // step
+        elif guard_or_false(start_index >= end_index):
+            new_size = 0
+        else:
+            # Both indices are resolved but we can't statically determine their
+            # ordering (e.g., when they involve Min/Max). Compute the size via
+            # max(end - start, 0) to avoid creating an unbacked symint.
+            diff = torch.sym_max(end_index - start_index, 0)
+            new_size = (diff + step - 1) // step
+
+    # create unbacked if case unknown
+    if new_size is None:
+        if shape_env is None:
+            raise AssertionError("Must have shape_env to create symint")
+        new_size = shape_env.create_unbacked_symint()
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
+
+    # stride
+    new_stride = strides[dim] * step
+
+    # storage offset
+    if start_index is not None:
+        storage_offset = self.storage_offset() + start_index * strides[dim]
+    else:
+        if shape_env is None:
+            raise AssertionError("Must have shape_env to create symint")
+        storage_offset = shape_env.create_unbacked_symint()
+        torch._check(storage_offset >= 0)
+
+    sizes[dim] = new_size  # type: ignore[unsupported-operation]
+    strides[dim] = new_stride
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)  # type: ignore[return-value]
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
-def masked_select(fake_mode, func, self, mask):
+def masked_select(
+    fake_mode: FakeTensorMode, func: OpOverload, self: FakeTensor, mask: FakeTensor
+) -> FakeTensor:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -774,7 +1265,7 @@ def masked_select(fake_mode, func, self, mask):
     if not has_free_symbols(self.numel()):
         num_elements = int(self.numel())
     else:
-        prod_node = math.prod(self.shape).node
+        prod_node = math.prod(self.shape).node  # type: ignore[union-attr]
         prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
         if isinstance(prod_range.upper, IntInfinity):
             num_elements = sys.maxsize - 1
@@ -785,62 +1276,76 @@ def masked_select(fake_mode, func, self, mask):
 
     _constrain_range_for_size(nnz, max=maxval)
 
-    return self.new_empty((nnz,))
+    return self.new_empty((nnz,))  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._assert_tensor_metadata.default)
 def assert_tensor_metadata(
-    fake_mode,
-    func,
-    t,
-    sizes=None,
-    strides=None,
-    dtype=None,
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    t: FakeTensor,
+    sizes: torch.Size | None = None,
+    strides: tuple[int, ...] | None = None,
+    dtype: torch.dtype | None = None,
     *,
-    device=None,
-    layout=None,
+    device: torch.device | None = None,
+    layout: torch.layout | None = None,
 ) -> None:
     if sizes is not None:
-        assert t.size() == sizes, (
-            f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
-        )
+        if t.size() != sizes:
+            raise AssertionError(
+                f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+            )
     if strides is not None:
-        assert t.stride() == strides, (
-            f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
-        )
+        if t.stride() != strides:
+            raise AssertionError(
+                f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+            )
     if dtype is not None:
-        assert t.dtype == dtype, (
-            f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
-        )
+        if t.dtype != dtype:
+            raise AssertionError(
+                f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+            )
     if layout is not None:
-        assert t.layout == layout, (
-            f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
-        )
+        if t.layout != layout:
+            raise AssertionError(
+                f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout}"
+            )
     if device is not None:
-        assert t.device == device, (
-            f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
-        )
+        if t.device != device:
+            raise AssertionError(
+                f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+            )
 
 
 # NB: this must be ordered after local_scalar_dense
 @register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
-def data_dep(fake_mode, func, *args, **kwargs):
+def data_dep(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> None:
     raise DataDependentOutputException(func)
 
 
 # Bool Indices get Expanded as Masks
 # See: IndexingUtils.h:expandTensors
-def check_no_bool_index_tensors(func, self, indices):
+def check_no_bool_index_tensors(
+    func: OpOverload, self: FakeTensor, indices: list[FakeTensor | None]
+) -> None:
     for index in indices:
         if index is not None and index.dtype in (torch.bool, torch.uint8):
             raise DynamicOutputShapeException(func)
 
 
-def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
-    _, new_kwargs = normalize_function(
+def run_and_return_new_tensor_of_input_device(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> FakeTensor:
+    # TODO: ref
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
@@ -855,11 +1360,11 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
 _is_builtin_namespaces = ordered_set("aten", "prims", "prim")
 
 
-def is_builtin(op):
+def is_builtin(op: OpOverload) -> bool:
     return op.namespace in _is_builtin_namespaces
 
 
-def has_meta(func):
+def has_meta(func: OpOverload) -> bool:
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
@@ -869,7 +1374,9 @@ def has_meta(func):
     and func.name().startswith("aten::_foreach_")
     and has_meta(func)
 )
-def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
+def foreach_run_and_map_input_device(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> list[FakeTensor] | None:
     tensor_lists = [
         arg
         for arg in itertools.chain(args, kwargs.values())
@@ -887,7 +1394,8 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     if not out_meta:
         return out_meta
 
-    assert tensor_lists
+    if not tensor_lists:
+        raise AssertionError("tensor_lists must not be empty")
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
@@ -905,10 +1413,12 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
-def index_tensor(fake_mode, func, *args, **kwargs):
+def index_tensor(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     from torch._meta_registrations import meta_index_Tensor
 
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -922,30 +1432,37 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # Can take mixed meta/non-meta arguments; the meta registration
 # will roughly do the right thing even when given real devices
 @register_op_impl(aten._embedding_bag.default)
-def embedding_bag(fake_mode, func, *args, **kwargs):
+def embedding_bag(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> tuple[FakeTensor, FakeTensor, FakeTensor, FakeTensor]:
     from torch._meta_registrations import meta_embedding_bag
 
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
 
 
-# takes in multiple-devices, dont default to default device handling
+# takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
-def multi_device_op_default(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.diagonal_scatter.default)
+def multi_device_op_default(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
 # same with multi_device_op_default, but return the input
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
-def multi_device_op_out(fake_mode, func, *args, **kwargs):
+def multi_device_op_out(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
     with in_kernel_invocation_manager(fake_mode):
         func(*args, **kwargs)
 
-    _, new_kwargs = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -954,11 +1471,12 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten.index_put_.default)
-def index_put_impl(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
+def index_put_impl(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     values = new_kwargs["values"]
     self_device = new_kwargs["input"].fake_device
     torch._check(
@@ -977,10 +1495,10 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
 @register_op_impl(aten._nested_view_from_buffer.default)
 @register_op_impl(aten._nested_view_from_buffer_copy.default)
-def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
-    raise UnsupportedOperatorException(
-        "torch.compile does not support strided NestedTensor"
-    )
+def nested_tensors_unsupported(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> None:
+    raise UnsupportedOperatorException(func)
 
 
 @register_op_impl(
@@ -998,63 +1516,96 @@ def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
         )
     ]
 )
-def nyi(fake_mode, func, *args, **kwargs):
-    assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) -> None:
+    if func in _device_not_kwarg_ops:
+        raise AssertionError(f"NYI: {func}")
 
 
 @register_op_impl([aten.convolution.default, aten.convolution_backward.default])
-def conv(fake_mode, func, *args, **kwargs):
-    _, kwargs = normalize_function(
+def conv(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    device = kwargs["input"].fake_device
+    input_ = new_kwargs["input"]
+    weight = new_kwargs["weight"]
+    # Internal passes such as Inductor freezing may run fake propagation over
+    # folded convs that do not need to match eager's public input checks.
+    if (
+        func is aten.convolution.default
+        and input_.fake_device.type == "cuda"
+        and input_.dtype != weight.dtype
+        and not fake_mode.allow_non_fake_inputs
+    ):
+        raise RuntimeError(
+            f"Input type ({input_.dtype}) and weight type "
+            f"({weight.dtype}) should be the same"
+        )
+    device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
-        # if the input is unsqueezed is done in Convolution.cpp we get segfault
-        k = kwargs["weight"].ndim
-        batch = kwargs["input"].shape[0]
+        # if the input is unsqueezed in Convolution.cpp we get segfault
+        k = weight.ndim
 
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import has_hint
+        from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
-        if not has_hint(batch):
+        all_hinted = all(has_guarding_hint(s) for s in input_.shape) and all(
+            has_guarding_hint(s) for s in weight.shape
+        )
+
+        if not all_hinted:
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
-        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-            mem_fmt = None
         else:
-            if func is aten.convolution.default:
-                conv_backend = torch._C._select_conv_backend(**kwargs)
-            else:
-                conv_backend = torch._C._select_conv_backend(
-                    kwargs["input"],
-                    kwargs["weight"],
-                    bias=None,
-                    stride=kwargs["stride"],
-                    padding=kwargs["padding"],
-                    dilation=kwargs["dilation"],
-                    transposed=kwargs["transposed"],
-                    output_padding=kwargs["output_padding"],
-                    groups=kwargs["groups"],
-                    bias_sizes=kwargs["bias_sizes"],
-                )
+            # convolution has "bias" but not "bias_sizes"; convolution_backward
+            # has "bias_sizes" but not "bias". .get() handles both with one call.
+            bias = new_kwargs.get("bias")
+            select_kwargs: dict[str, object] = dict(
+                stride=new_kwargs["stride"],
+                padding=new_kwargs["padding"],
+                dilation=new_kwargs["dilation"],
+                transposed=new_kwargs["transposed"],
+                output_padding=new_kwargs["output_padding"],
+                groups=new_kwargs["groups"],
+                bias=bias,
+            )
+            if bias is None:
+                select_kwargs["bias_sizes"] = new_kwargs.get("bias_sizes")
+            conv_backend = torch._C._select_conv_backend(
+                input_, weight, **select_kwargs
+            )
+            # Expand 1d -> 2d.
+            # Note: Avoid expanding before calling _select_conv_backend,
+            # as the function handles 2D expansion internally.
+            if k == 3 and not input_.is_mkldnn and not input_.is_xpu:
+                # Note: Using input.to(memory_format=contiguous) does not work.
+                input_ = input_.contiguous().unsqueeze(2)
+                weight = weight.unsqueeze(2)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
-                kwargs["input"], kwargs["weight"], conv_backend
+                input_, weight, conv_backend
             )
 
-    def convert(t, mem_fmt):
+    def convert(
+        t: torch.Tensor | None, mem_fmt: torch.memory_format | None
+    ) -> FakeTensor | None:
         if t is None:
             return t
         if mem_fmt is not None:
-            t = t.to(memory_format=mem_fmt)
+            # channels last only support 4d, try to expand dim then convert it back later.
+            if t.dim() == 3 and mem_fmt == torch.channels_last:
+                t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
+            else:
+                t = t.to(memory_format=mem_fmt)
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
-        out = func(**kwargs)
+        out = func(**new_kwargs)
 
         if func is aten.convolution.default:
-            return convert(out, mem_fmt)
+            return convert(out, mem_fmt)  # type: ignore[return]
         else:
             return (
                 convert(out[0], mem_fmt),
@@ -1064,7 +1615,13 @@ def conv(fake_mode, func, *args, **kwargs):
 
 
 @register_op_impl(torch.ops.aten.bincount.default)
-def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+def bincount(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    inputs: FakeTensor,
+    weights: FakeTensor | None = None,
+    minlength: IntLikeType = 0,
+) -> FakeTensor:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1078,11 +1635,17 @@ def bincount(fake_mode, func, inputs, weights=None, minlength=0):
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-    return inputs.new_empty(new_size)
+    return inputs.new_empty(new_size)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
-def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
+def _pack_padded_sequence(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    inputs: FakeTensor,
+    lengths: FakeTensor,
+    batch_first: bool,
+) -> tuple[FakeTensor, FakeTensor]:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1098,21 +1661,24 @@ def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
 
     if not batch_first:
         # Inputs should have shape (batch_size, seq_len, *)
-        inputs = inputs.transpose(0, 1)
+        inputs = inputs.transpose(0, 1)  # type: ignore[assignment]
 
     res_size = inputs.shape[1:]
     packed_data = inputs.new_empty(res_size)
     batch_size = inputs.new_empty((new_batch_size,))
-    return (packed_data, batch_size)
+    return (packed_data, batch_size)  # type: ignore[return]
 
 
+# pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 
 
 # Unlike register_op_impl, these don't do the slow iteration for
 # run_impl_check, and these run BEFORE decompositions
-def register_fast_op_impl(func: OpOverload):
-    def impl_decorator(op_impl):
+def register_fast_op_impl(
+    func: OpOverload,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
         FAST_OP_IMPLEMENTATIONS[func] = op_impl
         return op_impl
 
@@ -1120,13 +1686,15 @@ def register_fast_op_impl(func: OpOverload):
 
 
 # infer_size_impl in ExpandUtils
-def infer_size(a, b):
+def infer_size(
+    a: Sequence[IntLikeType], b: Sequence[IntLikeType]
+) -> tuple[IntLikeType, ...]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
-    expandedSizes = [0] * ndim
+    expandedSizes: list[IntLikeType] = [0] * ndim
     for i in range(ndim - 1, -1, -1):
         offset = ndim - 1 - i
         dimA = dimsA - 1 - offset
@@ -1156,10 +1724,11 @@ def infer_size(a, b):
 
 
 def make_fast_binary_impl(
-    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-):
-    def fast_binary_impl(mode, *args, **kwargs):
-        def slow(msg):
+    slow_ref: Callable[..., Any],
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+) -> Callable[..., FakeTensor]:
+    def fast_binary_impl(mode: FakeTensorMode, *args: Any, **kwargs: Any) -> FakeTensor:
+        def slow(msg: str) -> FakeTensor:
             count_label(f"slow {msg}")
             with mode:
                 return slow_ref(*args, **kwargs)
@@ -1177,16 +1746,18 @@ def make_fast_binary_impl(
         operands = args
 
         # compute_shape
-        final_shape = None
+        final_shape: ShapeType | None = None
         for op in operands:
-            shape = op.shape if isinstance(op, torch.Tensor) else ()
+            shape: ShapeType = op.shape if isinstance(op, torch.Tensor) else ()
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
             # were equal so you can skip the equality check
             # below if unnecessary
+            # pyrefly: ignore[bad-assignment]
             final_shape = infer_size(final_shape, shape)
-        assert final_shape is not None
+        if final_shape is None:
+            raise AssertionError("final_shape must not be None")
 
         from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -1197,7 +1768,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))
+                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
             ):
                 break
         else:
@@ -1206,19 +1777,21 @@ def make_fast_binary_impl(
 
         # compute_types
         cpu = torch.device("cpu")
-        common_device = cpu
-        common_dtype = None
+        common_device: torch.device = cpu
+        common_dtype: torch.dtype | None = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
-            # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
-                common_dtype = op.dtype
+                if type_promotion_kind != ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+                    has_different_input_dtypes = True
+                else:
+                    common_dtype = op.dtype
             elif common_dtype != op.dtype:
                 has_different_input_dtypes = True
 
@@ -1300,7 +1873,9 @@ def make_fast_binary_impl(
 
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
-def fast_detach(fake_mode, x, include_real=False):
+def fast_detach(
+    fake_mode: FakeTensorMode, x: FakeTensor, include_real: bool = False
+) -> FakeTensor:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     if include_real:
@@ -1309,7 +1884,7 @@ def fast_detach(fake_mode, x, include_real=False):
 
 
 @functools.cache
-def get_fast_op_impls():
+def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
     import torch._refs
 
     register_fast_op_impl(torch.ops.aten.add.Tensor)(

@@ -317,7 +317,8 @@ class PReLU(torch.nn.Module):
         observer(float_wt)
         if observer.dtype != torch.quint8:
             warn(
-                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}",
+                stacklevel=2,
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
@@ -334,7 +335,8 @@ class PReLU(torch.nn.Module):
         observer(float_wt)
         if observer.dtype != torch.quint8:
             warn(
-                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}",
+                stacklevel=2,
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(

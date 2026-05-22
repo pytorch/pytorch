@@ -33,7 +33,7 @@ std::atomic<int64_t> defaultNodeId(-1);
 std::atomic<uint64_t> next_thread_id_{0};
 thread_local uint64_t current_thread_id_ = 0;
 
-static constexpr size_t NumRecordScopes =
+constexpr size_t NumRecordScopes =
     static_cast<size_t>(RecordScope::NUM_SCOPES);
 
 RecordFunctionCallbacks::iterator findCallback(
@@ -203,7 +203,7 @@ class LocalCallbackManager {
   // Runtime cache.
   size_t global_version_{GlobalCallbackManager::NoVersion};
   std::array<CacheEntry, NumRecordScopes> active_callbacks_;
-  std::mt19937 generator_{};
+  std::mt19937 generator_;
 };
 
 // ============================================================================

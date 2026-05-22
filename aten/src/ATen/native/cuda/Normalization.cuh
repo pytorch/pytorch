@@ -8,6 +8,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
 
@@ -23,7 +24,7 @@ namespace at::native {
 
 // The maximum number of threads in a block
 #if defined(USE_ROCM)
-constexpr int MAX_BLOCK_SIZE = 256;
+constexpr int MAX_BLOCK_SIZE = 1024;
 #else
 constexpr int MAX_BLOCK_SIZE = 512;
 #endif
@@ -33,7 +34,7 @@ constexpr unsigned MAX_GRID_SIZE = 65535u;
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
 #if defined(USE_ROCM)
-  int threadSizes[5] = { 16, 32, 64, 128, MAX_BLOCK_SIZE };
+  int threadSizes[5] = { 64, 128, 256, 512, MAX_BLOCK_SIZE };
 #else
   int threadSizes[5] = { 32, 64, 128, 256, MAX_BLOCK_SIZE };
 #endif
@@ -53,7 +54,7 @@ __device__ __forceinline__ int getMSB(int val) {
 template <typename scalar_t, typename accscalar_t>
 struct Float2 {
   accscalar_t v1, v2;
-  __device__ Float2() {}
+  __device__ Float2() = default;
   __device__ Float2(scalar_t v1, scalar_t v2) : v1(static_cast<accscalar_t>(v1)), v2(static_cast<accscalar_t>(v2)) {}
   __device__ Float2(int v) : v1(static_cast<accscalar_t>(v)), v2(static_cast<accscalar_t>(v)) {}
   __device__ Float2& operator+=(const Float2& a) {
@@ -115,11 +116,25 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // first the reductions each thread does separately
   scalar_t sum = static_cast<scalar_t>(0);
   for (int batch = threadIdx.y; batch < tensor.size(0); batch += blockDim.y) {
+#if defined(USE_ROCM)
+    constexpr int UNRL = 4; // load deserilize factor
+    scalar_t tmp[UNRL];
+    for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x*UNRL) {
+#pragma unroll
+      for (int u = 0; u < UNRL; u++)
+        tmp[u] = op(batch, plane, std::min((int)tensor.size(2)-1, (int)(x+u*blockDim.x)));
+#pragma unroll
+      for (int u = 0; u < UNRL; u++)
+        if (x+u*blockDim.x < tensor.size(2))
+          sum += tmp[u];
+    }
+#else
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x) {
       sum += op(batch, plane, x);
     }
+#endif
   }
-  __shared__ scalar_t shared[C10_WARP_SIZE];
+  __shared__ scalar_t shared[C10_WARP_SIZE_UPPER_BOUND];
   SumReduceOp<scalar_t> reduce_op;
   sum = cuda_utils::BlockReduce<scalar_t, SumReduceOp<scalar_t>, cuda_utils::Block2D>(sum, reduce_op, 0, shared);
   if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -273,7 +288,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
-  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE + C10_WARP_SIZE];
+  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE_UPPER_BOUND + C10_WARP_SIZE_UPPER_BOUND];
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
@@ -292,6 +307,22 @@ __global__ void batch_norm_collect_statistics_kernel(
   stat_accscalar_t var_n = 0;
   int n = 0;
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
+#if defined(USE_ROCM)
+    constexpr int UNRL = 4;
+    stat_accscalar_t v_[UNRL];
+    for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
+      for (int u = 0; u < UNRL; u++)
+        v_[u] = input[batch][plane][std::min(x+u*blockDim.x, input.size(2)-1)];
+      for (int u = 0; u < UNRL; u++) {
+        if (x+u*blockDim.x < input.size(2)) {
+          stat_accscalar_t d1 = v_[u] - avg;
+          n++;
+          avg += d1 / n;
+          var_n += d1 * (v_[u] - avg);
+        }
+      }
+    }
+#else
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
       stat_accscalar_t v = input[batch][plane][x];
       stat_accscalar_t d1 = v - avg;
@@ -299,6 +330,7 @@ __global__ void batch_norm_collect_statistics_kernel(
       avg += d1 / n;
       var_n += d1 * (v - avg);
     }
+#endif
   }
 
   // first warpSum to get one value per thread to
@@ -718,7 +750,7 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
-  // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
+  // and good occupancy. Quite likely, we could go with even more blocks than 1024.
   // The various planes are independent, so we use blocks for them.
   int tf = std::max<int>(getNumThreads(input.size(2)/4),
                          std::min<int>(getNumThreads(input.size(2)), 64));
@@ -1032,12 +1064,22 @@ batch_norm_collect_statistics_channels_last_kernel(
     address_base = c_offset + blockIdx.y * stride;
     // write data to staging_data;
     if (threadIdx.y == 0 && c_offset < stride) {
+#ifndef USE_ROCM
       staging_mean[address_base] = mean_th;
       staging_m2n[address_base] = m2_th;
       staging_count[address_base] = count_th;
+#else
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore<accscalar_t, false>((void*)&staging_mean[address_base], mean_th);
+      cmtdStore<accscalar_t, false>((void*)&staging_m2n[address_base], m2_th);
+      cmtdStore((void*)&staging_count[address_base], count_th);
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence();
+#endif
     __syncthreads(); // ensuring writes to staging_ is visible to all blocks
 
     __shared__ bool is_last_block_done;
@@ -1257,11 +1299,20 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
     address_base = c_offset + blockIdx.y * stride;
     // write data to staging_data;
     if (threadIdx.y == 0 && c_offset < stride) {
+#ifndef USE_ROCM
       staging_sum_dy[address_base] = sum_dy_th;
       staging_sum_dy_xmu[address_base] = sum_dy_xmu_th;
+#else
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore<accscalar_t, false>((void*)&staging_sum_dy[address_base], sum_dy_th);
+      cmtdStore((void*)&staging_sum_dy_xmu[address_base], sum_dy_xmu_th);
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence();
+#endif
     __syncthreads(); // ensuring writes to staging_ is visible to all blocks
 
     __shared__ bool is_last_block_done;
@@ -1623,7 +1674,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
-  // Input is guarunteed to be channels-last compatible
+  // Input is guaranteed to be channels-last compatible
   at::Tensor grad_input = at::empty_like(input);
 
   dim3 block;
@@ -1691,7 +1742,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   const auto reduction_size = input.numel() / stride;
   auto norm_fct = 1.0 / reduction_size;
 
-  // Input is guarunteed to be channels-last compatible
+  // Input is guaranteed to be channels-last compatible
   at::Tensor grad_input = at::empty_like(input);
 
   dim3 block;

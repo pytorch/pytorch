@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -261,20 +260,20 @@ class Hardtanh(Module):
         min_val: float = -1.0,
         max_val: float = 1.0,
         inplace: bool = False,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
     ) -> None:
         super().__init__()
         if min_value is not None:
             warnings.warn(
-                "keyword argument `min_value` is deprecated and rename to `min_val`",
+                "keyword argument `min_value` is deprecated and renamed to `min_val`",
                 FutureWarning,
                 stacklevel=2,
             )
             min_val = min_value
         if max_value is not None:
             warnings.warn(
-                "keyword argument `max_value` is deprecated and rename to `max_val`",
+                "keyword argument `max_value` is deprecated and renamed to `max_val`",
                 FutureWarning,
                 stacklevel=2,
             )
@@ -283,7 +282,10 @@ class Hardtanh(Module):
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
-        assert self.max_val > self.min_val
+        if self.max_val <= self.min_val:
+            raise AssertionError(
+                f"max_val ({self.max_val}) must be greater than min_val ({self.min_val})"
+            )
 
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -745,8 +747,6 @@ class GLU(Module):
           dimensions
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
-    .. image:: ../scripts/activation_images/GLU.png
-
     Examples::
 
         >>> m = nn.GLU()
@@ -1053,7 +1053,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
-def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
+def _check_arg_device(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.device.type in [
             "cpu",
@@ -1063,7 +1063,7 @@ def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     return True
 
 
-def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+def _arg_requires_grad(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.requires_grad
     return False
@@ -1074,9 +1074,13 @@ def _is_make_fx_tracing():
         torch_dispatch_mode_stack = (
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
-        return any(
-            type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
-            for x in torch_dispatch_mode_stack
+        # this can be triggered when dynamo inlining the module too.
+        return (
+            any(
+                type(x) is torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
+                for x in torch_dispatch_mode_stack
+            )
+            or torch.compiler.is_exporting()
         )
     else:
         return False
@@ -1152,8 +1156,8 @@ class MultiheadAttention(Module):
     """
 
     __constants__ = ["batch_first"]
-    bias_k: Optional[torch.Tensor]
-    bias_v: Optional[torch.Tensor]
+    bias_k: torch.Tensor | None
+    bias_v: torch.Tensor | None
 
     def __init__(
         self,
@@ -1185,9 +1189,8 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError("embed_dim must be divisible by num_heads")
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1254,12 +1257,12 @@ class MultiheadAttention(Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""Compute attention outputs using query, key, and value embeddings.
 
             Supports optional parameters for padding, masks and attention weights.
@@ -1319,7 +1322,7 @@ class MultiheadAttention(Module):
 
             .. note::
                 `batch_first` argument is ignored for unbatched inputs.
-        """  # noqa: B950
+        """
         why_not_fast_path = ""
         if (
             (attn_mask is not None and torch.is_floating_point(attn_mask))
@@ -1391,6 +1394,7 @@ class MultiheadAttention(Module):
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
+        fast_path_blocked_by_tracing = False
         if not why_not_fast_path:
             tensor_args = (
                 query,
@@ -1405,8 +1409,6 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif _is_make_fx_tracing():
-                why_not_fast_path = "we are running make_fx tracing"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
@@ -1419,6 +1421,9 @@ class MultiheadAttention(Module):
                     "grad is enabled and at least one of query or the "
                     "input/output projection weights or biases requires_grad"
                 )
+            elif _is_make_fx_tracing():
+                why_not_fast_path = "we are running make_fx tracing"
+                fast_path_blocked_by_tracing = True
             if not why_not_fast_path:
                 merged_mask, mask_type = self.merge_masks(
                     attn_mask, key_padding_mask, query
@@ -1442,10 +1447,11 @@ class MultiheadAttention(Module):
                     )
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, (
-            "MultiheadAttention does not support NestedTensor outside of its fast path. "
-            + f"The fast path was not hit because {why_not_fast_path}"
-        )
+        if any_nested:
+            raise AssertionError(
+                "MultiheadAttention does not support NestedTensor outside of its fast path. "
+                + f"The fast path was not hit because {why_not_fast_path}"
+            )
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
@@ -1507,16 +1513,20 @@ class MultiheadAttention(Module):
                 is_causal=is_causal,
             )
         if self.batch_first and is_batched:
-            return attn_output.transpose(1, 0), attn_output_weights
+            attn_output = attn_output.transpose(1, 0)
+            if fast_path_blocked_by_tracing:
+                # Keep the traced slowpath layout aligned with eager fastpath.
+                attn_output = attn_output.contiguous()
+            return attn_output, attn_output_weights
         else:
             return attn_output, attn_output_weights
 
     def merge_masks(
         self,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         query: Tensor,
-    ) -> tuple[Optional[Tensor], Optional[int]]:
+    ) -> tuple[Tensor | None, int | None]:
         r"""Determine mask type and combine masks if necessary.
 
         If only one mask is provided, that mask
@@ -1531,8 +1541,8 @@ class MultiheadAttention(Module):
             merged_mask: merged mask
             mask_type: merged mask type (0, 1, or 2)
         """
-        mask_type: Optional[int] = None
-        merged_mask: Optional[Tensor] = None
+        mask_type: int | None = None
+        merged_mask: Tensor | None = None
 
         if key_padding_mask is not None:
             mask_type = 1
@@ -1728,9 +1738,9 @@ class Softmin(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1793,9 +1803,9 @@ class Softmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1878,9 +1888,9 @@ class LogSoftmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 

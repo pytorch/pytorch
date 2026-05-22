@@ -27,7 +27,6 @@
 //
 
 #include <cstdint>
-#include <c10/util/C++17.h>
 #include <c10/util/Load.h>
 #include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -46,7 +45,7 @@ using namespace vec;
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 std::index_sequence<INDEX...>) {
+                 std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
       c10::load<typename traits::template arg<INDEX>::type>(
           data[INDEX] + i * strides[INDEX])...);
@@ -65,7 +64,7 @@ dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
-                     std::index_sequence<INDEX...>) {
+                     std::index_sequence<INDEX...> /*unused*/) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
@@ -231,7 +230,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 template <typename traits, typename cb_t>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* /*strides*/,
-    std::index_sequence<>,
+    std::index_sequence<> /*unused*/,
     cb_t&& cb) {
   cb(0);
 }
@@ -239,7 +238,7 @@ inline void unroll_contiguous_scalar_checks(
 template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
-    std::index_sequence<INDEX0, INDEX...>,
+    std::index_sequence<INDEX0, INDEX...> /*unused*/,
     cb_t&& cb) {
   if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
     cb(INDEX0 + 1);
@@ -302,13 +301,15 @@ VectorizedLoop2d<op_t, vop_t> make_vectorized_loop2d(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE, bool check_dynamic_casting = true) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  if (check_dynamic_casting) {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  }
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
@@ -316,6 +317,11 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
       basic_loop(data, strides, 0, n, op);
   }, grain_size);
   iter.cast_outputs();
+}
+
+template <typename func_t>
+void cpu_kernel_opaque(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+  return cpu_kernel(iter, op, grain_size, false);
 }
 
 // This function helps write elementwise kernels that requires multiple outputs.
