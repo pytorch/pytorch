@@ -16587,7 +16587,6 @@ op_db: list[OpInfo] = [
            aliases=('group_norm',),
            ref=reference_group_norm,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -25074,6 +25073,11 @@ python_ref_db = [
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.hardsigmoid",
+        torch_opinfo_name="nn.functional.hardsigmoid",
+        supports_out=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_out=True,
@@ -26297,17 +26301,6 @@ python_ref_db = [
         "_refs.nn.functional.group_norm",
         torch_opinfo_name="nn.functional.group_norm",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-        )
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
@@ -27232,43 +27225,3 @@ def mask_not_all_zeros(shape):
         result = torch.randn(shape).gt(0)
         if result.sum() > 0:
             return result
-
-# Copied from functorch
-def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
-
-
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
-        matching_opinfos = [o for o in all_opinfos
-                            if o.name == op_name and o.variant_test_name == variant_name]
-        if len(matching_opinfos) < 1:
-            # When OPINFO_RESTRICT_TO_DSL filters op_db down to a DSL subset,
-            # xfail entries targeting filtered-out ops are benign - just skip them.
-            if OPINFO_RESTRICT_TO_DSL:
-                continue
-            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
-        for op in matching_opinfos:
-            decorators = list(op.decorators)
-            if expected_failure:
-                decorator = DecorateInfo(unittest.expectedFailure,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            else:
-                decorator = DecorateInfo(unittest.skip("Skipped!"),
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            op.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-    return wrapped

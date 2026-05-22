@@ -79,7 +79,13 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
-from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
+from torch.fx.experimental.dynamic_spec import (
+    IntVar,
+    LeafSpec,
+    ObjectSpec,
+    ShapesSpec,
+    TensorSpec,
+)
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -136,6 +142,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -146,6 +153,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -352,16 +360,74 @@ def safe_has_grad(t: object) -> bool:
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
-    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    Returns the leaf ``TensorSpec`` / ``IntVar`` / ``int`` at the
+    corresponding path, or ``None`` if the source isn't covered.
+    Supported source kinds:
+
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec._fields[member]``.
+    - ``NNModuleSource`` (and subclasses) — transparently unwrapped.
+      ``nn.Module`` attribute access produces
+      ``AttrSource(NNModuleSource(...))``; ``NNModuleSource`` is a
+      guard-semantics marker, not an access step, so the walk skips
+      past it.
+    - ``DictGetItemSource(UnspecializedParamBufferSource(_,
+      '_parameters' | '_buffers'), key)`` — dynamo rewrites
+      ``self.weight`` internally as ``self._parameters["weight"]``;
+      the walk collapses that pair into a single ``("attr", key)``
+      step so the user-facing attribute name matches the spec.
+
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
+
+    # Walk source.base chain to its root, collecting (kind, key) entries.
+    path: list[tuple[str, Any]] = []
+    cur: Source = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, NNModuleSource):
+            cur = cur.base
+            continue
+        # ``self.weight`` → dynamo emits
+        # ``DictGetItemSource(UnspecializedParamBufferSource(_,
+        # '_parameters'), 'weight')``. Collapse this pair into a single
+        # ``("attr", key)`` step so the user's ``ObjectSpec({"weight":
+        # ...})`` matches.
+        if isinstance(cur, DictGetItemSource) and isinstance(
+            cur.base, UnspecializedParamBufferSource
+        ):
+            path.append(("attr", cur.index))
+            cur = cur.base.base
+            continue
+        if isinstance(cur, AttrSource):
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
+    if not cur.is_input:
         return None
-    return shapes_spec._params._named_args.get(source.local_name)
+    path.reverse()
+
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec._params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
+            return None
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    # Only return leaves — a container at the end of the walk means
+    # the source's path didn't reach an applicable spec.
+    if isinstance(spec, ObjectSpec):
+        return None
+    return spec
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -2376,11 +2442,15 @@ class VariableBuilder:
                     )
 
             if is_dynamic_source(self.source.name):
-                log.debug("%s marked dynamic via source whitelist", self.source.name)
+                log.debug(
+                    "%s marked dynamic via dynamic-sources list", self.source.name
+                )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
             if is_unbacked_source(self.source.name):
-                log.debug("%s marked unbacked via source whitelist", self.source.name)
+                log.debug(
+                    "%s marked unbacked via unbacked-sources list", self.source.name
+                )
                 return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
@@ -3543,9 +3613,12 @@ def handle_traced_output(
         if is_sparse_any(example_value) and (
             not tx.export or not config.capture_sparse_compute
         ):
+            # Avoid calling str() on FakeTensors with unbacked symints as it triggers
+            # _tensor_str machinery which can cause GuardOnDataDependentSymNode errors
+            context = f"sparse tensor with layout={example_value.layout}, shape={example_value.shape}"
             unimplemented(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
-                context=str(example_value),
+                context=context,
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
@@ -3897,11 +3970,29 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
         )
 
 
-_DYNAMIC_SOURCES: set[str] | None = None
+# Each entry is (pattern, dim) where dim is None for "all dims" or an int
+# for a single dim. The optional ":N" suffix on a source list entry restricts
+# the match to dim N of the matched tensor. List the same source multiple
+# times (e.g. "L['x']:0, L['x']:2") to target multiple specific dims.
+_DYNAMIC_SOURCES: list[tuple[str, int | None]] | None = None
 _DYNAMIC_SOURCES_CONFIG_HASH: int | None = None
 
+_DIM_SUFFIX_RE: re.Pattern[str] = re.compile(r"^(.+):(\d+)$")
 
-def get_dynamic_sources() -> set[str]:
+
+def _parse_source_entry(entry: str) -> tuple[str, int | None]:
+    """Parse a source list entry into (pattern, dim).
+
+    Entries may end with an optional ``:N`` suffix where ``N`` is a literal
+    non-negative integer (the dim portion is not part of the name regex).
+    """
+    m = _DIM_SUFFIX_RE.match(entry)
+    if m:
+        return m.group(1), int(m.group(2))
+    return entry, None
+
+
+def get_dynamic_sources() -> list[tuple[str, int | None]]:
     global _DYNAMIC_SOURCES, _DYNAMIC_SOURCES_CONFIG_HASH
 
     current_hash = hash(torch.compiler.config.dynamic_sources)
@@ -3911,31 +4002,43 @@ def get_dynamic_sources() -> set[str]:
         return _DYNAMIC_SOURCES
 
     # Config has changed or first time, (re)calculate the sources
-    _DYNAMIC_SOURCES = {
-        s
+    _DYNAMIC_SOURCES = [
+        _parse_source_entry(s)
         for s in torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
         if s
-    }
+    ]
     _DYNAMIC_SOURCES_CONFIG_HASH = current_hash
 
     return _DYNAMIC_SOURCES
 
 
-def is_dynamic_source(source_name: str) -> bool:
+def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the dynamic-sources list.
+
+    If ``dim`` is None, returns True if any entry matches the source
+    name (regardless of any per-dim qualifier). This is the right semantics for
+    callers that ask "is this source dynamic at all?" (e.g. the static-shapes
+    early return, or non-tensor int sources which have no dim).
+
+    If ``dim`` is given, returns True only when a matching entry either has no
+    dim qualifier ("all dims dynamic") or its dim qualifier equals ``dim``.
+    """
     dynamic_sources = get_dynamic_sources()
-    for pattern in dynamic_sources:
+    for pattern, pat_dim in dynamic_sources:
         if pattern == source_name or re.match(pattern, source_name):
-            log.debug(
-                "%s was marked dynamic due to dynamic source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            symbolic_shape_log.info(
-                "%s was marked dynamic due to dynamic source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            return True
+            if dim is None or pat_dim is None or pat_dim == dim:
+                pretty = pattern if pat_dim is None else f"{pattern}:{pat_dim}"
+                log.debug(
+                    "%s was marked dynamic due to dynamic-sources entry: %s",
+                    source_name,
+                    pretty,
+                )
+                symbolic_shape_log.info(
+                    "%s was marked dynamic due to dynamic-sources entry: %s",
+                    source_name,
+                    pretty,
+                )
+                return True
     return False
 
 
@@ -3971,11 +4074,13 @@ def record_automatic_dynamic(
     )
 
 
-_UNBACKED_SOURCES: set[str] | None = None
+# Same per-dim suffix syntax as _DYNAMIC_SOURCES: optional ":N" restricts the
+# match to dim N of the matched tensor.
+_UNBACKED_SOURCES: list[tuple[str, int | None]] | None = None
 _UNBACKED_SOURCES_CONFIG_HASH: int | None = None
 
 
-def get_unbacked_sources() -> set[str]:
+def get_unbacked_sources() -> list[tuple[str, int | None]]:
     global _UNBACKED_SOURCES, _UNBACKED_SOURCES_CONFIG_HASH
 
     current_hash = hash(torch.compiler.config.unbacked_sources)
@@ -3985,26 +4090,31 @@ def get_unbacked_sources() -> set[str]:
         return _UNBACKED_SOURCES
 
     # Config has changed or first time, (re)calculate the sources
-    _UNBACKED_SOURCES = {
-        s
+    _UNBACKED_SOURCES = [
+        _parse_source_entry(s)
         for s in torch.compiler.config.unbacked_sources.replace(" ", "").split(",")
         if s
-    }
+    ]
     _UNBACKED_SOURCES_CONFIG_HASH = current_hash
 
     return _UNBACKED_SOURCES
 
 
-def is_unbacked_source(source_name: str) -> bool:
+def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the unbacked-sources list.
+
+    See :func:`is_dynamic_source` for the ``dim`` argument semantics.
+    """
     unbacked_sources = get_unbacked_sources()
-    for pattern in unbacked_sources:
+    for pattern, pat_dim in unbacked_sources:
         if pattern == source_name or re.match(pattern, source_name):
-            log.debug(
-                "%s was marked unbacked due to unbacked source allowlist pattern: %s",
-                source_name,
-                pattern,
-            )
-            return True
+            if dim is None or pat_dim is None or pat_dim == dim:
+                log.debug(
+                    "%s was marked unbacked due to unbacked-sources entry: %s",
+                    source_name,
+                    pattern if pat_dim is None else f"{pattern}:{pat_dim}",
+                )
+                return True
     return False
 
 
@@ -4271,12 +4381,12 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if is_dynamic_source(name):
-            log.debug("%s marked dynamic via source whitelist", name)
+        if is_dynamic_source(name, i):
+            log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
             automatic_dynamic_size = True
 
-        if is_unbacked_source(name):
-            log.debug("%s marked unbacked via source whitelist", name)
+        if is_unbacked_source(name, i):
+            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
             automatic_dynamic_size = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
@@ -4329,7 +4439,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked or is_unbacked_source(name):
+        if marked_unbacked or is_unbacked_source(name, i):
             dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
