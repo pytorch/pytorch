@@ -2,10 +2,12 @@
 
 import io
 import os
+import pickle
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import (
@@ -27,6 +29,93 @@ def strip_trailing_whitespace(r):
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_save_args_dynamic_shapes(self):
+        import torch._functorch.config as functorch_config
+        from torch._inductor import config as inductor_config
+        from torch._inductor.debug import load_args_and_run_compile_fx_inner
+
+        torch._dynamo.reset()
+
+        def fn(x):
+            output = torch.zeros_like(x)
+            _ = output.numel()
+            return output
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+            inductor_config.patch(
+                {
+                    "save_args": True,
+                    "force_disable_caches": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+            functorch_config.patch({"enable_autograd_cache": False}),
+        ):
+            opt_fn = torch.compile(fn, dynamic=True)
+            inp = torch.randn(4)
+            self.assertEqual(opt_fn(inp), fn(inp))
+
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            self.assertTrue(os.path.isdir(saved_args_dir))
+            saved_args_paths = os.listdir(saved_args_dir)
+            self.assertGreater(len(saved_args_paths), 0)
+
+            compiled = load_args_and_run_compile_fx_inner(
+                os.path.join(saved_args_dir, saved_args_paths[0])
+            )
+            self.assertIsNotNone(compiled)
+
+    def test_save_args_custom_sympy_expr(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.debug import (
+            load_args_and_run_compile_fx_inner,
+            save_args_for_compile_fx_inner,
+            SymExprMetadataHolder,
+        )
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+        from torch.utils._sympy.functions import ModularIndexing
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(
+            17,
+            ConstantSource("custom_symbol"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        expr = ModularIndexing(symbol + 3, 2, 5)
+        symint = shape_env.create_symintnode(expr, hint=0)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+        ):
+            save_args_for_compile_fx_inner(symint)
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            saved_path = os.path.join(saved_args_dir, os.listdir(saved_args_dir)[0])
+
+            with open(saved_path, "rb") as f:
+                saved_args, _ = pickle.load(f)
+            self.assertIsInstance(saved_args[0], SymExprMetadataHolder)
+            self.assertTrue(saved_args[0].expr.has(ModularIndexing))
+
+            def fake_compile_fx_inner(restored_symint):
+                self.assertIsInstance(restored_symint, torch.SymInt)
+                self.assertTrue(restored_symint.node.expr.has(ModularIndexing))
+                self.assertEqual(restored_symint.node.hint, 0)
+                return restored_symint
+
+            with patch(
+                "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+            ):
+                restored = load_args_and_run_compile_fx_inner(saved_path)
+
+            self.assertIsInstance(restored, torch.SymInt)
+            self.assertTrue(restored.node.expr.has(ModularIndexing))
+
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
         # TODO: This triggers CUDA context initialization, even though
@@ -311,6 +400,102 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertNotIsInstance(compiled, str)
         result = compiled(list(args))
         self.assertEqual(result[0].shape, torch.Size([4]))
+
+    def test_symint_expr_serialized(self):
+        """InputWriter serializes symbolic expressions alongside hint values,
+        and InputReader captures them in symint_exprs."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(160, ConstantSource("s0"))
+        s1 = shape_env.create_symbol(200, ConstantSource("s1"))
+
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=160))
+        si1 = torch.SymInt(SymNode(s1, shape_env, int, hint=200))
+        derived = (si0 + si1) // 10
+
+        writer = InputWriter(save_dir=None)
+        writer.symint("free_sym", si0)
+        writer.symint("derived_sym", derived)
+        writer.symint("plain_int", 42)
+
+        lines = writer.lines()
+        code = "\n".join(lines)
+
+        # Free symbol should have expr=
+        self.assertIn("expr=", code)
+        # Plain int should NOT have expr=
+        plain_line = next(l for l in lines if "plain_int" in l)
+        self.assertNotIn("expr=", plain_line)
+
+        # Round-trip: execute load_args and verify reader captures exprs
+        reader = InputReader(save_dir=None)
+        ns: dict = {}
+        exec(compile(code, "<test>", "exec"), ns)
+        ns["load_args"](reader)
+
+        self.assertEqual(len(reader.args), 3)
+        self.assertTrue(hasattr(reader, "symint_exprs"))
+        self.assertGreater(len(reader.symint_exprs), 0)
+        # The derived symint should have an expression with '//'
+        derived_expr = reader.symint_exprs.get(1)
+        self.assertIsNotNone(derived_expr)
+        self.assertIn("//", derived_expr)
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
+    def test_symint_expr_e2e_repro(self):
+        """End-to-end: generate a repro from a symbolically-traced graph
+        with SymInt args, verify expr= appears, and run the repro."""
+        import subprocess
+        import tempfile
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(8, ConstantSource("s0"))
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=8))
+
+        class SimpleGraph(torch.nn.Module):
+            def forward(self, size, x):
+                return (x.sum() + size,)
+
+        mod = SimpleGraph()
+        args = [si0, torch.randn(16)]
+        gm = make_fx(mod, tracing_mode="symbolic")(*args)
+
+        buf = io.StringIO()
+        save_graph_repro(
+            buf,
+            gm,
+            args,
+            "inductor",
+            save_dir=None,
+            tracing_mode="symbolic",
+        )
+        repro_src = buf.getvalue()
+
+        # Verify expr= is serialized for the SymInt arg
+        self.assertIn("expr=", repro_src)
+
+        # Run the generated repro in a subprocess
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+            tmp.write(repro_src)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                res.returncode,
+                0,
+                f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
+            )
 
 
 if __name__ == "__main__":

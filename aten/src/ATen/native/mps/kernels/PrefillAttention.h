@@ -10,13 +10,10 @@
 // one bundled section), so Attention.mm only needs a single library handle.
 #pragma once
 
+#include <c10/metal/common.h>
+
 #define PREFILL_CONST static constant constexpr const
 #define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
-#if __METAL_VERSION__ >= 400
-#define IF_CONSTEXPR constexpr
-#else
-#define IF_CONSTEXPR
-#endif
 
 template <typename T>
 struct pointer_element {};
@@ -828,13 +825,14 @@ prefill_attention(
               row_pos_in_seq,
               col_pos_in_seq);
 
+          constexpr selem_t kLog2E = selem_t(1.44269504089f);
           PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
             if IF_CONSTEXPR (is_bool) {
               Stile.frag_at(i, j)[jj] =
                   mfrag[jj] ? Stile.frag_at(i, j)[jj] : neg_inf;
             } else {
-              Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]);
+              Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]) * kLog2E;
             }
           }
         }

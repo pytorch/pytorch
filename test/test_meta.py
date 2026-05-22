@@ -2041,6 +2041,23 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(result, expected)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_pad_sequence_decomp_mixed_dtype_padding_value(self):
+        from torch._decomp import decompositions
+
+        for first_sequence in (
+            torch.tensor([0, 0.4]),
+            torch.tensor([0, 0.4 + 0j]),
+        ):
+            sequences = [first_sequence, torch.tensor([0], dtype=torch.int32)]
+            result = decompositions.pad_sequence(
+                sequences, batch_first=False, padding_value=-0.7
+            )
+            expected = torch.ops.aten.pad_sequence.default(
+                sequences, False, -0.7, "right"
+            )
+            self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -2274,6 +2291,8 @@ class TestMetaKernelRegistrations(TestCase):
     def test_mkldnn_rnn_backward_dtype(self):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN not available")
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest("MKLDNN bf16 not supported on this CPU")
         hidden_size = 16
         seq_len, batch, input_size = 5, 2, 8
         input_t = torch.randn(seq_len, batch, input_size, dtype=torch.bfloat16)

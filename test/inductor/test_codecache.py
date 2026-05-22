@@ -401,10 +401,6 @@ class TestPyCodeCache(TestCase):
                 .decode()
                 .strip()
             )
-            # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-            if torch.xpu.is_available():
-                wrapper_path = wrapper_path.splitlines()[-1]
-                hit = hit.splitlines()[-1]
             self.assertEqual(hit, "1")
 
             with open(wrapper_path) as f:
@@ -663,6 +659,70 @@ class TestFxGraphCache(TestCase):
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalFxGraphCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self.reset()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_default_dtype_affects_factory_cache_key(self):
+        old_dtype = torch.get_default_dtype()
+        FxGraphCache.clear()
+
+        def fn():
+            return (
+                torch.ones(2),
+                torch.zeros(2),
+                torch.tensor([1.0, 2.0]),
+                torch.arange(2.0),
+                torch.empty(2),
+            )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        try:
+            torch.set_default_dtype(torch.float32)
+            first = compiled_fn()
+            self.assertEqual([x.dtype for x in first], [torch.float32] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            torch.set_default_dtype(torch.float64)
+            expected = fn()
+            actual = compiled_fn()
+            self.assertEqual([x.dtype for x in actual], [x.dtype for x in expected])
+            self.assertEqual([x.dtype for x in actual], [torch.float64] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        finally:
+            torch.set_default_dtype(old_dtype)
+            FxGraphCache.clear()
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
@@ -2724,6 +2784,32 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+        # Lists of properly-registered custom hooks should also allow caching.
+        custom_passes = [TestCustomGraphPass(), TestCustomGraphPass()]
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_passes,
+                "post_grad_custom_post_pass": custom_passes,
+                "joint_custom_pre_pass": custom_passes,
+                "joint_custom_post_pass": custom_passes,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
@@ -3187,6 +3273,39 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details1),
                 pickler.dumps(details3),
             )
+
+        custom_pass_1 = TestCustomGraphPass()
+        custom_pass_2 = TestCustomGraphPass()
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_1, custom_pass_2]}
+        ):
+            custom_pass_1._uuid = "1"
+            custom_pass_2._uuid = "2"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass_2._uuid = "3"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_2, custom_pass_1]}
+        ):
+            details4 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details3),
+            pickler.dumps(details4),
+        )
 
     def test_hash_custom_backend_pass(self):
         """
