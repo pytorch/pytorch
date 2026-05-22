@@ -3624,6 +3624,24 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             scan(fct_input_mutation, init, x, dim=0)
 
     @requires_cuda
+    def test_scan_additional_input_mutation(self):
+        device = torch.device("cuda")
+        buf = torch.randn(2, 2, device=device)
+
+        def fct_additional_input_mutation(x, y):
+            buf.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_additional_input_mutation, init, x, dim=0)
+
+    @requires_cuda
     def test_scan_input_carry_alias(self):
         device = torch.device("cuda")
 
@@ -10473,7 +10491,6 @@ class TestHopSchema(TestCase):
     def test_scan_gen_schema_init_and_xs_mutation_raises(self):
         def combine_fn(carry, x):
             carry.add_(x)
-            x.add_(1)
             return carry, carry * x
 
         with self.assertRaisesRegex(
