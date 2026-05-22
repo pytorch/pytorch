@@ -4829,21 +4829,27 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, inst.argval))
 
     # See
-    # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
+    # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/pylifecycle.c#L881
     # for the common constants - make sure it matches for Python 3.14+.
-    # The common constants are all attributes of `builtins`.
     _common_constants = (
-        "AssertionError",
-        "NotImplementedError",
-        "tuple",
-        "all",
-        "any",
+        AssertionError,
+        NotImplementedError,
+        tuple,
+        all,
+        any,
+        list,
+        set,
+        None,
+        "",
+        True,
+        False,
+        -1,
     )
 
     def LOAD_COMMON_CONSTANT(self, inst: Instruction) -> None:
         if not isinstance(inst.arg, int):
             raise AssertionError("expected LOAD_COMMON_CONSTANT arg to be set to int")
-        self.push(self.load_builtin_from_argval(self._common_constants[inst.arg]))
+        self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
