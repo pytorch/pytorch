@@ -1771,6 +1771,7 @@ class BenchmarkRunner:
         self.autocast_arg = {}
         self.optimizer: torch.optim.Optimizer | None = None
         self._args = None
+        self._logged_training_accuracy_iteration_override = False
 
     def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
@@ -2050,23 +2051,24 @@ class BenchmarkRunner:
         return 1
 
     def run_n_iterations(self, mod, inputs, model_iter_fn):
-        n = (
-            1
-            if self.collect_training_outputs_before_optimizer_step()
-            else self.args.iterations
-        )
+        n = self.args.iterations
+        if self.collect_training_outputs_before_optimizer_step():
+            if n != 1 and not self._logged_training_accuracy_iteration_override:
+                log.warning(
+                    "Training accuracy with optimizer snapshotting runs 1 "
+                    "iteration instead of the configured %s iterations.",
+                    n,
+                )
+                self._logged_training_accuracy_iteration_override = True
+            n = 1
         for _ in range(n - 1):
             model_iter_fn(mod, inputs, collect_outputs=False)
         return model_iter_fn(mod, inputs, collect_outputs=True)
 
     def collect_training_outputs_before_optimizer_step(self):
-        # Adam can amplify tiny gradient differences into large parameter
-        # deltas, so accuracy checks compare the training signal before step().
-        return (
-            self.args.accuracy
-            and self.args.training
-            and isinstance(self.optimizer, torch.optim.Adam)
-        )
+        # Optimizer steps can amplify tiny gradient differences into large
+        # parameter deltas, so accuracy checks compare the training signal.
+        return self.args.accuracy and self.args.training and self.optimizer is not None
 
     def clone_tensors_for_accuracy(self, result):
         return tree_map_only(torch.Tensor, lambda x: x.detach().clone(), result)

@@ -18,11 +18,11 @@ except ImportError:
 
 
 class TestDynamoBenchmark(unittest.TestCase):
-    def test_adam_accuracy_collects_single_iteration(self) -> None:
+    def test_optimizer_accuracy_collects_single_iteration(self) -> None:
         runner = BenchmarkRunner()
         runner.args = SimpleNamespace(iterations=4, accuracy=True, training=True)
         param = torch.nn.Parameter(torch.ones(()))
-        runner.optimizer = torch.optim.Adam([param])
+        runner.optimizer = torch.optim.SGD([param], lr=0.1)
 
         calls = 0
 
@@ -31,14 +31,15 @@ class TestDynamoBenchmark(unittest.TestCase):
             calls += 1
             return calls
 
-        self.assertEqual(runner.run_n_iterations(None, None, model_iter_fn), 1)
+        with self.assertLogs("benchmarks.dynamo.common", level="WARNING") as cm:
+            self.assertEqual(runner.run_n_iterations(None, None, model_iter_fn), 1)
         self.assertEqual(calls, 1)
+        self.assertIn("runs 1 iteration", "\n".join(cm.output))
 
-    def test_non_adam_accuracy_collects_configured_iterations(self) -> None:
+    def test_accuracy_without_optimizer_collects_configured_iterations(self) -> None:
         runner = BenchmarkRunner()
         runner.args = SimpleNamespace(iterations=4, accuracy=True, training=True)
-        param = torch.nn.Parameter(torch.ones(()))
-        runner.optimizer = torch.optim.SGD([param], lr=0.1)
+        runner.optimizer = None
 
         calls = 0
 
@@ -59,13 +60,13 @@ class TestDynamoBenchmark(unittest.TestCase):
 
         self.assertTrue(torch.equal(snapshot["tensor"], torch.ones(2)))
 
-    def test_torchbench_adam_accuracy_snapshots_before_step(self) -> None:
+    def test_torchbench_optimizer_accuracy_snapshots_before_step(self) -> None:
         runner = TorchBenchmarkRunner()
         runner.args = SimpleNamespace(accuracy=True, training=True)
         model = torch.nn.Linear(1, 1, bias=False)
         with torch.no_grad():
             model.weight.fill_(1.0)
-        runner.optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+        runner.optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
         result = runner.forward_and_backward_pass(
             model, (torch.ones(1, 1),), collect_outputs=True

@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 import unittest.mock
+import warnings
 import weakref
 from collections.abc import Callable
 from pathlib import Path
@@ -65,7 +66,7 @@ from torch._inductor.utils import (
     triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import check_significant_strides, is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.library import _scoped_library
 from torch.nn import functional as F
@@ -435,6 +436,59 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def _assert_same_significant_strides(self: TestCase, actual, expected):
+    actual_flat = pytree.tree_leaves(actual)
+    expected_flat = pytree.tree_leaves(expected)
+    if len(actual_flat) != len(expected_flat):
+        raise AssertionError(
+            f"Tree leaf count mismatch: {len(actual_flat)} != {len(expected_flat)}"
+        )
+
+    for i, (actual_val, expected_val) in enumerate(zip(actual_flat, expected_flat)):
+        if not (
+            isinstance(actual_val, torch.Tensor)
+            and isinstance(expected_val, torch.Tensor)
+            and actual_val.layout == torch.strided
+            and expected_val.layout == torch.strided
+        ):
+            continue
+
+        same_strides, dim = check_significant_strides(
+            actual_val, expected_val, only_cuda=False
+        )
+        if not same_strides:
+            raise AssertionError(
+                f"Significant strides mismatch at leaf {i}, dim {dim}: "
+                f"{actual_val.stride()} != {expected_val.stride()} "
+                f"for shape {actual_val.shape}"
+            )
+
+
+def _assert_equal_with_significant_stride_check(
+    self: TestCase,
+    assert_equal_fn,
+    actual,
+    expected,
+    *,
+    atol,
+    rtol,
+    equal_nan,
+    exact_dtype,
+    exact_stride,
+):
+    assert_equal_fn(
+        actual,
+        expected,
+        atol=atol,
+        rtol=rtol,
+        equal_nan=equal_nan,
+        exact_dtype=exact_dtype,
+        exact_stride=False,
+    )
+    if exact_stride:
+        _assert_same_significant_strides(self, actual, expected)
+
+
 def check_model(
     self: TestCase,
     model,
@@ -616,7 +670,9 @@ def check_model(
             assert_equal_fn = self.assertEqual
 
         check_exact_stride = exact_stride and not has_zero_dim(correct)
-        assert_equal_fn(
+        _assert_equal_with_significant_stride_check(
+            self,
+            assert_equal_fn,
             actual,
             correct,
             atol=atol,
@@ -635,8 +691,10 @@ def check_model(
             equal_nan=True,
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
-            exact_stride=exact_stride,
+            exact_stride=False,
         )
+        if exact_stride:
+            _assert_same_significant_strides(self, ref_inputs, example_inputs)
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
@@ -648,8 +706,8 @@ def check_model(
                     raise AssertionError(
                         f"Expected size {correct_val.size()}, got {actual_val.size()}"
                     )
-                strides_equal, _ = torch._prims_common.check_significant_strides(
-                    correct_val, actual_val
+                strides_equal, _ = check_significant_strides(
+                    correct_val, actual_val, only_cuda=False
                 )
                 if not strides_equal:
                     raise AssertionError(
@@ -665,13 +723,6 @@ def check_model(
                         raise AssertionError(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
-                check_exact_stride = exact_stride and not has_zero_dim(correct_val)
-                if check_exact_stride:
-                    if correct_val.stride() != actual_val.stride():
-                        raise AssertionError(
-                            f"Expected stride {correct_val.stride()}, got {actual_val.stride()}"
-                        )
-
     if check_gradient:
         actual = output_process_fn_grad(actual)
         correct = output_process_fn_grad(correct)
@@ -719,7 +770,9 @@ def check_model(
 
             for actual_g, expect_g in zip(actual_grad, expect_grad):
                 check_exact_stride = exact_stride and not has_zero_dim(expect_g)
-                self.assertEqual(
+                _assert_equal_with_significant_stride_check(
+                    self,
+                    self.assertEqual,
                     actual_g,
                     expect_g,
                     atol=grad_atol or atol,
@@ -6401,6 +6454,34 @@ class CommonTemplate:
             (weight, indices),
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_no_grad_embedding_renorm_negative_indices(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires cuda")
+
+        def fn(weight, indices):
+            return torch.ops.aten._no_grad_embedding_renorm_(
+                weight, indices, max_norm=1.0, norm_type=1.0
+            )
+
+        dtype = (
+            torch.bfloat16 if self.is_dtype_supported(torch.bfloat16) else torch.float32
+        )
+        indices = (
+            torch.arange(-32, 32, dtype=torch.int32, device=self.device)
+            .repeat(8)
+            .reshape(32, 16)
+        )
+        weight = torch.randn((1000, 512), dtype=dtype, device=self.device) * 0.1
+        expected_weight = weight.clone()
+        actual_weight = weight.clone()
+
+        expected = fn(expected_weight, indices)
+        actual = torch.compile(fn, backend="inductor")(actual_weight, indices)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_weight, expected_weight)
+
     @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
         def fn(x):
@@ -6657,6 +6738,37 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_complex_python_literal_backward(self):
+        dtypes = [
+            dtype
+            for dtype in (torch.complex64, torch.complex128)
+            if self.is_dtype_supported(dtype)
+        ]
+        if not dtypes:
+            self.skipTest("complex dtypes not supported on this device")
+
+        cases = (
+            (lambda x: x * (2.0 + 1.0j), "mul"),
+            (lambda x: x / (1.0 + 1.0j), "div"),
+        )
+
+        for dtype in dtypes:
+            for fn, name in cases:
+                with self.subTest(dtype=dtype, op=name):
+                    x = torch.randn(
+                        4, dtype=dtype, device=self.device, requires_grad=True
+                    )
+                    x_ref = x.detach().clone().requires_grad_(True)
+
+                    expected = fn(x_ref).abs().sum()
+                    expected.backward()
+
+                    actual = torch.compile(fn, backend="inductor")(x).abs().sum()
+                    actual.backward()
+
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(x.grad, x_ref.grad)
+
     def test_complex_zero_dim_scalar(self):
         # Test that 0-d complex tensors can be compiled without crashing.
         # This exercises a fix in constant folding where view.dtype on 0-d
@@ -6903,7 +7015,6 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
-    @xfail_if_mps
     def test_complex_real_imag_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that extracting real/imag from conjugated tensors works when compiled.
@@ -9983,6 +10094,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @skip_if_triton_cpu
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
@@ -13840,6 +13952,109 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # because bucketize is computationally expensive.
         FileCheck().check("def triton").check("def triton").run(code[0])
 
+    def test_searchsorted_sliced_computed_boundaries(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[:-1], values + 10, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.searchsorted(
+                boundaries[1:], values, out_int32=True, right=True
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_searchsorted_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence, values, out_int32=True, right=True, sorter=sorter[1:]
+            )
+
+        sequence = torch.tensor([4, 0, 8, 2, 6])
+        sorter = torch.tensor([0, 1, 3, 0, 4, 2])
+        values = torch.arange(10, 20)
+
+        self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_boundaries_offset(self):
+        def fn(sequence, values):
+            sequence = sequence + 10
+            return torch.searchsorted(
+                sequence[1:, 1:], values, out_int32=True, right=True
+            )
+
+        sequence = torch.arange(24).reshape(4, 6)
+        values = torch.tensor(
+            [[16, 17, 19, 21, 22], [22, 23, 25, 27, 28], [28, 29, 31, 33, 34]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, values), check_lowp=False)
+
+    def test_searchsorted_nd_sliced_computed_sorter_offset(self):
+        def fn(sequence, sorter, values):
+            sequence = sequence + 10
+            sorter = sorter + 0
+            return torch.searchsorted(
+                sequence[1:, 1:],
+                values,
+                out_int32=True,
+                right=True,
+                sorter=sorter[1:, 1:],
+            )
+
+        sequence = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [99, 5, 1, 4, 2, 3],
+                [99, 15, 11, 14, 12, 13],
+                [99, 25, 21, 24, 22, 23],
+            ]
+        )
+        sorter = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+                [0, 1, 3, 4, 2, 0],
+            ]
+        )
+        values = torch.tensor(
+            [[10, 11, 13, 15, 16], [20, 21, 23, 25, 26], [30, 31, 33, 35, 36]]
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (sequence, sorter, values), check_lowp=False)
+
+    def test_searchsorted_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.searchsorted(
+                base.expand(5), values, out_int32=True, right=True
+            )
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -13912,6 +14127,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries(self):
+        def fn(boundaries, count: int):
+            boundaries = boundaries + 10
+            values = torch.arange(count, device=boundaries.device)
+            return (
+                torch.bucketize(values, boundaries[:-1], out_int32=True, right=True) - 1
+            )
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+
+        self.common(fn, (boundaries, 10), check_lowp=False)
+
+    def test_bucketize_sliced_computed_boundaries_offset(self):
+        def fn(boundaries, values):
+            boundaries = boundaries + 10
+            return torch.bucketize(values, boundaries[1:], out_int32=True, right=True)
+
+        boundaries = torch.tensor([0, 2, 4, 6, 8, 10])
+        values = torch.arange(10, 23)
+
+        self.common(fn, (boundaries, values), check_lowp=False)
+
+    def test_bucketize_expanded_boundaries_zero_stride(self):
+        def fn(base, values):
+            return torch.bucketize(values, base.expand(5), out_int32=True, right=True)
+
+        base = torch.tensor([12])
+        values = torch.arange(10, 16)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self.common(fn, (base, values), check_lowp=False)
 
     def test_bucketize_scalar_various_values(self):
         def fn(boundaries, scalar_val):
@@ -18182,7 +18430,17 @@ if RUN_GPU:
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
-            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+            fns = (
+                "first_arg",
+                "store",
+                "second_arg",
+                "same_pm_one",
+                "same_pp_one",
+                "gather",
+                "gather_generated_index",
+                "cross_entropy_loss",
+                "cross_entropy_loss_generated_target",
+            )
 
             def test(fn, ndims, dyn_shape, one_size=False):
                 proc = subprocess.Popen(
@@ -19121,6 +19379,36 @@ if RUN_GPU:
 
 
 if RUN_CPU:
+
+    class CheckModelStrideSemanticsTest(TestCase):
+        def test_check_model_exact_stride_ignores_insignificant_strides(self):
+            def fn(x, y):
+                return torch.einsum("aij,ajk->aik", x, y)
+
+            x = torch.arange(6, dtype=torch.int64).reshape(1, 2, 3)
+            y = torch.arange(12, dtype=torch.int64).reshape(1, 3, 4)
+
+            check_model(
+                self,
+                fn,
+                (x, y),
+                exact_stride=True,
+                reference_in_float=False,
+            )
+
+        def test_significant_stride_check_rejects_meaningful_stride_mismatch(self):
+            _assert_same_significant_strides(
+                self,
+                torch.empty_strided((1, 2, 4), (4, 4, 1)),
+                torch.empty_strided((1, 2, 4), (8, 4, 1)),
+            )
+
+            with self.assertRaisesRegex(AssertionError, "Significant strides mismatch"):
+                _assert_same_significant_strides(
+                    self,
+                    torch.empty_strided((2, 2, 4), (4, 4, 1)),
+                    torch.empty_strided((2, 2, 4), (8, 4, 1)),
+                )
 
     class TestFull(TestCase):
         def test_full_dtype(self):
