@@ -131,35 +131,68 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
   Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::zeros_like(
-        X,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        memory_format);
+    if (N != 0) {
+      dX = at::native::empty_like(
+          X,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          memory_format);
+    } else {
+      dX = at::native::zeros_like(
+          X,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          memory_format);
+    }
   }
+
+  Tensor dgamma;
   if (grad_input_mask[1]) {
-    dgamma = at::native::zeros_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+    if (N != 0) {
+      dgamma = at::native::empty_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    } else {
+      dgamma = at::native::zeros_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    }
   }
+
+  Tensor dbeta;
   if (grad_input_mask[2]) {
-    dbeta = at::native::zeros_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+    if (N != 0) {
+      dbeta = at::native::empty_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    } else {
+      dbeta = at::native::zeros_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    }
   }
+
   if (N != 0) {
     GroupNormBackwardKernel(
         X.device().type(),
@@ -223,38 +256,72 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
+  bool dX_output_defined{N != 0 && (dY.defined() || dmean.defined() || drstd.defined())};
   Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::zeros_like(
-        X,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        memory_format);
-  }
-  if (grad_input_mask[1]) {
-    dgamma = at::native::zeros_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
-  }
-  if (grad_input_mask[2]) {
-    dbeta = at::native::zeros_like(
-        gamma,
-        std::nullopt /* dtype */,
-        std::nullopt /* layout */,
-        std::nullopt /* device */,
-        std::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+    if (dX_output_defined) {
+      dX = at::native::empty_like(
+          X,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          memory_format);
+    } else {
+      dX = at::native::zeros_like(
+          X,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          memory_format);
+    }
   }
 
-  if (N != 0 && (dY.defined() || dmean.defined() || drstd.defined())) {
+  bool dgamma_dbeta_output_defined{N != 0 && dY.defined()};
+  Tensor dgamma;
+  if (grad_input_mask[1]) {
+    if (dgamma_dbeta_output_defined) {
+      dgamma = at::native::empty_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    } else {
+      dgamma = at::native::zeros_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    }
+  }
+
+  Tensor dbeta;
+  if (grad_input_mask[2]) {
+    if (dgamma_dbeta_output_defined) {
+      dbeta = at::native::empty_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    } else {
+      dbeta = at::native::zeros_like(
+          gamma,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
+    }
+  }
+
+  if (dX_output_defined) {
     GroupNormBackwardMultipleGradsKernel(
         X.device().type(),
         dY,
