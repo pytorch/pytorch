@@ -119,8 +119,7 @@ class _ChunkViews:
 @dataclasses.dataclass
 class _ChunkContext:
     """Per-call state for the chunked loop. Built once via
-    ``_ChunkContext.build`` before the loop. Methods (``mm``, ``amax``,
-    ``dotgather``, ``sumexp_``, ``div``, ``mul``, ``to``) hide
+    ``_ChunkContext.build`` before the loop. Methods hide
     dtype/device/acc_policy dispatch behind single math operations;
     per-iteration math without dispatch is inlined into the loop body.
 
