@@ -731,7 +731,7 @@ def fake_tensor_prop(
                 if not force_allow_non_fake_inputs
                 else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
-            with ctx:
+            with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
                     *example_inputs
                 )
@@ -1120,9 +1120,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -1956,10 +1957,10 @@ def cudagraphify_impl(
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
-    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
     # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
-        remove_unaligned_input_idxs(inputs, static_input_idxs)
+        remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
@@ -2261,7 +2262,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
     )
 
     return (
-        torch.cuda.device(next(iter(cuda_devices)))
+        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
         if len(cuda_devices) == 1
         else contextlib.nullcontext()
     )
@@ -3117,7 +3118,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
