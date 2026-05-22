@@ -8,6 +8,29 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._library.opaque_object import register_opaque_type
+
+
+class _OpaqueVal(torch._opaque_base.OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        if not isinstance(other, _OpaqueVal):
+            return NotImplemented
+        return self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __repr__(self):
+        return f"_OpaqueVal({self.val})"
+
+    def __fx_repr__(self):
+        return (f"_OpaqueVal({self.val})", {"_OpaqueVal": _OpaqueVal})
+
+
+register_opaque_type(_OpaqueVal, typ="value", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
@@ -1321,24 +1344,22 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, (False, True, True))
 
     # =====================================================================
-    # Pybind11 opaque object comparison (Placement types)
+    # Opaque object comparison (TorchScriptObjectVariable)
     # =====================================================================
 
-    def test_placement_cmp(self):
-        """Placement subclasses (Shard, Replicate) use C++ value-based __eq__."""
-        from torch.distributed.tensor.placement_types import Replicate, Shard
+    def test_opaque_object_cmp(self):
+        """Opaque objects use value-based __eq__, not identity."""
+        a1 = _OpaqueVal(1)
+        a2 = _OpaqueVal(1)
+        b = _OpaqueVal(2)
+        self._assert_all_cmp_equals(a1, a2, error_ops=self._ORDERING_OPS)
+        self._assert_all_cmp_equals(a1, b, error_ops=self._ORDERING_OPS)
 
-        self._assert_all_cmp_equals(Shard(0), Shard(0), error_ops=self._ORDERING_OPS)
-        self._assert_all_cmp_equals(Shard(0), Shard(1), error_ops=self._ORDERING_OPS)
-        self._assert_all_cmp_equals(Shard(0), Replicate(), error_ops=self._ORDERING_OPS)
-
-    def test_placement_tuple_cmp(self):
-        """Tuple of Placement objects: mirrors DTensor's placements comparison."""
-        from torch.distributed.tensor.placement_types import Replicate, Shard
-
-        p1 = (Shard(0), Replicate())
-        p2 = (Shard(0), Replicate())
-        p3 = (Shard(1), Replicate())
+    def test_opaque_object_tuple_cmp(self):
+        """Tuple of opaque objects: mirrors DTensor's placements comparison."""
+        p1 = (_OpaqueVal(1), _OpaqueVal(2))
+        p2 = (_OpaqueVal(1), _OpaqueVal(2))
+        p3 = (_OpaqueVal(1), _OpaqueVal(3))
 
         for op in (operator.eq, operator.ne):
             with self.subTest(op=op.__name__):
