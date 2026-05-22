@@ -507,6 +507,16 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
   return std::make_tuple(std::move(atol_tensor), std::move(rtol_tensor));
 }
 
+Tensor expand_pinv_tolerance(
+    const Tensor& tolerance,
+    SymIntArrayRef batch_shape,
+    SymIntArrayRef singular_value_shape) {
+  if (at::is_expandable_to(tolerance.sym_sizes(), batch_shape)) {
+    return tolerance.expand_symint(batch_shape).unsqueeze(-1);
+  }
+  return tolerance.expand_symint(singular_value_shape);
+}
+
 } // anonymous namespace
 
 Tensor linalg_pinv(
@@ -540,7 +550,11 @@ Tensor linalg_pinv(
     // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
     auto [U, S, V] = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
-    Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    const auto S_shape = c10::SymDimVector(S.sym_sizes().begin(), S.sym_sizes().end());
+    const auto batch_shape = c10::SymDimVector(S_shape.begin(), S_shape.end() - 1);
+    Tensor atol_expanded = expand_pinv_tolerance(atol, batch_shape, S_shape);
+    Tensor rtol_expanded = expand_pinv_tolerance(rtol, batch_shape, S_shape);
+    Tensor tol = at::max(atol_expanded, rtol_expanded * max_val);
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.mH());
@@ -550,7 +564,11 @@ Tensor linalg_pinv(
     Tensor S_abs = S.abs();
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
     Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
-    Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    const auto S_shape = c10::SymDimVector(S_abs.sym_sizes().begin(), S_abs.sym_sizes().end());
+    const auto batch_shape = c10::SymDimVector(S_shape.begin(), S_shape.end() - 1);
+    Tensor atol_expanded = expand_pinv_tolerance(atol, batch_shape, S_shape);
+    Tensor rtol_expanded = expand_pinv_tolerance(rtol, batch_shape, S_shape);
+    Tensor tol = at::max(atol_expanded, rtol_expanded * max_val);
     Tensor S_pseudoinv = at::where(S_abs > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.mH());
