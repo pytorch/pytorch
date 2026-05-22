@@ -10,7 +10,6 @@ import os
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
-from typing import Any
 
 from functorch_additional_op_db import additional_op_db
 
@@ -26,13 +25,6 @@ from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRu
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
 
 
-def _select_fn(op: torch._ops.OperatorBase, *args: Any, **kwargs: Any) -> torch.Tensor:
-    if "native_group_norm" in op.name():
-        # native_group_norm currently only supports contiguous inputs.
-        return torch.select_copy(*args, **kwargs)
-    return torch.select(*args, **kwargs)
-
-
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     outs = []
     out_spec = None
@@ -42,7 +34,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         if args_spec != dims_spec:
             raise AssertionError(f"args_spec {args_spec} != dims_spec {dims_spec}")
         new_args = [
-            _select_fn(op, a, in_dim, idx) if in_dim is not None else a
+            torch.select_copy(a, in_dim, idx) if in_dim is not None else a
             for a, in_dim in zip(flat_args, flat_dims)
         ]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
@@ -100,12 +92,12 @@ def loop2(
     for idx1 in range(batch_size1):
         out_split = []
         arg_split = [
-            _select_fn(op, a, in_dim1, idx1) if in_dim1 is not None else a
+            torch.select_copy(a, in_dim1, idx1) if in_dim1 is not None else a
             for a, in_dim1 in zip(flat_args, flat_dims1)
         ]
         for idx2 in range(batch_size2):
             new_args = [
-                _select_fn(op, a, in_dim, idx2) if in_dim is not None else a
+                torch.select_copy(a, in_dim, idx2) if in_dim is not None else a
                 for a, in_dim in zip(arg_split, flat_dims2)
             ]
             out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
