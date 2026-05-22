@@ -32,7 +32,7 @@ permissions:
 jobs:
   docker-build:
     if: github.repository_owner == 'pytorch'
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    environment: docker-build
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -101,7 +101,6 @@ jobs:
           aws-role-to-assume: arn:aws:iam::308535385114:role/arc
 
       - name: Login to GHCR
-        if: github.event_name == 'push' && github.ref_type == 'branch'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -143,7 +142,6 @@ jobs:
         uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
 
       - name: Mirror image to GHCR
-        if: github.event_name == 'push' && github.ref_type == 'branch'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
           DOCKER_TAG: ${{ steps.tag.outputs.docker-tag }}
