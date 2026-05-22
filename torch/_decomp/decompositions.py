@@ -3168,7 +3168,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -4888,7 +4888,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(t1.numel() == 0):
+    if guard_or_false(sym_numel(t1) == 0):
         return True
 
     t1_shape = t1.shape
@@ -5203,8 +5203,8 @@ def _reflection_or_replication_pad(
     inp_shape = a.shape[-dim:]
     nc_dim = a.dim() - dim
 
-    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
-    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     result = a
     for i in range(dim):
@@ -5212,8 +5212,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps", "xpu"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
@@ -5227,8 +5239,8 @@ def _reflection_pad_backward(grad_output, x, padding):
 
     dhw = [h - 1 for h in x.shape[-dim:]]
 
-    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
-    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     indices = []
     for i in range(x.ndim):

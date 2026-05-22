@@ -185,7 +185,7 @@ class DraftExportReport:
         if self.successful():
             return f"""{GREEN_COLOR}
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
 {END_COLOR}"""
@@ -528,7 +528,7 @@ with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_prof
         log.info(
             """
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
     """
