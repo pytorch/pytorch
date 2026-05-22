@@ -73,6 +73,25 @@ struct IsVecType<at::vec::VectorizedN<T, N>> : std::true_type {};
 
 template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VecMask<src_t, src_n>& mask) {
+  return mask.template cast<dst_t, dst_n>();
+}
+
+template <typename dst_t, int dst_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::Vectorized<bool>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(
+      at::vec::VectorizedN<bool, 1>(mask));
+}
+
+template <typename dst_t, int dst_n, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VectorizedN<bool, src_n>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(mask);
+}
 #endif
 
 template <typename T>
@@ -192,7 +211,16 @@ Welford<T> welford_combine(
   if (b.index == 0) {
     return a;
   }
+  // Guard against inf - inf = NaN when both means are infinite and equal.
+  // This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
   auto delta = b.mean - a.mean;
+  if constexpr (IsVecType<T>::value) {
+    delta = T::blendv(delta, T(0), a.mean == b.mean);
+  } else {
+    if (std::isinf(a.mean) && a.mean == b.mean) {
+      delta = T(0);
+    }
+  }
   auto a_weight = use_index ? T(a.index) : a.weight;
   auto b_weight = use_index ? T(b.index) : b.weight;
   auto new_weight = a_weight + b_weight;
@@ -618,6 +646,15 @@ inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
   return argmin_vec_impl(a, next_value, next_idx, tail_size);
 }
 
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
 template <typename T, int NV, int NI, bool horizontal>
 inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     IndexValueVec<T, NV, NI>& a,
@@ -626,6 +663,15 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     std::optional<int64_t> tail_size = std::nullopt) {
   auto next_idx = create_index<T, NI, horizontal>(next_index);
   return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
 template <typename T, int NV, int NI>

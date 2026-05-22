@@ -17,7 +17,6 @@
 #include <c10/util/irange.h>
 
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1527,7 +1526,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 
   if (fmt.substr(last_offset) == "|deprecated") {
     hidden = true;
-    // TODO: raise warning when parsing deprecated signatures
     deprecated = true;
   } else if (fmt.substr(last_offset) == "|hidden") {
     hidden = true;
@@ -1994,7 +1992,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
             i,
             Py_TYPE(obj)->tp_name));
   }
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);

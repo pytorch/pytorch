@@ -66,6 +66,9 @@ struct MPSHooks : public at::MPSHooksInterface {
     // When MPS is available, it is always in use for the one device.
     return true;
   }
+  DeviceIndex deviceCount() const override {
+    return hasMPS() ? 1 : 0;
+  }
 };
 
 } // namespace at::mps

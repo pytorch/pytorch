@@ -195,6 +195,44 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta(
+    [
+        aten._transformer_encoder_layer_fwd.default,
+        aten._transformer_encoder_layer_fwd.out,
+    ]
+)
+@out_wrapper()
+def meta__transformer_encoder_layer_fwd(
+    src: Tensor,
+    embed_dim: int,
+    num_heads: int,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    use_gelu: bool,
+    norm_first: bool,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
+    ffn_weight_1: Tensor,
+    ffn_bias_1: Tensor,
+    ffn_weight_2: Tensor,
+    ffn_bias_2: Tensor,
+    mask: torch.Tensor | None = None,
+    mask_type: int | None = None,
+) -> Tensor:
+    if src.is_nested:
+        raise NotImplementedError(
+            "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
+        )
+    if src.numel() == 0:
+        return src.clone()
+    return torch.empty_like(src)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
@@ -4505,15 +4543,33 @@ def meta_zero_(self):
 @register_meta(
     [
         aten.mul_.Scalar,
-        aten.div_.Scalar,
         aten.mul_.Tensor,
-        aten.div_.Tensor,
         aten.logical_and_.default,
         aten.logical_or_.default,
         aten.logical_xor_.default,
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
+    return self
+
+
+@register_meta([aten.div_.Scalar, aten.div_.Tensor])
+def meta_div_inplace(self, other):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    torch._check(
+        utils.can_safe_cast_to(cast_from=result_dtype, cast_to=self.dtype),
+        lambda: (
+            f"result type {result_dtype} can't be cast to the desired "
+            f"output type {self.dtype}"
+        ),
+    )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
