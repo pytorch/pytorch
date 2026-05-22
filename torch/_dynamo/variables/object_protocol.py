@@ -7,9 +7,15 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
+import abc
+import enum
+import sys
+import types
+import typing
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
+import torch
 from torch._C._dynamo import (
     get_type_slots,
     has_slot,
@@ -1270,3 +1276,112 @@ def generic_contains(
         return VariableTracker.build(
             tx, polyfills.impl_CONTAINS_OP_fallback
         ).call_function(tx, [item, it], {})
+
+
+# Metaclasses whose __subclasscheck__ Dynamo can't trace but whose
+# behavior we're willing to observe at trace time via Python's issubclass.
+# Each entry trades fidelity to the metaclass's side effects (e.g. ABC's
+# subclass cache mutation) for coverage of the common case.
+_CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES: tuple[type, ...] = (
+    abc.ABCMeta,
+    torch._C._TensorMeta,  # actually just type.__subclasscheck__, but easier to list it here
+    enum.EnumMeta,
+)
+
+
+def generic_issubclass(
+    tx: "InstructionTranslator",
+    derived: VariableTracker,
+    cls: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyObject_IsSubclass / object_issubclass.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2766-L2823
+
+    This only attempts to replicate object_issubclass, otherwise we delegate to cpython
+    """
+    derived_py = derived.get_real_python_backed_value()
+    cls_py = cls.get_real_python_backed_value()
+    if derived_py is NO_SUCH_SUBOBJ or cls_py is NO_SUCH_SUBOBJ:
+        unimplemented(
+            gb_type="issubclass() with unsupported arguments",
+            context=f"issubclass({derived}, {cls})",
+            explanation="Arguments to issubclass() must be backed by python values.",
+            hints=[
+                "Make sure your arguments are types.",
+                *graph_break_hints.USER_ERROR,
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+    cls_type = maybe_get_python_type(cls)
+
+    # Step 1: PyType_CheckExact fast path — abstract.c L2772
+    if cls_type is type:
+        try:
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,  # pyrefly: ignore [invalid-argument]
+                )
+            )
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
+    # Step 2: PEP 604 Union (e.g. ``int | str``) — abstract.c L2779-2781.
+    union_types = {types.UnionType}
+    if sys.version_info < (3, 14):
+        union_types.add(
+            typing._UnionGenericAlias  # pyrefly: ignore [missing-attribute]
+        )
+    if cls_type in union_types:
+        # TODO can trace this once TypingVariable is removed
+        args = typing.get_args(cls_py)
+        cls = VariableTracker.build(tx, args)
+
+    # Step 3: tuple of classes — abstract.c L2783-2799.  Check for
+    # TupleVariable instead of tuple to make the type checker happy.
+    from .lists import TupleVariable
+
+    if isinstance(cls, TupleVariable):
+        for item in cls.items:
+            r = generic_issubclass(tx, derived, item)
+            if isinstance(r, ConstantVariable) and r.value:
+                return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
+    # Allowlist short-circuit for Step 4: constant-fold via Python's
+    # issubclass for metaclasses whose ``__subclasscheck__`` Dynamo can't
+    # trace (see _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES).  Note that ABCMeta
+    # is problematic in particular since it caches registered subclasses.
+    # Ideally this should be traced or guarded
+    if isinstance(cls_py, type) and issubclass(
+        type(cls_py), _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES
+    ):
+        try:
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,
+                )
+            )
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
+    # TypeError gate, mirroring abstract.c L2822 ``recursive_issubclass``:
+    # CPython reaches that fallback when ``_PyObject_LookupSpecial`` for
+    # ``__subclasscheck__`` returns NULL, and its first action is
+    # ``check_class(cls, ...)`` which raises this TypeError.  We check
+    # eagerly because Dynamo's ``call_method`` below would graph-break
+    # rather than cleanly signal "no such method".
+    if not isinstance(cls_py, type):
+        raise_type_error(
+            tx,
+            "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+        )
+
+    # Step 4: general case — call ``__subclasscheck__`` on cls's metaclass
+    # (abstract.c L2801-2815).  Runs user code on a custom metaclass.
+    result = cls.call_method(tx, "__subclasscheck__", [derived], {})
+
+    # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
+    return generic_bool(tx, result)
