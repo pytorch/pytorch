@@ -10,6 +10,7 @@ from torch._inductor.fx_passes.pad_mm import (
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
+    is_mm_compute_bound,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -438,9 +439,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
-        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
-        size = [61, 61]
+        # Size must be big enough that `is_mm_compute_bound` returns True on
+        # the current GPU, and must still need padding to 4 elements.
+        dim = 61
+        while not is_mm_compute_bound(dim, dim, dim, torch.float32):
+            dim += 4
+        size = [dim, dim]
         mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         self.assertEqual(len(local_cache), 2)
