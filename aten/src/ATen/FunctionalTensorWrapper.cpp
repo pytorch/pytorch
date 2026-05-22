@@ -4,7 +4,13 @@
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
+#include <c10/util/safe_numerics.h>
 
+#include <algorithm>
+#include <limits>
+#include <numeric>
+#include <optional>
+#include <unordered_set>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -15,6 +21,305 @@
 #endif
 
 namespace at {
+namespace {
+
+enum class InternalOverlapCheck {
+  No,
+  Overlap,
+  TooHard,
+};
+
+bool has_as_strided_view_meta(
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>&
+        view_metas) {
+  return std::any_of(
+      view_metas.begin(), view_metas.end(), [](const auto& view_meta) {
+        return view_meta->is_as_strided;
+      });
+}
+
+std::optional<int64_t> maybe_guard_symint_to_int(const c10::SymInt& value) {
+  if (!value.is_symbolic()) {
+    return value.maybe_as_int();
+  }
+  // Guard backed symbolic values so overlap-dependent graphs are not reused
+  // for shapes with a different overlap classification.
+  if (!value.has_hint()) {
+    return std::nullopt;
+  }
+  return value.guard_int(__FILE__, __LINE__);
+}
+
+bool all_symints_have_hints(c10::SymIntArrayRef values) {
+  return std::all_of(values.begin(), values.end(), [](const auto& value) {
+    return value.has_hint();
+  });
+}
+
+bool has_pairwise_overlap(
+    uint64_t size0,
+    uint64_t stride0,
+    uint64_t size1,
+    uint64_t stride1) {
+  const auto stride_gcd = std::gcd(stride0, stride1);
+  return stride1 / stride_gcd <= size0 - 1 &&
+      stride0 / stride_gcd <= size1 - 1;
+}
+
+bool has_any_pairwise_overlap(
+    const std::vector<uint64_t>& sizes,
+    const std::vector<uint64_t>& strides) {
+  for (const auto dim0 : c10::irange(sizes.size())) {
+    for (const auto dim1 : c10::irange(dim0 + 1, sizes.size())) {
+      if (has_pairwise_overlap(
+              sizes[dim0], strides[dim0], sizes[dim1], strides[dim1])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool is_definitely_non_overlapping_by_span(
+    const std::vector<uint64_t>& sizes,
+    const std::vector<uint64_t>& strides) {
+  std::vector<size_t> dim_order(sizes.size());
+  std::iota(dim_order.begin(), dim_order.end(), 0);
+  std::sort(dim_order.begin(), dim_order.end(), [&](size_t a, size_t b) {
+    if (strides[a] != strides[b]) {
+      return strides[a] < strides[b];
+    }
+    return sizes[a] < sizes[b];
+  });
+
+  uint64_t max_offset = 0;
+  for (const auto dim : dim_order) {
+    if (strides[dim] <= max_offset) {
+      return false;
+    }
+
+    uint64_t dim_span = 0;
+    if (c10::mul_overflows(sizes[dim] - 1, strides[dim], &dim_span) ||
+        c10::add_overflows(max_offset, dim_span, &max_offset)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+InternalOverlapCheck has_duplicate_offsets(
+    std::vector<uint64_t> sizes,
+    std::vector<uint64_t> strides,
+    uint64_t max_offsets_to_check) {
+  std::vector<size_t> dim_order(sizes.size());
+  std::iota(dim_order.begin(), dim_order.end(), 0);
+  std::sort(dim_order.begin(), dim_order.end(), [&](size_t a, size_t b) {
+    if (strides[a] != strides[b]) {
+      return strides[a] < strides[b];
+    }
+    return sizes[a] < sizes[b];
+  });
+
+  std::vector<uint64_t> ordered_sizes;
+  std::vector<uint64_t> ordered_strides;
+  ordered_sizes.reserve(sizes.size());
+  ordered_strides.reserve(strides.size());
+  for (const auto dim : dim_order) {
+    ordered_sizes.push_back(sizes[dim]);
+    ordered_strides.push_back(strides[dim]);
+  }
+
+  std::vector<uint64_t> indices(ordered_sizes.size(), 0);
+  std::unordered_set<uint64_t> seen_offsets;
+  seen_offsets.reserve(static_cast<size_t>(max_offsets_to_check));
+  uint64_t offset = 0;
+  uint64_t offsets_checked = 0;
+
+  while (true) {
+    if (!seen_offsets.insert(offset).second) {
+      return InternalOverlapCheck::Overlap;
+    }
+    offsets_checked++;
+
+    size_t dim = 0;
+    for (; dim < ordered_sizes.size(); dim++) {
+      indices[dim]++;
+      if (indices[dim] < ordered_sizes[dim]) {
+        offset += ordered_strides[dim];
+        break;
+      }
+      offset -= (ordered_sizes[dim] - 1) * ordered_strides[dim];
+      indices[dim] = 0;
+    }
+    if (dim == ordered_sizes.size()) {
+      return InternalOverlapCheck::No;
+    }
+    if (offsets_checked >= max_offsets_to_check) {
+      return InternalOverlapCheck::TooHard;
+    }
+  }
+}
+
+InternalOverlapCheck has_internal_overlap_or_too_hard(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
+  TORCH_INTERNAL_ASSERT(sizes.size() == strides.size());
+
+  // Empty views have no internal overlap. If a symbolic size cannot be proven
+  // nonzero, avoid reporting definite overlap because the view may be empty.
+  for (const auto i : c10::irange(sizes.size())) {
+    if (TORCH_GUARD_OR_FALSE(sizes[i].sym_eq(0))) {
+      return InternalOverlapCheck::No;
+    }
+  }
+  for (const auto i : c10::irange(sizes.size())) {
+    if (!TORCH_GUARD_OR_FALSE(sizes[i].sym_ne(0))) {
+      return InternalOverlapCheck::No;
+    }
+  }
+
+  if (sizes.size() == 0) {
+    return InternalOverlapCheck::No;
+  }
+
+  if (sizes.size() == 1) {
+    return TORCH_GUARD_OR_FALSE(strides[0].sym_eq(0)) &&
+            TORCH_GUARD_OR_FALSE(sizes[0].sym_gt(1))
+        ? InternalOverlapCheck::Overlap
+        : InternalOverlapCheck::No;
+  }
+
+  std::vector<uint64_t> nontrivial_sizes;
+  std::vector<uint64_t> nontrivial_strides;
+  nontrivial_sizes.reserve(sizes.size());
+  nontrivial_strides.reserve(strides.size());
+
+  for (const auto i : c10::irange(sizes.size())) {
+    if (TORCH_GUARD_OR_FALSE(strides[i].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(sizes[i].sym_gt(1))) {
+        return InternalOverlapCheck::Overlap;
+      }
+      continue;
+    }
+    if (!TORCH_GUARD_OR_FALSE(sizes[i].sym_gt(1))) {
+      continue;
+    }
+
+    const auto maybe_size = maybe_guard_symint_to_int(sizes[i]);
+    const auto maybe_stride = maybe_guard_symint_to_int(strides[i]);
+    if (!maybe_size.has_value() || !maybe_stride.has_value()) {
+      return InternalOverlapCheck::No;
+    }
+
+    const auto size = *maybe_size;
+    auto stride = *maybe_stride;
+    if (size <= 1) {
+      continue;
+    }
+    if (stride == 0) {
+      return InternalOverlapCheck::Overlap;
+    }
+    if (stride < 0) {
+      if (stride == std::numeric_limits<int64_t>::min()) {
+        return InternalOverlapCheck::TooHard;
+      }
+      stride = -stride;
+    }
+    nontrivial_sizes.push_back(static_cast<uint64_t>(size));
+    nontrivial_strides.push_back(static_cast<uint64_t>(stride));
+  }
+
+  if (nontrivial_sizes.empty()) {
+    return InternalOverlapCheck::No;
+  }
+
+  if (nontrivial_sizes.size() == 1 ||
+      is_definitely_non_overlapping_by_span(
+          nontrivial_sizes, nontrivial_strides)) {
+    return InternalOverlapCheck::No;
+  }
+
+  if (nontrivial_sizes.size() == 2) {
+    return has_pairwise_overlap(
+               nontrivial_sizes[0],
+               nontrivial_strides[0],
+               nontrivial_sizes[1],
+               nontrivial_strides[1])
+        ? InternalOverlapCheck::Overlap
+        : InternalOverlapCheck::No;
+  }
+
+  if (has_any_pairwise_overlap(nontrivial_sizes, nontrivial_strides)) {
+    return InternalOverlapCheck::Overlap;
+  }
+
+  uint64_t numel = 1;
+  bool numel_overflowed = false;
+  uint64_t max_offset = 0;
+  bool max_offset_overflowed = false;
+  uint64_t stride_gcd = 0;
+  for (const auto dim : c10::irange(nontrivial_sizes.size())) {
+    uint64_t next_numel = 0;
+    numel_overflowed |= c10::mul_overflows(
+        numel, nontrivial_sizes[dim], &next_numel);
+    if (!numel_overflowed) {
+      numel = next_numel;
+    }
+
+    uint64_t dim_span = 0;
+    max_offset_overflowed |= c10::mul_overflows(
+        nontrivial_sizes[dim] - 1, nontrivial_strides[dim], &dim_span);
+    max_offset_overflowed |=
+        c10::add_overflows(max_offset, dim_span, &max_offset);
+
+    stride_gcd = stride_gcd == 0
+        ? nontrivial_strides[dim]
+        : std::gcd(stride_gcd, nontrivial_strides[dim]);
+  }
+
+  if (!max_offset_overflowed) {
+    // All offsets are multiples of the stride gcd and lie in [0, max_offset].
+    // If the view has more logical elements than possible offsets, overlap is
+    // guaranteed without enumerating the layout.
+    uint64_t possible_offsets = max_offset / stride_gcd;
+    const bool possible_offsets_overflowed =
+        c10::add_overflows(possible_offsets, 1, &possible_offsets);
+    if (!possible_offsets_overflowed &&
+        (numel_overflowed || numel > possible_offsets)) {
+      return InternalOverlapCheck::Overlap;
+    }
+
+    constexpr uint64_t kMaxExactOffsetsToCheck = 131072;
+    return has_duplicate_offsets(
+        std::move(nontrivial_sizes),
+        std::move(nontrivial_strides),
+        kMaxExactOffsetsToCheck);
+  }
+
+  return InternalOverlapCheck::TooHard;
+}
+
+InternalOverlapCheck as_strided_view_internal_overlap_check(
+    const Tensor& value,
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>&
+        view_metas) {
+  if (!has_as_strided_view_meta(view_metas)) {
+    return InternalOverlapCheck::No;
+  }
+  if (value.layout() != c10::kStrided) {
+    return InternalOverlapCheck::No;
+  }
+
+  const auto sizes = value.sym_sizes();
+  const auto strides = value.sym_strides();
+  if (all_symints_have_hints(strides) &&
+      value.unsafeGetTensorImpl()->is_non_overlapping_and_dense_or_false()) {
+    return InternalOverlapCheck::No;
+  }
+  return has_internal_overlap_or_too_hard(sizes, strides);
+}
+
+} // namespace
 
 void FunctionalTensorWrapper::set_constructor_metadata() {
   TORCH_INTERNAL_ASSERT(value_.defined());
@@ -217,6 +522,22 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
 void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regenerate) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
+  if (!from_lazy_regenerate) {
+    const auto overlap_check =
+        as_strided_view_internal_overlap_check(value_, view_metas_);
+    if (overlap_check == InternalOverlapCheck::Overlap) {
+      TORCH_CHECK(
+          false,
+          "torch.compile/functionalization does not support in-place mutation on overlapping as_strided views. ",
+          "Please clone() the tensor before mutating it, or remove the mutation from the model.");
+    }
+    if (overlap_check == InternalOverlapCheck::TooHard) {
+      TORCH_CHECK(
+          false,
+          "torch.compile/functionalization cannot safely determine whether an as_strided view has internal overlap for in-place mutation. ",
+          "Please clone() the tensor before mutating it, or remove the mutation from the model.");
+    }
+  }
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
