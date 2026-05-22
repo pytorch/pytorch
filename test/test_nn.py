@@ -9595,6 +9595,21 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
+        # Unsupported (ndim, pad_size) combinations for non-constant modes raise ValueError
+        for mode in ('reflect', 'replicate', 'circular'):
+            # pad_size=2 requires 2D or 3D input
+            self.assertRaisesRegex(
+                ValueError,
+                "does not support 4D input with padding size 2",
+                lambda: F.pad(torch.randn(1, 1, 4, 4, device=device, dtype=dtype), (1, 1), mode=mode),
+            )
+            # pad_size=4 requires 3D or 4D input
+            self.assertRaisesRegex(
+                ValueError,
+                "does not support 5D input with padding size 4",
+                lambda: F.pad(torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype), (1, 1, 1, 1), mode=mode),
+            )
+
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
         # Should raise error when trying to wrap around more than once

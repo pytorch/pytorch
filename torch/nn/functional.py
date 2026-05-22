@@ -5562,9 +5562,11 @@ def pad(
         :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
         for concrete examples on how each of the padding modes works. Constant
         padding is implemented for arbitrary dimensions. Circular, replicate and
-        reflection padding are implemented for padding the last 3 dimensions of a
-        4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
-        or the last dimension of a 2D or 3D input tensor.
+        reflection padding support only specific ``(ndim, pad_size)`` combinations:
+
+        - ``pad`` size 2 (pads last dim): ``input`` must be 2D or 3D
+        - ``pad`` size 4 (pads last 2 dims): ``input`` must be 3D or 4D
+        - ``pad`` size 6 (pads last 3 dims): ``input`` must be 4D or 5D
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -5600,6 +5602,25 @@ def pad(
         return handle_torch_function(
             torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
         )
+    if mode != "constant":
+        ndim = input.dim()
+        pad_len = len(pad)
+        # Non-constant modes only implement 1D/2D/3D spatial padding:
+        #   pad_len=2 (last dim)  -> requires 2D or 3D input
+        #   pad_len=4 (last 2 dims) -> requires 3D or 4D input
+        #   pad_len=6 (last 3 dims) -> requires 4D or 5D input
+        _valid: dict[int, set[int]] = {2: {2}, 3: {2, 4}, 4: {4, 6}, 5: {6}}
+        allowed = _valid.get(ndim)
+        if allowed is None or pad_len not in allowed:
+            valid_desc = (
+                "2D or 3D input with pad size 2, "
+                "3D or 4D input with pad size 4, "
+                "or 4D or 5D input with pad size 6"
+            )
+            raise ValueError(
+                f"Padding mode '{mode}' does not support {ndim}D input with "
+                f"padding size {pad_len}. Supported: {valid_desc}."
+            )
     if not torch.jit.is_scripting():
         if torch.are_deterministic_algorithms_enabled() and (
             input.is_cuda or input.is_xpu
