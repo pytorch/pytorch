@@ -3835,10 +3835,6 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
-        # Since half on CPU is not supported, need to skip the remaining test cases
-        if dtype == torch.half and torch.device(device).type == 'cpu':
-            return
-
         # Ensure that masks are expanded to match tensor properly
         a = torch.rand(100, 100, device=device).mul(100).to(dtype)
         mask_first_el_each_row = torch.zeros(100, device=device, dtype=torch.bool)

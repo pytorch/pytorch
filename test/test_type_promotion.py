@@ -358,9 +358,7 @@ class TestTypePromotion(TestCase):
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
         elif dtype.is_floating_point or dtype.is_complex:
-            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, device=device)
-            tensor = tensor.to(dtype)
+            tensor = torch.randn(shape, dtype=dtype, device=device)
             if remove_zeros:
                 tensor[torch.abs(tensor) < 0.05] = 5
         else:
@@ -373,16 +371,12 @@ class TestTypePromotion(TestCase):
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @float_double_default_dtype
     def test_many_promotions(self, device):
-        # Can also include half on CPU in cases where it will be promoted to a
-        # supported dtype
         dtypes1 = get_all_math_dtypes('cuda')
         dtypes2 = get_all_math_dtypes(device)
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
-                if common_dtype == torch.half and self.device_type == 'cpu':
-                    continue
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
