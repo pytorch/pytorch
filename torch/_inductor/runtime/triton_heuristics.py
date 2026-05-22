@@ -49,6 +49,7 @@ from .hints import (
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
+    runtime_device_properties,
     TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
@@ -440,7 +441,9 @@ class CachingAutotuner(KernelInterface):
             validate_triton_config(cfg)
 
         self.fn = fn
-        self.device_props: DeviceProperties = triton_meta["device"]
+        self.device_props: DeviceProperties = runtime_device_properties(
+            triton_meta["device"]
+        )
         self.triton_meta = {
             **triton_meta,
             "device": self.device_props.index,

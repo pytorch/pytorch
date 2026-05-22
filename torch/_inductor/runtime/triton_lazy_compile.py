@@ -16,7 +16,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from .triton_heuristics import CachingAutotuner
 
@@ -56,7 +56,7 @@ def _get_async_compile() -> Any:
 
 def _wrap_tma_args(args: list[Any], kernel_fn: CachingAutotuner) -> list[Any]:
     """Wrap tensor args with TMA descriptors where the signature requires them."""
-    signature = kernel_fn.triton_meta.get("signature", {})
+    signature = cast(dict[str, Any], kernel_fn.triton_meta.get("signature", {}))
     sig_items = list(signature.items())
 
     # Track args index separately from sig_items index since the signature
