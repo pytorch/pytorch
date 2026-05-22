@@ -22883,6 +22883,11 @@ op_db: list[OpInfo] = [
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
+            # CUDA grid_sampler_2d backward is nondeterministic, and TestJit's
+            # gradgrad variant check compares separate executions with a fixed
+            # tolerance that is too tight for this op.
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit',
+                         device_type='cuda', dtypes=(torch.float32,)),
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=2e-6),
