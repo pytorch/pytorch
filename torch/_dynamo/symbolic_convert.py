@@ -204,7 +204,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1491,7 +1491,7 @@ class InstructionTranslatorBase(
     def inline_generator_function(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1504,7 +1504,7 @@ class InstructionTranslatorBase(
     def inline_user_function_return(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
@@ -5655,7 +5655,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         cls,
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tracer = None
@@ -5735,7 +5735,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         if not isinstance(
