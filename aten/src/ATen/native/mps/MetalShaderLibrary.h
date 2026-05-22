@@ -1,6 +1,9 @@
 #pragma once
+#include <c10/macros/Macros.h>
 #ifdef __OBJC__
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 typedef id<MTLLibrary> MTLLibrary_t;
 typedef id<MTLFunction> MTLFunction_t;
 typedef id<MTLComputePipelineState> MTLComputePipelineState_t;

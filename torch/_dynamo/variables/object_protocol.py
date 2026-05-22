@@ -7,8 +7,8 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
-from functools import lru_cache
-from typing import TYPE_CHECKING
+from functools import lru_cache, partial
+from typing import NoReturn, TYPE_CHECKING
 
 from torch._C._dynamo import (
     get_type_slots,
@@ -86,11 +86,23 @@ def vt_identity_compare(
     if (
         istype(left, variables.ExceptionVariable)
         and istype(right, variables.ExceptionVariable)
-        and left.exc_type is not right.exc_type
+        and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
     ):
         return ConstantVariable.create(False)
 
     return None
+
+
+def binop_type_error(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_symbol: str,
+) -> NoReturn:
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
 
 
 @lru_cache(maxsize=256)
@@ -99,22 +111,37 @@ def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     return get_type_slots(obj_type)
 
 
-def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
+def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given sq slot."""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
     return has_slot(seq_slots, slot)
 
 
-def type_implements_sq_length(obj_type: type) -> bool:
-    """Check whether obj_type implements __len__ as sequence protocol"""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_LENGTH)
+type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
+type_implements_sq_length = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
+)
+type_implements_sq_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONCAT
+)
+type_implements_sq_inplace_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_CONCAT
+)
+type_implements_sq_contains = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONTAINS
+)
 
 
-def type_implements_sq_item(obj_type: type) -> bool:
-    """Check whether obj_type implements __getitem__ as sequence protocol"""
+def type_implements_sq_repeat(obj_type: type) -> bool:
+    """Check whether obj_type implements the sq_repeat slot (sequence repetition)."""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_ITEM)
+    return has_slot(seq_slots, PySequenceSlots.SQ_REPEAT)
+
+
+def type_implements_sq_inplace_repeat(obj_type: type) -> bool:
+    """Check whether obj_type implements the sq_inplace_repeat slot."""
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, PySequenceSlots.SQ_INPLACE_REPEAT)
 
 
 def type_implements_mp_length(obj_type: type) -> bool:
@@ -163,6 +190,12 @@ def type_implements_nb_positive(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_positive slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
+
+
+def type_implements_nb_absolute(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_absolute slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_ABSOLUTE)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -517,6 +550,26 @@ def generic_pos(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
+def generic_abs(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyNumber_Absolute.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1395
+
+    Algorithm:
+    1. If type has nb_absolute slot, call obj.nb_absolute_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_absolute(obj_type):
+        return obj.nb_absolute_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for abs(): '{obj.python_type_name()}'",
+    )
+
+
 def generic_getiter(
     tx: "InstructionTranslator", obj: VariableTracker
 ) -> "VariableTracker":
@@ -559,8 +612,18 @@ def generic_getiter(
 # ---------------------------------------------------------------------------
 
 NB_SLOT_MAPPING = {
+    "nb_lshift": PyNumberSlots.NB_LSHIFT,
+    "nb_inplace_lshift": PyNumberSlots.NB_INPLACE_LSHIFT,
+    "nb_inplace_rshift": PyNumberSlots.NB_INPLACE_RSHIFT,
+    "nb_rshift": PyNumberSlots.NB_RSHIFT,
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
+    "nb_subtract": PyNumberSlots.NB_SUBTRACT,
+    "nb_inplace_subtract": PyNumberSlots.NB_INPLACE_SUBTRACT,
+    "nb_add": PyNumberSlots.NB_ADD,
+    "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
+    "nb_multiply": PyNumberSlots.NB_MULTIPLY,
+    "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
 }
 
 
@@ -599,17 +662,42 @@ def binary_op1(
     e.g. ``__ror__``). For built-in types the flag is ignored because their
     slots check both operands symmetrically.
 
+    CPython splits the check into two steps: ``Py_TYPE(v)->tp_as_number !=
+    NULL`` (does the type have a number-protocol struct), then read the
+    slot pointer (which may itself be NULL).  We collapse both into a
+    single :func:`type_implements_nb_slot` query — its bit is set only
+    when the specific slot is non-NULL, which already implies
+    ``tp_as_number`` is non-NULL.  Treating a missing slot as "no impl"
+    is what keeps the base ``VariableTracker.nb_*_impl`` graph-break
+    out of the path for types that genuinely lack the slot in C.
+
     https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L926-L977
     """
     impl_attr = f"{op_slot}_impl"
-    v_slot = getattr(type(v), impl_attr, None)
-    w_slot = getattr(type(w), impl_attr, None)
+    nb_slot_bit = NB_SLOT_MAPPING[op_slot]
 
-    # Same class -> only call once (CPython: slotw = NULL if same type)
-    if v.python_type() is w.python_type():
-        w_slot = None
-    # Same implementation (inherited) -> skip w
-    elif v_slot is w_slot:
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+
+    v_slot = (
+        getattr(type(v), impl_attr, None)
+        if type_implements_nb_slot(v_type, nb_slot_bit)
+        else None
+    )
+    w_slot = (
+        getattr(type(w), impl_attr, None)
+        if type_implements_nb_slot(w_type, nb_slot_bit)
+        else None
+    )
+
+    # CPython skips slotw if Py_TYPE(w) == Py_TYPE(v) (one C type, one slot
+    # function).  In Dynamo two VT subclasses can share a Python type — e.g.
+    # ConstantVariable(3) and SymNodeVariable both report ``int`` — yet have
+    # different ``nb_*_impl`` methods.  Comparing the slots themselves
+    # captures both "literally the same function" (CPython's check) and
+    # "different VT subclasses sharing a python_type", so we drop the type
+    # equality check.
+    if v_slot is w_slot:
         w_slot = None
 
     if v_slot is not None:
@@ -646,10 +734,7 @@ def binary_op(
 
     result = binary_op1(tx, v, w, op_slot)
     if is_nb_not_implemented(result):
-        raise_type_error(
-            tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
-        )
+        binop_type_error(tx, v, w, op_symbol)
     return result
 
 
@@ -702,11 +787,242 @@ def binary_iop(
     """
     result = binary_iop1(tx, v, w, iop_slot, op_slot)
     if is_nb_not_implemented(result):
+        binop_type_error(tx, v, w, op_symbol)
+    return result
+
+
+# add / inplace add needs special handling
+def vt_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements addition via nb_add / nb_inplace_add with binary_op dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1138-L1155
+    result = binary_op1(tx, v, w, "nb_add")
+    if not is_nb_not_implemented(result):
+        return result
+
+    T = maybe_get_python_type(v)
+    if type_implements_sq_concat(T):
+        return v.sq_concat_impl(tx, w)
+    binop_type_error(tx, v, w, "+")
+
+
+def vt_inplace_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements in-place addition via nb_inplace_add with binary_iop dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1307-L1328
+    result = binary_iop1(tx, v, w, "nb_inplace_add", "nb_add")
+    if is_nb_not_implemented(result):
+        obj_type = maybe_get_python_type(v)
+        if type_implements_sq_inplace_concat(obj_type):
+            return v.sq_inplace_concat_impl(tx, w)
+        elif type_implements_sq_concat(obj_type):
+            return v.sq_concat_impl(tx, w)
+        else:
+            binop_type_error(tx, v, w, "+=")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Multiplication: PyNumber_Multiply / PyNumber_InPlaceMultiply
+#
+# Multiplication is special because numeric types implement nb_multiply but
+# sequence types (list, tuple, str, bytes, bytearray) implement only sq_repeat.
+# CPython's PyNumber_Multiply tries nb_multiply first (via binary_op1) and on
+# NotImplemented falls back to sq_repeat on either operand.
+#
+# https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1156-L1193
+# ---------------------------------------------------------------------------
+
+
+def sequence_repeat(
+    tx: "InstructionTranslator",
+    seq: VariableTracker,
+    n: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's sequence_repeat helper.
+
+    Validates that ``n`` is index-like, converts it to an int, and dispatches
+    to ``seq.sq_repeat_impl(tx, count)``.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1156-L1174
+    """
+    n_type = maybe_get_python_type(n)
+    if not type_implements_nb_index(n_type):
         raise_type_error(
             tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+            f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
-    return result
+    count = n.nb_index_impl(tx)
+    return seq.sq_repeat_impl(tx, count)
+
+
+def sequence_inplace_repeat(
+    tx: "InstructionTranslator",
+    seq: VariableTracker,
+    n: VariableTracker,
+) -> VariableTracker:
+    """sequence_repeat using sq_inplace_repeat.
+
+    The validation step is identical to ``sequence_repeat``; only the
+    target slot differs.
+    """
+    n_type = maybe_get_python_type(n)
+    if not type_implements_nb_index(n_type):
+        raise_type_error(
+            tx,
+            f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
+        )
+    count = n.nb_index_impl(tx)
+    return seq.sq_inplace_repeat_impl(tx, count)
+
+
+def generic_multiply(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_Multiply.
+
+    Try nb_multiply via binary_op1; on NotImplemented fall back to sq_repeat
+    on either operand.  TypeError if no path works.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1176-L1193
+    """
+    result = binary_op1(tx, v, w, "nb_multiply")
+    if not is_nb_not_implemented(result):
+        return result
+
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+    if type_implements_sq_repeat(v_type):
+        return sequence_repeat(tx, v, w)
+    if type_implements_sq_repeat(w_type):
+        return sequence_repeat(tx, w, v)
+
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for *: "
+        f"'{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
+def generic_inplace_multiply(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyNumber_InPlaceMultiply.
+
+    Try nb_inplace_multiply / nb_multiply via binary_iop1; on NotImplemented
+    fall back to sq_inplace_repeat (preferred), then sq_repeat.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1330-L1357
+    """
+    result = binary_iop1(tx, v, w, "nb_inplace_multiply", "nb_multiply")
+    if not is_nb_not_implemented(result):
+        return result
+
+    v_type = maybe_get_python_type(v)
+    w_type = maybe_get_python_type(w)
+    if type_implements_sq_inplace_repeat(v_type):
+        return sequence_inplace_repeat(tx, v, w)
+    if type_implements_sq_repeat(v_type):
+        return sequence_repeat(tx, v, w)
+    # Cannot mutate w in-place — abstract.c L1348-1352 explicitly avoids
+    # sq_inplace_repeat on the right-hand operand.
+    if type_implements_sq_repeat(w_type):
+        return sequence_repeat(tx, w, v)
+
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for *=: "
+        f"'{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Type-object slot wrappers for ``__mul__`` / ``__rmul__`` / ``__imul__``
+#
+# These mirror the *type object*'s installation of ``__mul__`` etc. as a
+# method, not the operator dispatch.  In CPython the user-visible
+# ``int.__mul__`` and ``list.__mul__`` are different functions, each
+# generated at type-construction time from ``Objects/typeobject.c``'s
+# ``slotdefs[]`` table:
+#
+#   slotdefs[]:
+#     BINSLOT(__mul__, nb_multiply, slot_nb_multiply, "*")    [L10323]
+#     SQSLOT (__mul__, sq_repeat,   NULL, wrap_indexargfunc)  [L10419]
+#     RBINSLOT(__rmul__, nb_multiply, slot_nb_multiply, "*")  [L10325]
+#     SQSLOT (__rmul__, sq_repeat,   NULL, wrap_indexargfunc) [L10421]
+#     IBSLOT (__imul__, nb_inplace_multiply, ...)             [L10364]
+#     SQSLOT (__imul__, sq_inplace_repeat, NULL, ...)         [L10434]
+#
+# https://github.com/python/cpython/blob/v3.13.13/Objects/typeobject.c#L10244 (slotdefs[])
+# https://github.com/python/cpython/blob/v3.13.13/Objects/typeobject.c#L10412-L10416 (rationale comment)
+#
+# ``add_operators`` walks ``slotdefs[]`` and inserts a method into the
+# type's ``__dict__`` for whichever slot the type fills.  As the comment
+# at L10412 notes, types fill at most one of ``nb_multiply`` /
+# ``sq_repeat`` per op; nb_* takes priority because its slotdef appears
+# first.  ``slot_wrapper_mul``/``slot_wrapper_imul`` reproduce that
+# selection so that ``call_method`` routing for direct dunder calls
+# (``[1, 2].__mul__(3)``) reaches the correct slot.
+#
+# Distinct from ``generic_multiply`` / ``generic_inplace_multiply``, which
+# mirror the operator-level algorithm in ``Objects/abstract.c``
+# (``PyNumber_Multiply``) — cross-operand subclass priority and the
+# ``sq_repeat`` fallback when ``nb_multiply`` returns ``NotImplemented``.
+# ---------------------------------------------------------------------------
+
+
+def slot_wrapper_mul(
+    tx: "InstructionTranslator",
+    self: VariableTracker,
+    other: VariableTracker,
+    reverse: bool = False,
+) -> VariableTracker:
+    """``self.__mul__(other)`` / ``self.__rmul__(other)`` slot wrapper."""
+    self_type = maybe_get_python_type(self)
+    if type_implements_nb_slot(self_type, PyNumberSlots.NB_MULTIPLY):
+        return self.nb_multiply_impl(tx, other, reverse=reverse)
+    if type_implements_sq_repeat(self_type):
+        # SQSLOT for __mul__ and __rmul__ both use ``wrap_indexargfunc`` —
+        # the wrapper ignores the reverse flag because sq_repeat takes
+        # ``(seq, count)`` regardless of which side ``self`` is on.
+        return sequence_repeat(tx, self, other)
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for *: "
+        f"'{self.python_type_name()}' and '{other.python_type_name()}'",
+    )
+
+
+def slot_wrapper_imul(
+    tx: "InstructionTranslator",
+    self: VariableTracker,
+    other: VariableTracker,
+) -> VariableTracker:
+    """``self.__imul__(other)`` slot wrapper.
+
+    When neither ``nb_inplace_multiply`` nor ``sq_inplace_repeat`` is
+    installed, the slotdef machinery doesn't generate ``__imul__`` at all
+    — but the operator-level fallback in ``slot_nb_inplace_multiply``
+    (typeobject.c) does try the non-inplace slot.  We mirror that here so
+    method lookups don't graph-break on (e.g.) tuple, even though tuple
+    has no ``__imul__`` attribute in standard CPython.
+    """
+    self_type = maybe_get_python_type(self)
+    if type_implements_nb_slot(self_type, PyNumberSlots.NB_INPLACE_MULTIPLY):
+        return self.nb_inplace_multiply_impl(tx, other)
+    if type_implements_sq_inplace_repeat(self_type):
+        return sequence_inplace_repeat(tx, self, other)
+    return slot_wrapper_mul(tx, self, other)
 
 
 def generic_hash_impl(
@@ -748,7 +1064,7 @@ def generic_contains(
     """
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
     T = maybe_get_python_type(obj)
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONTAINS):
+    if type_implements_sq_contains(T):
         return obj.sq_contains(tx, item)
     else:
         # iter fallback handles both __iter__ and __getitem__ sequence protocol cases

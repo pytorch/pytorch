@@ -71,7 +71,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
           # enable-cache persists ~/.cache/uv across nightlies (keyed on the
           # workflow file hash by default); a warm cache makes the subsequent
