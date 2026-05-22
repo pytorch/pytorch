@@ -61,6 +61,21 @@ inline float randn(long seed, long index) {
       ::metal::cos(2.0 * M_PI_F * u2);
 }
 
+// Box-Muller transform: convert two raw Philox uint32 outputs into two
+// independent N(0, 1) samples. The radial uniform `u1` is clamped away from
+// `0` so `log(u1)` stays finite; the angular uniform `u2` needs no clamp
+// because `sin` / `cos` are bounded over the entire domain. `sincos` is the
+// fused intrinsic that returns `sin` and writes `cos` in one call.
+inline float2 box_muller_from_philox(uint2 raw) {
+  constexpr float eps = ::metal::numeric_limits<float>::epsilon();
+  float u1 = ::metal::max(detail::uint32_to_uniform_float(raw.x), eps);
+  float u2 = detail::uint32_to_uniform_float(raw.y);
+  float r = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1));
+  float c;
+  float s = ::metal::precise::sincos(2.0f * M_PI_F * u2, c);
+  return r * float2(c, s);
+}
+
 inline float rand(long seed, long index) {
   auto value = philox4::rand(seed, index);
   return detail::uint32_to_uniform_float(value.x);

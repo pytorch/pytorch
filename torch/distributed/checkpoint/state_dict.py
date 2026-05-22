@@ -1342,7 +1342,7 @@ def _unflatten_model_state_dict(
         warnings.warn(
             "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"
             "is deprecated and will be removed in 2.5. If you need this "
-            "feature, please preprocessing the model_state_dict to achieve the "
+            "feature, please preprocess the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
             stacklevel=2,
