@@ -36,11 +36,17 @@ macro(custom_protobuf_find)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Ancient protobuf forces CMake compatibility")
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+    pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
     unset(CMAKE_POLICY_VERSION_MINIMUM)
   else()
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+    pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
   endif()
+  # Re-stage protobuf's public headers (google/protobuf/*) since its own
+  # install rules were suppressed.
+  install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/src/google"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT libtorch
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.inc")
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 

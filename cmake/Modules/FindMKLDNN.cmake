@@ -175,7 +175,11 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
   ENDIF()
 
-  ADD_SUBDIRECTORY(${MKLDNN_ROOT})
+  pytorch_add_thirdparty_subdirectory(${MKLDNN_ROOT})
+  # dnnl public headers (dnnl.h, dnnl_*.hpp, oneapi/dnnl/...) ship in
+  # nightly under torch/include/. Re-stage them since dnnl's own install
+  # rules were suppressed.
+  pytorch_install_thirdparty_headers("${MKLDNN_ROOT}/include")
 
   IF(NOT TARGET dnnl)
     MESSAGE("Failed to include MKL-DNN target")

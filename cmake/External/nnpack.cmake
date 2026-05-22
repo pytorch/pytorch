@@ -66,9 +66,12 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
       message(WARNING "Ancient nnpack forces CMake compatibility")
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
-    add_subdirectory(
+    pytorch_add_thirdparty_subdirectory(
       "${NNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/NNPACK")
+    # nnpack.h is part of the libtorch public include surface; re-stage it
+    # since NNPACK's own install rules were suppressed.
+    pytorch_install_thirdparty_headers("${NNPACK_SOURCE_DIR}/include")
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
       unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
