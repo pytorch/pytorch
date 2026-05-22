@@ -555,7 +555,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # divmod
             # operator.and_
             # operator.or_
-            # operator.xor
         }
         return fns
 
