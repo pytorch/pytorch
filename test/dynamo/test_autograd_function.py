@@ -561,6 +561,40 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         res.sum().backward()
         self.assertEqual(x.grad, torch.cos(x + 1))
 
+    def test_backward_mutation_saved_tensor_returned_as_output(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, saved):
+                ctx.save_for_backward(saved)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                saved.add_(grad_output)
+                return grad_output.clone(), None
+
+        def fn(x):
+            saved = x.clone()
+            out = Foo.apply(x, saved)
+            return out.clone(), saved
+
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        x = torch.randn(32, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_()
+
+        ref_out, ref_saved = fn(ref_x)
+        out, saved = compiled_fn(x)
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(saved, ref_saved)
+        (ref_out.sum() + ref_saved.sum()).backward()
+        (out.sum() + saved.sum()).backward()
+        self.assertEqual(saved, ref_saved)
+        self.assertEqual(x.grad, ref_x.grad)
+
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
