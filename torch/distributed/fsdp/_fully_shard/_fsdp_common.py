@@ -22,11 +22,11 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
-def _dynamo_disable(func):
+def _dynamo_disable(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Disable dynamo tracing for FSDP hooks."""
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs):
         return torch._dynamo.disable(
             func, recursive=True, reason="skipping FSDP hooks"
         )(*args, **kwargs)

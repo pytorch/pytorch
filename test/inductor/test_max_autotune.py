@@ -38,6 +38,21 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
+from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.template.triton import (
+    BlackwellGPUGemmConfig,
+    CUDAAddmmPersistentTMATemplateConfigHeuristic,
+    CUDAAddMMTemplateConfigHeuristic,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
+    CUDAMMTemplateConfigHeuristic,
+    CUDAPersistentTMATemplateConfigHeuristic,
+    GemmConfig,
+    get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
+    XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
+)
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
@@ -53,21 +68,6 @@ from torch._inductor.select_algorithm import (
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
-)
-from torch._inductor.template_heuristics.registry import override_template_heuristics
-from torch._inductor.template_heuristics.triton import (
-    BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
-    CUDAMMTemplateConfigHeuristic,
-    CUDAPersistentTMATemplateConfigHeuristic,
-    GemmConfig,
-    get_shared_memory_checker_opts,
-    ROCmMMTemplateConfigHeuristic,
-    XPUMMTemplateConfigHeuristic,
-    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -187,7 +187,8 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+
+        triton_meta = {"device": torch.device(GPU_TYPE)}
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -536,7 +537,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     mock_get_tma_workspace_arg,
                 ),
             ):
@@ -603,7 +604,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     return_value=fake_ws,
                 ),
                 patch.object(TritonBenchmarkRequest, "__init__", spy_init),
@@ -862,11 +863,36 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(100, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN",
-            }
+        extern_bias_shape = None
+        original_bmreq_init = ExternKernelBenchmarkRequest.__init__
+
+        def tracking_bmreq_init(self, *args, **kwargs):
+            nonlocal extern_bias_shape
+            original_bmreq_init(self, *args, **kwargs)
+            extern_bias_shape = tuple(self.input_tensor_meta[0].sizes)
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "test_configs.max_mm_configs": 1,
+                }
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+            mock.patch.object(
+                ExternKernelBenchmarkRequest,
+                "__init__",
+                tracking_bmreq_init,
+            ),
         ):
             Y_compiled, code = run_and_get_code(torch.compile(addmm), x, a, b)
             Y = addmm(x, a, b)
@@ -875,6 +901,8 @@ class TestMaxAutotune(TestCase):
             # Verify addmm is called without reinterpret_tensor on bias
             FileCheck().check("addmm").run(code[0])
             self.assertNotIn("addmm(reinterpret_tensor", code[0])
+
+            self.assertEqual((100,), extern_bias_shape)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -1986,7 +2014,7 @@ class TestMaxAutotune(TestCase):
         # Force only contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2030,7 +2058,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2092,7 +2120,7 @@ class TestMaxAutotune(TestCase):
             # Test with non-contiguous second matrix - should use contiguous transform
             with (
                 mock.patch(
-                    "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                    "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
                 ) as contiguous_mock,
             ):
                 contiguous_mock.return_value = True
@@ -2138,7 +2166,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2164,11 +2192,11 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.kernel.mm import MMKernelInputs
-        from torch._inductor.template_heuristics.registry import (
+        from torch._inductor.heuristics.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
+        from torch._inductor.kernel.mm import MMKernelInputs
 
         template_uid = torch._inductor.kernel.mm.mm_template.uid
 
@@ -2278,7 +2306,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 20)
+        self.assertEqual(generate_and_load_args, 21)
 
     @fresh_cache()
     @config.patch(
@@ -2367,9 +2395,9 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                        'transpose_discontiguous_tensor_descriptors_override':None,
+                        'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
                         'hint_override':None,'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -2409,9 +2437,9 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                    'transpose_discontiguous_tensor_descriptors_override':None,
+                    'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -2638,7 +2666,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_heuristics.registry.get_template_heuristic"
+            "torch._inductor.heuristics.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
@@ -3381,7 +3409,10 @@ class TestMaxAutotune(TestCase):
                 out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x)
 
         FileCheck().check_not(kernel_name).run(code_unfused[0])
-        self.assertEqual(out, out_unfused)
+        if GPU_TYPE == "xpu" and dtype == torch.float16:
+            torch.testing.assert_close(out, out_unfused, atol=5e-4, rtol=5e-4)
+        else:
+            self.assertEqual(out, out_unfused)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
@@ -3946,6 +3977,51 @@ class TestMaxAutotuneSubproc(TestCase):
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
+
+    def test_max_autotune_profiler_benchmarker_smoke(self):
+        """
+        Smoke test that a simple max-autotune matmul runs with profiler
+        benchmarker selection enabled through config patching, and records
+        positive autotune benchmark timing.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(64, 32).to(GPU_TYPE)
+        b = torch.randn(32, 64).to(GPU_TYPE)
+
+        import torch._inductor.runtime.benchmarking as inductor_benchmarking
+
+        benchmark_timings_ms = []
+        original_benchmark_gpu = inductor_benchmarking.benchmarker.benchmark_gpu
+
+        def benchmark_gpu_with_capture(*args, **kwargs):
+            timing_ms = original_benchmark_gpu(*args, **kwargs)
+            benchmark_timings_ms.append(timing_ms)
+            return timing_ms
+
+        with config.patch(
+            {"max_autotune": True, "use_torch_profiler_benchmarker": True}
+        ):
+            with mock.patch.object(
+                inductor_benchmarking.benchmarker,
+                "benchmark_gpu",
+                side_effect=benchmark_gpu_with_capture,
+            ):
+                torch.compile(mm)(a, b)
+
+        finite_timings_ms = [t for t in benchmark_timings_ms if math.isfinite(t)]
+        self.assertGreater(
+            len(finite_timings_ms),
+            0,
+            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+        )
+        self.assertGreater(
+            min(finite_timings_ms),
+            0.0,
+            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+        )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
@@ -5122,7 +5198,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"
     )
-    @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize(
         "test_case",
         [

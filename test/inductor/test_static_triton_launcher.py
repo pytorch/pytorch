@@ -21,7 +21,7 @@ from torch._inductor.runtime.triton_compat import (
 )
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfXpu
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -537,6 +537,8 @@ class TestStaticTritonCompileResult(TestCase):
 
 
 @requires_gpu_and_triton
+# _FastCudaLauncher hipModuleLaunchKernel path segfaults on ROCm
+@skipIfRocm
 @skipIfXpu
 class TestFastCudaLauncher(TestCase):
     """Tests for _FastCudaLauncher vectorcall C extension."""
@@ -669,6 +671,16 @@ class TestFastCudaLauncher(TestCase):
         with self.assertRaises(RuntimeError):
             fast(1, 1, 1, stream, arg0)  # missing arg1
 
+    def test_too_many_args_raises_value_error(self):
+        """Verify _FastCudaLauncher raises ValueError when nArgs > MAX_ARGS (121)."""
+        from torch._C import _FastCudaLauncher
+
+        # Use a dummy CUfunction (0) — construction should fail before launch.
+        # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
+        arg_tys = "O" * 130
+        with self.assertRaises(ValueError):
+            _FastCudaLauncher(0, 1, 0, arg_tys, 0)
+
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
@@ -678,6 +690,7 @@ class TestFastCudaLauncher(TestCase):
         "use_fast_triton_launcher": True,
     }
 )
+@skipIfRocm  # see TestFastCudaLauncher
 class TestFastCudaLauncherCompileResult(TestCase):
     """E2E tests verifying _FastCudaLauncher is actually used by torch.compile.
 

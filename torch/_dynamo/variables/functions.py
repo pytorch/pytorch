@@ -34,6 +34,7 @@ import re
 import sys
 import traceback
 import types
+import typing
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
@@ -72,6 +73,7 @@ from ..source import (
     GetItemSource,
     ImportSource,
     SkipGuardSource,
+    TypeMROSource,
     TypeSource,
 )
 from ..utils import (
@@ -80,6 +82,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_function,
+    is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -344,6 +347,7 @@ def _create_nested_fn(
 
 fn_known_dunder_attrs = {
     "__annotations__",
+    "__builtins__",
     "__closure__",
     "__code__",
     "__defaults__",
@@ -1000,7 +1004,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         union_type = getattr(types, "UnionType", None)
         if union_type is not None and isinstance(value, union_type):
             collected = []
-            for entry in value.__args__:
+            for entry in typing.get_args(value):
                 flat = self._flatten_type_spec(entry)
                 if flat is None:
                     return None
@@ -1090,42 +1094,6 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
             # tracing instead of triggering a graph break.
             return self.map_fn.call_function(tx, args, kwargs)
         return leaf
-
-
-class BuiltinMethodVariable(BaseUserFunctionVariable):
-    def __init__(
-        self, fn: types.BuiltinMethodType, is_constant: bool = False, **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        if not isinstance(fn, types.BuiltinMethodType):
-            raise AssertionError(f"expected BuiltinMethodType, got {type(fn)}")
-        self.fn = fn
-
-    def python_type(self) -> type:
-        return types.BuiltinMethodType
-
-    @staticmethod
-    def is_supported_builtin_method(obj: Any) -> bool:
-        method_self = obj.__self__
-        method_name = obj.__name__
-
-        # TODO(anijain2305) - Add support for more builtin methods
-        # Supports tuple.__new__ and frozenset({....}).__contains__
-        return (method_self is tuple and method_name == "__new__") or (
-            type(method_self) is frozenset and method_name == "__contains__"
-        )
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        method_self = self.fn.__self__
-        name = self.fn.__name__
-        obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
-        return obj_vt.call_method(tx, name, args, kwargs)
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
@@ -2572,9 +2540,30 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
+        # Inner torch.compile wrapper: disable nested graph breaks to
+        # preserve the inner compile's semantics (e.g. fullgraph=True).
+        # Graph breaks inside the inner function should raise Unsupported
+        # so they're handled by the outer frame, not as nested breaks.
+        # Skip this for recursive calls to the same compiled function
+        # (the wrapper's original callable matches the root frame's code).
+        is_inner_torch_compile = (
+            self.attr_to_trace == "_torchdynamo_inline"
+            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            and getattr(
+                getattr(self.wrapper_obj, "_torchdynamo_orig_callable", None),
+                "__code__",
+                None,
+            )
+            is not tx.output.root_tx.f_code
+        )
+        polyfill = (
+            polyfills.getattr_and_trace_no_nested_graph_breaks
+            if is_inner_torch_compile
+            else polyfills.getattr_and_trace
+        )
         return VariableTracker.build(
             tx,
-            polyfills.getattr_and_trace,  # type: ignore[arg-type]
+            polyfill,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
@@ -3900,6 +3889,12 @@ class MethodWrapperVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MethodWrapperType
 
+    def get_real_python_backed_value(self) -> types.MethodWrapperType:
+        return self.as_python_constant()
+
+    def is_python_constant(self) -> bool:
+        return self.obj.is_python_constant()
+
     def as_python_constant(self) -> types.MethodWrapperType:
         return self.descriptor.__get__(self.obj.as_python_constant())
 
@@ -3909,11 +3904,46 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        try:
+            method_wrapper = self.as_python_constant()
+        except NotImplementedError:
+            method_wrapper = None
+        if (
+            method_wrapper is not None
+            and is_tensor_base_attr_getter(method_wrapper)
+            and args
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            if not (len(args) == 1 and len(kwargs) == 0):
+                raise_type_error(
+                    tx, "tensor attribute getter takes exactly one argument"
+                )
+            # Avoid the generic descriptor path's implicit owner lookup, which
+            # would read __class__ on tensor subclasses during __torch_function__.
+            descriptor = cast(Any, method_wrapper.__self__)
+            return args[0].var_getattr(tx, descriptor.__name__)
+
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        try:
+            # CPython wrapper_hash:
+            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
+            return hash(self.as_python_constant()), False
+        except NotImplementedError:
+            return super().hash_impl(tx)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, VariableTracker):
+            return False
+        try:
+            return self.as_python_constant() == other.as_python_constant()
+        except NotImplementedError:
+            return False
 
 
 class MethodDescriptorVariable(VariableTracker):
@@ -4050,7 +4080,12 @@ class BoundBuiltinMethodVariable(VariableTracker):
         return types.BuiltinMethodType
 
     def as_python_constant(self) -> Any:
-        return self.descriptor.__get__(self.obj.as_python_constant())  # type: ignore[union-attr]
+        obj = self.obj.as_python_constant()
+        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
+            return self.descriptor.__get__(None, obj)
+        if hasattr(self.descriptor, "__get__"):
+            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
+        return getattr(obj, self.descriptor.__name__)
 
     def call_function(
         self,
@@ -4378,6 +4413,19 @@ class GetSetDescriptorVariable(VariableTracker):
                 ],
             )
         result_source = obj.source and AttrSource(obj.source, attr_name)
+        if (
+            obj.source
+            and self.descriptor.__objclass__ is type
+            and attr_name in ("__annotations__", "__dict__", "__mro__")
+        ):
+            # Direct descriptor calls still resolve the standard type slot even
+            # when a metaclass shadows the same attribute. Only attach the
+            # normal attribute source when runtime attribute lookup agrees.
+            static_desc = inspect.getattr_static(type(obj_value), attr_name, None)
+            if static_desc is not self.descriptor:
+                result_source = None
+            elif attr_name == "__mro__":
+                result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
 
 

@@ -135,9 +135,30 @@ class CustomInferenceAwareGraphPass(CustomGraphPass):
         """
 
 
-CustomGraphPassType: TypeAlias = (
-    CustomGraphPass | Callable[[torch.fx.graph.Graph], None] | None
+CustomGraphPassCallable: TypeAlias = (
+    CustomGraphPass | Callable[[torch.fx.graph.Graph], None]
 )
+CustomGraphPassType: TypeAlias = (
+    CustomGraphPassCallable
+    | list[CustomGraphPassCallable]
+    | tuple[CustomGraphPassCallable, ...]
+    | None
+)
+
+CustomSchedulerPassCallable: TypeAlias = (
+    CustomSchedulerPass
+    | Callable[[list["BaseSchedulerNode"]], list["BaseSchedulerNode"]]
+)
+
+
+def get_custom_graph_passes(
+    custom_pass: CustomGraphPassType,
+) -> tuple[CustomGraphPassCallable, ...]:
+    if custom_pass is None:
+        return ()
+    if isinstance(custom_pass, (list, tuple)):
+        return tuple(custom_pass)
+    return (custom_pass,)
 
 
 @lru_cache(1)
