@@ -104,7 +104,7 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 local_reduce_kwargs += ", local_reduce_feeds_main=True"
             if getattr(qtb, "local_reduce_source_from_epilogue", False):
                 local_reduce_kwargs += ", local_reduce_source_from_epilogue=True"
-        tuned_kwargs = f", tuned={qtb.tuned!r}"
+        tuned_kwargs = f", tuned={qtb.tuned!r}, epilogue_source={qtb.epilogue_source!r}"
         if qtb.gemm_op in ("mm", "bmm"):
             call_args = [input_args[0], input_args[1]]
             out_dtype_kwargs = "" if qtb.out_dtype is None else f", out_dtype={qtb.out_dtype!r}"
