@@ -9261,7 +9261,6 @@ class TestCudaAutocast(TestAutocast):
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
 
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     def test_rnn_packed_sequence_batch_sizes_must_be_cpu(self):
         # Verify that passing batch_sizes on CUDA raises an error instead of segfaulting
         data = torch.randn([18, 16], dtype=torch.float32, device="cuda")
@@ -9286,6 +9285,25 @@ class TestCudaAutocast(TestAutocast):
                 train=False,
                 bidirectional=False,
             )
+
+        def rnn_tanh(data, batch_sizes, hx, params):
+            return torch.ops.aten.rnn_tanh(
+                data,
+                batch_sizes=batch_sizes,
+                hx=hx,
+                params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
+
+        compiled_rnn_tanh = torch.compile(rnn_tanh, backend="eager")
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            compiled_rnn_tanh(data, batch_sizes, hx, params)
 
     @serialTest()
     def test_autocast_cache_leak(self):
