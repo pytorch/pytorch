@@ -24,8 +24,6 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
-    skipIfRocmArch,
-    MI300_ARCH,
     MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -460,8 +458,16 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.002)
+    # Test asserts fastpath == slowpath, both running under the current
+    # precision — so the @tf32_on_and_off tolerance applies to the mutual
+    # agreement of two TF32-rounded outputs, not to TF32-vs-FP32. Measured
+    # worst case on MI300 at d_model=12/seqlen<=1040 is ~1e-3, well under
+    # 0.002. For d_model=256 the inner GEMMs have K=256 (vs K=12), so
+    # summation-order drift between the two paths under hipBLASLt FAST_TF32
+    # scales ~sqrt(256/12) ≈ 4.6x and compounds through 2 encoder layers;
+    # use a looser tolerance on ROCm to cover that worst case while keeping
+    # CUDA strict. See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.002)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -3246,7 +3252,6 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertFalse(dk.isnan().any())
             self.assertFalse(dv.isnan().any())
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_mask_broken_177842(self):
         # https://github.com/pytorch/pytorch/issues/177842
@@ -3457,8 +3462,6 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("type", ["nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_cudnn_nested(self, device, type: str, is_contiguous: bool):
-        if TEST_WITH_ROCM and type == 'nested':
-            self.skipTest("ROCM does not support efficient attention on nested tensors, for now")
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=torch.float16, packed=True)
 
         batch_size, seq_len, num_heads, head_dim = 8, 64, 16, 64
@@ -3757,7 +3760,6 @@ class TestSDPACudaOnly(NNTestCase):
         reset_order = torch._C._get_sdp_priority_order()
         self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
 
-    @skipIfRocm  # Missing deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @parametrize("warn_only", [True, False])
@@ -4481,9 +4483,6 @@ class TestSDPACudaOnly(NNTestCase):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=dtype)
         batch, num_heads, head_dim = 32, 8, 64
         head_dim_v = 32 if is_efficient else head_dim
-        if TEST_WITH_ROCM and head_dim != head_dim_v:
-            self.skipTest("head_dim != head_dim_v unsupported on ROCm for now")
-            return
         seq_lens_q = (torch.randint(low=1, high=5, size=(1,)).item()
                       if expand_q_batch
                       else torch.randint(low=1, high=32, size=(batch,)).tolist())
@@ -4547,7 +4546,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
 
-    @skipIfRocm(msg="Efficient Attention on ROCM does not support head_dim != head_dim_v for now.")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
