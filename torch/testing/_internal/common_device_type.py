@@ -383,14 +383,18 @@ class DeviceTypeTestBase(TestCase):
         self._tls.rel_tol = prec
 
     @classmethod
-    def _apply_op_overrides(cls, ops, test=None):
+    def _apply_op_overrides(cls, op_list, test=None):
+        # Returns the op list to use for this (device_cls, test) pair. The
+        # caller must use the returned list rather than ops.op_list, because
+        # ops is shared across device classes and mutating it would cause the
+        # same overrides to be re-applied (and duplicated) on each device.
         class_overrides = cls.op_overrides or {}
         test_overrides = {} if test is None else getattr(test, "_op_overrides", {})
 
         if not class_overrides and not test_overrides:
-            return
+            return op_list
 
-        op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
+        op_dict = {op.full_name: op for op in copy.deepcopy(op_list)}
 
         for op_name, decorators in class_overrides.items():
             for decorator in decorators:
@@ -408,7 +412,7 @@ class DeviceTypeTestBase(TestCase):
                 if op_name in op_dict:
                     op_dict[op_name].decorators += (decorator,)
 
-        ops.op_list = list(op_dict.values())
+        return list(op_dict.values())
 
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
@@ -424,21 +428,21 @@ class DeviceTypeTestBase(TestCase):
         return []
 
     @classmethod
-    def _apply_op_allowlist(cls, ops):
-        """Filters ops.op_list to only include ops declared in op_allowlist.
+    def _apply_op_allowlist(cls, op_list):
+        """Filters op_list to only include ops declared in op_allowlist.
 
         If op_allowlist is None (default), no filtering is applied.
         If op_allowlist is set, only ops whose full_name is in the collection
         will generate test variants.
 
         Args:
-            ops: The ops decorator instance whose op_list will be filtered.
+            op_list: The OpInfo list to filter.
         """
         if cls.op_allowlist is None:
-            return
+            return op_list
 
         supported_set = set(cls.op_allowlist)
-        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
+        return [op for op in op_list if op.full_name in supported_set]
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -1272,10 +1276,10 @@ class ops(_TestParametrizer):
 
         # Order matters: op_allowlist filters first, then op_overrides adds decorators
         # This ensures op_overrides only applies to ops that passed the op_allowlist filter
-        device_cls._apply_op_allowlist(self)
-        device_cls._apply_op_overrides(self, test)
+        op_list = device_cls._apply_op_allowlist(self.op_list)
+        op_list = device_cls._apply_op_overrides(op_list, test)
         op = check_exhausted_iterator = object()
-        for op in self.op_list:
+        for op in op_list:
             # Determine the set of dtypes to use.
             dtypes: set[torch.dtype] | set[None]
             if isinstance(self.opinfo_dtypes, Sequence):
