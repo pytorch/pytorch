@@ -864,6 +864,44 @@ def batchwise_reference_select(op, sample):
     return sample.input.unbind()[sample.kwargs["index"]]
 
 
+def batchwise_reference_index_select(op, sample):
+    njt = sample.input
+    index = sample.kwargs["index"]
+    lengths = njt.offsets().diff() if njt.lengths() is None else njt.lengths()
+    selected_lengths = torch.index_select(lengths, 0, index)
+    selected_offsets = torch.cat(
+        [
+            torch.zeros(1, device=index.device, dtype=selected_lengths.dtype),
+            selected_lengths.cumsum(dim=0),
+        ]
+    )
+
+    if index.numel() == 0:
+        selected_values = torch.narrow(
+            njt.values(), dim=njt._ragged_idx - 1, start=0, length=0
+        )
+    else:
+        selected_starts = torch.index_select(njt.offsets()[:-1], 0, index)
+        selected_values = torch.cat(
+            [
+                torch.narrow(
+                    njt.values(),
+                    dim=njt._ragged_idx - 1,
+                    start=start.item(),
+                    length=length.item(),
+                )
+                for start, length in zip(selected_starts, selected_lengths)
+            ],
+            dim=njt._ragged_idx - 1,
+        )
+
+    return torch.nested.nested_tensor_from_jagged(
+        values=selected_values,
+        offsets=selected_offsets,
+        jagged_dim=njt._ragged_idx,
+    )
+
+
 def batchwise_reference_split(op, sample):
     # TODO: write this!
     raise NotImplementedError
@@ -1376,6 +1414,40 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
                 yield _update_sample(sample_input, {"index": index})
 
 
+def sample_inputs_index_select(op_info, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        dim = sample_input.kwargs["dim"]
+        D = sample_input.input.size(dim)
+        index_kwargs = [{"index": torch.tensor([0], device=device, dtype=torch.int64)}]
+
+        if dim == sample_input.input._ragged_idx:
+            yield _update_sample(sample_input, index_kwargs[0])
+            continue
+
+        if D > 1:
+            if dim == 0:
+                index_kwargs.append(
+                    {
+                        "index": torch.tensor(
+                            [D - 1, 0, 0], device=device, dtype=torch.int64
+                        )
+                    }
+                )
+            else:
+                index_kwargs.append(
+                    {
+                        "index": torch.tensor(
+                            [D - 1, 0], device=device, dtype=torch.int64
+                        )
+                    }
+                )
+
+        for kwargs_update in index_kwargs:
+            yield _update_sample(sample_input, kwargs_update)
+
+
 def sample_inputs_split(op_info, device, dtype, requires_grad, **kwargs):
     for sample_input in sample_inputs_unary_dimwise(
         op_info, device, dtype, requires_grad, **kwargs
@@ -1532,6 +1604,7 @@ njt_sample_inputs = {
     "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
     "narrow": sample_inputs_narrow,
+    "index_select": sample_inputs_index_select,
     "index_put": sample_inputs_index_put,
     # these two don't have ReductionOpInfo entries
     "max.reduction_with_dim": sample_inputs_njt_reduction,
@@ -1556,6 +1629,9 @@ njt_references = {
     "min.reduction_with_dim": reduction_reference,
     "narrow": partial(
         unary_dimwise_reference, batchwise_reference=batchwise_reference_narrow
+    ),
+    "index_select": partial(
+        unary_dimwise_reference, batchwise_reference=batchwise_reference_index_select
     ),
     "select": partial(
         unary_dimwise_reference, batchwise_reference=batchwise_reference_select

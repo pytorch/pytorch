@@ -1926,6 +1926,58 @@ def select_int(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.index_select.default, "self: jt_all, dim: any, index: t"
+)
+def index_select_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    new_kwargs["dim"], operating_on_batch = _wrap_jagged_dim(
+        inp.dim(),
+        new_kwargs["dim"],
+        inp._ragged_idx,
+        "index_select",
+        allow_batch_dim=True,
+    )
+
+    if operating_on_batch:
+        lengths = inp._offsets.diff() if inp._lengths is None else inp._lengths
+        selected_lengths = torch.index_select(lengths, 0, new_kwargs["index"])
+        selected_offsets = F.pad(selected_lengths.cumsum(dim=0), (1, 0), value=0)  # type: ignore[arg-type]
+
+        if new_kwargs["index"].numel() == 0:
+            selected_values = torch.narrow(
+                inp._values, dim=inp._ragged_idx - 1, start=0, length=0
+            )
+        else:
+            selected_starts = torch.index_select(
+                inp._offsets[:-1], 0, new_kwargs["index"]
+            )
+            selected_values = torch.cat(
+                [
+                    torch.narrow(
+                        inp._values,
+                        dim=inp._ragged_idx - 1,
+                        start=start.item(),
+                        length=length.item(),
+                    )
+                    for start, length in zip(selected_starts, selected_lengths)
+                ],
+                dim=inp._ragged_idx - 1,
+            )
+
+        return NestedTensor(
+            selected_values,
+            offsets=selected_offsets,
+            _ragged_idx=inp._ragged_idx,
+        )
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
+@register_jagged_func(
     torch.ops.aten.slice.Tensor,
     "self: jt, dim: any?, start: any?, end: any?, step: any?",
 )

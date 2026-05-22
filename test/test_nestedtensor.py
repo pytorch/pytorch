@@ -8465,6 +8465,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             op.full_name
             in {
                 "chunk",
+                "index_select",
                 "narrow",
                 "select",
                 "split",
@@ -8799,6 +8800,13 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "select"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
         name="broken_select_backward_unbacked",
+    ),
+    # index_select on batch dim currently materializes per-sequence slices in Python,
+    # which is not torch.compile-friendly yet.
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "index_select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_index_select_compile_on_batch_dim",
     ),
 ]
 
