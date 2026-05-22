@@ -2303,7 +2303,7 @@ class CUDAGraphTreeManager:
             return self.current_node.id
         else:
             raise RuntimeError(f"Unknown node type {type(self.current_node)}")
-\
+
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:

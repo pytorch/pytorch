@@ -170,11 +170,12 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
+    """Cache parameterized CUDA graph runners for dynamic input pointer sets."""
     fn_cache: dict[
         tuple[Any, tuple[tuple[int, str, int | None, int], ...]], Callable[..., Any]
     ] = {}
     shape_cache: dict[Any, Callable[..., Any]] = {}
-    warmed_up_keys: set[Any] = set()
+    warmed_up_keys: OrderedSet[Any] = OrderedSet()
 
     # Detect int inputs: we need to index on these
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
@@ -189,9 +190,7 @@ def cudagraphify_impl(
 
         int_key = get_ints(inputs)
         check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
-        new_static_input_idxs = remove_unaligned_input_idxs(
-            inputs, static_input_idxs
-        )
+        new_static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
         for idx in OrderedSet(static_input_idxs) - OrderedSet(new_static_input_idxs):
             input = inputs[idx]
             if not isinstance(input, torch.Tensor):
@@ -534,7 +533,9 @@ def cudagraphify(
                     index_expanded_dims(capture_input, get_expanded_dims(capture_input))
                 )
                 copy_srcs.append(
-                    index_expanded_dims(original_input, get_expanded_dims(capture_input))
+                    index_expanded_dims(
+                        original_input, get_expanded_dims(capture_input)
+                    )
                 )
             if copy_dsts:
                 torch._foreach_copy_(copy_dsts, copy_srcs)
@@ -547,7 +548,7 @@ def cudagraphify(
             preserve_rng_state(),
             torch.cuda.graph(
                 graph,
-                pool=capture_pool.id,
+                pool=torch.cuda._POOL_HANDLE(capture_pool.id),
                 stream=stream,
                 capture_error_mode="thread_local",
             ),
@@ -935,9 +936,7 @@ def cudagraphify(
         }
         segment_address_starts = [
             input_info.data_ptr for input_info in direct_input_infos
-        ] + [
-            allocation_address_starts[idx] for idx in allocation_order
-        ]
+        ] + [allocation_address_starts[idx] for idx in allocation_order]
         segment_sizes = [input_info.nbytes for input_info in direct_input_infos] + [
             allocation_sizes[idx] for idx in allocation_order
         ]
@@ -1329,7 +1328,7 @@ class PythonDynamicCUDAGraph:
         memset_node_updates: list[MemsetNodeUpdate],
     ) -> None:
         self.graph = graph
-        device_dynamic_tensor_indices = sorted(set(alloc_indices))
+        device_dynamic_tensor_indices = sorted(OrderedSet(alloc_indices))
         device_dynamic_tensor_idx_map = {
             old_idx: new_idx
             for new_idx, old_idx in enumerate(device_dynamic_tensor_indices)
@@ -1438,9 +1437,7 @@ def _dynamic_update_for_graph_pointer(
 ) -> GraphPointerUpdate | None:
     if ptr == other_ptr:
         return None
-    result = _check_allocation_within_graph(
-        ptr, sorted_allocations, allocation_starts
-    )
+    result = _check_allocation_within_graph(ptr, sorted_allocations, allocation_starts)
     other_result = _check_allocation_within_graph(
         other_ptr, other_sorted_allocations, other_allocation_starts
     )
@@ -2094,9 +2091,7 @@ def make_dynamic_graph_runner(
         stream = torch.cuda.current_stream()
         cuda_python_error_check(
             cuda_runtime.cudaGraphUpload(
-                cuda_runtime.cudaGraphExec_t(
-                    init_value=graph.raw_cuda_graph_exec()
-                ),
+                cuda_runtime.cudaGraphExec_t(init_value=graph.raw_cuda_graph_exec()),
                 cuda_runtime.cudaStream_t(init_value=stream.cuda_stream),
             )
         )
