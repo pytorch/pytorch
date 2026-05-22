@@ -153,52 +153,102 @@ def type_implements_mp_length(obj_type: type) -> bool:
     return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
 
 
-def type_implements_nb_bool(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+    return has_slot(number_slots, slot)
 
 
-def type_implements_nb_int(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_int slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INT)
-
-
-def type_implements_nb_index(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_index slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
-
-
-def type_implements_nb_float(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_float slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
+type_implements_nb_add = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_ADD)
+type_implements_nb_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_SUBTRACT
+)
+type_implements_nb_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MULTIPLY
+)
+type_implements_nb_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_REMAINDER
+)
+type_implements_nb_power = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_POWER)
+type_implements_nb_negative = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_NEGATIVE
+)
+type_implements_nb_positive = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_POSITIVE
+)
+type_implements_nb_absolute = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_ABSOLUTE
+)
+type_implements_nb_bool = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_BOOL)
+type_implements_nb_invert = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INVERT
+)
+type_implements_nb_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_LSHIFT
+)
+type_implements_nb_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_RSHIFT
+)
+type_implements_nb_and = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_AND)
+type_implements_nb_xor = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_XOR)
+type_implements_nb_or = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_OR)
+type_implements_nb_int = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INT)
+type_implements_nb_float = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_FLOAT)
+type_implements_nb_inplace_add = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_ADD
+)
+type_implements_nb_inplace_subtract = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_SUBTRACT
+)
+type_implements_nb_inplace_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MULTIPLY
+)
+type_implements_nb_inplace_remainder = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_REMAINDER
+)
+type_implements_nb_inplace_power = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_POWER
+)
+type_implements_nb_inplace_lshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_LSHIFT
+)
+type_implements_nb_inplace_rshift = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_RSHIFT
+)
+type_implements_nb_inplace_and = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_AND
+)
+type_implements_nb_inplace_xor = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_XOR
+)
+type_implements_nb_inplace_or = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_OR
+)
+type_implements_nb_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_FLOOR_DIVIDE
+)
+type_implements_nb_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_TRUE_DIVIDE
+)
+type_implements_nb_inplace_floor_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE
+)
+type_implements_nb_inplace_true_divide = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_TRUE_DIVIDE
+)
+type_implements_nb_index = partial(type_implements_nb_slot, slot=PyNumberSlots.NB_INDEX)
+type_implements_nb_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_MATRIX_MULTIPLY
+)
+type_implements_nb_inplace_matrix_multiply = partial(
+    type_implements_nb_slot, slot=PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY
+)
 
 
 def type_implements_mp_subscript(obj_type: type) -> bool:
     """Check whether obj_type has tp_as_mapping->mp_subscript."""
     _, map_slots, _, _ = _get_cached_slots(obj_type)
     return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
-
-
-def type_implements_nb_negative(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_negative slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
-
-
-def type_implements_nb_positive(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_positive slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
-
-
-def type_implements_nb_absolute(obj_type: type) -> bool:
-    """Check whether obj_type implements the nb_absolute slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, PyNumberSlots.NB_ABSOLUTE)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -209,12 +259,6 @@ def type_implements_tp_iter(obj_type: type) -> bool:
 def type_implements_tp_iternext(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
-
-
-def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
-    """Check whether obj_type implements the nb slot."""
-    _, _, number_slots, _ = _get_cached_slots(obj_type)
-    return has_slot(number_slots, slot)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -627,6 +671,10 @@ NB_SLOT_MAPPING = {
     "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
+    "nb_and": PyNumberSlots.NB_AND,
+    "nb_inplace_and": PyNumberSlots.NB_INPLACE_AND,
+    "nb_xor": PyNumberSlots.NB_XOR,
+    "nb_inplace_xor": PyNumberSlots.NB_INPLACE_XOR,
 }
 
 
