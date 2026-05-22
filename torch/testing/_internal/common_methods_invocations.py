@@ -4888,6 +4888,17 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if mode in ("nearest", "nearest-exact") and rank == 3:
+                # https://github.com/pytorch/pytorch/issues/183771
+                yield SampleInput(
+                    make_arg(
+                        (2, 2, 5, 2, 3), memory_format=torch.channels_last_3d
+                    ),
+                    (5, 6, 7),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             if rank > 1 and dtype.is_floating_point:
                 yield SampleInput(
                     make_arg(uneven_shape(D, rank)),
@@ -16587,7 +16598,6 @@ op_db: list[OpInfo] = [
            aliases=('group_norm',),
            ref=reference_group_norm,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -26302,17 +26312,6 @@ python_ref_db = [
         "_refs.nn.functional.group_norm",
         torch_opinfo_name="nn.functional.group_norm",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.int32, torch.int16, torch.int8, torch.uint8)
-            ),
-        )
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
