@@ -1085,6 +1085,27 @@ test_inductor_pallas() {
   assert_git_not_dirty
 }
 
+test_inductor_helion() {
+  python test/run_test.py --include inductor/test_helion_backend.py inductor/test_helion_kernels.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_helion_pallas_cpu() {
+  # Inductor -> Helion -> Pallas (CPU interpret mode) path.
+  # Routes via Helion's pallas backend; cpu_backend is patched to 'helion'
+  # in test_helion_backend.py.
+  HELION_BACKEND=pallas HELION_PALLAS_INTERPRET=1 \
+    python test/run_test.py --include inductor/test_helion_backend.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_helion_pallas_tpu() {
+  # Inductor -> Helion -> Pallas (TPU) path. Skeleton: sentinels not yet populated.
+  HELION_BACKEND=pallas \
+    python test/run_test.py --include inductor/test_helion_backend.py --verbose
+  assert_git_not_dirty
+}
+
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
@@ -2279,6 +2300,12 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-helion-pallas-cpu* ]]; then
+  test_inductor_helion_pallas_cpu
+elif [[ "${TEST_CONFIG}" == *inductor-helion-pallas-tpu* ]]; then
+  test_inductor_helion_pallas_tpu
+elif [[ "${TEST_CONFIG}" == *inductor-helion* ]]; then
+  test_inductor_helion
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then

@@ -1,0 +1,124 @@
+name: inductor-helion
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - ciflow/inductor-helion/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  # Inductor -> Helion -> Triton path on CUDA.
+  # Runs the full test_torchinductor suite via test_helion_backend.py.
+  # Known failures are encoded as empty sentinel files under
+  # test/inductor/helion_expected_failures/ (key: "{BaseClass}.{test_name}").
+  linux-jammy-py3_10-inductor-helion-gpu-build:
+    name: helion-gpu-py3.10-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      runner: linux.4xlarge.memory
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor-helion-gpu", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor-helion-gpu", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor-helion-gpu", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor-helion-gpu", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_10-inductor-helion-gpu-test:
+    name: helion-gpu-py3.10-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_10-inductor-helion-gpu-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-inductor-helion-gpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-inductor-helion-gpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-inductor-helion-gpu-build.outputs.test-matrix }}
+    secrets: inherit
+
+  # Inductor -> Helion -> Pallas (CPU interpret mode) path.
+  # Pallas backend runs in CPU interpret mode (HELION_PALLAS_INTERPRET=1).
+  # Sentinels under test/inductor/helion_expected_failures/ use keys
+  # like "CpuTests.{test_name}" / "SweepInputsCpuTest.{test_name}".
+  linux-jammy-py3_12-inductor-helion-pallas-cpu-build:
+    name: helion-pallas-cpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-py3.12-gcc11-pallas
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.12-pallas
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor-helion-pallas-cpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "inductor-helion-pallas-cpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_12-inductor-helion-pallas-cpu-test:
+    name: helion-pallas-cpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_12-inductor-helion-pallas-cpu-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-cpu-build.outputs.test-matrix }}
+    secrets: inherit
+
+  # Inductor -> Helion -> Pallas (TPU) path.
+  # Skeleton workflow. The runner has a real TPU; tests run via test_helion_backend.py
+  # with cpu_backend kept default and tpu_backend=helion patched. Sentinels would
+  # live alongside the others under test/inductor/helion_expected_failures/
+  # with keys like "TpuTests.{test_name}" / "SweepInputsTpuTest.{test_name}".
+  # NOTE: Sentinels for the TPU path are not populated yet; this job is expected
+  # to fail until TPU sentinels are generated. Treated as informational until then.
+  linux-jammy-py3_12-inductor-helion-pallas-tpu-build:
+    name: helion-pallas-tpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
+      docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
+      test-matrix: |
+        { include: [
+          { config: "inductor-helion-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_12-inductor-helion-pallas-tpu-test:
+    name: helion-pallas-tpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_12-inductor-helion-pallas-tpu-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-tpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-tpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_12-inductor-helion-pallas-tpu-build.outputs.test-matrix }}
+    secrets: inherit

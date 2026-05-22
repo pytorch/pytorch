@@ -2626,18 +2626,29 @@ class rocm:
     origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
-# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
-cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental) or "helion" (experimental)
+cpu_backend: Literal["cpp", "triton", "halide", "helion", "pallas"] = "cpp"
 
 # Backend to use for CUDA codegen either
-# "triton", "halide" (experimental) or "pallas" (experimental)
-cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+# "triton", "halide" (experimental), "pallas" (experimental) or "helion" (experimental)
+cuda_backend: Literal["triton", "halide", "pallas", "helion"] = "triton"
 
 # Backend to use for TPU codegen
-tpu_backend: Literal["pallas"] = "pallas"
+tpu_backend: Literal["pallas", "helion"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
+
+# Helion backend settings (used when cuda_backend="helion" or cpu_backend="helion")
+# Which code generation backend Helion uses: "triton" or "cute"
+# For TPU/XLA/CPU devices, "pallas" is always forced regardless of this setting.
+helion_backend: Literal["triton", "cute"] = "triton"
+
+# Autotuning effort for Helion kernels: "none", "quick", or "full"
+helion_autotune_effort: Literal["none", "quick", "full"] = "none"
+
+# Whether Helion prints the generated backend code
+helion_print_output_code: bool = False
 
 
 class mtia:
