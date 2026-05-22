@@ -273,7 +273,7 @@ def custom_op(
 _DO_SLOW_PATH = object()
 
 # TLS for the fast dispatch chain: stores the resolved backend_impl for the current call.
-_fast_dispatch_tls = threading.local()
+_backend_impl_tls = threading.local()
 
 
 class CustomOpDef:
@@ -895,7 +895,7 @@ class CustomOpDef:
         opdef = self
 
         def backend_dispatch(keyset, *args, **kwargs):
-            return _fast_dispatch_tls.backend_impl(*args, **kwargs)
+            return _backend_impl_tls.entry(*args, **kwargs)
 
         if schema.is_mutable:
             chain = (autograd_impl, self._adinplaceorview_impl, backend_dispatch)
@@ -927,13 +927,13 @@ class CustomOpDef:
                 return _DO_SLOW_PATH
 
             opdef._fast_path_hits += 1
-            _fast_dispatch_tls.backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
+            _backend_impl_tls.entry = backend_impls.get(device_type) or backend_impls.get(None)
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
             try:
                 with _ops._enable_fast_redispatch(op, chain):
                     return op.redispatch(keyset, *args)
             finally:
-                _fast_dispatch_tls.backend_impl = None
+                _backend_impl_tls.entry = None
 
         self._fast_path = fast_path
 

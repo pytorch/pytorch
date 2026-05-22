@@ -34,18 +34,18 @@ _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
 
 
-_fast_dispatch_tls = threading.local()
+_redispatch_chain_tls = threading.local()
 
 
 @contextlib.contextmanager
 def _enable_fast_redispatch(op: "OpOverload", chain: tuple) -> Iterator[None]:
     """While active, op.redispatch() pops from *chain* instead of C++ dispatch."""
-    prev = getattr(_fast_dispatch_tls, "chain_entry", None)
-    _fast_dispatch_tls.chain_entry = [op, chain, 0]
+    prev = getattr(_redispatch_chain_tls, "entry", None)
+    _redispatch_chain_tls.entry = [op, chain, 0]
     try:
         yield
     finally:
-        _fast_dispatch_tls.chain_entry = prev
+        _redispatch_chain_tls.entry = prev
 
 
 # Query `hasattr` only once.
@@ -890,7 +890,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
-        entry = getattr(_fast_dispatch_tls, "chain_entry", None)
+        entry = getattr(_redispatch_chain_tls, "entry", None)
         if entry is not None:
             target_op, chain, idx = entry
             if target_op is self and idx < len(chain):
