@@ -62,7 +62,7 @@ class FlexFlashConfig:
         None uses the kernel default. Only effective for forward; backward does
         not currently support vectorized score_mod.
     mask_mod_vec_size: Number of consecutive KV lanes evaluated per mask_mod
-        call. Maps to mask_mod.__mask_vec_size__ in CuTe flash attention and to
+        call. Maps to mask_mod.__vec_size__ in CuTe flash attention and to
         the direct captured-tensor vector-load width for mask_mod.
     mask_mod_vec_size_forced: Whether callers explicitly forced mask_mod_vec_size.
     """

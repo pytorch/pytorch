@@ -115,7 +115,6 @@
         {% endif %}
     {{ set_cute_hash("mask_mod", "mask") }}
     {% if MASK_MOD_VEC_SIZE %}
-    mask_mod.__mask_vec_size__ = {{ MASK_MOD_VEC_SIZE }}
     mask_mod.__vec_size__ = {{ MASK_MOD_VEC_SIZE }}
     {% endif %}
     block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))

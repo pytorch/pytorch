@@ -1977,7 +1977,6 @@ class TestFlexFlash(InductorTestCase):
         fn,
         *args,
         expect_autovec: bool = True,
-        expect_legacy_vec_attr: bool = False,
     ):
         expected = fn(*args)
         with force_flex_flash_mask_mod_vec_size(None):
@@ -1992,11 +1991,9 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(scalar, expected, atol=3e-2, rtol=3e-2)
         self.assertEqual(actual, scalar, atol=0, rtol=0)
-        self.assertNotIn("mask_mod.__mask_vec_size__", "\n".join(scalar_code))
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
         src = "\n".join(code)
-        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
-        if expect_legacy_vec_attr:
-            self.assertIn("mask_mod.__vec_size__ = 32", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
         if expect_autovec:
             self.assertIn("cute.autovec_copy", src)
         return src
@@ -2052,10 +2049,10 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(scalar_mask, expected, atol=3e-2, rtol=3e-2)
         self.assertEqual(actual, scalar_mask, atol=0, rtol=0)
-        self.assertNotIn("mask_mod.__mask_vec_size__", "\n".join(scalar_code))
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
         src = "\n".join(code)
         self.assertIn("score_mod.__vec_size__ = 8", src)
-        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
         self.assertIn("cute.autovec_copy", src)
 
     @unittest.skipUnless(
@@ -2094,7 +2091,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        self.assertNotIn("mask_mod.__mask_vec_size__", src)
+        self.assertNotIn("mask_mod.__vec_size__", src)
         self.assertNotIn("cute.autovec_copy", src)
 
     @unittest.skipUnless(
@@ -2161,7 +2158,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
         self.assertIn("utils.shr_u32", src)
         self.assertIn("utils.shl_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
@@ -2206,7 +2203,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
-        self.assertIn("mask_mod.__mask_vec_size__ = 32", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
         self.assertIn("utils.shr_u32", src)
         self.assertIn("utils.shl_u32", src)
         self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
@@ -2249,9 +2246,9 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
         if vec_size is None:
-            self.assertNotIn("mask_mod.__mask_vec_size__", src)
+            self.assertNotIn("mask_mod.__vec_size__", src)
         else:
-            self.assertIn(f"mask_mod.__mask_vec_size__ = {vec_size}", src)
+            self.assertIn(f"mask_mod.__vec_size__ = {vec_size}", src)
         self.assertNotIn("utils.shr_u32", src)
 
     @unittest.skipUnless(
@@ -2356,7 +2353,7 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
         self.assertNotIn("utils.shr_u32", src)
-        self.assertNotIn("mask_mod.__mask_vec_size__", src)
+        self.assertNotIn("mask_mod.__vec_size__", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
@@ -2399,9 +2396,9 @@ class TestFlexFlash(InductorTestCase):
         self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
         src = "\n".join(code)
         if vec_size is None:
-            self.assertNotIn("mask_mod.__mask_vec_size__", src)
+            self.assertNotIn("mask_mod.__vec_size__", src)
         else:
-            self.assertIn(f"mask_mod.__mask_vec_size__ = {vec_size}", src)
+            self.assertIn(f"mask_mod.__vec_size__ = {vec_size}", src)
 
     @unittest.skipUnless(
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
@@ -2435,9 +2432,7 @@ class TestFlexFlash(InductorTestCase):
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
             )
 
-        self._assert_sm100_mask_vec_matches_scalar(
-            fn, q, k, v, mask_bias, col_mask, expect_legacy_vec_attr=True
-        )
+        self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, mask_bias, col_mask)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
