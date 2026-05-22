@@ -531,6 +531,53 @@ def create_swap(n: int) -> list[Instruction]:
     ]
 
 
+def get_call_callable_depth(opname: str, arg: int) -> int:
+    """Return the depth of the callable from TOS for a call instruction.
+
+    Depth is 1-indexed: TOS = 1, below-TOS = 2, etc.  This encodes the
+    per-version stack layouts for every call instruction variant.
+
+    Note: on 3.11-3.12, CPython's CALL can have either NULL or self at the
+    bottom depending on function vs method call.  Dynamo's LOAD_METHOD
+    normalizes method calls to NULL + bound_method, so the bottom is always
+    NULL and the callable is always at depth arg + 1.
+
+    Stack layouts (bottom-to-top within the call's frame):
+      CALL (3.13+):            callable  NULL  arg0 ... argN-1
+      CALL (3.11-3.12):        NULL  callable  arg0 ... argN-1
+      CALL_KW (3.13+):         callable  NULL  arg0 ... argN-1  kw_names
+      CALL_FUNCTION (3.10):    callable  arg0 ... argN-1
+      CALL_FUNCTION_KW (3.10): callable  arg0 ... argN-1  kw_names
+      CALL_FUNCTION_EX:
+        3.14+:                 callable  NULL  args_tuple  kwargs_or_null
+        3.13:                  callable  NULL  args_tuple [kwargs_dict]
+        3.11-3.12:             NULL  callable  args_tuple [kwargs_dict]
+        3.10:                  callable  args_tuple [kwargs_dict]
+    """
+    if opname in ("CALL", "CALL_KW"):
+        kw_extra = 1 if opname == "CALL_KW" else 0
+        if sys.version_info >= (3, 13):
+            return arg + 2 + kw_extra
+        else:
+            # 3.11-3.12: NULL is always at bottom (Dynamo normalizes
+            # LOAD_METHOD to NULL + bound_method)
+            return arg + 1 + kw_extra
+    elif opname in ("CALL_FUNCTION", "CALL_FUNCTION_KW"):
+        kw_extra = 1 if opname == "CALL_FUNCTION_KW" else 0
+        return arg + 1 + kw_extra
+    elif opname == "CALL_FUNCTION_EX":
+        if sys.version_info >= (3, 14):
+            return 4
+        elif sys.version_info >= (3, 13):
+            return 3 + (arg & 1)
+        elif sys.version_info >= (3, 11):
+            return 2 + (arg & 1)
+        else:
+            return 2 + (arg & 1)
+    else:
+        raise ValueError(f"not a call instruction: {opname}")
+
+
 def create_binary_slice(
     start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
