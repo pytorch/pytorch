@@ -3823,6 +3823,21 @@ def linear_cross_entropy(
     # cross_entropy: the chunked op runs softmax over the full
     # linear_weight.shape[0], not per-position over the num_classes
     # axis.
+    if options is not None and (
+        out_features
+        or reduction not in {"mean", "sum"}
+        or label_smoothing != 0.0
+        or target.dtype != torch.int64
+    ):
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
+            f" == int64, out_features == (). Got reduction={reduction!r}, "
+            f"label_smoothing={label_smoothing}, target.dtype={target.dtype}"
+            f", out_features={tuple(out_features)}.",
+            stacklevel=2,
+        )
+
     if (
         options is not None
         and reduction in {"mean", "sum"}

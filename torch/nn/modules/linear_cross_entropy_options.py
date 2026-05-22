@@ -46,26 +46,12 @@ class LinearCrossEntropyOptions:
     picks measured on A100 / x86 CPU); unlisted pairs fall back to
     ``("compact", "aspect_ratio:2")``.
 
-    The chunked path supports a subset of :func:`linear_cross_entropy`:
-    ``reduction in {"mean", "sum"}``, ``label_smoothing == 0.0``, integer
-    ``target`` (class indices), and 2-D loss output (no ``out_features``).
-    Any other configuration falls through to the reference path.
+    Supports a subset of :func:`linear_cross_entropy`; unsupported
+    configurations fall through to the reference path with a warning.
 
     Chunking is a win when ``num_batches >= in_features`` and
     ``num_classes > in_features``; below that, the reference path is
     cheaper.
-
-    Example::
-
-        # Device-aware defaults.
-        options = LinearCrossEntropyOptions()
-        loss = linear_cross_entropy(input, weight, target, options=options)
-
-        # Explicit override.
-        options = LinearCrossEntropyOptions(
-            chunking_method="aspect_ratio:2",
-            acc_dtype=torch.float32,
-        )
     """
 
     allow_retain_graph: bool = False
@@ -82,13 +68,6 @@ class LinearCrossEntropyOptions:
     Under :func:`torch.compile` this field is auto-promoted to ``True``
     because the default-mode second-backward guard relies on a ctx
     mutation Dynamo doesn't preserve; the wrapper warns on the promotion.
-
-    Example::
-
-        options = LinearCrossEntropyOptions(allow_retain_graph=True)
-        loss = linear_cross_entropy(input, weight, target, options=options)
-        loss.backward(retain_graph=True)
-        loss.backward()  # second pass is allowed under this option
     """
 
     batch_chunk_size: int | None = None
@@ -151,24 +130,14 @@ class LinearCrossEntropyOptions:
     Policy effects (``"balanced"`` vs ``"accurate"``) are visible only
     when :attr:`acc_dtype` differs from the input dtype; ``"compact"``
     saves memory in both regimes.
-
-    Override ``"auto"`` when you need tighter gradient precision than
-    the default (``"accurate"``), pre-``"compact"`` numerics for
-    backward-compat (``"balanced"``), or the CUDA-style memory path on
-    a non-CUDA backend (``"compact"``, rarely worth it on CPU).
     """
 
     acc_dtype: torch.dtype | None = None
-    """Dtype for internal accumulation. ``None`` (the default visible
-    in ``repr``) resolves at call time:
-
-    - Under ``acc_policy="auto"`` with fp16/bf16 input on hardware
-      that supports mixed-precision mm (CUDA SM 7.0+ for fp16,
-      SM 8.0+ for bf16, and CPU): resolves to ``torch.float32`` --
-      the realistic training configuration.
-    - Otherwise: resolves to the input dtype.
-
-    Mixed-precision currently requires fp16 / bf16 input with
+    """Dtype for internal accumulation. ``None`` resolves at call time
+    to ``torch.float32`` under ``acc_policy="auto"`` with fp16/bf16
+    input on hardware with mixed-precision mm (CUDA SM 7.0+ for fp16,
+    SM 8.0+ for bf16, and CPU); otherwise to the input dtype.
+    Mixed-precision currently requires fp16/bf16 input with
     ``acc_dtype=torch.float32``.
     """
 
@@ -188,11 +157,20 @@ class LinearCrossEntropyOptions:
             raise ValueError(
                 f"batch_chunk_size must be positive int or None, got {self.batch_chunk_size!r}"
             )
-        if self.acc_dtype is not None and not getattr(
-            self.acc_dtype, "is_floating_point", False
-        ):
+        # fp64 is allowed for the internal ``_adjust`` path (fp64 inputs);
+        # user-facing fp64-vs-low-precision mismatches are caught at runtime.
+        _SUPPORTED_ACC_DTYPES = {
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        }
+        if self.acc_dtype is not None and self.acc_dtype not in _SUPPORTED_ACC_DTYPES:
             raise ValueError(
-                f"acc_dtype must be a floating dtype or None, got {self.acc_dtype!r}"
+                f"acc_dtype must be one of {{None, torch.float16, "
+                f"torch.bfloat16, torch.float32, torch.float64}}, got "
+                f"{self.acc_dtype!r}. Pass acc_dtype=None to let the chunked "
+                "op pick automatically."
             )
 
     @staticmethod
