@@ -9,6 +9,7 @@ live in their respective VT files.
 
 import abc
 import enum
+import sys
 import types
 import typing
 from functools import lru_cache, partial
@@ -1129,10 +1130,12 @@ def generic_issubclass(
             raise_observed_exception(TypeError, tx, args=list(e.args))
 
     # Step 2: PEP 604 Union (e.g. ``int | str``) — abstract.c L2779-2781.
-    if cls_type in (
-        types.UnionType,
-        typing._UnionGenericAlias,  # pyrefly: ignore [missing-attribute]
-    ):
+    union_types = {types.UnionType}
+    if sys.version_info < (3, 14):
+        union_types.add(
+            typing._UnionGenericAlias  # pyrefly: ignore [missing-attribute]
+        )
+    if cls_type in union_types:
         # TODO can trace this once TypingVariable is removed
         args = typing.get_args(cls_py)
         cls = VariableTracker.build(tx, args)
