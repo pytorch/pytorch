@@ -151,7 +151,7 @@ class KernelSideTable:
     id_to_kernel: dict[int, "TritonKernelType"] = {}
     kernel_to_id: dict["TritonKernelType", int] = {}
     constant_args: dict[int, dict[str, Any]] = {}
-    output_tiles: dict[int, dict[str, str]] = {}
+    output_tiles: dict[int, tuple[str, ...]] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -189,11 +189,11 @@ class KernelSideTable:
             )
         return self.constant_args[idx]
 
-    def set_output_tile(self, kernel_idx: int, output_tile: dict[str, str]) -> None:
+    def set_output_tile(self, kernel_idx: int, output_tile: tuple[str, ...]) -> None:
         with self.lock:
             self.output_tiles[kernel_idx] = output_tile
 
-    def get_output_tile(self, kernel_idx: int) -> "dict[str, str] | None":
+    def get_output_tile(self, kernel_idx: int) -> "tuple[str, ...] | None":
         return self.output_tiles.get(kernel_idx)
 
     # Resets the table (only meant to be used in unit tests)
@@ -2348,7 +2348,7 @@ class TraceableTritonKernelWrapper:
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
     kernel_source: "Source | None"
-    output_tile: dict[str, str] | None
+    output_tile: tuple[str, ...] | None
 
     def __init__(
         self,
@@ -2356,7 +2356,7 @@ class TraceableTritonKernelWrapper:
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
         kernel_source: "Source | None" = None,
-        output_tile: dict[str, str] | None = None,
+        output_tile: tuple[str, ...] | None = None,
     ) -> None:
         self.kernel = None
         self.grid = None

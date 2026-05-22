@@ -7061,6 +7061,8 @@ class FusedUserTritonKernel(TritonKernel):
     """
 
     # TODO(jjvraw): indent buffer should respect the user's indent level.
+    # TODO(jjvraw): alias args for input pointers in case of in-place pointer arithmetic. 
+    #               e.g. out += BLOCK_SIZE.
     # TODO(jjvraw): handle reduction ops.
     def __init__(
         self,
