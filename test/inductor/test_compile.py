@@ -7,10 +7,12 @@ from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
+from torch._inductor import config, cpu_vec_isa
 from torch._inductor.codecache import write
-from torch._inductor.cpp_builder import CppBuilder, CppOptions
+from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
+from torch._inductor.cpu_vec_isa import invalid_vec_isa
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import gen_gm_and_inputs
+from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -183,6 +185,49 @@ class TestStandaloneInductor(TestCase):
         else:
             check_linux_debug_section(binary_path)
 
+    def test_cpp_prefix_vectorized_bool_mask_cast(self):
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+        if not vec_isa:
+            self.skipTest("requires CPU vectorization")
+
+        cpp_code = """
+        #include <torch/csrc/inductor/cpp_prefix.h>
+        int main() {
+        #if INDUCTOR_USE_VECTOR_TYPES()
+          __at_align__ bool in[at::vec::Vectorized<bool>::size()] = {};
+          __at_align__ bool out[at::vec::Vectorized<bool>::size()] = {};
+          auto mask = at::vec::Vectorized<bool>::loadu(
+              in, at::vec::Vectorized<bool>::size());
+          auto casted = inductor_vec_mask_cast<float, 1>(mask);
+          casted.store(out, at::vec::Vectorized<bool>::size());
+        #endif
+          return 0;
+        }
+        """
+
+        _, source_path = write(cpp_code, "cpp")
+        cpp_builder = CppBuilder(
+            name="test_vectorized_bool_mask_cast",
+            sources=source_path,
+            output_dir=os.path.dirname(source_path),
+            BuildOption=CppTorchOptions(vec_isa=vec_isa),
+        )
+        cpp_builder.build()
+
+    def test_cpp_codegen_bool_where_uses_mask_cast_helper(self):
+        if not cpu_vec_isa.pick_vec_isa():
+            self.skipTest("requires CPU vectorization")
+
+        def fn(a):
+            b = a > 0
+            c = a < 1
+            return torch.where(b, c, ~c)
+
+        x = torch.randn(128)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertIn("inductor_vec_mask_cast<float,1>", "".join(code).replace(" ", ""))
+
     @mock.patch.dict(os.environ, {"TORCHINDUCTOR_DEBUG_SYMBOL": "1"})
     def test_inductor_generate_debug_symbol(self):
         cpp_code = """
@@ -229,6 +274,45 @@ class TestStandaloneInductor(TestCase):
             pass  # MacOS not sure that if it should be works.
         else:
             check_linux_debug_section(binary_path)
+
+    def _aot_cpp_arch_flags(self):
+        build_option = CppTorchOptions(
+            aot_mode=True,
+            compile_only=True,
+            vec_isa=invalid_vec_isa,
+        )
+        return [
+            flag
+            for flag in build_option.get_cflags()
+            if flag.startswith(("march=", "mcpu="))
+        ]
+
+    def test_aot_cpp_march_config(self):
+        with (
+            config.patch({"cpp.march": "x86-64"}),
+            mock.patch(
+                "torch._inductor.cpp_builder.platform.machine",
+                return_value="x86_64",
+            ),
+        ):
+            arch_flags = self._aot_cpp_arch_flags()
+        self.assertEqual(arch_flags, ["march=x86-64"])
+
+    def test_aot_cpp_march_config_ppc64le(self):
+        with (
+            config.patch({"cpp.march": "power9"}),
+            mock.patch(
+                "torch._inductor.cpp_builder.platform.machine",
+                return_value="ppc64le",
+            ),
+        ):
+            arch_flags = self._aot_cpp_arch_flags()
+        self.assertEqual(arch_flags, ["mcpu=power9"])
+
+    def test_cpp_march_config_can_disable_arch_flag(self):
+        with config.patch({"cpp.march": ""}):
+            arch_flags = self._aot_cpp_arch_flags()
+        self.assertEqual(arch_flags, [])
 
 
 if __name__ == "__main__":
