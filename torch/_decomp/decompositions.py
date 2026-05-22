@@ -1140,18 +1140,103 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
 def unfold_backward(
     grad: Tensor, input_size: list[int], dimension: int, size: int, step: int
 ) -> Tensor:
+    torch._check_value(step > 0, lambda: f"step is {step} but must be > 0")
     if len(input_size) == 0:
         return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
-    idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
-    idx = idx.unfold(0, size, step).flatten()
-    grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
-    # nb. At the moment this generates two kernels in triton
-    # It could potentially be fused into one call to scatter_reduce,
-    # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    index = (None,) * dim + (idx,)
-    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
+
+    def _vectorized_index_put() -> Tensor:
+        idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
+        idx = idx.unfold(0, size, step).flatten()
+        source = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+        index = (None,) * dim + (idx,)
+        return aten._unsafe_index_put(
+            grad_input, index, source, accumulate=True
+        ).contiguous()
+
+    if step >= size:
+        return _vectorized_index_put()
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def _is_canonical_grad_shape() -> bool:
+        if grad.dim() != len(input_size) + 1:
+            return False
+        if not statically_known_true(grad.size(-1) == size):
+            return False
+
+        n_folds = (input_size[dim] - size) // step + 1
+        if not statically_known_true(grad.size(dim) == n_folds):
+            return False
+
+        return all(
+            source_dim == dim
+            or statically_known_true(grad.size(source_dim) == dim_size)
+            for source_dim, dim_size in enumerate(input_size)
+        )
+
+    if _is_canonical_grad_shape():
+        return _vectorized_index_put()
+
+    def _sym_min_if_needed(a, b):
+        if statically_known_true(a <= b):
+            return a
+        if statically_known_true(b <= a):
+            return b
+        return torch.sym_min(a, b)
+
+    def _sym_max_if_needed(a, b):
+        if statically_known_true(a >= b):
+            return a
+        if statically_known_true(b >= a):
+            return b
+        return torch.sym_max(a, b)
+
+    def _reshape_source(source: Tensor, target_shape: list[int]) -> Tensor:
+        ndim = len(target_shape)
+        source_ndim = source.dim()
+        if source_ndim > ndim:
+            return source.expand(target_shape)
+
+        dim_offset = ndim - source_ndim
+        view_shape = [1] * ndim
+        for source_dim in range(source_ndim):
+            target_dim = dim if source_dim == dim else source_dim + dim_offset
+            if target_dim < 0 or target_dim >= ndim:
+                return source.expand(target_shape)
+            if statically_known_true(view_shape[target_dim] == 1):
+                view_shape[target_dim] = source.shape[source_dim]
+            else:
+                # Multiple grad dimensions may align to the unfolded input
+                # dimension after select(); only singleton collisions can
+                # still be reshaped and broadcast to the target shape.
+                torch._check(
+                    source.shape[source_dim] == 1,
+                    lambda: "unfold_backward grad shape is not broadcastable "
+                    "to input_size",
+                )
+
+        return source.reshape(view_shape).expand(target_shape)
+
+    input_dim_size = input_size[dim]
+    grad_dim_size = grad.size(dim)
+    # Descending offsets make each grad_input element accumulate overlapping
+    # windows in increasing fold-index order, matching native numerics.
+    for offset in reversed(range(size)):
+        max_valid_len = _sym_max_if_needed(
+            (input_dim_size - offset + step - 1) // step, 0
+        )
+        valid_len = _sym_min_if_needed(grad_dim_size, max_valid_len)
+        idx = torch.arange(valid_len, device=grad.device, dtype=torch.int32)
+        idx = idx * step + offset
+        source = grad.select(-1, offset).narrow(dim, 0, valid_len)
+        source_shape = list(input_size)
+        source_shape[dim] = valid_len
+        source = _reshape_source(source, source_shape)
+        grad_input = aten.index_add(grad_input, dim, idx, source)
+
+    return grad_input.contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)

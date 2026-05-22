@@ -39,9 +39,9 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, with_ieee_matmul_precision
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, with_ieee_matmul_precision
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    _get_torch_rocm_version, SM80OrLater
+    SM80OrLater, SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -7502,6 +7502,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, "chunking_method"):
             nn.LinearCrossEntropyOptions(chunking_method=chunking_method)
 
+    @parametrize_test(
+        "acc_dtype",
+        [torch.int32, torch.complex64, torch.bool, torch.float8_e4m3fn],
+    )
+    def test_linear_cross_entropy_options_invalid_acc_dtype_raises(
+        self, acc_dtype,
+    ):
+        """__post_init__ rejects non-float and exotic-float acc_dtype."""
+        with self.assertRaisesRegex(ValueError, "acc_dtype"):
+            nn.LinearCrossEntropyOptions(acc_dtype=acc_dtype)
+
     def test_linear_cross_entropy_options_auto_defaults(self):
         """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
         construction time; ``_adjust`` resolves them per (device, dtype).
@@ -14623,6 +14634,23 @@ if __name__ == '__main__':
         self.assertEqual(y, y_ref)
 
     def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32, acc_policy=None, acc_dtype=None):
+        """Test the chunked LCE forward + backward against an fp64 reference.
+
+        Two metrics per gradient:
+
+        1. PRINCIPLED -- Frobenius-norm relative error
+           ``grad_error(...) <= feps`` (= 3 * eps_dtype). This is the
+           correctness guarantee; it is robust against per-element ULP
+           inflation near zero.
+        2. REGRESSION -- per-element ULP <= ``expected_*_max_ulp_diff``.
+           Empirical maxima from a sweep on H100 / M-series MPS /
+           x86_64 CPU; trip-wires for drift, not correctness bounds.
+           Device-specific overrides like ``# x86_64 119`` record the
+           value seen on the named host.
+
+        The loss has no relative-error counterpart: its magnitude is
+        O(1), so the ULP cap alone is meaningful.
+        """
         # tests LinearCrossEntropyLoss in the default (in-place backward) mode
 
         # For assessing the accuracy of chunking algorithms, we'll use
@@ -14651,7 +14679,26 @@ if __name__ == '__main__':
         # The following mapping to expected ULP differences
         # characterizes the accuracy dependence on acc_policy, dtype,
         # and device:
-        if _resolved_policy == "balanced":
+        if _resolved_policy == "accurate":
+            if "cpu" in device:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 1
+                    expected_weight_grad_max_ulp_diff = 0
+                else:  # dtype == torch.bfloat16
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 0
+                    expected_weight_grad_max_ulp_diff = 0
+            else:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 1
+                    expected_weight_grad_max_ulp_diff = 0
+                else:  # dtype == torch.bfloat16
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 0
+                    expected_weight_grad_max_ulp_diff = 0
+        elif _resolved_policy == "balanced":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
@@ -14674,25 +14721,6 @@ if __name__ == '__main__':
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
-                    expected_weight_grad_max_ulp_diff = 0
-        elif _resolved_policy == "accurate":
-            if "cpu" in device:
-                if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
-            else:
-                if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
                     expected_weight_grad_max_ulp_diff = 0
         elif _resolved_policy == "compact":
             # Mirrors "balanced" except on CUDA (direct addmm_ skips
@@ -15017,7 +15045,7 @@ if __name__ == '__main__':
 
         Both sources are bounded by ~1 ULP per operation. We run the
         test at fp64 so the total rounding stays at ~1e-15 scale per
-        operation — far below ``assertEqual``'s default fp64
+        operation -- far below ``assertEqual``'s default fp64
         tolerance (``rtol=1.3e-7``, ``atol=1e-9``). This isolates
         the assertion to the chunking machinery's *algorithmic*
         invariance rather than conflating it with matmul-kernel
@@ -15161,6 +15189,290 @@ class TestUtils(TestCase):
         # Check they are the same preserving order
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
+class TestFusedRMSNormOverrideRouting(TestCase):
+    """Stage 1: verify the override's cond predicates return True/False as
+    expected on the exact inputs stage 2 uses.
+
+    These tests call the cond functions directly rather than inspecting a
+    profiler trace -- the cond is an importable function, so "did it return
+    True?" is a cleaner question than "did a `_native::*` event show up?".
+    The registry's contract that a True cond actually routes to the impl is
+    covered by test/python_native/.
+    """
+
+    def test_fwd_cond_fires_supported_fp16(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(128, dtype=torch.float16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_fires_supported_bf16(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.bfloat16, device="cuda")
+        w = torch.randn(128, dtype=torch.bfloat16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_fires_supported_fp32(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float32, device="cuda")
+        w = torch.randn(128, dtype=torch.float32, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_fires_weight_none(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], None, 1e-5))
+
+    def test_fwd_cond_fires_eps_none(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(128, dtype=torch.float16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, None))
+
+    def test_fwd_cond_fires_multi_dim_normalized_shape(self):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(2, 4, 8, 16, dtype=torch.bfloat16, device="cuda")
+        w = torch.randn(8, 16, dtype=torch.bfloat16, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [8, 16], w, 1e-5))
+
+    def test_fwd_cond_fires_non_contiguous_input(self):
+        # The cond accepts non-contiguous inputs; the impl reshapes+copies.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        base = torch.randn(8, 256, dtype=torch.float32, device="cuda")
+        x = base[:, ::2]
+        self.assertFalse(x.is_contiguous())
+        w = torch.randn(128, dtype=torch.float32, device="cuda")
+        self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_unsupported_dtype(self):
+        # fp64 is outside the override's supported dtype set.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float64, device="cuda")
+        w = torch.randn(128, dtype=torch.float64, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_empty_input(self):
+        # Empty inputs crash quack with cudaErrorInvalidConfiguration; cond
+        # guards against this explicitly.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(0, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(128, dtype=torch.float16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_weight_shape_mismatch(self):
+        # Weight shape must equal normalized_shape; otherwise fall through so
+        # aten raises the usual shape-check error.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(64, dtype=torch.float16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_input_shape_mismatch(self):
+        # input.shape[-n:] must equal normalized_shape.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 64, dtype=torch.float16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], None, 1e-5))
+
+    def test_fwd_cond_false_on_weight_dtype_mismatch(self):
+        # Weight dtype must match input dtype; aten casts, quack doesn't.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(128, dtype=torch.float32, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_non_contiguous_weight(self):
+        # Non-contiguous weight would need a copy; not measured, fall through.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        base = torch.randn(256, dtype=torch.float16, device="cuda")
+        w = base[::2]
+        self.assertFalse(w.is_contiguous())
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    @parametrize_test(
+        "output_mask",
+        [
+            subtest([True, True], name="mask_TT"),
+            subtest([True, False], name="mask_TF"),
+            subtest([False, True], name="mask_FT"),
+        ],
+    )
+    def test_bwd_cond_fires(self, output_mask):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_backward_cond
+
+        dtype = torch.float16
+        shape = (8, 128)
+        normalized_shape = [128]
+        x = torch.randn(*shape, dtype=dtype, device="cuda")
+        w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+        gout = torch.randn(*shape, dtype=dtype, device="cuda")
+        rstd = torch.empty(shape[0], dtype=torch.float32, device="cuda")
+        self.assertTrue(
+            _fused_rms_norm_backward_cond(
+                gout, x, normalized_shape, rstd, w, output_mask
+            )
+        )
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+")
+class TestFusedRMSNormOverrideNumerics(TestCase):
+    """Stage 2: numerical equivalence between the cutedsl override and aten.
+
+    Stage 1 (TestFusedRMSNormOverrideRouting) verifies the cond predicate
+    returns True on the same input shapes; these tests assume that and
+    compare the override's output against an aten reference obtained via
+    `torch.backends.python_native.operations_disabled(...)`. If a cond
+    regression stops the override from firing, stage 1 fails first and
+    flags it -- the trivial aten-vs-aten equality here wouldn't.
+
+    Generic per-dtype numerics across many shapes are covered by the OpInfo
+    entry in torch/testing/_internal/common_methods_invocations.py.
+    """
+
+    def test_weight_none(self):
+        dtype = torch.float16
+        x = torch.randn(8, 128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], None, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], None, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_eps_none(self):
+        dtype = torch.float16
+        x = torch.randn(8, 128, dtype=dtype, device="cuda")
+        w = torch.randn(128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], w, None)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], w, None)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_multi_dim_normalized_shape(self):
+        dtype = torch.bfloat16
+        x = torch.randn(2, 4, 8, 16, dtype=dtype, device="cuda")
+        w = torch.randn(8, 16, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [8, 16], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [8, 16], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
+
+    def test_non_contiguous_input(self):
+        dtype = torch.float32
+        base = torch.randn(8, 256, dtype=dtype, device="cuda")
+        x = base[:, ::2]  # non-contiguous view, trailing dim = 128
+        self.assertFalse(x.is_contiguous())
+        w = torch.randn(128, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-5, rtol=0)
+
+    def test_unsupported_dtype_falls_through_numerics(self):
+        # Companion to test_fwd_cond_false_on_unsupported_dtype: check that
+        # the fallthrough to aten still produces the right answer.
+        x = torch.randn(8, 128, dtype=torch.float64, device="cuda")
+        w = torch.randn(128, dtype=torch.float64, device="cuda")
+        out, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
+        ref = torch.nn.functional.rms_norm(x, [128], w, 1e-5)
+        self.assertEqual(out, ref, atol=1e-12, rtol=0)
+
+    # Tolerances picked to match the aten kernel within ~1 ULP of the reduced
+    # dtype; the quack kernel uses a different accumulation order.
+    _BWD_ATOL = {
+        torch.float16: 1e-1,
+        torch.bfloat16: 3e-1,
+        torch.float32: 1e-5,
+    }
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize_test(
+        "shape",
+        [(8, 128), (4, 8, 32), (2, 16, 512), (4, 32, 1024)],
+    )
+    def test_autograd_roundtrip_matches_aten(self, dtype, shape):
+        atol = self._BWD_ATOL[dtype]
+        normalized_shape = list(shape[-1:])
+        x = torch.randn(*shape, dtype=dtype, device="cuda")
+        w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+        gout = torch.randn(*shape, dtype=dtype, device="cuda")
+
+        x1 = x.detach().requires_grad_(True)
+        w1 = w.detach().requires_grad_(True)
+        y, _ = torch.ops.aten._fused_rms_norm(x1, normalized_shape, w1, 1e-5)
+        y.backward(gout)
+
+        x2 = x.detach().requires_grad_(True)
+        w2 = w.detach().requires_grad_(True)
+        with torch.backends.python_native.operations_disabled(
+            "_fused_rms_norm", "_fused_rms_norm_backward"
+        ):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x2, normalized_shape, w2, 1e-5)
+            y_ref.backward(gout)
+
+        self.assertEqual(y, y_ref, atol=atol, rtol=0)
+        self.assertEqual(x1.grad, x2.grad, atol=atol, rtol=0)
+        self.assertEqual(w1.grad, w2.grad, atol=atol, rtol=0)
+
+    @parametrize_test(
+        "output_mask",
+        [[True, True], [True, False], [False, True]],
+    )
+    def test_backward_output_mask_variants(self, output_mask):
+        dtype = torch.float16
+        shape = (8, 128)
+        normalized_shape = [128]
+        x = torch.randn(*shape, dtype=dtype, device="cuda")
+        w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
+        gout = torch.randn(*shape, dtype=dtype, device="cuda")
+
+        # Forward once to get rstd (shape [*batch, 1...]) under the aten path;
+        # the backward kernel takes rstd as an explicit input.
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            _, rstd = torch.ops.aten._fused_rms_norm(x, normalized_shape, w, 1e-5)
+
+        gx, gw = torch.ops.aten._fused_rms_norm_backward(
+            gout, x, normalized_shape, rstd, w, output_mask
+        )
+        with torch.backends.python_native.operations_disabled(
+            "_fused_rms_norm_backward"
+        ):
+            gx_ref, gw_ref = torch.ops.aten._fused_rms_norm_backward(
+                gout, x, normalized_shape, rstd, w, output_mask
+            )
+
+        if output_mask[0]:
+            self.assertIsNotNone(gx)
+            self.assertEqual(gx, gx_ref, atol=1e-1, rtol=0)
+        else:
+            self.assertIsNone(gx)
+        if output_mask[1]:
+            self.assertIsNotNone(gw)
+            self.assertEqual(gw, gw_ref, atol=1e-1, rtol=0)
+        else:
+            self.assertIsNone(gw)
+
+
+instantiate_parametrized_tests(TestFusedRMSNormOverrideRouting)
+instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)

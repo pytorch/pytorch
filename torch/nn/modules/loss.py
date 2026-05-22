@@ -1455,6 +1455,13 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             makes the module incompatible with
             :func:`torch.jit.script`; see the note below.
 
+    .. warning::
+        With non-``None`` ``options``, the chunked path consumes its
+        precomputed gradients in-place, so any second :meth:`backward`
+        call raises (even with ``retain_graph=True``). Use
+        ``LinearCrossEntropyOptions(allow_retain_graph=True)`` to allow
+        repeated backward (one extra gradient-sized allocation per call).
+
     .. note::
         ``options=None`` is scriptable; an ``options`` instance is not.
         The chunked path does not support higher-order AD, forward-mode
