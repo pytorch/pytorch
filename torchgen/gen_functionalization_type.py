@@ -807,7 +807,7 @@ class ViewMetaSpecialization:
 
     @property
     def is_as_strided(self) -> bool:
-        return str(self.f.func.name) == "as_strided"
+        return str(self.f.func.name) in ("as_strided", "as_strided_")
 
     @property
     def out_index(self) -> str:

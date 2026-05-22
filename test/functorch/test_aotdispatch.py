@@ -52,7 +52,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
@@ -11710,6 +11710,15 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
     """
 
+    _overlapping_as_strided_error = (
+        "torch.compile/functionalization does not support in-place mutation on "
+        "overlapping as_strided views"
+    )
+    _too_hard_as_strided_error = (
+        "torch.compile/functionalization cannot safely determine whether an "
+        "as_strided view has internal overlap"
+    )
+
     def assertExpectedInline(self, *args, **kwargs):
         # These will have different outputs because dynamo returns a different graph module
         # But we don't really care about that assertion when testing with dynamo,
@@ -11718,6 +11727,26 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
     def make_compiler(self, graph_cell):
         return make_boxed_compiler(partial(extract_graph, graph_cell=graph_cell))
+
+    def assert_overlapping_as_strided_error(self, fn, *args):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            self._overlapping_as_strided_error,
+        ):
+            try:
+                fn(*args)
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                raise e.inner_exception from None
+
+    def assert_too_hard_as_strided_error(self, fn, *args):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            self._too_hard_as_strided_error,
+        ):
+            try:
+                fn(*args)
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                raise e.inner_exception from None
 
     # Compiler to passes to dynamo
     def run_autograd(
@@ -11791,6 +11820,138 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_compile_errors_on_mutating_overlapping_as_strided_view(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((2, 2), (1, 1), 0)
+            y.add_(1)
+            return y
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_overlapping_as_strided_error(optf, torch.randn([2, 2, 10]))
+
+    def test_compile_errors_on_mutating_late_duplicate_as_strided_view(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((364, 364), (362, 363), 0)
+            y.add_(1)
+            return y
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_overlapping_as_strided_error(optf, torch.randn(263176))
+
+    def test_compile_errors_on_mutating_non_empty_zero_stride_as_strided_view(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((2, 2), (0, 1), 0)
+            y.add_(1)
+            return y
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_overlapping_as_strided_error(optf, torch.randn(2))
+
+    def test_compile_errors_on_mutating_overlapping_as_strided_view_autograd(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((2, 2), (1, 1), 0)
+            y.add_(1)
+            return y.sin().sum()
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_overlapping_as_strided_error(
+            optf, torch.randn([2, 2, 10], requires_grad=True)
+        )
+
+    def test_compile_errors_on_mutating_overlapping_as_strided_inplace_view(self):
+        def f(x):
+            x = x.clone()
+            x.as_strided_((2, 2), (1, 1), 0)
+            x.add_(1)
+            return x
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_overlapping_as_strided_error(optf, torch.randn([2, 2, 10]))
+
+    def test_compile_errors_on_dynamic_overlapping_as_strided_view(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((x.shape[0] - 1, 2), (1, 1), 0)
+            y.add_(1)
+            return y
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+        inp = torch.randn(2)
+        self.assertEqual(f(inp.clone()), optf(inp.clone()))
+
+        self.assert_overlapping_as_strided_error(optf, torch.randn(3))
+
+    def test_compile_errors_on_too_hard_as_strided_view_mutation(self):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((400, 400, 2), (401, 402, 160600), 0)
+            y.add_(1)
+            return y
+
+        optf = torch.compile(f, backend="aot_eager", dynamic=True)
+
+        self.assert_too_hard_as_strided_error(optf, torch.randn(480998))
+
+    def test_compile_allows_non_overlapping_as_strided_view_mutations(self):
+        def gapped_as_strided(x):
+            x = x.clone()
+            y = x.as_strided((3,), (2,), 1)
+            y.add_(1)
+            return x, y
+
+        def non_overlapping_subview(x):
+            x = x.clone()
+            y = x.as_strided((2, 2), (1, 1), 0)
+            z = y[0]
+            z.add_(1)
+            return x, y, z
+
+        def multidimensional_gapped_as_strided(x):
+            x = x.clone()
+            y = x.as_strided((3, 2), (2, 3), 0)
+            y.add_(1)
+            return x, y
+
+        def empty_zero_stride_as_strided(x):
+            x = x.clone()
+            y = x.as_strided((0, 2), (1, 0), 0)
+            y.add_(1)
+            return x, y
+
+        for f, inp in (
+            (gapped_as_strided, torch.randn(8)),
+            (non_overlapping_subview, torch.randn(4)),
+            (multidimensional_gapped_as_strided, torch.randn(8)),
+            (empty_zero_stride_as_strided, torch.randn(1)),
+        ):
+            optf = torch.compile(f, backend="aot_eager", dynamic=True)
+            self.assertEqual(f(inp.clone()), optf(inp.clone()))
+
+    def test_compile_allows_dynamic_1d_non_overlapping_as_strided_without_recompile(
+        self,
+    ):
+        def f(x):
+            x = x.clone()
+            y = x.as_strided((x.shape[0],), (1,), 0)
+            y.add_(1)
+            return x, y
+
+        counter = CompileCounterWithBackend("aot_eager")
+        optf = torch.compile(f, backend=counter, dynamic=True)
+
+        for inp in (torch.randn(2), torch.randn(5), torch.randn(3)):
+            self.assertEqual(f(inp.clone()), optf(inp.clone()))
+        self.assertEqual(counter.frame_count, 1)
 
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):
