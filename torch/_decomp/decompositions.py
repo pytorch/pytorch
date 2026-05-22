@@ -1660,7 +1660,10 @@ def native_group_norm_backward_multiple_grads(
         else:
             ds_val = ds.reshape(N, group, cpg).sum(2)
             db_val = db.reshape(N, group, cpg).sum(2)
-            c1 = rstd.broadcast_to((N, group, cpg))
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                torch.ones((1, group, cpg), dtype=rstd.dtype, device=rstd.device),
+            )
 
         grad_mean_val = grad_mean if grad_mean is not None else 0
         grad_rstd_val = grad_rstd if grad_rstd is not None else 0
