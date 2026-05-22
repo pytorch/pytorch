@@ -765,6 +765,18 @@ class TestAutogradFunctional(TestCase):
             autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
+    def test_jacobian_forward_mode_requires_vectorize(self, ctors):
+        def foo(x):
+            return x.exp()
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError,
+            'strategy="forward-mode" requires vectorize=True',
+        ):
+            autogradF.jacobian(foo, inp, strategy="forward-mode", vectorize=False)
+
+    @base_and_logging_tensor
     def test_jacobian_no_grad(self, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
@@ -1027,6 +1039,20 @@ class TestAutogradFunctional(TestCase):
         x = ctors.randn(2)
         y = ctors.randn(3)
         self._check_hessian_vectorize_correctness(f, (x, y))
+
+    @base_and_logging_tensor
+    def test_hessian_forward_mode_requires_vectorize(self, ctors):
+        def foo(x):
+            return x.exp().sum()
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError,
+            'outer_jacobian_strategy="forward-mode" requires vectorize=True',
+        ):
+            autogradF.hessian(
+                foo, inp, outer_jacobian_strategy="forward-mode", vectorize=False
+            )
 
     @parametrize("vectorize", [True, False])
     @base_and_logging_tensor
