@@ -170,6 +170,53 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    def test_sparse_one_hot_sum_fold(self):
+        vocab = 8
+
+        def invariant_value(target, scale):
+            safe_target = torch.where(target != -100, target, 0)
+            iota = torch.arange(vocab, device=target.device).view(1, vocab)
+            one_hot = torch.where(
+                safe_target.expand(target.shape[0], vocab) == iota,
+                torch.tensor(-1.0, device=target.device),
+                torch.tensor(0.0, device=target.device),
+            )
+            valid_scale = torch.where(
+                target != -100, scale, torch.tensor(0.0, device=target.device)
+            )
+            return (one_hot * valid_scale).sum(dim=[1], keepdim=True)
+
+        def vocab_dependent_value(target, value):
+            iota = torch.arange(value.shape[1], device=target.device)
+            mask = target == iota
+            return torch.where(
+                mask, value, torch.tensor(0.0, device=target.device)
+            ).sum(dim=[1], keepdim=True)
+
+        target = torch.tensor(
+            [[0], [3], [-100], [-1], [vocab], [5]],
+            device=device_type,
+            dtype=torch.int64,
+        )
+        scale = torch.randn(target.shape, device=device_type)
+        value = torch.randn(target.shape[0], vocab, device=device_type)
+
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(invariant_value, fullgraph=True), target, scale
+        )
+        self.assertEqual(actual, invariant_value(target, scale))
+        self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 1)
+        FileCheck().check_not("rnumel").run(code)
+
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(vocab_dependent_value, fullgraph=True), target, value
+        )
+        self.assertEqual(actual, vocab_dependent_value(target, value))
+        self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 1)
+        FileCheck().check_not("rnumel").run(code)
+
     def test_view_replay_padding_issue_163328(self):
         class ReproModule(nn.Module):
             def __init__(self):
