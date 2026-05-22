@@ -1228,13 +1228,6 @@ def forward(self, x_1, output_1):
             else f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
         )
         num_bufs_allocated = code.count(code_string)
-        if (
-            inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is not True
-        ):
-            # Lazy compile emits aoti_torch_empty_strided for scratch space
-            # allocation (global_scratch + profile_scratch) per unique kernel wrapper
-            num_bufs_allocated -= 4
         self.assertEqual(num_bufs_allocated, 2)
 
         # Check we're reusing buffers if not allocating.
@@ -2884,6 +2877,25 @@ def forward(self, arg0_1, arg1_1):
             BLOCK_SIZE = 32
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             kernel[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    def test_kernel_with_backslash_in_docstring(self):
+        # https://github.com/pytorch/pytorch/issues/183420
+        # Backslash escapes in the kernel source text must be doubled before
+        # the source is spliced into the generated triple-quoted wrapper,
+        # otherwise '\n' becomes a real newline in the second-stage .py file
+        # and parsing fails with SyntaxError.
+        def fn(sz):
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel_with_backslash_in_docstring[grid](x, sz, BLOCK_SIZE)
             return x
 
         actual = fn(345)
