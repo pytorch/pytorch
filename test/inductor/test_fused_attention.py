@@ -17,14 +17,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import (
-    IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
-    IS_LINUX,
-    skipIfXpu,
-    TEST_WITH_ROCM,
-    xfailIf,
-)
+from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -1635,6 +1628,52 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
 
+class TestSDPAPatternRegistration(TestCase):
+    def test_inference_only_patterns_not_registered_for_training(self):
+        from torch._inductor.fx_passes import fuse_attention
+
+        inference_only_patterns = [
+            "_sfdp_pattern_13",
+            "_sfdp_pattern_15",
+            "_sfdp_pattern_17",
+            "_sfdp_pattern_18",
+            "_sfdp_pattern_19",
+            "_sfdp_pattern_20",
+            "_sfdp_pattern_21",
+            "_sfdp_pattern_22",
+            "_sfdp_pattern_23",
+            "_sfdp_pattern_24",
+        ]
+        self.assertEqual(
+            inference_only_patterns,
+            sorted(fuse_attention._INFERENCE_ONLY_SFDP_PATTERNS),
+        )
+
+        registered_names = [
+            name for name, _ in fuse_attention._get_sfdp_patterns(torch.device("cpu"))
+        ]
+        unexpected_training_names = sorted(
+            name
+            for name in registered_names
+            if name.endswith("_training")
+            and any(
+                name.startswith(f"{pattern_name}_")
+                for pattern_name in inference_only_patterns
+            )
+        )
+        self.assertEqual([], unexpected_training_names)
+
+        missing_inference_names = sorted(
+            pattern_name
+            for pattern_name in inference_only_patterns
+            if not any(
+                name.endswith("_inference") and name.startswith(f"{pattern_name}_")
+                for name in registered_names
+            )
+        )
+        self.assertEqual([], missing_inference_names)
+
+
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
@@ -1783,10 +1822,7 @@ if HAS_CPU:
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
         )
         test_sdpa_rewriter_2_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_2
-        # see https://github.com/pytorch/pytorch/issues/177244
-        test_sdpa_rewriter_5_cpu = xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
-        )
+        test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
@@ -1805,8 +1841,7 @@ if HAS_CPU:
         test_sdpa_rewriter_13_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
         )
-        # see https://github.com/pytorch/pytorch/issues/177244
-        test_sdpa_rewriter_14_cpu = xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)(
+        test_sdpa_rewriter_14_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
         )
         test_sdpa_rewriter_15_cpu = functools.partialmethod(
