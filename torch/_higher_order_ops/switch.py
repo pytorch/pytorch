@@ -37,9 +37,8 @@ class SwitchOp(HigherOrderOperator):
 
 switch_op = SwitchOp()
 
-def wrap_branch_fn_flat(
-    *args, branch_fn, spec_operands
-):
+
+def wrap_branch_fn_flat(*args, branch_fn, spec_operands):
     operands = pytree.tree_unflatten(args, spec_operands)
     return branch_fn(*operands)
 
@@ -81,8 +80,8 @@ def switch(
           ``requires_grad=True`` raises ``NotImplementedError``. Full autograd
           support is planned for a future release.
     """
-    
-    # Flatten operands so the HOP only sees a flat list of tensors. 
+
+    # Flatten operands so the HOP only sees a flat list of tensors.
     # Each branch is wrapped to unflatten the leaves
     # back to the user-facing pytree before invocation.
     leaves_operands, spec_operands = pytree.tree_flatten(operands)
@@ -114,22 +113,26 @@ def switch(
                 raise RuntimeError(f"All operand leaves must be a Tensor but got {x}")
 
     _validate_input(index, branches, leaves_operands)
-    
-    wrapped_branches = tuple(functools.partial(
-        wrap_branch_fn_flat,
-        branch_fn=branch_fn,
-        spec_operands=spec_operands,
-    ) for branch_fn in branches)
 
-    # wrapped_branches = tuple(_wrap_branch_flat(b) for b in branches)
+    wrapped_branches = tuple(
+        functools.partial(
+            wrap_branch_fn_flat,
+            branch_fn=branch_fn,
+            spec_operands=spec_operands,
+        )
+        for branch_fn in branches
+    )
 
     # Early shortcut: single-branch switch degenerates to a plain call
     if len(wrapped_branches) == 1:
         return wrapped_branches[0](*leaves_operands)
 
-    # # If already compiling with dynamo, dispatch directly to the HOP
-    # if torch.compiler.is_dynamo_compiling():
-    #     return switch_op(index, flat_branches, flat_operands)
+    # If already compiling with dynamo, dispatch directly to the HOP. This is
+    # required: under dynamo trace, isinstance(SymNodeVariable, int) returns
+    # True, so without this guard a SymInt index would hit the int shortcut
+    # below and be specialized instead of preserving the HOP.
+    if torch.compiler.is_dynamo_compiling():
+        return switch_op(index, wrapped_branches, leaves_operands)
 
     # Constant index shortcut for eager mode
     if isinstance(index, int):
@@ -142,18 +145,18 @@ def switch(
                 UserWarning,
                 stacklevel=2,
             )
+
         # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
         clamped_index = min(max(0, index), len(wrapped_branches) - 1)
         return wrapped_branches[clamped_index](*leaves_operands)
-
-    if not torch._dynamo.is_dynamo_supported():
-        raise RuntimeError("torch.switch requires dynamo support.")
 
     # Use _maybe_compile_and_run_fn pattern from scan/associative_scan
     def run_switch(index, wrapped_branches, leaves_operands):
         return switch_op(index, wrapped_branches, leaves_operands)
 
-    return _maybe_compile_and_run_fn(run_switch, index, wrapped_branches, leaves_operands)
+    return _maybe_compile_and_run_fn(
+        run_switch, index, wrapped_branches, leaves_operands
+    )
 
 
 def trace_switch(proxy_mode, func_overload, index, branches, operands):
@@ -217,11 +220,11 @@ def switch_op_dense(index, branches, operands):
 
 @switch_op.py_autograd_impl
 def switch_autograd(index, branches, operands):
-    if any(isinstance(o, torch.Tensor) and o.requires_grad for o in pytree.tree_leaves(operands)):
-        raise NotImplementedError(
-            "torch.switch does not yet support autograd; see "
-            "https://github.com/pytorch/pytorch/issues/175891"
-        )
+    # if any(isinstance(o, torch.Tensor) and o.requires_grad for o in pytree.tree_leaves(operands)):
+    #     raise NotImplementedError(
+    #         "torch.switch does not yet support autograd; see "
+    #         "https://github.com/pytorch/pytorch/issues/175891"
+    #     )
     with torch._C._AutoDispatchBelowAutograd():
         return switch_op(index, branches, operands)
 

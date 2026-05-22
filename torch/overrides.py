@@ -319,7 +319,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.set_warn_always,
         torch.vmap,
         torch.cond,
-        torch.switch,
         torch.frombuffer,
         torch.asarray,
         torch._functional_sym_constrain_range,

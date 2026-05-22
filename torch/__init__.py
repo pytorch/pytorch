@@ -126,7 +126,6 @@ __all__ = [
     "set_warn_always",
     "split",
     "stack",
-    "switch",
     "sym_float",
     "sym_fresh_size",
     "sym_int",
@@ -2866,11 +2865,7 @@ from torch import (
     library as library,
     return_types as return_types,
 )
-from torch._higher_order_ops import (
-    cond as cond,
-    switch as switch,
-    while_loop as while_loop,
-)
+from torch._higher_order_ops import cond as cond, while_loop as while_loop
 from torch.func import vmap as vmap
 
 
