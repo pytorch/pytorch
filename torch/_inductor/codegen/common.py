@@ -2718,9 +2718,11 @@ class CSEProxy(DefaultHandler):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and var_shape is not None
+            ):
+                check_shape(V.kernel.compute, csevar, var_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
@@ -2799,9 +2801,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

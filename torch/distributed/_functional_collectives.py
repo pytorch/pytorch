@@ -561,7 +561,7 @@ def all_to_all_single_autograd(
 
 
 # ============================================================================
-# Collecive Autograd Functions / Custom Ops
+# Collective Autograd Functions / Custom Ops
 # ============================================================================
 
 
