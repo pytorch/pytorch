@@ -3543,25 +3543,25 @@ class CppCodeCache:
             if main_needs_vec_isa or kernel_needs_vec_isa
             else invalid_vec_isa
         )
-        shared_compile_command = {
+        shared_compile_command: dict[str, Any] = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
             "use_relative_path": config.is_fbcode(),
         }
-        main_compile_command = {
+        main_compile_command: dict[str, Any] = {
             **shared_compile_command,
             "vec_isa": picked_vec_isa if main_needs_vec_isa else invalid_vec_isa,
         }
-        optimized_compile_command = {
+        optimized_compile_command: dict[str, Any] = {
             **shared_compile_command,
             "vec_isa": picked_vec_isa if kernel_needs_vec_isa else invalid_vec_isa,
         }
-        main_link_command = {
+        main_link_command: dict[str, Any] = {
             **main_compile_command,
             "extra_flags": extra_flags + link_flags,
         }
-        link_command = {
+        link_command: dict[str, Any] = {
             **shared_compile_command,
             "extra_flags": extra_flags + link_flags,
         }
@@ -3572,7 +3572,7 @@ class CppCodeCache:
         # the optimized_code argument is present at all, since that's how the user of
         # this function opts in, but we do compilation and linking in one step if the
         # optimized_code argument is empty (as a micro-optimization).
-        # On GPU the C++ wrapper is just glue — the real kernels are compiled
+        # On GPU the C++ wrapper is just glue; the real kernels are compiled
         # separately by Triton/CUDA.  Always use -O1 to cut compile time.
         min_optimize = optimized_code is not None or device_type != "cpu"
         main_build_option = CppTorchDeviceOptions(
@@ -3587,6 +3587,7 @@ class CppCodeCache:
             # pyrefly: ignore [bad-argument-type]
             **optimized_compile_command,
         )
+        link_build_option = CppTorchDeviceOptions(**link_command)
 
         def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
             """Writing the code to file will calculate a hash, which we need to vary if
@@ -3601,9 +3602,7 @@ class CppCodeCache:
             get_hashable_command_line(optimized_build_option) if optimized_code else ""
         )
         link_cmd_line = (
-            get_hashable_command_line(CppTorchDeviceOptions(**link_command))
-            if optimized_code
-            else ""
+            get_hashable_command_line(link_build_option) if optimized_code else ""
         )
 
         key, main_path = write(
@@ -3675,8 +3674,7 @@ class CppCodeCache:
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
                     ],
-                    # pyrefly: ignore [bad-argument-type]
-                    BuildOption=CppTorchDeviceOptions(**link_command),
+                    BuildOption=link_build_option,
                     output_dir=output_dir,
                 )
 

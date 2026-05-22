@@ -151,14 +151,16 @@ def module_hooks_for_symbol(symbol_prefix: str) -> NVGemmModuleHooks:
 
 
 def export_compiled_artifact_to_c(
-    compiled_obj,
+    compiled_obj: Any,
     output_dir: str | Path,
     file_name: str,
     function_prefix: str,
 ) -> NVGemmNativeArtifact:
     import cutlass_api.config
 
-    compiled_obj = getattr(compiled_obj, "compiled_obj", compiled_obj)
+    compiled_exporter: Any = getattr(compiled_obj, "compiled_obj", None)
+    if compiled_exporter is None:
+        compiled_exporter = compiled_obj
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
 
@@ -166,7 +168,7 @@ def export_compiled_artifact_to_c(
     old_use_tvm_ffi = global_options.use_tvm_ffi
     global_options.use_tvm_ffi = False
     try:
-        compiled_obj.export_to_c(str(output), file_name, function_prefix)
+        compiled_exporter.export_to_c(str(output), file_name, function_prefix)
     finally:
         global_options.use_tvm_ffi = old_use_tvm_ffi
 
@@ -184,7 +186,7 @@ def export_compiled_artifact_to_c(
 
 
 def export_compiled_artifact_to_cache(
-    compiled_obj,
+    compiled_obj: Any,
     stable_cache_key_inputs: tuple[str, ...],
 ) -> NVGemmNativeArtifact:
     from torch._inductor.codecache import code_hash, get_path
