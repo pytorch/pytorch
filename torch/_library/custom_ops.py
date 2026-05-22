@@ -887,20 +887,20 @@ class CustomOpDef:
         if has_tensorlist:
             return
 
-        def backend_dispatch(keyset, *args, **kwargs):
-            return _fast_dispatch_tls.backend_impl(*args, **kwargs)
-
-        if schema.is_mutable:
-            chain = (self._adinplaceorview_impl, backend_dispatch)
-        else:
-            chain = (backend_dispatch,)
-
         op = self._opoverload
         raw_fns = self._raw_fns
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
         backend_impls = self._backend_impls
         opdef = self
+
+        def backend_dispatch(keyset, *args, **kwargs):
+            return _fast_dispatch_tls.backend_impl(*args, **kwargs)
+
+        if schema.is_mutable:
+            chain = (autograd_impl, self._adinplaceorview_impl, backend_dispatch)
+        else:
+            chain = (autograd_impl, backend_dispatch)
 
         def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -931,7 +931,7 @@ class CustomOpDef:
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
             try:
                 with _ops._enable_fast_redispatch(op, chain):
-                    return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
+                    return op.redispatch(keyset, *args)
             finally:
                 _fast_dispatch_tls.backend_impl = None
 
