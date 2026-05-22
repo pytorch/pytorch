@@ -2556,6 +2556,14 @@ class VariableBuilder:
                         sym_val.node.shape_env.var_to_hint_override[expr] = (
                             int_spec.optimization_hint
                         )
+                    # Dedup multiple uses of the same IntVar via runtime
+                    # equality check. `_uid` distinguishes IntVars with
+                    # the same name (including default `anon`). The
+                    # `__intvar__:` prefix keeps these from colliding
+                    # with user-supplied `shape_id` strings.
+                    sym_val.node.shape_env._add_shape_id_eq_check(
+                        sym_val, f"__intvar__:{int_spec._uid}"
+                    )
                     return result
                 else:
                     raise ValueError(
