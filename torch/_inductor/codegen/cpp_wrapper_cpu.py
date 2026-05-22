@@ -285,6 +285,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.declared_int_array_vars: OrderedSet[str] = OrderedSet()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self._aot_output: str | None = None
         # Defined kernels drive member declarations; called kernels drive
         # `call_<k>` emission. A kernel may be defined without being called.
         self._cpu_triton_kernel_names: OrderedSet[str] = OrderedSet()
@@ -1546,11 +1547,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # Close the entry function. In dual-wrapper-mode `result` is the JIT side;
         # the AOTI side close is emitted by _generate_end_aoti.
         if V.graph.aot_mode:
-            if V.graph.is_dual_wrapper_mode:
-                result.writeline("} // inductor_entry_impl")
-            else:
-                entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
-                result.writeline(f"}} // {self.aoti_model_class_name}::{entry}")
+            entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
+            result.writeline(f"}} // {self.aoti_model_class_name}::{entry}")
         else:
             result.writeline("} // inductor_entry_impl")
 
@@ -3585,13 +3583,11 @@ if (!custom_op_wrapper) {
         tmp_var_name = f"var_{next(self.arg_var_id)}"
         call_str = f"auto {tmp_var_name} = {handle};"
 
-        writer = (
-            writer if writer is not None else self
-        )  # pyrefly: ignore [bad-assignment]
-        if isinstance(writer, list):
+        if writer is None:
+            self.writeline(call_str)
+        elif isinstance(writer, list):
             writer.append(call_str)
         else:
-            # pyrefly: ignore [missing-attribute]
             writer.writeline(call_str)
 
         return tmp_var_name
