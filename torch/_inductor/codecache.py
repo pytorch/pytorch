@@ -91,6 +91,7 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    CustomPassBase,
     CustomSchedulerPass,
     get_custom_graph_passes,
 )
@@ -1418,7 +1419,7 @@ class FxGraphHashDetails:
             return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
-        if isinstance(custom_pass, (CustomGraphPass, CustomSchedulerPass)):
+        if isinstance(custom_pass, CustomPassBase):
             return custom_pass.uuid()
         if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
