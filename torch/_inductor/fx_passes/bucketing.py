@@ -14,6 +14,7 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -326,7 +327,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+    all_node_ancestors: BitsetAncestors | None = None,
 ) -> bool:
     """Check if an all_gather derives from exactly one placeholder (parameter).
 
@@ -336,7 +337,9 @@ def is_fsdp_all_gather(
     if not is_all_gather_into_tensor(node):
         return False
     if all_node_ancestors is not None:
-        phs = (a for a in all_node_ancestors[node] if a.op == "placeholder")
+        phs = (
+            a for a in all_node_ancestors.iter_ancestors(node) if a.op == "placeholder"
+        )
         return next(phs, None) is not None and next(phs, None) is None
     from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
@@ -611,7 +614,7 @@ def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
@@ -648,7 +651,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
 
 
@@ -660,7 +663,7 @@ def reduce_scatter_merge_fn_to_trace(
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
 
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     new_out_numels = [x.numel() // group_size for x in rs_ins]
@@ -673,7 +676,7 @@ def reduce_scatter_merge_fn_to_trace(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
 
 
@@ -690,14 +693,14 @@ def reduce_scatter_merge_fn_coalesced(
     Avoids cat-ing inputs into one buffer; instead passes the tensor list
     directly to reduce_scatter_tensor_coalesced for zero-copy batching.
     """
-    rs_ins_flat = [x.view(-1) for x in rs_ins]
+    rs_ins_flat = [x.reshape(-1) for x in rs_ins]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
 
     rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
         rs_ins_flat, reduce_op, group_size, group_name
     )
     rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
-    return [o.view(s) for o, s in zip(rs_outs, new_out_sizes)]
+    return [o.reshape(s) for o, s in zip(rs_outs, new_out_sizes)]
 
 
 def all_reduce_merge_fn_to_trace(
@@ -707,14 +710,14 @@ def all_reduce_merge_fn_to_trace(
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    ar_ins_flattened = [x.view(-1) for x in ar_ins]
+    ar_ins_flattened = [x.reshape(-1) for x in ar_ins]
     new_ar_in = torch.cat(ar_ins_flattened)
     new_ar_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_reduce.default(new_ar_in, reduce_op, group_name)
     )
     split_sizes = [x.numel() for x in ar_ins]
     new_outs_flat = new_ar_out.split(split_sizes)
-    new_outs = [x.view(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
+    new_outs = [x.reshape(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
     return new_outs
 
 
