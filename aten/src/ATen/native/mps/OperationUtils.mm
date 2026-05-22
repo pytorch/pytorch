@@ -906,7 +906,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
     functionNames.insert(names.begin(), names.end());
     functionNamesPopulated = true;
   }
-  return functionNames.count(fname) > 0;
+  return functionNames.contains(fname);
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {

@@ -176,8 +176,8 @@ kernel void unary_strided_castout(
           constant long* output_strides,                                       \
           constant uint& ndim,                                                 \
           uint index);                                                         \
-  template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::       \
-      c10::metal::unary_dense_castout<DTYPE0, NAME##_functor>(                 \
+  template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::c10::  \
+      metal::unary_dense_castout<DTYPE0, NAME##_functor>(                      \
           device void* output,                                                 \
           constant DTYPE0* input,                                              \
           constant uint2& size_outtype,                                        \
