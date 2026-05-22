@@ -825,9 +825,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                     left: VariableTracker,
                     right: VariableTracker,
                 ) -> VariableTracker | None:
-                    result = vt_identity_compare(left, right)
+                    result = vt_identity_compare(tx, left, right)
                     if result is None:
-                        return None
+                        unimplemented(
+                            gb_type="unsupported identity comparison",
+                            context=f"{op.__name__}({left}, {right})",
+                            explanation="Dynamo could not prove a guarded result for this identity comparison.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                     is_same = result.as_python_constant()
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
@@ -2682,7 +2687,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def _comparison_with_tensor(
         self, tx: "InstructionTranslator", left: VariableTracker, right: VariableTracker
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         from .builder import wrap_fx_proxy_cls
         from .tensor import supported_tensor_comparison_op_values
 
@@ -2695,10 +2700,18 @@ class BuiltinVariable(BaseBuiltinVariable):
                 and id(extract_fake_example_value(left.as_proxy().node))
                 == id(extract_fake_example_value(right.as_proxy().node))
             )
-            if op is operator.is_:
-                return VariableTracker.build(tx, is_result)
-            else:
-                return VariableTracker.build(tx, not is_result)
+            if left.is_tensor() and right.is_tensor():
+                if op is operator.is_:
+                    return VariableTracker.build(tx, is_result)
+                else:
+                    return VariableTracker.build(tx, not is_result)
+            result = vt_identity_compare(tx, left, right)
+            if result is not None:
+                is_same = result.as_python_constant()
+                return VariableTracker.build(
+                    tx, is_same if op is operator.is_ else not is_same
+                )
+            return None
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented(

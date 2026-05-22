@@ -1924,6 +1924,16 @@
       ]
     }
   ],
+  "GB6965": [
+    {
+      "Gb_type": "unsupported identity comparison",
+      "Context": "{op.__name__}({left}, {right})",
+      "Explanation": "Dynamo could not prove a guarded result for this identity comparison.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0143": [
     {
       "Gb_type": "Unsupported conversion for slice assignment",

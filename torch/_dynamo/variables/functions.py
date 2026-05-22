@@ -90,6 +90,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1704,7 +1705,7 @@ class UserMethodVariable(UserFunctionVariable):
         return super().var_getattr(tx, name)
 
     def get_real_python_backed_value(self) -> Any:
-        return self.fn
+        return NO_SUCH_SUBOBJ
 
 
 class WrappedUserMethodVariable(UserMethodVariable):

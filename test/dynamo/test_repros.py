@@ -14,6 +14,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import operator
 import os
 import random
 import sys
@@ -99,6 +100,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+_GLOBAL_TENSOR_FOR_IS_TEST = None
 
 HAS_MSGSPEC = importlib.util.find_spec("msgspec")
 if HAS_MSGSPEC:
@@ -8886,6 +8888,270 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return x + 2.0
 
         result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_operator_is_with_source_aliases(self):
+        shared = tuple(range(2))
+        alias = shared
+        distinct = tuple(range(2))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if not operator.is_(shared, alias):
+                return x + 10.0
+            if operator.is_(shared, distinct):
+                return x + 20.0
+            return x + 1.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        alias = distinct
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 10.0)
+
+    def test_inherited_c_descriptor_identity(self):
+        class DictSubclass(dict):
+            pass
+
+        class Plain:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if DictSubclass.get is dict.get and Plain.__hash__ is object.__hash__:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_mutated_class_attr_tensor(self):
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if DictSubclass.get is x:
+                return x + 1.0
+            return x + 2.0
+
+        x = torch.tensor(0.0)
+        result = f(x)
+        self.assertEqual(result.item(), 2.0)
+
+        DictSubclass.get = x
+        result = f(x)
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_tensor_result_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = x.contiguous()
+            if y is x:
+                return x + 1.0
+            return x + 2.0
+
+        x = torch.tensor(0.0)
+        result = f(x)
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_mutated_tensor_alias_source(self):
+        global _GLOBAL_TENSOR_FOR_IS_TEST
+        _GLOBAL_TENSOR_FOR_IS_TEST = torch.tensor(0.0)
+
+        try:
+            counter = CompileCounter()
+
+            @torch.compile(backend=counter)
+            def f(x):
+                if x is _GLOBAL_TENSOR_FOR_IS_TEST:
+                    return x + 1.0
+                return x + 2.0
+
+            old_global_tensor = _GLOBAL_TENSOR_FOR_IS_TEST
+            result = f(old_global_tensor)
+            self.assertEqual(result.item(), 1.0)
+
+            _GLOBAL_TENSOR_FOR_IS_TEST = torch.tensor(0.0)
+            result = f(old_global_tensor)
+            self.assertEqual(result.item(), 2.0)
+            self.assertEqual(counter.frame_count, 2)
+
+            result = f(_GLOBAL_TENSOR_FOR_IS_TEST)
+            self.assertEqual(result.item(), 1.0)
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            _GLOBAL_TENSOR_FOR_IS_TEST = None
+
+    def test_is_with_unsafe_instance_attr_source(self):
+        class Holder:
+            pass
+
+        holder = Holder()
+        left = object()
+        right = object()
+        holder.item = left
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x):
+            if holder.item is right:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        holder.item = right
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_is_with_descriptor_sources_from_class_dict(self):
+        class Foo:
+            __slots__ = ("slot",)
+
+            @property
+            def prop(self):
+                return 1
+
+        old_property = Foo.__dict__["prop"]
+        old_slot = Foo.__dict__["slot"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Foo.prop is old_property and Foo.slot is old_slot:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Foo.prop = property(lambda self: 2)
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        sentinel = object()
+
+        class WeirdProperty(property):
+            def __get__(self, obj, owner=None):
+                return sentinel
+
+        class Weird:
+            attr = WeirdProperty(lambda self: None)
+
+        old_attr = Weird.__dict__["attr"]
+
+        @torch.compile(backend="eager")
+        def g(x):
+            if Weird.attr is old_attr:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_mutated_staticmethod_source(self):
+        class Foo:
+            @staticmethod
+            def method():
+                pass
+
+        old_method = Foo.method
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if Foo.method is old_method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Foo.method = staticmethod(
+            types.FunctionType(
+                old_method.__code__,
+                old_method.__globals__,
+                old_method.__name__,
+            )
+        )
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        class Bar:
+            @staticmethod
+            def method():
+                pass
+
+        old_bar_method = Bar.method
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            if Bar.method is old_bar_method:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        Bar.method = classmethod(old_bar_method)
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_fresh_bound_method_source(self):
+        class Foo:
+            def method(self):
+                pass
+
+        obj = Foo()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if obj.method is obj.method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+    def test_is_with_mutated_classmethod_sources(self):
+        class Foo:
+            @classmethod
+            def method(cls):
+                pass
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if Foo.method is Foo.method:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        old_method = Foo.method
+        Foo.method = old_method
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+        self.assertEqual(counter.frame_count, 2)
+
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager")
+        def g(x):
+            if DictSubclass.fromkeys is DictSubclass.fromkeys:
+                return x + 1.0
+            return x + 2.0
+
+        result = g(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+
+        old_fromkeys = DictSubclass.fromkeys
+        DictSubclass.fromkeys = old_fromkeys
+        result = g(torch.tensor(0.0))
         self.assertEqual(result.item(), 1.0)
 
     def test_inspect_signature_callable_class(self):

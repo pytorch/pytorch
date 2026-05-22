@@ -7,6 +7,7 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
+import inspect
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
@@ -27,6 +28,16 @@ from ..exc import (
     raise_type_error,
     unimplemented,
 )
+from ..guards import GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    DictGetItemSource,
+    GetItemSource,
+    GlobalSource,
+    LocalSource,
+    SkipGuardSource,
+    TypeDictSource,
+)
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
@@ -37,6 +48,7 @@ if TYPE_CHECKING:
 
 
 def vt_identity_compare(
+    tx: "InstructionTranslator",
     left: VariableTracker,
     right: VariableTracker,
 ) -> "VariableTracker | None":
@@ -48,12 +60,151 @@ def vt_identity_compare(
     if left is right:
         return ConstantVariable.create(True)
 
-    left_val = left.get_real_python_backed_value()
-    right_val = right.get_real_python_backed_value()
+    def stable_class_attr_value(cls: type[object], name: str) -> object:
+        value = inspect.getattr_static(cls, name, NO_SUCH_SUBOBJ)
+        if value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+
+        if type(value) is staticmethod:
+            return value.__get__(None, cls)
+        if type(value) is classmethod:
+            return NO_SUCH_SUBOBJ
+
+        if not hasattr(type(value), "__get__"):
+            return value
+
+        metacls = type(cls)
+        if metacls is not type and "__getattribute__" in metacls.__dict__:
+            return NO_SUCH_SUBOBJ
+
+        if getattr(cls, name) is value:
+            return value
+        return NO_SUCH_SUBOBJ
+
+    def source_identity_value_from_source(source: object) -> object:
+        if isinstance(source, (GlobalSource, LocalSource)):
+            return tx.output.resolve_source_value(source)
+        if isinstance(source, DictGetItemSource):
+            return tx.output.resolve_source_value(source)
+        if isinstance(source, GetItemSource):
+            return tx.output.resolve_source_value(source)
+        if isinstance(source, SkipGuardSource):
+            return tx.output.resolve_source_value(source)
+        return NO_SUCH_SUBOBJ
+
+    def source_identity_value(var: VariableTracker) -> object:
+        source = var.source
+        if source is None:
+            return NO_SUCH_SUBOBJ
+        if isinstance(source, DictGetItemSource) and isinstance(
+            source.base, TypeDictSource
+        ):
+            owner = tx.output.resolve_source_value(source.base.base)
+            if isinstance(owner, type) and isinstance(source.index, str):
+                source_value = tx.output.resolve_source_value(source)
+                if stable_class_attr_value(owner, source.index) is source_value:
+                    return source_value
+                return NO_SUCH_SUBOBJ
+        if isinstance(source, AttrSource):
+            base = tx.output.resolve_source_value(source.base)
+            if isinstance(base, type):
+                return stable_class_attr_value(base, source.member)
+            if source.member in ("__func__", "__name__", "__objclass__"):
+                base_value = source_identity_value_from_source(source.base)
+                if base_value is not NO_SUCH_SUBOBJ:
+                    return tx.output.resolve_source_value(source)
+            static_value = inspect.getattr_static(base, source.member, NO_SUCH_SUBOBJ)
+            if static_value is not NO_SUCH_SUBOBJ:
+                resolved_value = tx.output.resolve_source_value(source)
+                if static_value is resolved_value:
+                    return resolved_value
+        return source_identity_value_from_source(source)
+
+    def source_guarded_value(var: VariableTracker) -> tuple[object, bool, bool]:
+        value = var.get_real_python_backed_value()
+        if value is not NO_SUCH_SUBOBJ:
+            if var.source is None:
+                return value, False, False
+            source_value = source_identity_value(var)
+            if source_value is value:
+                return value, not isinstance(var.source, SkipGuardSource), False
+            return NO_SUCH_SUBOBJ, False, False
+        value = source_identity_value(var)
+        return value, value is not NO_SUCH_SUBOBJ, var.source is None
+
+    def install_identity_guard(var: VariableTracker, needs_guard: bool) -> bool:
+        if not needs_guard:
+            return True
+        if var.source is None:
+            return True
+        if isinstance(var.source, AttrSource) and var.source.member == "__func__":
+            base_value = source_identity_value_from_source(var.source.base)
+            if base_value is not NO_SUCH_SUBOBJ:
+                try:
+                    install_guard(var.source.base.make_guard(GuardBuilder.ID_MATCH))
+                except NotImplementedError:
+                    return False
+        guard_type = var.get_id_guard_type()
+        if guard_type is None:
+            return True
+        try:
+            install_guard(var.source.make_guard(guard_type))
+        except NotImplementedError:
+            return False
+        return True
+
+    left_val, left_needs_guard, left_absent = source_guarded_value(left)
+    right_val, right_needs_guard, right_absent = source_guarded_value(right)
     left_known = left_val is not NO_SUCH_SUBOBJ
     right_known = right_val is not NO_SUCH_SUBOBJ
 
+    # Local import avoids a module cycle with variables.functions.
+    from .functions import UserMethodVariable
+
+    def install_user_method_lookup_guards(var: UserMethodVariable) -> bool:
+        source_fn = var.source_fn
+        if source_fn is None:
+            return False
+        guard_sources = [source_fn]
+        if isinstance(source_fn, AttrSource) and source_fn.member == "__func__":
+            guard_sources.append(source_fn.base)
+        for source in guard_sources:
+            try:
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            except NotImplementedError:
+                return False
+        return True
+
+    def install_known_value_guard(var: VariableTracker) -> bool:
+        value, needs_guard, absent = source_guarded_value(var)
+        if value is NO_SUCH_SUBOBJ:
+            return absent
+        return install_identity_guard(var, needs_guard)
+
+    if isinstance(left, UserMethodVariable) or isinstance(right, UserMethodVariable):
+        if isinstance(
+            left, UserMethodVariable
+        ) and not install_user_method_lookup_guards(left):
+            return None
+        if isinstance(
+            right, UserMethodVariable
+        ) and not install_user_method_lookup_guards(right):
+            return None
+        if not isinstance(left, UserMethodVariable) and not install_known_value_guard(
+            left
+        ):
+            return None
+        if not isinstance(right, UserMethodVariable) and not install_known_value_guard(
+            right
+        ):
+            return None
+        return ConstantVariable.create(False)
+
     if left_known and right_known:
+        if not install_identity_guard(
+            left, left_needs_guard
+        ) or not install_identity_guard(right, right_needs_guard):
+            return None
         return (
             ConstantVariable.create(True)
             if left_val is right_val
@@ -63,6 +214,12 @@ def vt_identity_compare(
     # One side has a concrete backing object, the other doesn't — they can't
     # be the same object.
     if left_known != right_known:
+        if not (left_absent or right_absent):
+            return None
+        if not install_identity_guard(
+            left, left_needs_guard
+        ) or not install_identity_guard(right, right_needs_guard):
+            return None
         return ConstantVariable.create(False)
 
     # Mutable containers created during tracing: VT identity = Python identity.
