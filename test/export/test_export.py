@@ -9383,6 +9383,33 @@ def forward(self, x):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
 
+    def test_linspace_logspace_unbacked_steps(self):
+        class Linspace(torch.nn.Module):
+            def forward(self, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.linspace(0, 3, steps=x, device=x.device)
+
+        class Logspace(torch.nn.Module):
+            def forward(self, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.logspace(0, 2, steps=x, device=x.device)
+
+        for module in (Linspace(), Logspace()):
+            for strict in (False, True):
+                with self.subTest(module=type(module).__name__, strict=strict):
+                    ep = export(module, (torch.tensor(4),), strict=strict)
+                    self.assertEqual(
+                        ep.module()(torch.tensor(5)), module(torch.tensor(5))
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError, "Runtime assertion failed"
+                    ):
+                        ep.module()(torch.tensor(1))
+
     def test_while_loop_simple(self):
         class Simple(torch.nn.Module):
             def forward(self, ci, a, b):
