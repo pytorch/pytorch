@@ -2725,17 +2725,14 @@ class CSEProxy(DefaultHandler):
             ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                is_triton_cpu = (
-                    backend == "triton"
-                    and V.graph.get_current_device_or_throw().type == "cpu"
-                )
-                if not is_triton_cpu:
-                    shape_to_check = (
-                        csevar.shape if csevar.shape is not None else var_shape
-                    )
-                    assert shape_to_check is not None
-                    check_shape(V.kernel.compute, csevar, shape_to_check)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and backend == "triton"
+                and V.graph.get_current_device_or_throw().type != "cpu"
+            ):
+                shape_to_check = csevar.shape if csevar.shape is not None else var_shape
+                assert shape_to_check is not None
+                check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
