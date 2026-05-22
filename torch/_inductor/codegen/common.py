@@ -711,7 +711,7 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
@@ -2686,7 +2686,7 @@ class CSEProxy(DefaultHandler):
                 else output_dtype
             )
             var_shape: BlockShapeType = (
-                output_shape[output_idx]
+                output_shape[output_idx]  # type: ignore[assignment]
                 if isinstance(output_shape, (list, tuple))
                 and len(output_shape) > 0
                 and isinstance(output_shape[0], (list, tuple))
@@ -2799,9 +2799,15 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
+            # Propagate bounds as we know how to compute them properly.
+            # When wrap_neg=False, negative indices stay negative and must keep
+            # their original bounds so lower-bound checks are not elided.
+            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
+            if (
+                wrap_neg
+                and var.bounds != ValueRanges.unknown()
+                and isinstance(size, sympy.Number)
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond

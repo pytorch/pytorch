@@ -10,6 +10,7 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
+#include <fmt/format.h>
 
 namespace at::native {
 namespace mps {
@@ -47,8 +48,9 @@ static void copy_cast_mps(at::Tensor& dst,
 
   @autoreleasepool {
     const bool needs_conj = src.is_conj() != dst.is_conj();
-    std::string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
-        std::to_string(needs_conj);
+    const bool needs_neg = src.is_neg() != dst.is_neg();
+    std::string key = fmt::format(
+        "copy_cast_mps{}:{}:{}", getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true), needs_conj, needs_neg);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
       auto outputTensor = inputTensor;
@@ -60,6 +62,9 @@ static void copy_cast_mps(at::Tensor& dst,
       }
       if (needs_conj) {
         outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
+      }
+      if (needs_neg) {
+        outputTensor = [mpsGraph negativeWithTensor:outputTensor name:nil];
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
@@ -238,12 +243,13 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
-  // gather into dst. This reduces the overhead of doing an additional blit for most cases
+  // gather into dst. This reduces the overhead of doing an additional blit for most cases.
   bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj();
+  const bool sameDataType =
+      src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj() && src_.is_neg() == dst_.is_neg();
 
   if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
       // the copy_cast path requires storage_offset to be applied before casting

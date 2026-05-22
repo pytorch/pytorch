@@ -560,7 +560,13 @@ jobs:
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
         shell: bash
         run: |
-          python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+          # Run via uv so pyyaml is provisioned regardless of the build image's
+          # Python setup. Build containers like ubuntu-cross-riscv use the
+          # system apt python3, which doesn't include pyyaml. Matches the
+          # pattern used by parse_ref.py / filter_test_configs.py in
+          # .github/actions/filter-test-configs/action.yml.
+          uv run --no-project --with pyyaml==6.0.2 \
+            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         id: aws-creds

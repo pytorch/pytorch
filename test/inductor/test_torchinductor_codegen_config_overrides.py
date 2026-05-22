@@ -19,6 +19,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 importlib.import_module("filelock")
@@ -148,8 +149,7 @@ class CodegenInductorTest(InductorTestCase):
         else:
             self.assertGreater(welford_count, 0)
 
-    @requires_gpu()
-    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @requires_cuda_and_triton
     @parametrize(
         "two_pass_variance_l2_fraction, expect_welford",
         [(0.0, True), (1e-12, True), (1.0, False)],
