@@ -304,7 +304,6 @@ class CustomOpDef:
 
         self._backend_fns: dict[str | None, Callable] = {}
         self._backend_impls: dict[str | None, Callable] = {}
-        self._raw_fns: dict[str | None, Callable] = {}
         self._fast_path: Callable | None = None
         self._fast_path_hits: int = 0
         self._autograd_impl: Callable | None = None
@@ -518,7 +517,6 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-                self._raw_fns[device_type] = fn
             self._install_fast_path()
             return fn
 
@@ -888,7 +886,6 @@ class CustomOpDef:
             return
 
         op = self._opoverload
-        raw_fns = self._raw_fns
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
         backend_impls = self._backend_impls
@@ -922,12 +919,12 @@ class CustomOpDef:
             if device_type == "meta" or device_type in disabled_kernel:
                 return _DO_SLOW_PATH
             # No registered kernel for this device
-            fn = raw_fns.get(device_type) or raw_fns.get(None)
-            if fn is None:
+            backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
+            if backend_impl is None:
                 return _DO_SLOW_PATH
 
             opdef._fast_path_hits += 1
-            _backend_impl_tls.entry = backend_impls.get(device_type) or backend_impls.get(None)
+            _backend_impl_tls.entry = backend_impl
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
             try:
                 with _ops._enable_fast_redispatch(op, chain):
