@@ -6990,6 +6990,69 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
 
 
+@dataclasses.dataclass
+class TritonStore:
+    store_node: ast.Call
+    store_pointer_node: ast.Expr
+    store_value_node: ast.Expr
+
+
+@dataclasses.dataclass
+class TritonStores:
+    stores: list[TritonStore]
+
+
+@functools.cache
+def identify_triton_stores(source_code: str) -> TritonStores:
+    """
+    Parse Python source code of the Triton kernel and find all tl.store calls.
+    Returns a TritonStores object containing information about pointer, value, and mask.
+
+    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
+    """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
+
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
+    stores = []
+
+    def _extract_arg(node, arg_name, positional_index):
+        """
+        Extract an argument from a Call node, checking both positional and keyword args.
+        Returns the AST node for the argument, or None if not found.
+        """
+        # Check positional args first
+        if len(node.args) > positional_index:
+            return node.args[positional_index]
+
+        # Check keyword args
+        for keyword in node.keywords:
+            if keyword.arg == arg_name:
+                return keyword.value
+
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # Check if this is a tl.store call
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tl"
+                and node.func.attr == "store"
+            ):
+                # Extract required arguments
+                pointer_node = _extract_arg(node, "pointer", 0)
+                value_node = _extract_arg(node, "value", 1)
+
+                if pointer_node is None or value_node is None:
+                    continue
+
+                stores.append(TritonStore(node, pointer_node, value_node))
+
+    return TritonStores(stores=stores)
+
+
 class FusedUserTritonKernel(TritonKernel):
     """
     When fusing a user-defined triton kernel with epilogues, we use this class
@@ -7005,10 +7068,6 @@ class FusedUserTritonKernel(TritonKernel):
         features: SIMDKernelFeatures,
         scheduler_node: FusedUserTritonSchedulerNode,
     ) -> None:
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            identify_triton_stores_from_ast,
-        )
-
         super().__init__(
             tiling,
             features=features,
@@ -7067,8 +7126,6 @@ class FusedUserTritonKernel(TritonKernel):
 
     # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
     def codegen(self) -> str:
-        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
-
         with self:
             index_vars = self.split_and_set_ranges(
                 self.scheduler_node.fused_epilogue.get_ranges()
