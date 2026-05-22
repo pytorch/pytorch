@@ -1659,7 +1659,7 @@ class CppMicroGemmWoQInt4Avx512(CppMicroGemmFP32Vec):
                     break;
                 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m");
                 }
             }
         }
