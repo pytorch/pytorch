@@ -4,15 +4,14 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-from torch._inductor.heuristics.registry import register_template_heuristic
-
-from ...ir import get_free_symbols
-from ...kernel.mm import decompose_k_subgraph_template
-from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import get_k_splits
-from ...virtualized import V
+from ..ir import get_free_symbols
+from ..kernel.mm import decompose_k_subgraph_template
+from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..utils import get_k_splits
+from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
