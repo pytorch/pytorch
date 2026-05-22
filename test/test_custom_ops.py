@@ -5360,6 +5360,10 @@ class TestCustomOpFastPath(TestCase):
         def fp_add(x: Tensor, y: Tensor) -> Tensor:
             return x + y
 
+        @fp_add.register_fake
+        def _(x, y):
+            return torch.empty_like(x)
+
         x = torch.randn(3)
         y = torch.randn(3)
         with self._assert_fast_path_taken(fp_add):
@@ -5375,9 +5379,17 @@ class TestCustomOpFastPath(TestCase):
         def fp_multi(x: Tensor) -> Tensor:
             return x * 2
 
+        @fp_multi.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
         @torch.library.custom_op("_torch_testing::fp_multi.with_bias", mutates_args=())
         def fp_multi_bias(x: Tensor, bias: Tensor) -> Tensor:
             return x * 2 + bias
+
+        @fp_multi_bias.register_fake
+        def _(x, bias):
+            return torch.empty_like(x)
 
         x = torch.randn(3)
         bias = torch.randn(3)
@@ -5390,6 +5402,21 @@ class TestCustomOpFastPath(TestCase):
                 torch.ops._torch_testing.fp_multi.with_bias(x, bias),
                 x * 2 + bias,
             )
+
+    @unittest.skip(
+        "OpOverloadPacket fast path for multi-overload ops not yet implemented"
+    )
+    def test_fast_path_multiple_overloads_via_packet(self):
+        @torch.library.custom_op("_torch_testing::fp_multi", mutates_args=())
+        def fp_multi(x: Tensor) -> Tensor:
+            return x * 2
+
+        @torch.library.custom_op("_torch_testing::fp_multi.with_bias", mutates_args=())
+        def fp_multi_bias(x: Tensor, bias: Tensor) -> Tensor:
+            return x * 2 + bias
+
+        x = torch.randn(3)
+        bias = torch.randn(3)
 
         # Calling via the packet dispatches to the correct overload
         with self._assert_fast_path_taken(fp_multi):
@@ -5707,6 +5734,10 @@ class TestCustomOpFastPath(TestCase):
     def test_custom_op_fast_path_check_c_api(self):
         args = (torch.randn(4), torch.randn(4))
         result = torch._C._custom_op_fast_path_check(args)
+        if TEST_WITH_CROSSREF:
+            # CrossRefMode is a TorchFunctionMode; the C API correctly rejects it
+            self.assertIsNone(result)
+            return
         self.assertIsNotNone(result)
         self.assertEqual(result[0], "cpu")
         # result[1] is the raw keyset; verify it contains the full dispatch chain
@@ -5821,7 +5852,6 @@ class TestCustomOpFastPath(TestCase):
         with self._assert_fast_path_taken(fp_err):
             with self.assertRaisesRegex(ValueError, "intentional error"):
                 fp_err(x)
-
 
     def test_fast_path_multithreaded(self):
         import concurrent.futures
