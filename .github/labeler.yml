@@ -189,10 +189,8 @@
 - test/distributed/**/*mem*
 - test/distributed/**/*mem*/**
 
-"ciflow/docker":
+"no-runner-experiments":
 - .ci/docker/**
-- .github/workflows/docker-builds.yml
-- .lintrunner.toml
 
 "ciflow/torchtitan":
 # torchtitan commit pin updates
