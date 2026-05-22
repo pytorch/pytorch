@@ -138,7 +138,6 @@ jobs:
       # API. Picked over `docker buildx imagetools create` so the mirror step
       # doesn't depend on the remote BuildKit being healthy.
       - name: Install crane
-        if: github.event_name == 'push' && github.ref_type == 'branch'
         uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
 
       - name: Mirror image to GHCR
