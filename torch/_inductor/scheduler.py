@@ -3120,13 +3120,6 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("epilogue of user's Triton kernel is not Pointwise")
             return False
 
-        written_buffer_name = self.node.mutation_outputs[0].name
-        if self.epilogue_requires_new_store(node2) and not self.output_tile:
-            why(
-                "epilogue reads additional buffers but kernel has no output_tile annotation"
-            )
-            return False
-
         # The epilogue may require additional index expressions.
         # If the user has provided the dimensions of the "output tile", we may be able to fuse.
         if self.output_tile:
@@ -3143,6 +3136,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("user's Triton kernel and epilogue have different buffer layouts")
             return False
 
+        written_buffer_name = self.node.mutation_outputs[0].name
         def _is_other_node_that_references_mutation_buffer(
             other_node: BaseSchedulerNode,
         ):
