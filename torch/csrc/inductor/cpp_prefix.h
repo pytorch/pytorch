@@ -73,6 +73,25 @@ struct IsVecType<at::vec::VectorizedN<T, N>> : std::true_type {};
 
 template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VecMask<src_t, src_n>& mask) {
+  return mask.template cast<dst_t, dst_n>();
+}
+
+template <typename dst_t, int dst_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::Vectorized<bool>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(
+      at::vec::VectorizedN<bool, 1>(mask));
+}
+
+template <typename dst_t, int dst_n, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VectorizedN<bool, src_n>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(mask);
+}
 #endif
 
 template <typename T>
