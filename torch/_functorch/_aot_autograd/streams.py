@@ -362,6 +362,47 @@ def populate_fw_metadata_with_stream_indices(
     fw_metadata.mutated_inp_stream_indices = stream_indices
 
 
+def _expand_dict_returning_deps(
+    deps: list[Node],
+    visited: set[Node],
+    graph: torch.fx.Graph,
+    sync_node: Node,
+) -> list[Node]:
+    expanded: list[Node] = []
+    for dep in deps:
+        if not (
+            dep.op == "call_function"
+            and dep.target is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            expanded.append(dep)
+            continue
+
+        after_sync_getitems = [
+            user
+            for user in dep.users
+            if user not in visited
+            and user.op == "call_function"
+            and user.target is operator.getitem
+        ]
+        if not after_sync_getitems:
+            expanded.append(dep)
+            continue
+
+        with graph.inserting_before(sync_node):
+            for old_getitem in after_sync_getitems:
+                new_getitem = graph.call_function(
+                    operator.getitem,
+                    args=(dep, old_getitem.args[1]),
+                )
+                new_getitem.meta.update(old_getitem.meta)
+                visited.add(new_getitem)
+                expanded.append(new_getitem)
+                old_getitem.replace_all_uses_with(new_getitem)
+                graph.erase_node(old_getitem)
+
+    return expanded
+
+
 def _wrap_sync_node(
     gm: torch.fx.GraphModule,
     sync_node: Node,
@@ -390,6 +431,12 @@ def _wrap_sync_node(
         for dep in deps_before_sync
         if any(user not in visited for user in dep.users)
     ]
+    deps_with_uses_after_sync = _expand_dict_returning_deps(
+        deps_with_uses_after_sync,
+        visited,
+        graph,
+        sync_node,
+    )
 
     # Create subgraph that executes sync and passes through only used dependencies
     subgraph_module = _create_subgraph_for_node(
@@ -448,6 +495,7 @@ def _wrap_sync_node(
 
             user.args = map_arg(user.args, _replace)
             user.kwargs = map_arg(user.kwargs, _replace)
+            user.meta.pop("eager_input_vals", None)
 
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)

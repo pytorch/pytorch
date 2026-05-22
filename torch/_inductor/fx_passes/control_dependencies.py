@@ -69,6 +69,7 @@ ORDER_ONLY_DEPENDENCIES_META_KEY = "inductor_order_only_dependencies"
 def add_order_only_dependency(node: fx.Node, dep: fx.Node) -> None:
     node.meta.setdefault(ORDER_ONLY_DEPENDENCIES_META_KEY, []).append(dep)
 
+
 # control_deps wraps side-effecting ops (e.g. record_event, wait_event)
 # and must not be eliminated by DCE even when its outputs are unused.
 from torch.fx.node import has_side_effect

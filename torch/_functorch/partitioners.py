@@ -163,9 +163,30 @@ class MinCutOptions:
 
 
 def must_recompute(node: fx.Node) -> bool:
+    if node.meta.get("recompute", None) not in [
+        CheckpointPolicy.MUST_RECOMPUTE,
+        CheckpointPolicy.PREFER_RECOMPUTE,
+    ]:
+        return False
+    # Recomputing from a value that was explicitly moved to CPU would require
+    # making the offloaded GPU activation available again before the recompute.
+    for inp in node.all_input_nodes:
+        if must_offload(inp):
+            return False
+    return True
+
+
+def has_recompute_policy(node: fx.Node) -> bool:
     return node.meta.get("recompute", None) in [
         CheckpointPolicy.MUST_RECOMPUTE,
         CheckpointPolicy.PREFER_RECOMPUTE,
+    ]
+
+
+def must_offload(node: fx.Node) -> bool:
+    return node.meta.get("recompute", None) in [
+        CheckpointPolicy.MUST_CPU_OFFLOAD,
+        CheckpointPolicy.PREFER_CPU_OFFLOAD,
     ]
 
 
@@ -181,7 +202,7 @@ def _is_assert_only_symbool(node: fx.Node) -> bool:
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
-        if must_recompute(node):
+        if has_recompute_policy(node) or must_offload(node):
             return True
     return False
 
@@ -1244,6 +1265,41 @@ def _extract_fwd_bwd_modules(
     return fwd_module, bwd_module
 
 
+def _propagate_save_for_offloaded_deps(
+    joint_module: fx.GraphModule,
+    forward_node_names: OrderedSet[str],
+) -> None:
+    """Save forward descendants whose recompute chain depends on CPU offload."""
+    offloaded_nodes = [
+        node
+        for node in joint_module.graph.nodes
+        if must_offload(node) and node.name in forward_node_names
+    ]
+    if not offloaded_nodes:
+        return
+
+    queue: deque[fx.Node] = deque(offloaded_nodes)
+    visited: OrderedSet[fx.Node] = OrderedSet(offloaded_nodes)
+    flipped = 0
+
+    while queue:
+        node = queue.popleft()
+        for user in node.users:
+            if user in visited or user.name not in forward_node_names:
+                continue
+            visited.add(user)
+            if has_recompute_policy(user):
+                user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+                flipped += 1
+            queue.append(user)
+
+    if flipped:
+        log.info(
+            "Activation CPU offload forced %d recompute-tagged descendants to save",
+            flipped,
+        )
+
+
 def default_partition(
     joint_module: fx.GraphModule,
     _joint_inputs: Any,
@@ -1309,6 +1365,13 @@ def default_partition(
             )
 
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
+
+    has_cpu_offload_policy = False
+    for node in joint_module.graph.nodes:
+        if must_offload(node):
+            node.meta["should_offload"] = True
+            has_cpu_offload_policy = True
+    _propagate_save_for_offloaded_deps(joint_module, forward_node_names)
 
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
@@ -1461,7 +1524,7 @@ def default_partition(
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     # pyrefly: ignore [unbound-name]
-    if config.enable_activation_offloading:
+    if config.enable_activation_offloading or has_cpu_offload_policy:
         from ._activation_offloading.activation_offloading import (
             enable_activation_offloading,
         )
@@ -1471,6 +1534,7 @@ def default_partition(
             bw_module,
             num_fwd_outputs,
             static_lifetime_input_nodes,
+            force_async=has_cpu_offload_policy,
         )
 
     # raise all getitem ops to as early as possible
@@ -2052,8 +2116,8 @@ def cleanup_recompute_tags(
             for user in node.users:
                 if (
                     must_recompute(user)
-                    and "ac_graph_id" in user.meta
-                    and "ac_graph_id" in node.meta
+                    and user.meta.get("ac_graph_id") is not None
+                    and node.meta.get("ac_graph_id") is not None
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
@@ -2309,8 +2373,9 @@ def solve_min_cut(
             if config.unsafe_allow_optimization_of_collectives or not is_collective:
                 return False
         # This bans recomputation of the node unless we've been forced not to by
-        # user annotation
-        if must_recompute(node):
+        # user annotation or the node is explicitly being saved through CPU
+        # offload.
+        if must_recompute(node) or must_offload(node):
             return False
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
@@ -2349,6 +2414,15 @@ def solve_min_cut(
                     reason="must be computed in backward: required for gradient",
                 )
                 continue
+
+        if must_offload(node):
+            nx_graph.add_edge(
+                node.name + "_in",
+                node.name + "_out",
+                capacity=0,
+                reason="must save through CPU offload: marked by checkpoint policy",
+            )
+            continue
 
         if must_recompute(node):
             # If user explicitly says they want to recompute a node, we honor it
@@ -3777,11 +3851,7 @@ def min_cut_rematerialization_partition(
     # picks it up downstream.
     has_cpu_offload_policy = False
     for node in joint_graph.nodes:
-        policy = node.meta.get("recompute")
-        if policy in (
-            CheckpointPolicy.MUST_CPU_OFFLOAD,
-            CheckpointPolicy.PREFER_CPU_OFFLOAD,
-        ):
+        if must_offload(node):
             node.meta["should_offload"] = True
             has_cpu_offload_policy = True
 
@@ -3789,6 +3859,10 @@ def min_cut_rematerialization_partition(
         static_lifetime_input_indices = []
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
+    )
+    _propagate_save_for_offloaded_deps(
+        joint_module,
+        OrderedSet(node.name for node in node_info.required_fw_nodes),
     )
 
     # networkx blows up on graphs with no required backward nodes
@@ -3906,6 +3980,7 @@ def min_cut_rematerialization_partition(
             bw_module,
             num_fwd_outputs,
             node_info.static_lifetime_input_nodes,
+            force_async=has_cpu_offload_policy,
         )
 
     # raise all getitem ops to as early as possible

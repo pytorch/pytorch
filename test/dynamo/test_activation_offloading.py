@@ -19,6 +19,11 @@ from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 networkx = pytest.importorskip("networkx")
@@ -43,6 +48,14 @@ def get_fw_bw_graph(
         dynamic=dynamic,
     )(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
+
+
+def count_graphmodule_code(gm, text):
+    return sum(
+        module.code.count(text)
+        for module in gm.modules()
+        if isinstance(module, torch.fx.GraphModule)
+    )
 
 
 @unittest.skipIf(not HAS_GPU, "requires GPU")
@@ -161,8 +174,8 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         self.assertNotIn("streams.join", fw_code)
         self.assertNotIn("streams.record_stream", fw_code)
 
-        # Verify keepalive: ao.wait_tensor for offload should reference the GPU tensor
-        # (cos_1) as its 2nd arg to extend its lifetime
+        # Verify last_use_of_storage: ao.wait_tensor for offload should reference
+        # the GPU tensor as its storage-lifetime arg.
         for node in fw_graph.graph.nodes:
             if (
                 node.op == "call_function"
@@ -170,11 +183,11 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
                 and isinstance(node.args[0], torch.fx.Node)
                 and node.args[0].target == torch.ops.ao.offload.default
             ):
-                self.assertEqual(len(node.args), 2)
+                self.assertEqual(len(node.args), 3)
                 offload_node = node.args[0]
-                keepalive_node = node.args[1]
-                # keepalive should be the same GPU tensor that was offloaded
-                self.assertIs(keepalive_node, offload_node.args[0])
+                self.assertIsNone(node.args[1])
+                last_use_node = node.args[2]
+                self.assertIs(last_use_node, offload_node.args[0])
 
         bw_code = bw_graph.code
         # Backward: ao.reload produces async GPU tensor, ao.wait_tensor synchronizes
@@ -233,7 +246,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             )
 
     def test_partitioner_offload_ao_ops_sink_wait(self):
-        """Test that sink_wait moves ao.wait_tensor for offload to end of forward graph."""
+        """Test that sink_wait pipelines ao.wait_tensor for offload."""
         reset_user_object_tracking()
         torch._dynamo.reset()
         with torch._functorch.config.patch(
@@ -244,7 +257,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         ):
             fw_graph, _ = get_fw_bw_graph(self.fn, [self.x])
 
-        # The ao.wait_tensor for offload should be sunk to just before the output node
         nodes = list(fw_graph.graph.nodes)
         output_node = next(n for n in nodes if n.op == "output")
         output_idx = nodes.index(output_node)
@@ -257,17 +269,17 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
                 and node.args[0].target == torch.ops.ao.offload.default
             ):
                 wait_idx = nodes.index(node)
-                # ao.wait_tensor should be immediately before output
-                self.assertEqual(wait_idx, output_idx - 1)
+                offload_idx = nodes.index(node.args[0])
+                self.assertGreater(wait_idx, offload_idx)
+                self.assertLess(wait_idx, output_idx)
 
     def test_partitioner_offload_ao_ops_prefetch(self):
-        """Test that prefetch moves ao.reload earlier in backward graph."""
+        """Test that prefetch keeps reloads structurally one wait ahead."""
         reset_user_object_tracking()
         torch._dynamo.reset()
         with torch._functorch.config.patch(
             enable_activation_offloading=True,
             activation_offload_separate_stream=True,
-            activation_reload_prefetch=True,
             joint_custom_pass=self.joint_custom_pass,
         ):
             _, bw_graph = get_fw_bw_graph(self.fn, [self.x])
@@ -312,7 +324,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             enable_activation_offloading=True,
             activation_offload_separate_stream=True,
             activation_offload_sink_wait=True,
-            activation_reload_prefetch=True,
             joint_custom_pass=self.joint_custom_pass,
         ):
             x_compile = [x.detach().clone().requires_grad_(True) for x in x_larger]
@@ -341,6 +352,20 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         x = torch.randn(4, device=GPU_TYPE)
         with self.assertRaisesRegex(RuntimeError, "no pending transfer"):
             _pop_wait(x)
+
+    def test_wait_tensor_error_duplicate_transfer(self):
+        """Test _register_wait raises RuntimeError on duplicate registration."""
+        from torch._functorch._activation_offloading.offload_ops import (
+            _clear_wait_registry,
+            _register_wait,
+        )
+
+        _clear_wait_registry()
+        x = torch.empty(4, device="cpu", pin_memory=True)
+        _register_wait(x, torch.device(GPU_TYPE))
+        with self.assertRaisesRegex(RuntimeError, "already registered"):
+            _register_wait(x, torch.device(GPU_TYPE))
+        _clear_wait_registry()
 
     def test_offload_reload_fake_tensor(self):
         """Test fake tensor implementations for offload, reload, and wait_tensor."""
@@ -392,7 +417,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
 
         bw_code = bw_graph.code
         self.assertEqual(bw_code.count("ao.reload.default"), 3)
-        self.assertEqual(bw_code.count("ao.wait_tensor.default"), 3)
+        self.assertEqual(count_graphmodule_code(bw_graph, "ao.wait_tensor.default"), 3)
 
     def test_multiple_tensors_offload_ao_ops_accuracy(self):
         """Test accuracy when offloading all saved tensors with ao ops."""
@@ -455,19 +480,183 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         (FileCheck().check("ao.offload").check("ao.wait_tensor").run(fw_code))
         (FileCheck().check("ao.reload").check("ao.wait_tensor").run(bw_code))
 
-    def test_estimate_transfer_time_config(self):
-        """Test bandwidth config controls transfer time estimation."""
-        from torch._functorch._activation_offloading.activation_offloading import (
-            _estimate_transfer_time_in_ms,
-        )
+    def test_cpu_offload_policy_auto_enables_async(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.cos.default:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
 
-        size_bytes = 1024**3  # 1 GB
-        # 1 GB at 50 GB/s = 20 ms
-        with torch._functorch.config.patch(activation_offload_cpu_gpu_bw=50.0):
-            self.assertAlmostEqual(_estimate_transfer_time_in_ms(size_bytes), 20.0)
-        # 1 GB at 25 GB/s = 40 ms
-        with torch._functorch.config.patch(activation_offload_cpu_gpu_bw=25.0):
-            self.assertAlmostEqual(_estimate_transfer_time_in_ms(size_bytes), 40.0)
+        context_fn = partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def region(x):
+            return torch.cos(x) * torch.sin(x)
+
+        def fn(x):
+            return checkpoint(
+                region,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+
+        x = torch.randn(8, 8, requires_grad=True, device=GPU_TYPE)
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        with torch._functorch.config.patch(
+            enable_activation_offloading=False,
+            activation_offload_separate_stream=False,
+            activation_offload_sink_wait=False,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(fn, [x])
+
+        self.assertIn("ao.offload.default", fw_graph.code)
+        self.assertIn("control_deps", fw_graph.code)
+        self.assertTrue(
+            any(
+                "ao.wait_tensor.default" in module.code
+                for module in fw_graph.modules()
+                if isinstance(module, torch.fx.GraphModule)
+            )
+        )
+        self.assertIn("ao.reload.default", bw_graph.code)
+        self.assertIn("ao.wait_tensor.default", bw_graph.code)
+
+    def test_must_cpu_offload_unsupported_errors(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.transpose.int:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def region(x):
+            y = x.transpose(0, 1)
+            return y.sin()
+
+        def fn(x):
+            return checkpoint(
+                region,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+
+        x = torch.randn(8, 8, requires_grad=True, device=GPU_TYPE)
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        with (
+            torch._functorch.config.patch(enable_activation_offloading=False),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "MUST_CPU_OFFLOAD cannot be honored",
+            ),
+        ):
+            get_fw_bw_graph(fn, [x])
+
+    def test_prefer_cpu_offload_unsupported_falls_back(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.transpose.int:
+                return CheckpointPolicy.PREFER_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def region(x):
+            y = x.transpose(0, 1)
+            return y.sin()
+
+        def fn(x):
+            return checkpoint(
+                region,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+
+        x = torch.randn(8, 8, requires_grad=True, device=GPU_TYPE)
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        with torch._functorch.config.patch(enable_activation_offloading=False):
+            fw_graph, bw_graph = get_fw_bw_graph(fn, [x])
+
+        self.assertNotIn("ao.offload.default", fw_graph.code)
+        self.assertNotIn("ao.reload.default", bw_graph.code)
+
+    def test_eager_cpu_offload_policy_correctness(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.cos.default:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def region(x):
+            return (torch.cos(x) * torch.sin(x)).sum()
+
+        x_ref = torch.randn(8, 8, requires_grad=True, device=GPU_TYPE)
+        x = x_ref.detach().clone().requires_grad_(True)
+
+        region(x_ref).backward()
+        checkpoint(
+            region,
+            x,
+            use_reentrant=False,
+            context_fn=context_fn,
+        ).backward()
+
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_cpu_offload_policy_three_step_training_correctness(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.relu.default:
+                return CheckpointPolicy.MUST_CPU_OFFLOAD
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def offloaded_model(x, w1, w2):
+            def region(a, b):
+                return torch.relu(a @ b)
+
+            hidden = checkpoint(
+                region,
+                x,
+                w1,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+            return hidden @ w2
+
+        def baseline_model(x, w1, w2):
+            return torch.relu(x @ w1) @ w2
+
+        torch.manual_seed(0)
+        x = torch.randn(8, 8, device=GPU_TYPE)
+        target = torch.randn(8, 8, device=GPU_TYPE)
+        params_ref = [
+            torch.randn(8, 8, device=GPU_TYPE, requires_grad=True),
+            torch.randn(8, 8, device=GPU_TYPE, requires_grad=True),
+        ]
+        params_compiled = [p.detach().clone().requires_grad_(True) for p in params_ref]
+        compiled_model = torch.compile(offloaded_model, backend="aot_eager")
+
+        for _ in range(3):
+            for param in params_ref + params_compiled:
+                param.grad = None
+
+            loss_ref = (baseline_model(x, *params_ref) - target).pow(2).mean()
+            loss_compiled = (compiled_model(x, *params_compiled) - target).pow(2).mean()
+            loss_ref.backward()
+            loss_compiled.backward()
+
+            self.assertEqual(loss_compiled, loss_ref)
+            for compiled_param, ref_param in zip(params_compiled, params_ref):
+                self.assertEqual(compiled_param.grad, ref_param.grad)
+
+            with torch.no_grad():
+                for compiled_param, ref_param in zip(params_compiled, params_ref):
+                    ref_param -= 0.01 * ref_param.grad
+                    compiled_param -= 0.01 * compiled_param.grad
 
 
 @unittest.skipIf(not HAS_GPU, "requires GPU")

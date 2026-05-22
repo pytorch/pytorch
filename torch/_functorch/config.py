@@ -227,10 +227,6 @@ activation_offload_separate_stream = False
 # activation offloading wait sinking when using separate stream (fwd graph)
 activation_offload_sink_wait = False
 
-# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
-# scheduling. This is hardware-specific and should be set by the user.
-activation_offload_cpu_gpu_bw: float = 50.0
-
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
 # is to turn it off during torch.compile.
