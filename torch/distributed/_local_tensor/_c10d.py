@@ -85,6 +85,9 @@ def _resolve_pg_or_name(
     """
     if isinstance(group, (ProcessGroup, ScriptObject)):
         return group
+    # ``GroupName`` is ``NewType("GroupName", str)``, so wrapping ``group`` here
+    # is a runtime no-op. The cast exists purely so pyrefly accepts the
+    # narrowed ``str | GroupName`` argument against the declared parameter type.
     return _resolve_process_group(GroupName(group))
 
 
