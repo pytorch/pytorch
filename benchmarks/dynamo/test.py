@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import torch
 
+from . import common as benchmark_common
 from .common import BenchmarkRunner, parse_args, run
 from .torchbench import setup_torchbench_cwd, TorchBenchmarkRunner
 
@@ -31,7 +32,7 @@ class TestDynamoBenchmark(unittest.TestCase):
             calls += 1
             return calls
 
-        with self.assertLogs("benchmarks.dynamo.common", level="WARNING") as cm:
+        with self.assertLogs(benchmark_common.log, level="WARNING") as cm:
             self.assertEqual(runner.run_n_iterations(None, None, model_iter_fn), 1)
         self.assertEqual(calls, 1)
         self.assertIn("runs 1 iteration", "\n".join(cm.output))
