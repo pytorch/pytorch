@@ -8022,6 +8022,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             c_fn(x)
 
+    @torch._dynamo.config.patch(recompile_limit=32)
+    def test_convolution_errors_with_uint_input_float_weight(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU only")
+
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                input_shape = [1, 8] + [16] * dim
+                x = torch.ones(input_shape, device=self.device, dtype=dtype)
+                weight = torch.ones(
+                    8, 1, *([4] * dim), device=self.device, dtype=torch.float32
+                )
+                op = getattr(F, f"conv{dim}d")
+                c_op = torch.compile(op)
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r".*(Input type.*weight type|expected scalar type|"
+                    r"not implemented|aoti_torch_).*",
+                ):
+                    c_op(x, weight, stride=4, padding=2, groups=8)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -18108,7 +18130,7 @@ if RUN_GPU:
                     "\n".join(lines),
                     """\
     tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
                 )
@@ -18119,6 +18141,66 @@ if RUN_GPU:
         tmp0 = tl.load(in_ptr0 + (x1 + 512*x0 + 262144*r0_2), r0_mask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
+
+        @config.patch(
+            {
+                "triton.persistent_reductions": True,
+                "triton.multi_kernel": False,
+                "triton.use_block_ptr": False,
+            }
+        )
+        def test_evict_first_for_persistent_reduction_last_use(self):
+            def get_args():
+                shape = (128, 512, 64)
+                return (
+                    rand_strided(shape, (32768, 1, 512), device=GPU_TYPE),
+                    rand_strided(shape, (32768, 1, 512), device=GPU_TYPE),
+                    rand_strided(shape, (64, 0, 1), device=GPU_TYPE),
+                    rand_strided(shape, (64, 0, 1), device=GPU_TYPE),
+                )
+
+            @torch.compile
+            def f(a0, a1, a2, a3):
+                act0 = (a0 * (a1.relu() - a2) * a3).sum(dim=-1)
+                act1 = a0.sum(dim=-1)
+                return act0, act1
+
+            code = run_and_get_triton_code(f, *get_args())
+            self.assertIn("@triton_heuristics.persistent_reduction", code)
+            self.assertEqual(code.count("eviction_policy='evict_first'"), 2)
+            self.assertEqual(code.count("eviction_policy='evict_last'"), 2)
+
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(lines), 4)
+            self.assertEqual(
+                sum("eviction_policy='evict_first'" in line for line in lines[:2]),
+                2,
+            )
+            self.assertEqual(
+                sum("eviction_policy='evict_last'" in line for line in lines[2:]),
+                2,
+            )
+
+        @config.patch(
+            {
+                "triton.persistent_reductions": True,
+                "triton.multi_kernel": False,
+                "triton.use_block_ptr": False,
+            }
+        )
+        def test_evict_last_for_reused_persistent_reduction_load(self):
+            @torch.compile
+            def f(x):
+                return (x[:, :-1] * x[:, 1:]).sum(dim=-1)
+
+            x = torch.randn(256, 129, device=GPU_TYPE)
+            code = run_and_get_triton_code(f, x)
+            self.assertIn("@triton_heuristics.persistent_reduction", code)
+
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("eviction_policy='evict_last'", lines[0])
+            self.assertIn("eviction_policy='evict_first'", lines[1])
 
         @config.patch("triton.skip_l1_cache", True)
         def test_skip_l1_cache(self):
@@ -18198,7 +18280,7 @@ if RUN_GPU:
                     "\n".join(lines),
                     """\
     tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero', eviction_policy='evict_first')
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
                 )
