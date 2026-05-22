@@ -11,7 +11,11 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import (
+    Max as TorchMax,
+    Min as TorchMin,
+    ModularIndexing,
+)
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -2392,7 +2396,7 @@ class PallasKernel(SIMDKernel):
             self.has_flatten_indexing = True
             self.flatten_indexed_buffers.add(name)
             # Flatten then index for non-contiguous access (gather operation)
-            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            has_minmax = index.has(sympy.Min, sympy.Max, TorchMin, TorchMax)
             idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
             idx = (
                 f"({indexing.index_str}).astype({idx_dtype})"

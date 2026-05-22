@@ -502,8 +502,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_no_grad_inside_compiled_region(self):
-        self.assertTrue(torch.is_grad_enabled())
-
         mod = ConvBN(3, 32, bias=True, kernel_size=3, stride=2).eval().to(self.device)
         x = torch.rand(3, 3, 32, 32).to(self.device)
 

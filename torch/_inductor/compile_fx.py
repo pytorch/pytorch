@@ -1120,9 +1120,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -2923,7 +2924,7 @@ def _compile_fx_main(
         # for graphs that enter no_grad/inference_mode inside the compiled
         # region, so make the inference compiler choice independent of it.
         if config.freezing:
-            freezing_compiler: Callable[..., Any] = functools.partial(
+            inference_compiler: Callable[..., Any] = functools.partial(
                 fw_compiler_freezing,
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
@@ -2932,13 +2933,6 @@ def _compile_fx_main(
                 graph_id=compiler_config_extra.graph_id,
                 forward_device=compiler_config_extra.forward_device,
             )
-
-            def inference_compiler(
-                gm: GraphModule, example_inputs: Sequence[InputType]
-            ) -> Any:
-                with torch.no_grad():
-                    return freezing_compiler(gm, example_inputs)
-
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
             inference_compiler = SerializableAOTDispatchCompiler(
