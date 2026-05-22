@@ -926,7 +926,15 @@ class TestFP8Lowering(TestCase):
                 w_inverse_scale.t().contiguous().t().t()
             )  # 1x128 blocks need scales to be outer-dim-major
         else:
-            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+            # 128x128 blocks: kernel requires scale shape
+            # (round_up(K/128, 4), N/128); pad inner dim to a multiple of 4
+            # before the transpose.
+            pad_amount = (-w_inverse_scale.shape[-1]) % 4
+            if pad_amount:
+                w_inverse_scale = torch.nn.functional.pad(
+                    w_inverse_scale, (0, pad_amount), "constant", 0
+                )
+            w_inverse_scale = w_inverse_scale.t()
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
@@ -936,6 +944,16 @@ class TestFP8Lowering(TestCase):
             x_inverse_scale = (
                 x_inverse_scale.t().contiguous().t()
             )  # 1x128 blocks need scales to be outer-dim-major
+        else:
+            # 128x128 blocks: kernel requires scale shape
+            # (round_up(K/128, 4), M/128); pad inner dim to a multiple of 4
+            # before the transpose.
+            pad_amount = (-x_inverse_scale.shape[-1]) % 4
+            if pad_amount:
+                x_inverse_scale = torch.nn.functional.pad(
+                    x_inverse_scale, (0, pad_amount), "constant", 0
+                )
+            x_inverse_scale = x_inverse_scale.t()
 
         recipe_x = (
             ScalingType.BlockWise1x128

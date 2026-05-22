@@ -930,10 +930,9 @@ def tuned_scaled_mm_v2(
 
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
 
-    def check_supported_recipe(recipe):
-        disallowed = [ScalingType.BlockWise1x16, ScalingType.BlockWise1x32]
-
-        return recipe not in disallowed
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = {ScalingType.BlockWise1x16, ScalingType.BlockWise1x32}
+        return all(ScalingType(r) not in disallowed for r in recipe)
 
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
         recipe_b
