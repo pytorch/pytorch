@@ -663,8 +663,8 @@ void GroupNormInputBackward(
     const PT* gamma,
     const opmath_t* ds,
     const opmath_t* db,
-    const T* dmean,
-    const T* drstd,
+    const PT* dmean,
+    const PT* drstd,
     T* dX) {
   const int64_t G = group;
   const int64_t D = C / G;
@@ -692,8 +692,8 @@ void GroupNormInputBackward(
         }
       }
       const opmath_t c2 =
-          (db_val * opmath_t(mean[i]) - ds_val - opmath_t(drstd ? drstd[i] : T(0))) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * s;
-      const opmath_t c3 = -c2 * opmath_t(mean[i]) - (db_val * opmath_t(rstd[i]) - opmath_t(dmean ? dmean[i] : T(0))) * s;
+          (db_val * opmath_t(mean[i]) - ds_val - opmath_t(drstd ? drstd[i] : PT(0))) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * s;
+      const opmath_t c3 = -c2 * opmath_t(mean[i]) - (db_val * opmath_t(rstd[i]) - opmath_t(dmean ? dmean[i] : PT(0))) * s;
 
       for (const auto j : c10::irange(D)) {
         const int64_t c = g * D + j;
@@ -915,8 +915,8 @@ void GroupNormBackwardKernelImplInternal(
   const PT* mean_data = mean.const_data_ptr<PT>();
   const PT* rstd_data = rstd.const_data_ptr<PT>();
   const PT* gamma_data = gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
-  const T* dmean_data = dmean.defined() ? dmean.const_data_ptr<T>() : nullptr;
-  const T* drstd_data = drstd.defined() ? drstd.const_data_ptr<T>() : nullptr;
+  const PT* dmean_data = dmean.defined() ? dmean.const_data_ptr<PT>() : nullptr;
+  const PT* drstd_data = drstd.defined() ? drstd.const_data_ptr<PT>() : nullptr;
   T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
   PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
   PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
@@ -1495,8 +1495,8 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
   const PT* mean_data = mean.const_data_ptr<PT>();
   const PT* rstd_data = rstd.const_data_ptr<PT>();
   const PT* gamma_data = gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
-  const T* dmean_data = dmean.defined() ? dmean.const_data_ptr<T>() : nullptr;
-  const T* drstd_data = drstd.defined() ? drstd.const_data_ptr<T>() : nullptr;
+  const PT* dmean_data = dmean.defined() ? dmean.const_data_ptr<PT>() : nullptr;
+  const PT* drstd_data = drstd.defined() ? drstd.const_data_ptr<PT>() : nullptr;
   T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
   PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
   PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
@@ -1549,9 +1549,9 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         if (dX_data) {
           T* dX_ptr = dX_data + n * HxW * C + g * D;
           const PT* rstd_ptr = rstd_data + i;
-          const opmath_t c2 = (db_gamma * opmath_t(mean_data[i]) - ds_gamma - opmath_t(drstd_data ? drstd_data[i] : T(0))) *
+          const opmath_t c2 = (db_gamma * opmath_t(mean_data[i]) - ds_gamma - opmath_t(drstd_data ? drstd_data[i] : PT(0))) *
               opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * s;
-          const opmath_t c3 = -c2 * opmath_t(mean_data[i]) - (db_gamma * opmath_t(rstd_data[i]) - opmath_t(dmean_data ? dmean_data[i] : T(0)))* s;
+          const opmath_t c3 = -c2 * opmath_t(mean_data[i]) - (db_gamma * opmath_t(rstd_data[i]) - opmath_t(dmean_data ? dmean_data[i] : PT(0))) * s;
           ApplyInputGradientsChannelsLastColMov<T, PT, opmath_t>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
         }
 
@@ -1671,7 +1671,7 @@ void GroupNormBackwardMultipleGradsKernelImpl(
   // It will keep module parameters in opmath dtype i.e. float
   // while input/output will be in lower precision data type.
   // Using parameters in BFloat16 or Half may cause high precision loss.
-  const bool mixed_type = is_mixed_type(dY, mean);
+  const bool mixed_type = is_mixed_type(X, mean, rstd);
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND2(

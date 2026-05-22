@@ -2361,7 +2361,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            xfail("native_group_norm"),
         },
     )
     @opsToleranceOverride(
