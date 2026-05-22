@@ -14,4 +14,4 @@ def has_helion_package() -> bool:
 
 @functools.cache
 def has_helion() -> bool:
-    return has_helion_package() and has_triton()
+    return has_helion_package()
