@@ -38,13 +38,6 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
-  TORCH_CHECK(data_type == ScalarType::Float ||
-              data_type == ScalarType::BFloat16 ||
-              data_type == ScalarType::Half ||
-              data_type == ScalarType::Byte ||
-              data_type == ScalarType::Char ||
-              data_type == ScalarType::Float8_e4m3fn,
-              "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8, float8_e4m3fn cpu tensor")
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte ||
       mkldnn_tensor.scalar_type() == ScalarType::Char ||
       mkldnn_tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
@@ -58,25 +51,33 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
     mkldnn_tensor.options().layout(c10::kStrided).dtype(data_type));
   if (stensor.is_empty()) return cpu_tensor;
   ideep::tensor pub_tensor;
-  if (data_type == ScalarType::Float) {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<float>(), ideep::tensor::data_type::f32);
-  } else if (data_type == ScalarType::BFloat16) {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<BFloat16>(), ideep::tensor::data_type::bf16);
-  } else if (data_type == ScalarType::Half) {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<Half>(), ideep::tensor::data_type::f16);
-  } else if (data_type == ScalarType::Byte) {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<uint8_t>(), ideep::tensor::data_type::u8);
-  } else if (data_type == ScalarType::Char) {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<int8_t>(), ideep::tensor::data_type::s8);
-  } else {
-    pub_tensor = stensor.to_public(
-        cpu_tensor.template data_ptr<Float8_e4m3fn>(),
-        ideep::tensor::data_type::f8_e4m3);
+  switch (data_type) {
+    case ScalarType::Float:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<float>(), ideep::tensor::data_type::f32);
+      break;
+    case ScalarType::BFloat16:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<BFloat16>(), ideep::tensor::data_type::bf16);
+      break;
+    case ScalarType::Half:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<Half>(), ideep::tensor::data_type::f16);
+      break;
+    case ScalarType::Byte:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<uint8_t>(), ideep::tensor::data_type::u8);
+      break;
+    case ScalarType::Char:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<int8_t>(), ideep::tensor::data_type::s8);
+      break;
+    case ScalarType::Float8_e4m3fn:
+      pub_tensor = stensor.to_public(
+          cpu_tensor.template data_ptr<Float8_e4m3fn>(),
+          ideep::tensor::data_type::f8_e4m3);
+      break;
+    default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for ideep public tensor: ", data_type);
   }
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   // Make sure that NC11 strides follow formula of contiguous tensor.
