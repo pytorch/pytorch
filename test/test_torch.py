@@ -10778,6 +10778,24 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_threads(invalid_val))
             self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_interop_threads(invalid_val))
 
+    def test_intlist_arg_with_misbehaving_list_subclass(self) -> None:
+        # Regression test for https://github.com/pytorch/pytorch/issues/184877:
+        # an INTERNAL ASSERT fired when the arg parser tried to format a type
+        # error for a list subclass whose __len__/__iter__ raised.
+        class Foo(list):
+            def __iter__(self):
+                raise RuntimeError("should not be called")
+
+            def __len__(self):
+                raise RuntimeError("should not be called")
+
+        x = Foo()
+        x.append("a")
+        with self.assertRaisesRegex(
+            TypeError, r"found element of type str at pos 0"
+        ):
+            torch.randn(x)
+
     def _get_tensor_prop(self, t):
         preserved = (
             id(t),
