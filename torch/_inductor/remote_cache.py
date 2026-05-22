@@ -25,7 +25,7 @@ if typing.TYPE_CHECKING:
 try:
     import redis
 except ImportError:
-    redis = None
+    redis = None  # type: ignore[assignment]
 
 
 log = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ class RemoteCache(Generic[_T]):
                 self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
-    def _decode(self, data: _U, sample: Sample | None) -> _T:
+    def _decode(self, data: _U, sample: Sample | None) -> _T:  # type: ignore[override]
         return self.serde.decode(data)  # type: ignore[arg-type]
 
     # Used to convert structured data into data for the cache.

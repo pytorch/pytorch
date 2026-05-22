@@ -291,6 +291,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        self.needs_vec_isa = self.device == "cpu"
 
     @staticmethod
     def create(
@@ -913,7 +914,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                 from ..graph import may_get_constant_buffer_dtype
 
-                dtype = may_get_constant_buffer_dtype(V.graph.graph_inputs[input_key])
+                dtype = may_get_constant_buffer_dtype(
+                    V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
+                )
                 assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
                 self.codegen_tensor_item(
                     dtype, f"inputs[{idx}]", input_key, self.prefix
@@ -1305,7 +1308,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
                 if name in V.graph.const_output_index:
-                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
             assert None not in const_index_mapping, (
                 "Not all constant gets mapped for constant folding graph."
             )
@@ -1432,6 +1435,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
             return
         if cpp_definition is not None:
+            self.needs_vec_isa = True
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
         else:
@@ -1554,7 +1558,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Close the wrapper code block
             result.splice('"""\n)')
 
-        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+        if config.cpp_wrapper_build_separate:
+            kernel_code = "kernel_src"
+            needs_vec_isa = "False"
+            kernel_needs_vec_isa = str(self.needs_vec_isa)
+        else:
+            kernel_code = "None"
+            needs_vec_isa = str(self.needs_vec_isa)
+            kernel_needs_vec_isa = "None"
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1562,6 +1573,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
+                needs_vec_isa={needs_vec_isa},
+                kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
@@ -2075,16 +2088,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
-    def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
     ) -> None:
+        if V.graph.aot_mode and V.graph.is_const_graph:
+            return
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
         if V.graph.aot_mode:
-            if V.graph.is_const_graph:
-                return
-            self.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
+            code.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
         else:
-            self.writeline(stmt)
+            code.writeline(stmt)
 
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (
@@ -2673,14 +2691,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     assert isinstance(
                         arg_type.getElementType(),
-                        static_arg_types,
+                        static_arg_types,  # type: ignore[arg-type]
                     ), (
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
             else:
                 assert isinstance(
                     arg_type,
-                    static_arg_types,
+                    static_arg_types,  # type: ignore[arg-type]
                 ), (
                     f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                 )
@@ -2727,7 +2745,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
@@ -2876,7 +2894,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
             return
@@ -2889,7 +2907,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             python_kernel_name,
             op_overload,
             raw_args,
-            output_args,
+            output_args,  # type: ignore[arg-type]
             outputs,
         )
 
@@ -3071,14 +3089,14 @@ if (!custom_op_wrapper) {
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
 
@@ -3228,14 +3246,14 @@ if (!custom_op_wrapper) {
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
         scope_gil_acquire = self.generate_scoped_gil_acquire(
