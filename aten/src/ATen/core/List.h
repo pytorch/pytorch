@@ -188,8 +188,24 @@ private:
     return lhs.iterator_ == rhs.iterator_;
   }
 
-  friend auto operator<=>(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ <=> rhs.iterator_;
+  friend bool operator!=(const ListIterator& lhs, const ListIterator& rhs) {
+    return !(lhs == rhs);
+  }
+
+  friend bool operator<(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ < rhs.iterator_;
+  }
+
+  friend bool operator<=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ <= rhs.iterator_;
+  }
+
+  friend bool operator>(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ > rhs.iterator_;
+  }
+
+  friend bool operator>=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ >= rhs.iterator_;
   }
 
   friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
