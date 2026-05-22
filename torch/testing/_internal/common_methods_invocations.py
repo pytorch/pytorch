@@ -21408,7 +21408,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_logsumexp,
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
-           dtypes=all_types_and_complex(),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            error_inputs_func=error_inputs_trace,
