@@ -41,29 +41,25 @@ logger = logging.getLogger(__name__)
 
 
 def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
-    """BFS collecting nodes whose inputs are all within the chain."""
-    chain: list[fx.Node] = [node]
-    chain_set: OrderedSet[fx.Node] = OrderedSet([node])
+    """BFS forward collecting node and its transitive users with no external inputs."""
+    result: list[fx.Node] = [node]
+    result_set: OrderedSet[fx.Node] = OrderedSet([node])
     i = 0
-    while i < len(chain):
-        for user in chain[i].users:
-            if user not in chain_set and all(
-                inp in chain_set for inp in user.all_input_nodes
+    while i < len(result):
+        for user in result[i].users:
+            if user not in result_set and all(
+                inp in result_set for inp in user.all_input_nodes
             ):
-                chain_set.add(user)
-                chain.append(user)
+                result_set.add(user)
+                result.append(user)
         i += 1
-    return chain
+    return result
 
 
 def _collect_nodes_must_be_before(
     node: fx.Node, node_positions: dict[fx.Node, int]
 ) -> list[fx.Node]:
-    """Collect the minimal set of non-placeholder nodes needed to produce node.
-
-    BFS backward from node, stopping at placeholders.
-    Returns them sorted by graph position (topological order).
-    """
+    """BFS backward collecting node and its non-placeholder dependencies, topo-sorted."""
     visited: OrderedSet[fx.Node] = OrderedSet()
     queue = [node]
     while queue:
@@ -99,9 +95,8 @@ def _move_overlap_nodes(
     for rs_wait, rs_starts in rs_defer.items():
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
         # rs_wait and its transitive users must be after latest_rs_start
-        nodes = _collect_nodes_must_be_after(rs_wait)
         node_insert_after = latest_rs_start
-        for node in nodes:
+        for node in _collect_nodes_must_be_after(rs_wait):
             node_insert_after.append(node)
             node_insert_after = node
 
@@ -115,8 +110,7 @@ def _move_overlap_nodes(
             if node_positions[ag_start] < ag_wait_pos:
                 continue
             # ag_start and its dependencies must be before ag_wait
-            nodes = _collect_nodes_must_be_before(ag_start, node_positions)
-            for node in nodes:
+            for node in _collect_nodes_must_be_before(ag_start, node_positions):
                 ag_wait.prepend(node)
 
 
@@ -391,11 +385,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             if is_compute_node(node):
                 last_compute = node
 
-        if last_compute is not None and not bool(
-            OrderedSet(picked_ag) & OrderedSet(self.node_ancestors[last_compute])
-        ):
-            for ag in picked_ag:
-                overlap_deps[last_compute].add(ag)
+        if last_compute is not None:
+            if not any(
+                self.node_ancestors.is_ancestor(ag, last_compute) for ag in picked_ag
+            ):
+                for ag in picked_ag:
+                    overlap_deps[last_compute].add(ag)
 
         _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
         self.graph.lint()
