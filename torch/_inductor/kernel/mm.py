@@ -440,6 +440,24 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
+    if (
+        out_dtype is None
+        and is_nonzero
+        and static_shape
+        and m == n
+        and inductor_config.math_kernel_optimizations.diag_symm_mm
+        and is_triton(layout.device)
+    ):
+        node = V.graph.current_node
+        if node is not None and node.meta.get("math", {}).get(
+            "symmetric", False
+        ):
+            from torch._inductor.kernel.diag_symm_mm import (
+                diag_symm_mm_template,
+            )
+
+            templates_to_use.append(diag_symm_mm_template)
+
     choices.extend(
         V.choices.get_template_configs(
             kernel_inputs,

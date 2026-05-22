@@ -1320,6 +1320,20 @@ class aten_distributed_optimizations:
     allow_comms_decompositions: bool = False
 
 
+class math_kernel_optimizations:
+    """Optimized kernels for ops with known mathematical properties.
+
+    When the FX graph carries meta["math"] annotations (e.g., {"symmetric": True}),
+    inductor can select specialized kernels that exploit these properties.
+    Each flag controls a specific optimization independently.
+    """
+
+    # Diagonal-symmetric Triton mm for mm nodes whose output is known symmetric.
+    # Computes only upper triangle and mirrors to lower, ~1.5x speedup.
+    # Requires meta["math"]["symmetric"] = True on the mm node.
+    diag_symm_mm: bool = False
+
+
 def parallel_compile_enabled_internally() -> bool:
     """
     TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
