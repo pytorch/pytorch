@@ -486,8 +486,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         if self.rank == 0:
             t1 = torch.zeros([1], dtype=torch.float32)
+            work = pg.allreduce([t1], opts)
             with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
-                pg.allreduce([t1], opts).wait()
+                work.wait()
+            # Regression for #147312: Work.exception() must hand back a typed
+            # Python exception, not a raw std::exception_ptr.
+            exc = work.exception()
+            self.assertIsInstance(exc, RuntimeError)
+            self.assertIn("Timed out", str(exc))
 
     @requires_gloo()
     def test_allreduce_overall_timeout(self):
