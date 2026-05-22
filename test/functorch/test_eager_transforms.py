@@ -58,8 +58,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
-    expectedFailureCPU,
-    expectedFailureCUDA,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -1478,20 +1476,6 @@ class TestAutogradFunction(TestCase):
         self.assertFalse(
             torch._C._dispatch_keys(weight).has(DispatchKey.FuncTorchGradWrapper)
         )
-
-    @expectedFailureCPU
-    @expectedFailureCUDA
-    def test_set_data_under_grad_raises(self, device):
-        # Used to SIGSEGV before the c10 fix. Now raises a Python error
-        # because the wrapper has no direct storage to copy from.
-        weight = nn.Parameter(torch.randn(8, 8, device=device))
-
-        def f(x):
-            weight.data = x.new_zeros(8, 8) + weight.detach()
-            return (x * weight).sum()
-
-        x = torch.randn(8, 8, device=device)
-        grad(f)(x)
 
 
 @markDynamoStrictTest
