@@ -909,7 +909,9 @@ class CustomOpDef:
 
             # Returns (device_type, keyset_raw) or None; rejects subclasses,
             # modes, autocast, multi-device, nested/sparse/quantized
-            check = _C._custom_op_fast_path_check(args)  # pyrefly: ignore[missing-attribute]
+            check = _C._custom_op_fast_path_check(
+                args
+            )  # pyrefly: ignore[missing-attribute]
             if check is None:
                 return _DO_SLOW_PATH
 
@@ -946,7 +948,9 @@ class CustomOpDef:
             result = fast_path(*args, **kwargs)
             if result is not _DO_SLOW_PATH:
                 return result
-            return overload._orig_op(*args, **kwargs)  # pyrefly: ignore[missing-attribute]
+            return overload._orig_op(
+                *args, **kwargs
+            )  # pyrefly: ignore[missing-attribute]
 
         overload._op = fast_op
 
