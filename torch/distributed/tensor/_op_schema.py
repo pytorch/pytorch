@@ -77,6 +77,7 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
+        device=arg.mesh.device_type,
     )
 
 
