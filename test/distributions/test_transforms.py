@@ -627,8 +627,9 @@ def test_transformed_distribution(
 
 
 def test_save_load_transform():
-    # Evaluating `log_prob` will create a weakref `_inv` which cannot be pickled. Here, we check
-    # that `__getstate__` correctly handles the weakref, and that we can evaluate the density after.
+    # Evaluating `log_prob` populates the `_inv` cache, which can
+    # contain reference cycles. Here, we check that `__getstate__`
+    # drops the cache, and that we can evaluate the density after loading.
     dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
     x = torch.linspace(0, 1, 10)
     log_prob = dist.log_prob(x)
