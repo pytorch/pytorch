@@ -4431,6 +4431,16 @@
       ]
     }
   ],
+  "GB6015": [
+    {
+      "Gb_type": "Unsupported direct torch.ops.aten.set call",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support tracing direct `torch.ops.aten.set` calls. `aten.set` aliases storage in ways that downstream functionalization cannot safely model.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0312": [
     {
       "Gb_type": "torch.cond: improper operands contents",
