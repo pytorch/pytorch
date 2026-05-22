@@ -30,7 +30,12 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, format_source_range, istype
+from ..utils import (
+    cmp_name_to_op_mapping,
+    format_source_range,
+    istype,
+    raise_args_mismatch,
+)
 
 
 if TYPE_CHECKING:
@@ -747,6 +752,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="missing_mp_ass_subscript",
+            context=f"mp_ass_subscript_impl not defined for {self.python_type_name()}",
+            explanation=f"Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_ass_item_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="unsupported __setitem__ (sq_ass_item)",
+            context=f"sq_ass_item_impl {self} {key} {value}",
+            explanation=f"Dynamo does not know how to handle sq_ass_item on {self}",
+            hints=[],
+        )
+
     def sq_concat_impl(
         self,
         tx: InstructionTranslator,
@@ -785,12 +816,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 from .object_protocol import vt_getitem
 
                 return vt_getitem(tx, self, args[0])
-            from ..utils import raise_args_mismatch
-
             raise_args_mismatch(
                 tx,
                 name,
                 "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__setitem__":
+            if len(args) == 2 and not kwargs:
+                from .object_protocol import generic_setitem
+
+                return generic_setitem(tx, self, args[0], args[1])
+            raise_args_mismatch(
+                tx,
+                name,
+                "2 args and 0 kwargs",
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):

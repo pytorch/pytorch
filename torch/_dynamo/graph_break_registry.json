@@ -2862,6 +2862,14 @@
       ]
     }
   ],
+  "GB0781": [
+    {
+      "Gb_type": "unsupported __setitem__ (sq_ass_item)",
+      "Context": "sq_ass_item_impl {self} {key} {value}",
+      "Explanation": "Dynamo does not know how to handle sq_ass_item on {self}",
+      "Hints": []
+    }
+  ],
   "GB0209": [
     {
       "Gb_type": "torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
@@ -4874,6 +4882,16 @@
       "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
       "Hints": [
         "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB7786": [
+    {
+      "Gb_type": "missing_mp_ass_subscript",
+      "Context": "mp_ass_subscript_impl not defined for {self.python_type_name()}",
+      "Explanation": "Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
