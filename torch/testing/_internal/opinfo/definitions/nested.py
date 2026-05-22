@@ -890,7 +890,7 @@ def batchwise_reference_index_select(op, sample):
                     start=start.item(),
                     length=length.item(),
                 )
-                for start, length in zip(selected_starts, selected_lengths)
+                for start, length in zip(selected_starts, selected_lengths, strict=True)
             ],
             dim=njt._ragged_idx - 1,
         )
