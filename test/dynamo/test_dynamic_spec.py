@@ -647,7 +647,9 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             m,
             backend=backend,
-            shapes_spec={"self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})},
+            shapes_spec={
+                "self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+            },
         )
 
         compiled()
