@@ -1035,8 +1035,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 opt_net(data).sum().backward()
 
             # At least 2 fwd and 2 bwd graphs should be recorded. Some liveness
-            # patterns require replacement backward recordings, but this should
-            # stabilize instead of rerecording every iteration.
+            # patterns require extra recordings, but this should stabilize instead
+            # of rerecording every iteration.
             graph_id = (
                 torch._inductor.cudagraph_trees.get_container(self.rank)
                 .tree_manager.new_graph_id()
