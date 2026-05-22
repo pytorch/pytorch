@@ -4834,7 +4834,7 @@ def _cpp_fake_mode_ctx():
         torch._C._deactivate_cpp_fake_tensor_mode()
 
 
-def maybe_cpp_fake_mode_ctx(
+def fake_mode_context(
     fake_mode: torch._subclasses.FakeTensorMode,
 ) -> contextlib.AbstractContextManager[None]:
     if torch._C._does_cpp_fake_tensor_mode_exist():

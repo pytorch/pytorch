@@ -18,7 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from ..fx_utils import get_fake_args_kwargs
-from ..utils import maybe_cpp_fake_mode_ctx
+from ..utils import fake_mode_context
 from ..virtualized import V
 
 
@@ -51,7 +51,7 @@ def call_function(
         raise RuntimeError(f"Call function should not get a str target {target=}")
     node = graph.call_function(target, args, kwargs)
     _, args, kwargs = get_fake_args_kwargs(node)
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         node.meta["val"] = target(*args, **kwargs)
         # node.meta["val"] may be a container. So we use tree_map here
         # to recursively extract the tensor metadata.

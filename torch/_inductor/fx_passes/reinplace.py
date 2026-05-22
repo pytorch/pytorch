@@ -20,7 +20,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
-from torch._inductor.utils import maybe_cpp_fake_mode_ctx
+from torch._inductor.utils import fake_mode_context
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -67,7 +67,7 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
         lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
         (args, kwargs),
     )
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         fake_result = fn(*fake_args, **fake_kwargs)
 
     node = graph.call_function(fn, args, kwargs)

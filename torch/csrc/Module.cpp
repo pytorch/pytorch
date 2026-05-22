@@ -3322,21 +3322,25 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_create_cpp_fake_tensor_mode",
-      [](py::object converter, py::object shape_env) {
+      [](py::object converter,
+         py::object shape_env,
+         bool allow_fallback_kernels) {
         Py_INCREF(shape_env.ptr());
         Py_INCREF(converter.ptr());
         auto mode = std::make_shared<c10::FakeTensorMode>(
             std::make_shared<c10::SafePyObject>(
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
-                converter.ptr(), getPyInterpreter()));
+                converter.ptr(), getPyInterpreter()),
+            allow_fallback_kernels);
         mode->decomp_fn_ = tryPythonDecomp;
         mode->op_impl_fn_ = tryPythonOpImpl;
         mode->prim_meta_fn_ = tryPythonPrimMeta;
         c10::impl::FakeTensorModeTLS::create_state(std::move(mode));
       },
       py::arg("converter"),
-      py::arg("shape_env") = py::none());
+      py::arg("shape_env") = py::none(),
+      py::arg("allow_fallback_kernels") = true);
 
   py_module.def("_activate_cpp_fake_tensor_mode", []() {
     c10::impl::FakeTensorModeTLS::activate();
@@ -3353,6 +3357,17 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_does_cpp_fake_tensor_mode_exist", []() -> bool {
     return c10::impl::FakeTensorModeTLS::get_state() != nullptr;
   });
+
+  py_module.def(
+      "_set_cpp_fake_tensor_mode_allow_fallback_kernels",
+      [](bool allow) {
+        auto mode = c10::impl::FakeTensorModeTLS::get_state();
+        TORCH_CHECK(
+            mode != nullptr,
+            "No C++ FakeTensorMode is active");
+        mode->allow_fallback_kernels_ = allow;
+      },
+      py::arg("allow"));
 
   py_module.def("_get_cpp_fake_mode_shape_env", []() -> py::object {
     auto mode = c10::impl::FakeTensorModeTLS::get_state();

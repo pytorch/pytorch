@@ -24,7 +24,7 @@ from torch._inductor.select_algorithm import (
     ExternKernelChoice,
 )
 from torch._inductor.utils import convert_symint_to_expr
-from torch._inductor.utils import maybe_cpp_fake_mode_ctx
+from torch._inductor.utils import fake_mode_context
 from torch._inductor.virtualized import V
 
 
@@ -511,7 +511,7 @@ def autotune_custom_op(
 
     fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         # pyrefly: ignore [no-matching-overload]
         fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
         fake_output = op_overload(*fake_inputs, **fallback_kwargs)
@@ -613,7 +613,7 @@ def _generate_dynamic_configs(
     schema = op_overload._schema
     param_names = [arg.name for arg in schema.arguments if not arg.kwarg_only]
 
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
 
     fake_tensors_dict = dict(zip(param_names, fake_tensors))
@@ -772,7 +772,7 @@ def _lower_single_impl(
 
     shape_env = _get_shape_env()
 
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
 
@@ -990,7 +990,7 @@ def _range_based_lowering_fn(
 
     from torch._inductor.fx_utils import _get_shape_env
 
-    with maybe_cpp_fake_mode_ctx(V.fake_mode):
+    with fake_mode_context(V.fake_mode):
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
         shape_env = _get_shape_env()

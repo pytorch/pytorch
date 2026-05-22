@@ -2774,6 +2774,15 @@ class _MakefxTracer:
                         f"Unexpected tracing type: {self.tracing_mode}"
                     )
 
+            if (
+                self.fake_tensor_mode is not None
+                and _has_cpp_fake_tensor
+                and torch._C._does_cpp_fake_tensor_mode_exist()
+            ):
+                torch._C._set_cpp_fake_tensor_mode_allow_fallback_kernels(
+                    self.fake_tensor_mode.allow_fallback_kernels
+                )
+
             self._construct_modes_with_fx_tracer(self.fx_tracer)
             yield
         finally:

@@ -92,7 +92,7 @@ from torch._inductor.utils import (
     get_static_bw_input_idxs,
     InputType,
     is_gpu,
-    maybe_cpp_fake_mode_ctx,
+    fake_mode_context,
     should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
     tensor_is_aligned,
