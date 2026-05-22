@@ -23,8 +23,9 @@ Tensor quantize_per_tensor_dynamic(
   if (dtype == ScalarType::Half) {
     return input_contig.to(ScalarType::Half);
   }
-  float x_min = input_contig.min().item<float>();
-  float x_max = input_contig.max().item<float>();
+  auto [x_min_t, x_max_t] = at::aminmax(input_contig);
+  float x_min = x_min_t.item<float>();
+  float x_max = x_max_t.item<float>();
 
   if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     reduce_range = false;
@@ -275,8 +276,9 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
     bool reduce_range) {
   at::Tensor a;
   auto input_contig = self.contiguous();
-  float x_min = input_contig.min().item<float>();
-  float x_max = input_contig.max().item<float>();
+  auto [x_min_t, x_max_t] = at::aminmax(input_contig);
+  float x_min = x_min_t.item<float>();
+  float x_max = x_max_t.item<float>();
 
   if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     reduce_range = false;
