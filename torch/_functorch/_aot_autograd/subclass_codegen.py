@@ -73,9 +73,34 @@ def _codegen_unwrap_subclass(
     include_symints: bool = True,
 ) -> None:
     """Emit code to recursively unwrap a single subclass input."""
+
+    def emit_plain_tensor_symints(var: str, meta: PlainTensorMeta) -> None:
+        if not include_symints:
+            return
+
+        if any(meta.size_symbol_placeholders):
+            size_var = state.fresh_name("_size")
+            state.emit(f"{size_var} = {var}.size()", indent=indent)
+            for i, is_sym in enumerate(meta.size_symbol_placeholders):
+                if is_sym:
+                    state.emit(f"unwrapped_args.append({size_var}[{i}])", indent=indent)
+
+        if any(meta.stride_symbol_placeholders):
+            stride_var = state.fresh_name("_stride")
+            state.emit(f"{stride_var} = {var}.stride()", indent=indent)
+            for i, is_sym in enumerate(meta.stride_symbol_placeholders):
+                if is_sym:
+                    state.emit(
+                        f"unwrapped_args.append({stride_var}[{i}])", indent=indent
+                    )
+
     for attr, attr_meta in meta.attrs.items():
         match attr_meta:
-            case PlainTensorMeta() | OpaqueMeta():
+            case PlainTensorMeta():
+                attr_var = _safe_attr_access(var, attr)
+                state.emit(f"unwrapped_args.append({attr_var})", indent=indent)
+                emit_plain_tensor_symints(attr_var, attr_meta)
+            case OpaqueMeta():
                 state.emit(
                     f"unwrapped_args.append({_safe_attr_access(var, attr)})",
                     indent=indent,
@@ -144,7 +169,9 @@ def _codegen_wrap_subclass(
         match attr_meta:
             case PlainTensorMeta() | OpaqueMeta():
                 idx = out_idx_ref[0]
-                out_idx_ref[0] += 1
+                out_idx_ref[0] += (
+                    attr_meta.arg_count if isinstance(attr_meta, PlainTensorMeta) else 1
+                )
                 entries.append(f"{attr!r}: unwrapped_outs[{idx}]")
             case SubclassCreationMeta():
                 nested_var = _codegen_wrap_subclass(state, attr_meta, out_idx_ref)
@@ -204,8 +231,8 @@ def _emit_output_wrapping(
     for meta in out_metas:
         if isinstance(meta, PlainTensorMeta):
             result_exprs.append(f"unwrapped_outs[{meta.unwrapped_idx}]")
-            num_args_tallied += 1
-            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + 1)
+            num_args_tallied += meta.arg_count
+            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + meta.arg_count)
         else:
             result_var = _codegen_wrap_subclass(state, meta, out_idx_ref)
             result_exprs.append(result_var)

@@ -207,6 +207,83 @@ def inner_fn(args):
         self.assertIs(received_args[2], seed)
         self.assertIs(received_args[3], offset)
 
+    def test_inner_plain_tensor_symints_forwarded(self):
+        # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
+        from dataclasses import dataclass
+        from typing import Any
+
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        @dataclass
+        class _TestSubclassMeta:
+            flat_tensor_start_idx: int
+            arg_count: int
+            included_subclass_symints: bool
+            attrs: dict
+            outer_size: tuple
+            outer_stride: tuple
+            meta: Any
+            original_subclass: Any
+            original_subclass_type: type
+
+        inner_a_meta = PlainTensorMeta(
+            unwrapped_idx=0,
+            size_symbol_placeholders=(True, False),
+            stride_symbol_placeholders=(True, False),
+        )
+        inner_b_meta = PlainTensorMeta(unwrapped_idx=3)
+        inp_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=4,
+            included_subclass_symints=True,
+            attrs={"a": inner_a_meta, "b": inner_b_meta},
+            outer_size=(4, 6),
+            outer_stride=(6, 1),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+        )
+        out_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=4,
+            included_subclass_symints=True,
+            attrs={"a": inner_a_meta, "b": inner_b_meta},
+            outer_size=(4, 6),
+            outer_stride=(6, 1),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+        )
+
+        source, globals_dict = _codegen_subclass_wrapper_source(
+            inp_metas=[inp_meta],
+            out_metas=[out_meta],
+            num_fw_outs_saved_for_bw=None,
+        )
+
+        received_args = []
+
+        def mock_compiled_fn(args):
+            received_args.extend(args)
+            return [args[0] * 2, args[1], args[2], args[3] * 2]
+
+        globals_dict["compiled_fn"] = mock_compiled_fn
+        local_dict = {}
+        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)
+        wrapper = local_dict["inner_fn"]
+
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        out = wrapper([TwoTensor(a, b)])
+
+        self.assertEqual(received_args[:4], [a, 4, 6, b])
+        self.assertIsInstance(out[0], TwoTensor)
+        self.assertEqual(out[0].a, a * 2)
+        self.assertEqual(out[0].b, b * 2)
+
 
 if __name__ == "__main__":
     run_tests()

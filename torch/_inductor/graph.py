@@ -12,7 +12,7 @@ import time
 import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, Literal, NoReturn, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -422,6 +422,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        self.symbolic_input_sources: dict[
+            sympy.Symbol, tuple[str, Literal["size", "stride"], int]
+        ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (

@@ -228,6 +228,16 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+    size_symbol_placeholders: tuple[bool, ...] = ()
+    stride_symbol_placeholders: tuple[bool, ...] = ()
+
+    @property
+    def arg_count(self) -> int:
+        return (
+            1
+            + sum(self.size_symbol_placeholders)
+            + sum(self.stride_symbol_placeholders)
+        )
 
 
 @dataclass
@@ -332,7 +342,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 if not isinstance(subclass, Tensor):
                     raise AssertionError("Tensor expected")
-                curr_start_idx += 1
+                curr_start_idx += creation_meta.arg_count
             else:
                 subclass = creation_meta.creation_fn(
                     all_args,

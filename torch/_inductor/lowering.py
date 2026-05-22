@@ -12,7 +12,7 @@ import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -2763,6 +2763,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -4948,12 +4949,8 @@ def _create_constants(*args, dtype):
 @register_lowering(prims.rev.default)
 def rev(x, dims):
     # note - dims pre-canonicalized
-    sizes = x.get_size()
-
-    if len(sizes) == 0:
-        return clone(x)
-
     x_loader = x.make_loader()
+    sizes = x.get_size()
 
     def loader(idx):
         idx = list(idx)
@@ -8135,11 +8132,27 @@ def sym_constrain_range(a, min=None, max=None):
     return None
 
 
+def _record_symbolic_input_source(
+    tensor: Any,
+    dim: int,
+    expr: sympy.Expr,
+    kind: Literal["size", "stride"],
+) -> None:
+    if not isinstance(expr, sympy.Symbol) or not isinstance(tensor, TensorBox):
+        return
+
+    name = tensor.get_name()
+    if name in V.graph.graph_inputs:
+        V.graph.symbolic_input_sources.setdefault(expr, (name, kind, int(dim)))
+
+
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
     if isinstance(val, torch.SymInt):
-        return val.node.expr
+        expr = val.node.expr
+        _record_symbolic_input_source(a, dim, expr, "size")
+        return expr
     else:
         return int(val)
 
@@ -8148,7 +8161,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     if isinstance(val, torch.SymInt):
-        return val.node.expr
+        expr = val.node.expr
+        _record_symbolic_input_source(a, dim, expr, "stride")
+        return expr
     else:
         return int(val)
 

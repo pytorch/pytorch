@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+from types import SimpleNamespace
+
 import sympy
 
 import torch
@@ -7,6 +9,7 @@ from torch._inductor import ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -47,6 +50,53 @@ class TestPythonWrapperCodegen(TestCase):
 
         self.assertEqual(wrapper.prefix.getvalue(), "")
         self.assertEqual(list(bound_vars), [])
+
+    def test_codegen_inputs_binds_recorded_symbolic_input_source(self):
+        wrapper = self._new_wrapper()
+        s0 = sympy.Symbol("s0")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0, 3],
+                    stride=[3, 1],
+                ),
+            )
+        )
+        graph = SimpleNamespace(
+            graph_inputs={"arg0_1": tensor},
+            symbolic_input_sources={s0: ("arg0_1", "size", 0)},
+        )
+
+        with V.set_graph_handler(graph):
+            wrapper.codegen_inputs()
+
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
+
+    def test_codegen_inputs_rejects_unbound_input_symbol(self):
+        wrapper = self._new_wrapper()
+        s0 = sympy.Symbol("s0")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0, 3],
+                    stride=[3, 1],
+                ),
+            )
+        )
+        graph = SimpleNamespace(
+            graph_inputs={"arg0_1": tensor},
+            symbolic_input_sources={},
+        )
+
+        with V.set_graph_handler(graph):
+            with self.assertRaisesRegex(AssertionError, "expected .*s0"):
+                wrapper.codegen_inputs()
 
 
 if __name__ == "__main__":

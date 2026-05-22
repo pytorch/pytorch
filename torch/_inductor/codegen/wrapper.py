@@ -2332,17 +2332,31 @@ class PythonWrapperCodegen(CodeGen):
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
+        for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
+            if sym in bound_vars:
+                continue
+            if input_name not in graph_inputs:
+                continue
+            if kind == "size":
+                self.prefix.writeline(f"{sym} = {input_name}.size()[{dim}]")
+            else:
+                self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
+            bound_vars.add(sym)
+
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
             bound_vars: OrderedSet[sympy.Symbol],
         ):
             for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
-                if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
+                if not isinstance(expr, Expr):
                     continue
 
-                undefined_symbols = [
-                    sym for sym in expr.free_symbols if sym not in bound_vars
-                ]
+                symbols = (
+                    OrderedSet([expr])
+                    if isinstance(expr, sympy.Symbol)
+                    else OrderedSet(expr.free_symbols)
+                )
+                undefined_symbols = [sym for sym in symbols if sym not in bound_vars]
                 if len(undefined_symbols) > 0:
                     raise AssertionError(
                         f"For {expr}, expected {undefined_symbols} to have been codegen-ed."
