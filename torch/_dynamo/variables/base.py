@@ -20,7 +20,7 @@ import dataclasses
 import functools
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, TYPE_CHECKING
@@ -678,7 +678,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_function(
         self,
         tx: Any,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(
@@ -979,7 +979,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Performance optimization to implement optree.tree_map faster than tracing it"""
@@ -1012,7 +1012,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
@@ -1029,7 +1029,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
@@ -1051,7 +1051,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1090,7 +1090,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1105,7 +1105,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
