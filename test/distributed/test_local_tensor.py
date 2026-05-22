@@ -770,36 +770,26 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             for r in range(ws):
                 self.assertEqual(result._local_tensors[r], expected)
 
-    def test_runtime_compute_coordinate_on_dim_per_rank(self):
+    @parametrize("call_style", ["positional", "kwargs"])
+    def test_runtime_compute_coordinate_on_dim_per_rank(self, call_style):
         # Under LocalTensorMode the device_mesh op must return per-rank
         # coordinates wrapped in a LocalIntNode-backed SymInt, instead of
         # falling back to dist.get_rank() (which is always 0 under the fake
-        # backend). See pytorch/pytorch#184746.
+        # backend). The override binds arguments via the op schema so it must
+        # also accept keyword call sites. See pytorch/pytorch#184746.
         from torch.distributed._ops import device_mesh as _dm_ops  # noqa: F401
 
         with LocalTensorMode(self.world_size):
             mesh = self.build_device_mesh()
             full_mesh = mesh._layout.remap_to_tensor(mesh._rank_map)
-            coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
-                full_mesh, 0
-            )
-
-        self.assertIsInstance(coord, torch.SymInt)
-        self.assertIsInstance(coord.node, LocalIntNode)
-        expected = {r: r for r in range(self.world_size)}
-        self.assertEqual(coord.node._local_ints, expected)
-
-    def test_runtime_compute_coordinate_on_dim_kwargs(self):
-        # The LocalTensorMode override must also work when the op is called
-        # with keyword arguments, not just positional ones.
-        from torch.distributed._ops import device_mesh as _dm_ops  # noqa: F401
-
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-            full_mesh = mesh._layout.remap_to_tensor(mesh._rank_map)
-            coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
-                full_mesh=full_mesh, index=0
-            )
+            if call_style == "positional":
+                coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                    full_mesh, 0
+                )
+            else:
+                coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                    full_mesh=full_mesh, index=0
+                )
 
         self.assertIsInstance(coord, torch.SymInt)
         self.assertIsInstance(coord.node, LocalIntNode)
