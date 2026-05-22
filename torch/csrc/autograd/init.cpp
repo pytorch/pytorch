@@ -1341,7 +1341,8 @@ static PyObject* custom_op_fast_path_check(
   }
 
   // Mask out excluded keys (e.g. autocast keys are excluded by default)
-  // then check that nothing unexpected remains.
+  // then verify the active keyset contains only:
+  // 1) an autograd dispatch key, 2) ADInplaceOrView, 3) a backend key.
   uint64_t active = (ks.raw_repr() & ~tls.excluded_.raw_repr());
   if ((active & ~fast_path_allowed_ks.raw_repr()) != 0) {
     Py_RETURN_NONE;
