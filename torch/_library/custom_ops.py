@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import threading
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -271,6 +272,9 @@ def custom_op(
 # Sentinel returned by fast_path when it can't handle the call.
 _DO_SLOW_PATH = object()
 
+# TLS for the fast dispatch chain: stores the resolved backend_impl for the current call.
+_fast_dispatch_tls = threading.local()
+
 
 class CustomOpDef:
     """CustomOpDef is a wrapper around a function that turns it into a custom op.
@@ -299,10 +303,12 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        self._backend_impls: dict[str | None, Callable] = {}
         self._raw_fns: dict[str | None, Callable] = {}
         self._fast_path: Callable | None = None
         self._fast_path_hits: int = 0
         self._autograd_impl: Callable | None = None
+        self._adinplaceorview_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -499,6 +505,8 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
+
+                    self._backend_impls[device_type] = backend_impl
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
@@ -836,6 +844,8 @@ class CustomOpDef:
             # redispatch directly past ADInplaceOrView to the backend.
             return op.redispatch(keyset & after_ADInplaceOrView_keyset, *args, **kwargs)
 
+        self._adinplaceorview_impl = adinplaceorview_impl
+
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -863,14 +873,13 @@ class CustomOpDef:
         When any condition fails, ``fast_path`` returns ``_DO_SLOW_PATH``
         and the call falls through to the C++ dispatcher.
 
-        Dispatch order: fast_path -> autograd_impl -> op.redispatch (C++ dispatcher
-        handles ADInplaceOrView and backend keys)."""
+        Dispatch chain (all in Python, no C++ dispatcher hops):
+        fast_path -> autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
+        Connected via TLS-based redispatch interception in OpOverload.redispatch."""
         schema = self._opoverload._schema
         if schema._is_view_op():
             return
 
-        # Tensor-list args can hide subclasses that the top-level arg check
-        # in fast_path wouldn't catch.
         has_tensorlist = any(
             utils.is_tensorlist_like_type(a.type)
             for a in (*schema.arguments, *schema.returns)
@@ -878,9 +887,19 @@ class CustomOpDef:
         if has_tensorlist:
             return
 
+        def backend_dispatch(keyset, *args, **kwargs):
+            return _fast_dispatch_tls.backend_impl(*args, **kwargs)
+
+        if schema.is_mutable:
+            chain = (self._adinplaceorview_impl, backend_dispatch)
+        else:
+            chain = (backend_dispatch,)
+
+        op = self._opoverload
         raw_fns = self._raw_fns
         autograd_impl = self._autograd_impl
         disabled_kernel = self._disabled_kernel
+        backend_impls = self._backend_impls
         opdef = self
 
         def fast_path(*args, **kwargs):
@@ -908,8 +927,13 @@ class CustomOpDef:
                 return _DO_SLOW_PATH
 
             opdef._fast_path_hits += 1
+            _fast_dispatch_tls.backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
-            return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
+            try:
+                with _ops._enable_fast_redispatch(op, chain):
+                    return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
+            finally:
+                _fast_dispatch_tls.backend_impl = None
 
         self._fast_path = fast_path
 
