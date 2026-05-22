@@ -501,6 +501,7 @@ def init_backend_registration() -> None:
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
+    from .helion_backend import HelionScheduling
     from .mps import MetalScheduling
     from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
@@ -513,6 +514,7 @@ def init_backend_registration() -> None:
         cpu_backends = {
             "cpp": CppScheduling,
             "halide": HalideScheduling,
+            "helion": HelionScheduling,
             "triton": TritonScheduling,
             "pallas": PallasScheduling,
         }
@@ -532,6 +534,7 @@ def init_backend_registration() -> None:
             "triton": CUDACombinedScheduling,
             "halide": HalideScheduling,
             "pallas": PallasScheduling,
+            "helion": HelionScheduling,
         }
         register_backend_for_device(
             "cuda",
@@ -539,15 +542,6 @@ def init_backend_registration() -> None:
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
-        )
-
-    if get_scheduling_for_device("tpu") is None:
-        register_backend_for_device(
-            "tpu",
-            PallasScheduling,
-            PythonWrapperCodegen,
-            # CppWrapperGpu,
-            # WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("xpu") is None:
@@ -562,6 +556,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("tpu") is None:
         tpu_backends = {
             "pallas": PallasScheduling,
+            "helion": HelionScheduling,
         }
         register_backend_for_device(
             "tpu",
