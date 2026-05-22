@@ -140,6 +140,23 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
 
+    def test_root_no_forward_inputs(self):
+        device = torch.device(device_type.type, 0)
+
+        class ParameterOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4, device=device))
+
+            def forward(self):
+                return self.weight @ self.weight
+
+        model = ParameterOnlyModule()
+        fully_shard(model)
+        out = model()
+        self.assertEqual(out.shape, (4, 4))
+        out.sum().backward()
+
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
@@ -2472,6 +2489,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             fully_shard(layer)
             layer._get_fsdp_state()._lazy_init()
         share_comm_ctx(list(model))
+        shared_comm_ctx = model[0]._get_fsdp_state()._comm_ctx
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn(4, 3, lin_dim, device=device_type.type)
@@ -2561,6 +2579,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         self.assertEqual(len(all_gather_streams), 1)
         self.assertEqual(len(reduce_scatter_streams), 1)
+        self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
 
 
