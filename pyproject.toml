@@ -5,11 +5,17 @@ requires = [
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    "scikit-build-core",
+    # 0.12 tightens license-files handling (PEP 639); only acceptable if
+    # license-files lives solely under [project], which we do. CI pins the
+    # exact 0.12 patch we test against in .ci/docker/requirements-ci.txt.
+    "scikit-build-core>=0.12",
 ]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
+# experimental = true is required for the metadata.version / metadata.dependencies
+# custom provider modules used below (provider-path-based dynamic metadata is
+# gated behind this flag in scikit-build-core).
 experimental = true
 build-dir = "build"
 
@@ -74,8 +80,62 @@ install-dir = "torch"
 # Python packages to include in the wheel.
 packages = ["torch", "torchgen", "functorch"]
 # license-files is declared once under [project] (PEP 639 canonical location);
-# scikit-build-core honors it directly. Declaring it here too would trigger
-# AssertionError in scikit-build-core >= 0.12.
+# scikit-build-core honors it directly. Do NOT also declare it here -- as of
+# 0.12 that triggers an AssertionError.
+
+# Mirror the legacy setup.py package_data allowlist as gitignore-style
+# exclusions: without it, scikit-build-core's package walk plus the CMake
+# install step ship ~2300 extra files (source trees, third-party static
+# archives, cmake configs, dev artifacts) that the legacy setup.py omitted.
+# This block is intended as a temporary filter; a follow-up will replace
+# it with an install-component-based scheme that suppresses third-party
+# install rules at source.
+exclude = [
+    # Static archives never belong in a Python wheel (legacy package_data
+    # used a "lib/*.so*"/".dylib*"/".dll"/".lib" allowlist that excluded *.a
+    # implicitly). The largest single offender today is libtorch_xpu_ops.a
+    # at ~1.1GB.
+    "**/*.a",
+    # GNUInstallDirs places third-party cmake configs and static libs under
+    # lib64/ on x86_64; we don't ship any of them.
+    "torch/lib64/**",
+    # Bulk C++ source tree -- only the AOTI runtime header is consumed by
+    # downstream AOTInductor builds (and is staged explicitly via cmake).
+    "torch/csrc/**",
+    "!torch/csrc/inductor/aoti_runtime/model.h",
+    # Source-only directories the package walk picks up but setup.py excluded.
+    "torch/nativert/**",
+    "torch/headeronly/**",
+    "torch/lib/libshm/**",
+    "torch/lib/libshm_windows/**",
+    # Stray CMakeLists.txt copied in by directory installs.
+    "**/CMakeLists.txt",
+    # functorch dev artifacts (docs, notebooks, examples, op-analysis tools).
+    "functorch/docs/**",
+    "functorch/examples/**",
+    "functorch/benchmarks/**",
+    "functorch/op_analysis/**",
+    # torchgen autoheuristic tuning scripts (used to generate heuristics,
+    # not consumed at runtime).
+    "torchgen/_autoheuristic/**",
+    # Third-party cmake configs / docs that subproject installs leak in via
+    # GNUInstallDirs share/cmake/ destinations.
+    "torch/share/doc/**",
+    "torch/share/cmake/fbgemm/**",
+    "torch/share/cmake/kineto/**",
+    "torch/share/cmake/sleef/**",
+    "torch/share/cmake/XNNPACK/**",
+    "torch/share/cmake/ittapi/**",
+    "torch/share/cmake/dnnl/**",
+    "torch/share/cpuinfo/**",
+    # File types that are unambiguously build inputs or dev artifacts; none
+    # of these appear in nightly wheels today.
+    "**/*.bzl",
+    "**/*.ipynb",
+    "**/*.png",
+    "**/*.sh",
+    "**/*.proto",
+]
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files are found in the source
