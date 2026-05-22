@@ -68,6 +68,9 @@ with tempfile.TemporaryDirectory() as tmpdir:
         if name == "Cython" or name.startswith("Cython.")
     )
     assert not cython_modules, cython_modules  # noqa: S101
+    build_extension_cls = torch.utils.cpp_extension.BuildExtension
+    assert isinstance(build_extension_cls, type)  # noqa: S101
+    assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
