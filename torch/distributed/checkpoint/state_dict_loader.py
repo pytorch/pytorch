@@ -244,7 +244,7 @@ def _load_state_dict(
             and "kwargs" in inspect.signature(storage_reader.read_metadata).parameters
         ):
             try:
-                metadata = storage_reader.read_metadata(rank=distW.rank)  # noqa: F841
+                metadata = storage_reader.read_metadata(rank=distW.rank)
                 use_collectives = False
             except Exception as e:
                 rank_metadata_exc = e

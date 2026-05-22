@@ -281,6 +281,19 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.where(torch.le(a, 0), 0, a)
 
 
+@_inplace_wrapper
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.hardsigmoid
+    """
+    return torch.clamp(a / 6 + 0.5, 0, 1)
+
+
 @register_decomposition(aten.channel_shuffle)
 @out_wrapper()
 def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
@@ -560,7 +573,7 @@ def _check_reduction_value(reduction: str):
         raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
-# This helper function maps depreciated arguments, "size_average" and "reduce"
+# This helper function maps deprecated arguments, "size_average" and "reduce"
 # to their corresponding "reduction" string argument
 def _get_string_reduction_arg(*, size_average: bool | None, reduce: bool | None) -> str:
     if size_average is None:

@@ -7,13 +7,7 @@ These lists are used by both test_ops_unbacked.py (base tensor tests)
 and test_dtensor_ops.py (DTensor tests with unbacked dimensions).
 """
 
-
-def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
+from torch.testing._internal.common_device_type import skip, xfail
 
 
 # Ops that have data-dependent errors with unbacked dimensions.
@@ -162,6 +156,7 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),
     xfail("nn.functional.max_pool2d"),

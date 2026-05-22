@@ -83,4 +83,5 @@ __all__ = [
     "print",
     "inductor_compiled_code",
     "inline_asm_elementwise",
+    "register_hook",
 ]

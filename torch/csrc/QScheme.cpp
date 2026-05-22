@@ -77,13 +77,7 @@ PyTypeObject THPQSchemeType = {
 };
 
 void THPQScheme_init(PyObject* module) {
-  if (PyType_Ready(&THPQSchemeType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPQSchemeType);
-  if (PyModule_AddObject(
-          module, "qscheme", reinterpret_cast<PyObject*>(&THPQSchemeType)) !=
-      0) {
+  if (PyModule_AddType(module, &THPQSchemeType) < 0) {
     throw python_error();
   }
 }

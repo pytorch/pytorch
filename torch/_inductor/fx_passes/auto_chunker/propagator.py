@@ -444,8 +444,8 @@ def propagate_general_copy_metadata(
             and first_meta.chunk_dim is not None
             and _chunk_broadcasted_tensor(first_meta.chunk_dim)
         ):
-            # We don't chunking a broadcasted tensor for now.
-            # Can add the rule if such a use case come up
+            # We don't chunk a broadcasted tensor for now.
+            # Can add the rule if such a use case comes up
             return PropagateStatus.FAIL
 
         changed = set_chunking_meta_if_none(
@@ -478,7 +478,7 @@ def propagate_general_copy_metadata(
             return PropagateStatus.FAIL
 
         # apply any to a list to avoid short-circuit
-        changed = any(  # noqa: C419
+        changed = any(
             [  # noqa: C419
                 copy_chunking_meta(node, meta)
                 if not need_handle_broadcast or node_ndim[node] == out_ndim
@@ -493,7 +493,7 @@ def propagate_general_copy_metadata(
         # where we attach chunking metadata to tangents that need to be
         # included in the chunking subgraph.
         # This is different to having a None ChunkingMeta
-        changed |= any(  # noqa: C419
+        changed |= any(
             [  # noqa: C419
                 set_chunking_meta(node)
                 for node in scalar_args

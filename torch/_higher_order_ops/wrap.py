@@ -237,7 +237,7 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
     ) -> _R:
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         @disable
@@ -270,7 +270,7 @@ class WrapWithAutocast(HigherOrderOperator):
     ) -> _R:
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         @disable
@@ -303,7 +303,7 @@ class DynamoBypassingWrapper(HigherOrderOperator):
     ):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         is_compiling = isinstance(wrapper_fn_or_key, str)

@@ -101,6 +101,7 @@ _builtin_ops = [
     (torch.autograd.grad, "aten::grad"),
     (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
+    (torch.broadcast_shapes, "aten::broadcast_shapes"),
     (
         torch.nn.functional._no_grad_embedding_renorm_,  # type: ignore[attr-defined]
         "aten::_no_grad_embedding_renorm_",

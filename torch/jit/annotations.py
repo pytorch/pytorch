@@ -145,7 +145,7 @@ def is_function_or_method(the_callable):
 
 
 def is_vararg(the_callable):
-    if not is_function_or_method(the_callable) and callable(the_callable):  # noqa: B004
+    if not is_function_or_method(the_callable) and callable(the_callable):
         # If `the_callable` is a class, de-sugar the call so we can still get
         # the signature
         the_callable = the_callable.__call__
@@ -164,7 +164,7 @@ def get_param_names(fn, n_args):
         not is_function_or_method(fn)
         and callable(fn)
         and is_function_or_method(fn.__call__)
-    ):  # noqa: B004
+    ):
         # De-sugar calls to classes
         fn = fn.__call__
 
@@ -271,7 +271,7 @@ def get_type_line(source):
                 "The annotation prefix in line "
                 + str(wrong_type_lines[0][0])
                 + " is probably invalid.\nIt must be '# type:'"
-                + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"  # noqa: B950
+                + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"
                 + "\nfor examples"
             )
         return None

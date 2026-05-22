@@ -39,11 +39,6 @@ PyTypeObject* THPStorageClass = nullptr;
 static PyObject* THPStorage_New(PyTypeObject* type, c10::Storage _storage) {
   PyObject* obj = type->tp_alloc(type, 0);
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
-
-  // Ensure that PyUnstable_TryIncref calls don't fail spuriously in
-  // free-threaded Python.
-  PyUnstable_EnableTryIncRef(obj);
-
   auto s = (THPStorage*)obj;
   new (&s->cdata) c10::Storage(std::move(_storage));
   return obj;
@@ -60,35 +55,17 @@ PyObject* THPStorage_NewWithStorage(PyTypeObject* type, c10::Storage _storage) {
 
   c10::StorageImpl* storage_impl = _storage.unsafeGetStorageImpl();
   PyObject* obj = THPStorage_New(type, std::move(_storage));
-  PyObjectPreservation::init_fresh_nonatomic(
-      storage_impl, storage_impl->pyobj_slot(), obj);
+  PyObjectPreservation::init_fresh_nonatomic(*storage_impl, obj);
   return obj;
 }
 
 // Returns a PyObject wrapper for the c10::Storage object. The existing
 // wrapper is returned if it already exists.
 PyObject* THPStorage_Wrap(c10::Storage storage) {
-  if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_New(THPStorageClass, std::move(storage));
-  }
-
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
-  c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
-
-  PyObject* obj = pyobj_slot->load_pyobj();
-  if (obj) {
-    return Py_NewRef(obj);
-  }
-
-  obj = THPStorage_New(THPStorageClass, std::move(storage));
-  PyObject* wrapper =
-      PyObjectPreservation::init_once(storage_impl, pyobj_slot, obj);
-  if (wrapper != obj) {
-    // Another thread beat us to it
-    Py_DECREF(obj);
-    return Py_NewRef(wrapper);
-  }
-  return obj;
+  return PyObjectPreservation::get_or_init(*storage_impl, [&]() {
+    return THPStorage_New(THPStorageClass, std::move(storage));
+  });
 }
 
 static void THPStorage_dealloc(PyObject* self) {
@@ -469,11 +446,8 @@ bool THPStorage_init(PyObject* module) {
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_getset = THPStorage_properties;
-  if (PyType_Ready(&THPStorageType) < 0)
+  if (PyModule_AddType(module, &THPStorageType) < 0)
     return false;
-  Py_INCREF(&THPStorageType);
-  PyModule_AddObject(
-      module, "StorageBase", reinterpret_cast<PyObject*>(&THPStorageType));
   return true;
 }
 

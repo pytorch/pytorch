@@ -104,7 +104,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
 
   AT_DISPATCH_ALL_TYPES_AND(
       c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
-        // Note: acc_type further defines an accumulataion type depending on the
+        // Note: acc_type further defines an accumulation type depending on the
         // scalar_t and whether its on cuda vs cpu.
         using accscalar_t = at::acc_type<scalar_t, false>;
 

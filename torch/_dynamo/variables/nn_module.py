@@ -210,7 +210,8 @@ class NNModuleVariable(VariableTracker):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        assert res
+        if not res:
+            raise AssertionError("nn_module_stack_source must not be None")
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -218,6 +219,9 @@ class NNModuleVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.module_type
+
+    def get_id(self, tx: "InstructionTranslator") -> int | None:
+        return id(tx.output.get_submodule(self.module_key))
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -261,9 +265,12 @@ class NNModuleVariable(VariableTracker):
                 result.append(name_var)
             return result
 
-        assert isinstance(
+        if not isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
-        ), typestr(base)
+        ):
+            raise AssertionError(
+                f"Expected ModuleList, ParameterList, or Sequential, got {typestr(base)}"
+            )
         for idx, submod in enumerate(base):
             result.append(
                 tx.output.register_attr_or_module(
@@ -502,9 +509,10 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert not is_lazy, (
-                    "Expected lazy sequential isn't a valid combination?"
-                )
+                if is_lazy:
+                    raise AssertionError(
+                        "Expected lazy sequential isn't a valid combination?"
+                    )
                 if kwargs:
                     raise_args_mismatch(
                         tx,
@@ -581,7 +589,8 @@ class NNModuleVariable(VariableTracker):
                     fn_source = AttrSource(fn_source, "__func__")
                     args = [self] + list(args)
                 else:
-                    assert istype(fn, types.FunctionType)
+                    if not istype(fn, types.FunctionType):
+                        raise AssertionError(f"Expected FunctionType, got {type(fn)}")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
@@ -595,8 +604,6 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
-        # TODO(follow-up): add tests for ModuleList negative index, ModuleList/Sequential
-        # slice, ModuleDict missing key, invalid key types
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
@@ -624,7 +631,8 @@ class NNModuleVariable(VariableTracker):
                 )
             fn = module.__getitem__.__func__  # pyrefly: ignore[missing-attribute]
 
-            assert isinstance(fn, types.FunctionType)
+            if not isinstance(fn, types.FunctionType):
+                raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
@@ -684,6 +692,13 @@ class NNModuleVariable(VariableTracker):
             self.module_key,
             key_value,
             source=NNModuleSource(GetItemSource(self.source, key_value)),
+        )
+
+    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        from . import ListIteratorVariable
+
+        return ListIteratorVariable(
+            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
         )
 
     def call_method(
@@ -931,9 +946,7 @@ class NNModuleVariable(VariableTracker):
                 items_result.append(named_embed(name, submod))
             return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
         elif name == "__iter__":
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
+            return self.tp_iter_impl(tx)
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
@@ -1021,7 +1034,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        assert res
+        if not res:
+            raise AssertionError("nn_module_stack_source must not be None")
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -1100,26 +1114,33 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
-                if not (
-                    self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_hooks_with_kwargs")  # type: ignore[attr-defined]
-                    .realize()
-                    .len()
-                    or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
-                    or self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")  # type: ignore[attr-defined]
-                    .realize()
-                    .len()
-                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
-                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
-                ):
+
+                def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
+                    vt = obj.var_getattr(tx, attr)
+                    vt = vt.realize() if hasattr(vt, "realize") else vt
+                    return vt.len()  # type: ignore[union-attr]
+
+                has_hooks = any(
+                    _hooks_dict_len(self, attr)
+                    for attr in (
+                        "_backward_hooks",
+                        "_backward_pre_hooks",
+                        "_forward_hooks",
+                        "_forward_hooks_with_kwargs",
+                        "_forward_pre_hooks",
+                        "_forward_pre_hooks_with_kwargs",
+                    )
+                ) or any(
+                    _hooks_dict_len(globals_vt, attr)
+                    for attr in (
+                        "_global_backward_pre_hooks",
+                        "_global_backward_hooks",
+                        "_global_forward_hooks",
+                        "_global_forward_pre_hooks",
+                    )
+                )
+
+                if not has_hooks:
                     name = "forward"
                     fn = self.value_type.forward  # type: ignore[attr-defined]
 
@@ -1148,7 +1169,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Ideally we would have just used VariableTracker.build(tx, fn,
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we dont need this guard.
+                # forward not present in generic dict, we don't need this guard.
                 return variables.UserFunctionVariable(fn, source=source).call_function(
                     tx, [self] + list(args), kwargs
                 )
@@ -1251,6 +1272,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslator", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
         dict_vt = self.var_getattr(tx, field)
+        if isinstance(dict_vt, variables.UserDefinedDictVariable):
+            dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
@@ -1348,7 +1371,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     f"'{type(self.value).__name__}' object has no attribute '{name}'"
                 ],
             )
-        assert out is not None
+        if out is None:
+            raise AssertionError(
+                f"manually_trace_nn_module_getattr failed to find attribute '{name}'"
+            )
         return out
 
 
@@ -1376,9 +1402,10 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value: torch.nn.Module, **kwargs: Any) -> None:
         source = kwargs.get("source")
-        assert source is not None, (
-            "FSDPManagedNNModule depends on having an accurate source to control guarding."
-        )
+        if source is None:
+            raise AssertionError(
+                "FSDPManagedNNModule depends on having an accurate source to control guarding."
+            )
 
         super().__init__(value=value, **kwargs)
         self.source = source

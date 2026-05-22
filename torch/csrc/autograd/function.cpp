@@ -6,7 +6,6 @@
 
 #include <ATen/ATen.h>
 
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,10 +21,10 @@ namespace torch::autograd {
 // The current evaluating node. This is useful to assign the current node as a
 // parent of new nodes created during the evaluation of this node in anomaly
 // mode.
-C10_DEFINE_TLS_static(std::shared_ptr<Node>, tls_current_evaluating_node);
+C10_DEFINE_TLS_static(c10::intrusive_ptr<Node>, tls_current_evaluating_node);
 #define current_evaluating_node (tls_current_evaluating_node.get())
 
-NodeGuard::NodeGuard(std::shared_ptr<Node> node)
+NodeGuard::NodeGuard(c10::intrusive_ptr<Node> node)
     : last_evaluating_node_(std::move(current_evaluating_node)) {
   current_evaluating_node = std::move(node);
 }
@@ -34,7 +33,7 @@ NodeGuard::~NodeGuard() {
   current_evaluating_node = std::move(last_evaluating_node_);
 }
 
-std::shared_ptr<Node> get_current_node() {
+c10::intrusive_ptr<Node> get_current_node() {
   return current_evaluating_node;
 }
 
@@ -46,6 +45,44 @@ auto Node::name() const -> std::string {
   return c10::demangle(typeid(*this).name());
 }
 
+auto Node::forward_op_name() const -> std::string {
+  auto n = name();
+  // Strip "Backward<N>" suffix to get the forward op name.
+  auto pos = n.rfind("Backward");
+  if (pos == std::string::npos) {
+    return n;
+  }
+  // Verify everything after "Backward" is digits (e.g., "Backward0").
+  auto suffix_start = pos + 8;
+  for (size_t i = suffix_start; i < n.size(); ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(n[i]))) {
+      return n;
+    }
+  }
+  // Keep the numeric suffix if it is not "0" (e.g., "AddBackward1" → "Add1").
+  auto suffix = n.substr(suffix_start);
+  if (suffix == "0" || suffix.empty()) {
+    return n.substr(0, pos);
+  }
+  return n.substr(0, pos) + suffix;
+}
+
+bool Node::task_should_compute_output(size_t output_edge_index) const {
+  TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+  const auto& next = next_edges_[output_edge_index];
+  if (next.is_valid()) {
+    const auto exec_info = get_current_graph_task_exec_info();
+    if (exec_info && !exec_info->empty()) {
+      auto it = exec_info->find(next.function.get());
+      if (it == exec_info->end() || !it->second.should_execute()) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 AnomalyMetadata* Node::metadata() noexcept {
   if (!anomaly_metadata_) {
     anomaly_metadata_ = Engine::get_default_engine().make_anomaly_metadata();
@@ -53,9 +90,12 @@ AnomalyMetadata* Node::metadata() noexcept {
   return anomaly_metadata_.get();
 }
 
+// Iteratively release child nodes to prevent stack overflow on deletion
+// of deep computation graphs. See
+// https://github.com/pytorch/pytorch/issues/5534
 static void gatherFunctions(
     Node* func,
-    std::vector<std::shared_ptr<Node>>& stack) {
+    std::vector<c10::intrusive_ptr<Node>>& stack) {
   func->release_variables();
 
   for (auto& edge : func->next_edges()) {
@@ -67,42 +107,27 @@ static void gatherFunctions(
   }
 }
 
-/*
- * Fix for #5534: prevent stack overflow on deletion of deep computation graph
- *
- * Sometimes one can end up with a very big computation graph of Nodes
- * and Edges. Each std::shared_ptr<Node> contains a list of Edge, and
- * each Edge contains a std::shared_ptr<Node>. Deleting a
- * std::shared_ptr<Node> can trigger the recursive deletion of other
- * std::shared_ptr<Node>'s: this can stack overflow if the graph
- * is deep enough. Here is an example of such a graph:
- *
- * shared_ptr<Node> -> Edge -> shared_ptr<Node> -> Edge -> ... ->
- * shared_ptr<Node>
- *
- * The solution here is to detect when we are decrementing away the last
- * reference to a Node, and when doing so to buffer up the Node's
- * that will be recursively decremented.  We can then decrement (and free)
- * the original Node without causing a recursive cascade, before
- * draining the buffer applying the same behavior.  This is, in effect,
- * converting recursion to a loop, using a heap buffer in place of the
- * recursive call stack.
- */
-void deleteNode(Node* function) {
-  // To avoid stack overflow on large computational graphs,
-  // we need to track reference decrementing and freeing
-  // on the heap.
-  function->release_variables();
-  std::vector<std::shared_ptr<Node>> stack;
-  gatherFunctions(function, stack);
-  delete function;
-
+static void releaseGraphIteratively(Node* node) {
+  std::vector<c10::intrusive_ptr<Node>> stack;
+  gatherFunctions(node, stack);
   while (!stack.empty()) {
     auto func = std::move(stack.back());
     stack.pop_back();
     gatherFunctions(func.get(), stack);
-    // Reference count is decremented on the loop backedge.
   }
+}
+
+void Node::release_resources() {
+  releaseGraphIteratively(this);
+  pre_hooks_.clear();
+  post_hooks_.clear();
+  tensor_pre_hooks_.clear();
+  retains_grad_hooks_.clear();
+  anomaly_metadata_.reset();
+}
+
+Node::~Node() {
+  releaseGraphIteratively(this);
 }
 
 at::Tensor TypeAndSize::zeros() {

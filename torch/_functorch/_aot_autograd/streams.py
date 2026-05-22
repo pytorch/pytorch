@@ -16,7 +16,7 @@ from torch.utils._runtime_estimation import (
 
 
 if TYPE_CHECKING:
-    from .schemas import ViewAndMutationMeta  # noqa: TC004
+    from .schemas import ViewAndMutationMeta
 
 from .indexed_dict import IndexedDict
 
@@ -177,7 +177,7 @@ def handle_synced_deallocation(
         raise AssertionError(
             "allocating and side stream should be different for synced deallocations"
         )
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
             graph.call_function(

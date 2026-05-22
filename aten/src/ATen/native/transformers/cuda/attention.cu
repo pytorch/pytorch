@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <cstdint>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
@@ -489,9 +490,6 @@ _flash_attention_forward_impl(
     std::optional<int64_t> num_splits
     ) {
 #if defined(USE_FLASH_ATTENTION)
-  TORCH_CHECK(
-      !num_splits.has_value(),
-      "num_splits requires FA3. Register FA3 with `register_flash_attention_fa3()` to set num_splits.");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
 
@@ -500,7 +498,11 @@ _flash_attention_forward_impl(
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
   const float softcap = 0.0;
 
-#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef USE_ROCM
+  TORCH_CHECK(
+      !num_splits.has_value(),
+      "num_splits is not supported on ROCm");
+  // ROCM backend accepts std::optional for window_size_left/right directly.
 #ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
   const auto window_left = window_size_left;
   const auto window_right = window_size_right;
@@ -554,7 +556,11 @@ _flash_attention_forward_impl(
             window_right,
             softcap,
             return_debug_mask,
-            std::nullopt /*gen_*/);
+            std::nullopt /*gen_*/
+#ifndef USE_ROCM
+            , num_splits.value_or(0)
+#endif
+            );
   } else {
     std::tie(
         output,
@@ -679,7 +685,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
-          const auto offsets_ptr = metadata.data_ptr<int>();
+          const auto offsets_ptr = metadata.const_data_ptr<int>();
           const auto sizes_ptr = offsets_ptr + sizes.numel() + 1;
           const auto input_dim = sizes.sizes()[1];
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_dim == 1);
@@ -1729,9 +1735,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       return;
     }
     // Alignment
+    const auto is_ptr_aligned = [](const void* ptr, int64_t alignment_bytes) {
+      return uint64_t(ptr) % alignment_bytes == 0;
+    };
     if ((query.stride(2) % Kernel::kAlignmentQ) ||
         (key.stride(2) % Kernel::kAlignmentK) ||
-        (value.stride(2) % Kernel::kAlignmentV)) {
+        (value.stride(2) % Kernel::kAlignmentV) ||
+        !is_ptr_aligned(
+            query.const_data_ptr(), Kernel::kAlignmentQ * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            key.const_data_ptr(), Kernel::kAlignmentK * sizeof(scalar_t)) ||
+        !is_ptr_aligned(
+            value.const_data_ptr(), Kernel::kAlignmentV * sizeof(scalar_t))) {
       return;
     }
     // Uses too much shmem

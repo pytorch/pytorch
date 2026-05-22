@@ -746,7 +746,9 @@ class Tracer(TracerBase):
 
             # TODO: annotate return type. inspect.get_annotations(flatten_fn)
             # leaks the return annotation into the generated forward() code.
-            def flatten_fn(*args: Any):  # pyrefly: ignore[unannotated-parameter]
+            def flatten_fn(  # pyrefly: ignore[unannotated-parameter, unannotated-return]
+                *args: Any,
+            ):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
@@ -1057,7 +1059,7 @@ def _create_wrapped_func(orig_fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(orig_fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> Any:
         """
-        Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
+        Given a closed-over ``orig_function`` to invoke, search the args and kwargs for
         a Proxy object. If there is one, emit a ``call_function`` node to preserve the
         call to this leaf function directly. Otherwise, just return the results of
         this function call, as this function is not being traced.

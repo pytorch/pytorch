@@ -802,7 +802,7 @@ void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& inf
     return;
   }
 
-  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
+  if (batchCount(input) > 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
       apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
     });
@@ -825,7 +825,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
   const int64_t self_matrix_stride = matrixStride(self_working_copy);
   scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
 
-  scalar_t* A_ptr = A_column_major_copy.data_ptr<scalar_t>();
+  const scalar_t* A_ptr = A_column_major_copy.const_data_ptr<scalar_t>();
   const int64_t A_matrix_stride = matrixStride(A_column_major_copy);
   const int64_t ldb = std::max<int64_t>(1, A_column_major_copy.size(-1));
 

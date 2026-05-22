@@ -271,7 +271,7 @@ class AveragedModel(Module):
         multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
         | None = None,
         use_buffers=False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -478,7 +478,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr

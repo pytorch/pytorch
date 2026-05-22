@@ -56,6 +56,10 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 import torch.fx
 from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
+    set_external_object_by_index,
+)
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
@@ -65,6 +69,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
+    copy_strided_storage_,
     get_expanded_dims,
     get_input_idxs_to_check,
     index_expanded_dims,
@@ -424,11 +429,15 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
-
+        compile_id = kwargs.get("compile_id", "")
         if int_key is None:
-            log.info("Recording cudagraph tree for graph without symints")
+            log.info(
+                "[%s] Recording cudagraph tree for graph without symints", compile_id
+            )
         else:
-            log.info("Recording cudagraph tree for symint key %s", int_key)
+            log.info(
+                "[%s] Recording cudagraph tree for symint key %s", compile_id, int_key
+            )
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -633,6 +642,19 @@ def _use_cuda_memory_pool_manager(
     torch.cuda.current_stream().wait_stream(stream)
 
 
+@contextlib.contextmanager
+def _update_current_stream_external_object() -> Generator[None, None, None]:
+    """Update the external object registry so custom ops see the capture stream.
+
+    During cudagraph recording/warmup the current stream differs from the
+    trace-time default stream.  The external object at CURRENT_STREAM_INDEX
+    must reflect the actual current stream so that custom ops (e.g. event
+    record/wait) executed during capture use the right stream.
+    """
+    set_external_object_by_index(CURRENT_STREAM_INDEX, torch.cuda.current_stream())
+    yield
+
+
 def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     if not isinstance(t, torch.Tensor):
         assert t is None
@@ -725,6 +747,8 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            # NB: must go after _use_cuda_memory_pool_manager which switches the stream
+            _update_current_stream_external_object(),
             ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
@@ -1081,7 +1105,7 @@ class CUDAGraphNode:
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
         # if it is, we cached the output tensor and adjust storage liveness tracking to also
         # check if the output tensor does not have an additional python reference.
-        # If a descendent node discovers it has an alias of a prior output, then the output
+        # If a descendant node discovers it has an alias of a prior output, then the output
         # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
         # significant additional complexity with marginal gains
@@ -1126,7 +1150,13 @@ class CUDAGraphNode:
             if not isinstance(srcs[idx], torch.Tensor):
                 continue
             expanded_dims = self.expanded_dims[idx]
-            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))  # type: ignore[arg-type]
+            indexed_dst = index_expanded_dims(dsts[idx], expanded_dims)  # type: ignore[arg-type]
+            if torch._debug_has_internal_overlap(indexed_dst) != 0:
+                # rare path: dst still self-overlaps after dropping expanded dims
+                copy_strided_storage_(dsts[idx], srcs[idx])  # type: ignore[arg-type]
+                srcs[idx] = None  # type: ignore[call-overload]
+                continue
+            dst_tensors.append(indexed_dst)
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))  # type: ignore[arg-type]
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
@@ -1334,6 +1364,8 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            # NB: must go after torch.cuda.graph which switches the stream
+            _update_current_stream_external_object(),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
@@ -1577,7 +1609,7 @@ class CUDAGraphNode:
         return True
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
-        "Adds node as a a child of self"
+        "Adds node as a child of self"
         self.children[function_id].append(node)
 
     @staticmethod
@@ -1880,7 +1912,7 @@ def check_memory_pool(
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
     """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
-    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
@@ -2187,7 +2219,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        return False
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2199,6 +2234,12 @@ class CUDAGraphTreeManager:
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
+
+        if (
+            self.path_state == ExecutionState.EXECUTION
+            and self.can_start_new_generation()
+        ):
+            self.try_end_curr_execution()
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2250,11 +2291,15 @@ class CUDAGraphTreeManager:
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
-                if (
-                    status == CheckInvariantStatus.StaticInputIdxMismatch
-                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
-                ):
-                    unexpected_rerecord = True
+                if status != CheckInvariantStatus.SUCCESS:
+                    # StaticInputIdxMismatch fires on non-cudagraph-managed
+                    # static inputs (nn parameters and mark_static_address
+                    # tensors) whose identity can churn under
+                    # inline_inbuilt_nn_modules. We re-record but don't count
+                    # those toward cudagraph_unexpected_rerecord_limit. All
+                    # other mismatch reasons do count.
+                    if status != CheckInvariantStatus.StaticInputIdxMismatch:
+                        unexpected_rerecord = True
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2549,6 +2594,9 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation():
+            if not self.current_node.all_outputs_are_dead():
+                self.apply_checkpoint_execution_state_in_allocator()
+            self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2620,6 +2668,15 @@ class CUDAGraphTreeManager:
         assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+        live_storage_refs = list(self.current_node.path_live_weakrefs())
+        if not live_storage_refs:
+            return
+
+        if isinstance(self.current_node, CUDAGraphNode):
+            # Cached replay outputs are the Tensor objects returned to users.
+            # Drop them before poisoning stale outputs so future replays rebuild
+            # fresh Tensor objects.
+            self.current_node.remove_path_cached_tensors()
 
         stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
@@ -2650,7 +2707,7 @@ class CUDAGraphTreeManager:
                 stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = OrderedSet[Any]()
-        for storage_ref in self.current_node.path_live_weakrefs():
+        for storage_ref in live_storage_refs:
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
@@ -2658,7 +2715,14 @@ class CUDAGraphTreeManager:
                 msg = self.format_dealloc_msg(
                     stor_stack_trace.get(storage_ref.data_ptr())
                 )
-                torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                if torch._C._has_Standard_Deleter(_storage_deref):
+                    torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                else:
+                    # Replayed outputs are reconstructed from raw data pointers
+                    # and have non-owning storages.
+                    torch._C._cuda_cudaCachingAllocator_raw_delete(
+                        storage_ref.data_ptr()
+                    )
 
                 if self.disable_invalidate_aliases:
                     continue
