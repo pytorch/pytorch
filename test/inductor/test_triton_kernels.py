@@ -6016,7 +6016,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             wrap_triton(add_kernel, output_tile={"x": "BLOCK_SIZE"})[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
-            return out * c
+            out = out * c # Non-unary epilogue
+
+            out2 = torch.empty_like(a)
+            add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
+            return out
 
         a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
         b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
