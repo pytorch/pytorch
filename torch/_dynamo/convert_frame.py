@@ -2143,7 +2143,6 @@ def _compile(
                     TorchRuntimeError,
                     BackendCompilerFailed,
                     AssertionError,
-                    IndexError,  # dim out-of-range from canonicalize_dim/maybe_wrap_dim
                     ConstraintViolationError,
                     GuardOnDataDependentSymNode,
                     ValidationException,
