@@ -2298,14 +2298,10 @@ class TestReductions(TestCase):
             torch.int8: torch.int64,
         }
 
-        # prod is not supported for float16 & bfloat16 on CPU
-        if not (self.device_type == 'cpu' and dtype in [torch.float16, torch.bfloat16]):
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.prod().item(), -180)
-            self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
-            self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
-
         x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.prod().item(), -180)
+        self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
+        self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
 
         self.assertEqual(x.min().item(), -1)
         self.assertEqual(x.argmin().item(), 0)
