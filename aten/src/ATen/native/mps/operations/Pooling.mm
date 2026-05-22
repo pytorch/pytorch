@@ -337,6 +337,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
   for (const auto dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(stride_expanded[dim] > 0, op_name, ": stride should not be zero");
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,
