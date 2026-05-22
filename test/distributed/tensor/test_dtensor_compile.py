@@ -1194,7 +1194,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
@@ -1235,7 +1235,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
