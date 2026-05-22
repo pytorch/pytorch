@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -224,6 +227,233 @@ class TestBenchmarker(TestCase):
         finally:
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
+
+    def test_gpu_benchmark_lock_uses_visible_cuda_device(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "4,7",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", return_value=1),
+            ):
+                with _bench.maybe_gpu_benchmark_lock():
+                    with _bench.maybe_gpu_benchmark_lock():
+                        pass
+
+            lock_path = os.path.join(lock_dir, "gpu_7.lock")
+            self.assertTrue(os.path.exists(lock_path))
+            with open(lock_path) as f:
+                metadata = f.read()
+            self.assertIn("gpu=7\n", metadata)
+            self.assertIn("mode=exclusive\n", metadata)
+            self.assertIn("label=inductor_benchmark\n", metadata)
+
+    def test_gpu_benchmark_lock_tracks_nested_device_changes(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "4,7",
+            }
+            with patch.dict(os.environ, env):
+                with patch("torch.cuda.current_device", return_value=0):
+                    with _bench.maybe_gpu_benchmark_lock():
+                        with patch("torch.cuda.current_device", return_value=1):
+                            with _bench.maybe_gpu_benchmark_lock():
+                                pass
+
+            self.assertTrue(os.path.exists(os.path.join(lock_dir, "gpu_4.lock")))
+            self.assertTrue(os.path.exists(os.path.join(lock_dir, "gpu_7.lock")))
+
+    def test_gpu_benchmark_lock_prefers_hip_visible_devices_on_rocm(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "0",
+                "HIP_VISIBLE_DEVICES": "2",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch.object(torch.version, "hip", "mock-hip"),
+                patch("torch.cuda.current_device", return_value=0),
+            ):
+                with _bench.maybe_gpu_benchmark_lock():
+                    pass
+
+            self.assertTrue(os.path.exists(os.path.join(lock_dir, "gpu_2.lock")))
+            self.assertFalse(os.path.exists(os.path.join(lock_dir, "gpu_0.lock")))
+
+    def test_gpu_benchmark_lock_disabled_does_not_query_device(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch(
+                "torch.cuda.current_device",
+                side_effect=AssertionError("should not query device"),
+            ):
+                with _bench.maybe_gpu_benchmark_lock():
+                    pass
+
+    def test_gpu_benchmark_lock_uses_registered_context(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        @contextlib.contextmanager
+        def custom_context():
+            calls.append("enter")
+            try:
+                yield
+            finally:
+                calls.append("exit")
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with patch.dict(os.environ, {"INDUCTOR_GPU_BENCH_LOCK": "1"}):
+                with patch(
+                    "torch.cuda.current_device",
+                    side_effect=AssertionError("custom context should not query device"),
+                ):
+                    with _bench.maybe_gpu_benchmark_lock():
+                        calls.append("body")
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(calls, ["enter", "body", "exit"])
+
+    def test_do_bench_using_profiling_uses_gpu_benchmark_lock(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor import utils as inductor_utils
+
+        calls = []
+
+        def fake_do_bench(fn, warmup, rep, is_vetted_benchmarking):
+            calls.append((warmup, rep, is_vetted_benchmarking))
+            fn()
+            return 3.0
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "3",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", return_value=0),
+                patch.object(
+                    inductor_utils,
+                    "_do_bench_using_profiling",
+                    side_effect=fake_do_bench,
+                ),
+            ):
+                result = inductor_utils.do_bench_using_profiling(
+                    lambda: calls.append("fn"),
+                    warmup=1,
+                    rep=2,
+                    is_vetted_benchmarking=True,
+                )
+
+            self.assertEqual(result, 3.0)
+            self.assertEqual(calls, [(1, 2, True), "fn"])
+            with open(os.path.join(lock_dir, "gpu_3.lock")) as f:
+                metadata = f.read()
+            self.assertIn("gpu=3\n", metadata)
+            self.assertIn("mode=exclusive\n", metadata)
+
+    def test_benchmark_uses_inferred_cuda_device_context(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = TritonBenchmarker()
+        orig = dict(_bench._BENCHMARK_DISPATCH)
+        entered_devices = []
+
+        @contextlib.contextmanager
+        def fake_cuda_device(device):
+            entered_devices.append(device)
+            yield
+
+        try:
+            _bench.register_benchmarker(
+                "cuda",
+                lambda self, f, *, warmup, rep, **kw: 7.0,
+                override=True,
+            )
+            with patch("torch.cuda.device", side_effect=fake_cuda_device):
+                result = benchmarker.benchmark(lambda: None, device="cuda:1")
+        finally:
+            _bench._BENCHMARK_DISPATCH.clear()
+            _bench._BENCHMARK_DISPATCH.update(orig)
+
+        self.assertEqual(result, 7.0)
+        self.assertEqual(entered_devices, [torch.device("cuda:1")])
+
+    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        class FakeCUDAGraph:
+            def replay(self):
+                pass
+
+        benchmarker = Benchmarker()
+        calls = []
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "5",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", return_value=0),
+                patch("torch.cuda.synchronize"),
+                patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
+                patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
+                patch.object(Benchmarker, "benchmark_gpu", return_value=9.0),
+            ):
+                result = benchmarker.benchmark_gpu_with_cuda_graph(
+                    lambda: calls.append("call")
+                )
+
+            self.assertEqual(result, 9.0)
+            self.assertEqual(calls, ["call", "call"])
+            with open(os.path.join(lock_dir, "gpu_5.lock")) as f:
+                metadata = f.read()
+            self.assertIn("gpu=5\n", metadata)
+            self.assertIn("mode=exclusive\n", metadata)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
