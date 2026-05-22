@@ -23,6 +23,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._functorch import config as functorch_config
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
@@ -58,11 +59,20 @@ ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+_RAW_DOT_GRAPH_FORMATS = OrderedSet(["dot", "raw"])
 
 
 @functools.cache
 def has_dot() -> bool:
     return shutil.which("dot") is not None
+
+
+def _get_graph_output_format(fname: str | None) -> str:
+    if fname is not None:
+        _, ext = os.path.splitext(fname)
+        if ext:
+            return ext.lstrip(".")
+    return functorch_config.torch_compile_graph_format
 
 
 def draw_buffers(
@@ -71,9 +81,10 @@ def draw_buffers(
     fname: str | None = None,
 ) -> None:
     """
-    Draw a graph in fname.svg.
+    Draw a graph in fname.
     """
-    if not has_dot():
+    graph_format = _get_graph_output_format(fname)
+    if graph_format not in _RAW_DOT_GRAPH_FORMATS and not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
         return
 
@@ -578,7 +589,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # don't try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors
@@ -622,7 +633,10 @@ class DebugFormatter:
         return buf.getvalue()
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
-        draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+        draw_buffers(
+            nodes,
+            fname=self.filename(f"graph_diagram.{config.trace.graph_diagram_format}"),
+        )
 
     def draw_orig_fx_graph(
         self,
@@ -632,7 +646,9 @@ class DebugFormatter:
         annotate_orig_fx_with_snodes(gm, nodes)
         draw_graph(
             gm,
-            fname=self.filename("orig_fx_graph_diagram.svg"),
+            fname=self.filename(
+                f"orig_fx_graph_diagram.{config.trace.orig_fx_graph_diagram_format}"
+            ),
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
