@@ -36,6 +36,7 @@ import sys
 import types
 import typing
 import unittest
+import weakref
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -3140,108 +3141,180 @@ def is_aten_op_or_tensor_method(obj: Any) -> bool:
 
 class FunctionIdSet:
     """
-    Track a set of `id()`s of objects which are either allowed or not
-    allowed to go into the generated FX graph.  Use to test for torch.*,
-    numpy.*, builtins.*, etc.
+    Track a set of objects which are either allowed or not allowed to go into
+    the generated FX graph. Use weakrefs when possible so a stale id from a
+    collected object cannot match an unrelated new object.
 
     Support user modification to permit customization of what can be
     added to the graph and what will cause a graph break.
     """
 
-    function_ids: set[int] | None = None
-    function_names: dict[int, str] | None = None
+    weakrefs: dict[int, weakref.ReferenceType[Any]]
+    strongrefs: dict[int, Any]
+    function_names: dict[int, str] | None
+    initialized: bool
 
     def __init__(
-        self, lazy_initializer: Callable[[], dict[int, str] | set[int]]
+        self, lazy_initializer: Callable[[], dict[Any, str] | set[Any]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
+        self.weakrefs = {}
+        self.strongrefs = {}
+        self.function_names = None
+        self.initialized = False
+
+    def _remove_id(
+        self, idx: int, ref: weakref.ReferenceType[Any] | None = None
+    ) -> None:
+        if ref is None or self.weakrefs.get(idx) is ref:
+            self.weakrefs.pop(idx, None)
+            if self.function_names is not None:
+                self.function_names.pop(idx, None)
+
+    @staticmethod
+    def _idx(obj: Any) -> int:
+        return id(obj)
+
+    def _add(self, item: Any, name: str | None = None) -> None:
+        idx = self._idx(item)
+        try:
+            ref = weakref.ref(item, lambda ref: self._remove_id(idx, ref))
+        except TypeError:
+            self.strongrefs[idx] = item
+        else:
+            self.weakrefs[idx] = ref
+            self.strongrefs.pop(idx, None)
+
+        if name is not None:
+            if self.function_names is None:
+                self.function_names = {}
+            self.function_names[idx] = name
+
+    def _lazy_init(self) -> None:
+        if self.initialized:
+            return
+
+        self.initialized = True
+        value = self.lazy_initializer()
+        if isinstance(value, dict):
+            self.function_names = {}
+            for item, name in value.items():
+                self._add(item, name)
+        else:
+            if not isinstance(value, set):
+                raise AssertionError(
+                    f"expected lazy_initializer to return a dict or set, got {type(value)}"
+                )
+            for item in value:
+                self._add(item)
 
     def __call__(self) -> set[int]:
-        if self.function_ids is None:
-            value = self.lazy_initializer()
-            if isinstance(value, dict):
-                self.function_ids = set(value.keys())
-                self.function_names = value
-            else:
-                if not isinstance(value, set):
-                    raise AssertionError(
-                        f"expected lazy_initializer to return a dict or set, got {type(value)}"
-                    )
-                self.function_ids = value
-        return self.function_ids
+        self._lazy_init()
+        for idx, ref in list(self.weakrefs.items()):
+            if ref() is None:
+                self._remove_id(idx, ref)
+        return set(self.weakrefs) | set(self.strongrefs)
 
-    def get_name(self, idx: int, default: str) -> str:
-        self()  # lazy init
+    def get_name(self, item: Any, default: str) -> str:
+        self._lazy_init()
         if self.function_names is None:
             raise AssertionError(
                 "function_names is None; lazy_initializer returned a set, not a dict"
             )
-        return self.function_names.get(idx, default)
+        if item not in self:
+            return default
+        return self.function_names.get(self._idx(item), default)
 
-    def add(self, idx: int) -> None:
-        function_ids = self()  # lazy init
-        function_ids.add(idx)
+    def add(self, item: Any) -> None:
+        self._lazy_init()
+        self._add(item)
 
-    def remove(self, idx: int) -> None:
-        function_ids = self()
-        if idx in function_ids:
-            function_ids.remove(idx)
+    def remove(self, item: Any) -> None:
+        self._lazy_init()
+        idx = self._idx(item)
+        removed = False
+        ref = self.weakrefs.get(idx)
+        if ref is not None:
+            obj = ref()
+            if obj is None or obj is item:
+                self.weakrefs.pop(idx, None)
+                removed = True
 
-    def __contains__(self, idx: int) -> bool:
-        return idx in self()
+        if idx in self.strongrefs and self.strongrefs[idx] is item:
+            self.strongrefs.pop(idx, None)
+            removed = True
+
+        if removed and self.function_names is not None:
+            self.function_names.pop(idx, None)
+
+    def __contains__(self, item: Any) -> bool:
+        self._lazy_init()
+        idx = self._idx(item)
+        if idx in self.strongrefs:
+            return self.strongrefs[idx] is item
+
+        ref = self.weakrefs.get(idx)
+        if ref is None:
+            return False
+
+        obj = ref()
+        if obj is None:
+            self._remove_id(idx, ref)
+            return False
+        return obj is item
 
 
 @FunctionIdSet
-def _allowed_callable_ids() -> dict[int, str]:
-    rv: dict[int, str] = {}
+def _allowed_callable_ids() -> dict[Any, str]:
+    rv: dict[Any, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _leaf_function_ids() -> dict[int, str]:
-    rv: dict[int, str] = {}
+def _leaf_function_ids() -> dict[Any, str]:
+    rv: dict[Any, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _disallowed_callable_ids() -> dict[int, str]:
-    rv: dict[int, str] = {}
+def _disallowed_callable_ids() -> dict[Any, str]:
+    rv: dict[Any, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _nonstrict_trace_callable_ids() -> dict[int, str]:
-    rv: dict[int, str] = {}
+def _nonstrict_trace_callable_ids() -> dict[Any, str]:
+    rv: dict[Any, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _builtin_function_ids() -> dict[int, str]:
+def _builtin_function_ids() -> dict[Any, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
-        id(v): f"builtins.{k}"
+        v: f"builtins.{k}"
         for k, v in builtins.__dict__.items()
         if not k.startswith("_") and callable(v)
     }
     rv.update(
         {
-            id(v): f"operator.{k}"
+            v: f"operator.{k}"
             for k, v in operator.__dict__.items()
             if not k.startswith("_") and callable(v)
         }
     )
-    rv[id(builtins.__build_class__)] = "builtins.__build_class__"
+    rv[builtins.__build_class__] = "builtins.__build_class__"
     return rv
 
 
 @FunctionIdSet
-def _polyfilled_function_ids() -> set[int]:
+def _polyfilled_function_ids() -> set[Any]:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
     return set()
 
 
 @FunctionIdSet
-def _numpy_function_ids() -> dict[int, str]:
+def _numpy_function_ids() -> dict[Any, str]:
     unsupported_funcs = {
         "seed",
         "ranf",
@@ -3270,17 +3343,17 @@ def _numpy_function_ids() -> dict[int, str]:
     for mod in NP_SUPPORTED_MODULES:
         for k, v in mod.__dict__.items():
             if is_supported(k, v, mod):
-                rv[id(v)] = f"{mod.__name__}.{k}"
+                rv[v] = f"{mod.__name__}.{k}"
     return rv
 
 
 @FunctionIdSet
-def _builtin_constant_ids() -> dict[int, str]:
+def _builtin_constant_ids() -> dict[Any, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
     rv = {
-        id(v): f"builtins.{k}"
+        v: f"builtins.{k}"
         for k, v in builtins.__dict__.items()
         if not k.startswith("_") and not callable(v)
     }
@@ -3314,22 +3387,22 @@ def _maybe_init_lazy_module(obj: object) -> None:
 
 def is_callable_allowed(obj: Any) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _allowed_callable_ids
+    return obj in _allowed_callable_ids
 
 
 def is_nonstrict_trace_callable(obj: Any) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _nonstrict_trace_callable_ids
+    return obj in _nonstrict_trace_callable_ids
 
 
 def is_leaf_function(obj: Any) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _leaf_function_ids
+    return obj in _leaf_function_ids
 
 
 def is_callable_disallowed(obj: Any) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _disallowed_callable_ids
+    return obj in _disallowed_callable_ids
 
 
 def is_forbidden(obj: Any) -> bool:
@@ -3339,22 +3412,22 @@ def is_forbidden(obj: Any) -> bool:
 
 def is_builtin_callable(obj: Any) -> bool:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
-    return id(obj) in _builtin_function_ids
+    return obj in _builtin_function_ids
 
 
 def is_builtin_constant(obj: Any) -> bool:
-    return id(obj) in _builtin_constant_ids
+    return obj in _builtin_constant_ids
 
 
 def is_polyfilled_callable(obj: Any) -> bool:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
-    return id(obj) in _polyfilled_function_ids
+    return obj in _polyfilled_function_ids
 
 
 def is_numpy(obj: Any) -> bool:
     if np is None:
         return False
-    return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
+    return isinstance(obj, (np.ndarray, np.generic)) or obj in _numpy_function_ids
 
 
 def is_numpy_dtype(obj: Any) -> bool:
@@ -3996,7 +4069,7 @@ def check(obj: Any, is_inlined_call: bool = False, frame: Any | None = None) -> 
 def get_skip_reason(obj: Any) -> str:
     """Compute a descriptive skip reason for a callable. Only called on graph break."""
     if is_callable_disallowed(obj):
-        return _disallowed_callable_ids.get_name(id(obj), repr(obj))
+        return _disallowed_callable_ids.get_name(obj, repr(obj))
 
     filename = getfile(obj)
     if filename is not None:
@@ -4050,16 +4123,31 @@ BUILTIN_CALLABLES = {
 }
 
 
-def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
-    if not hashable(obj):
-        return None
+def _lookup_custom_callable_rule(
+    obj: Any, reasons: set[str] | None = None
+) -> type[VariableTracker] | None:
     # Custom allow/disallow in graph takes precedence over the general lookup.
     if is_callable_disallowed(obj):
+        if reasons is not None:
+            reasons.add("is_callable_disallowed")
         return SkipFunctionVariable
     if is_callable_allowed(obj):
+        if reasons is not None:
+            reasons.add("is_callable_allowed")
         return TorchInGraphFunctionVariable
     if is_polyfilled_callable(obj):
+        if reasons is not None:
+            reasons.add("is_polyfilled_callable")
         return PolyfilledFunctionVariable
+    return None
+
+
+def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
+    rule = _lookup_custom_callable_rule(obj)
+    if rule is not None:
+        return rule
+    if not hashable(obj):
+        return None
     if obj in BUILTIN_CALLABLES:
         return BUILTIN_CALLABLES[obj]
     if is_builtin_callable(obj):
@@ -4126,6 +4214,10 @@ def _lookup_inner(
     is_direct_call: bool = True,
     reasons: set[str] | None = None,
 ) -> type[VariableTracker] | None:
+    rule = _lookup_custom_callable_rule(obj, reasons)
+    if rule is not None:
+        return rule
+
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.

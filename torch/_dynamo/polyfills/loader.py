@@ -45,4 +45,4 @@ for polyfill_module in POLYFILLED_MODULES:
     for polyfill_name in polyfill_module.__all__:
         polyfill_handler = getattr(polyfill_module, polyfill_name)
         original_fn = polyfill_handler.__torch_dynamo_original__
-        trace_rules._builtin_function_ids.remove(id(original_fn))
+        trace_rules._builtin_function_ids.remove(original_fn)
