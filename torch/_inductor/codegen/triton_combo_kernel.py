@@ -95,7 +95,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         long_reduction = [
             n
             for n in reduction
-            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -111,7 +111,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             and V.graph.sizevars.optimization_hint(
                 node_info_map[n].tiling["x"], fallback=1
             )
-            > LARGE_NUMELS
+            > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -498,9 +498,7 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        return triton_kernel_cls(
-            tiling,
-            features=features,
+        kwargs: dict[str, Any] = dict(
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
@@ -508,6 +506,9 @@ class ComboKernel(Kernel):
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
         )
+        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
+
+        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
@@ -735,7 +736,7 @@ class ComboKernel(Kernel):
         }
 
         for arg_num in equal_1_arg_indices(signature):
-            triton_meta["constants"][signature[arg_num].name] = 1
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         triton_meta["configs"] = [config_of(signature)]
 
@@ -1036,7 +1037,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(const_tensor.size())
                     stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)

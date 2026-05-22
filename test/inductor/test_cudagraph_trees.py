@@ -408,6 +408,49 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertIsNotNone(self.get_manager())
 
+        def test_input_storage_mutation_skips_cudagraphs(self):
+            class Mod(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = nn.Parameter(torch.randn(4, 4, device="cuda"))
+                    self.register_buffer(
+                        "mask",
+                        torch.tril(torch.ones(4, 4, device="cuda")),
+                    )
+
+                def forward(self, x):
+                    with torch.no_grad():
+                        self.weight.data *= self.mask
+                    return x @ self.weight
+
+            torch.manual_seed(0)
+            model = Mod().eval()
+            x = torch.randn(4, 4, device="cuda")
+
+            with torch.no_grad():
+                expected = model(x)
+
+            counters.clear()
+            compiled_model = torch.compile(
+                model,
+                mode="reduce-overhead",
+                dynamic=True,
+            )
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx(), torch.no_grad():
+                actual = compiled_model(x)
+                actual_again = compiled_model(x)
+
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual_again)
+            FileCheck().check("skipping cudagraphs due to input storage mutation").run(
+                log_stream.getvalue()
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertIsNone(self.get_manager())
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", False)
@@ -1252,6 +1295,46 @@ if HAS_CUDA_AND_TRITON:
             num_partitions_overload = get_num_partitions(code)
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
+
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_topk_skips_cudagraph_on_hip(self):
+            # rocm workaround: topk kernels fault under cudagraph trees
+            # on the 2nd replay of a recorded graph.
+            BEAM_SIZE = 64
+            VOCAB_SIZE = 512
+
+            @torch.no_grad()
+            def generate(h0):
+                scores, _ = torch.topk(h0, k=BEAM_SIZE, dim=-1)
+                return scores
+
+            compiled = torch.compile(generate, fullgraph=True, mode="reduce-overhead")
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    h0 = torch.randn(
+                        8,
+                        BEAM_SIZE * VOCAB_SIZE,
+                        device="cuda",
+                        dtype=torch.bfloat16,
+                    )
+                    compiled(h0)
+                    torch.cuda.synchronize()
+
+            if torch.version.hip is not None:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to "
+                    "incompatible op aten.topk.default"
+                ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
@@ -2303,6 +2386,46 @@ if HAS_CUDA_AND_TRITON:
                 out2 + out2
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+
+        def test_error_on_dealloc_use_after_recording_and_execution(self):
+            def run(loop_count):
+                torch._dynamo.reset()
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
+                for _ in range(loop_count):
+                    x = cfn2(torch.randn(5, device="cuda"))
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    y = cfn(x)
+                    _ = y.cpu()
+
+                del x
+
+            for loop_count in (2, 3):
+                run(loop_count)
+
+        def test_error_on_dealloc_use_after_cached_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            stale = None
+            for _ in range(3):
+                stale = foo(torch.rand([4], device="cuda"))
+
+            self.assertIsNotNone(stale)
+            node = self.curr_node()
+            self.assertIs(stale, node.cached_tensor_outputs[0])
+
+            new = foo(torch.rand([4], device="cuda"))
+            self.assertIsNot(stale, new)
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+            _ = new.cpu()
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale + 1
+
+            del stale, new
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides

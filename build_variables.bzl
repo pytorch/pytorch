@@ -1,6 +1,5 @@
-# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
-
-# Bazel) as well as valid Python (for our cmake build).  This means that
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck)
+# as well as valid Python (for our cmake build).  This means that
 # load() directives are not allowed (as they are not recognized by Python).
 # If you want to fix this, figure out how run this file from cmake with a proper
 # Starlark interpreter as part of the default OSS build process.  If you need
@@ -496,6 +495,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
     "torch/csrc/shim_common.cpp",
+    "torch/csrc/shim_exception_state.cpp",
 ]
 
 libtorch_core_sources = sorted(
