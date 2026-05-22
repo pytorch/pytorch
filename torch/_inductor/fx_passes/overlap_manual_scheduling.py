@@ -94,7 +94,6 @@ def _move_overlap_nodes(
 
     for rs_wait, rs_starts in rs_defer.items():
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
-        # rs_wait and its transitive users must be after latest_rs_start
         node_insert_after = latest_rs_start
         for node in _collect_nodes_must_be_after(rs_wait):
             node_insert_after.append(node)
@@ -109,7 +108,6 @@ def _move_overlap_nodes(
         for ag_start in sorted_starts:
             if node_positions[ag_start] < ag_wait_pos:
                 continue
-            # ag_start and its dependencies must be before ag_wait
             for node in _collect_nodes_must_be_before(ag_start, node_positions):
                 ag_wait.prepend(node)
 
