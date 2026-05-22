@@ -151,6 +151,27 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
         self.assertEqual(len(onnx_program.model.graph.inputs), 1)
 
+    def test_dynamic_shape_bilstm_batch_first(self):
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        time = torch.export.Dim("time")
+        onnx_program = self.assert_export(
+            BiLSTM().eval(),
+            (torch.randn(2, 5, 4),),
+            input_names=["x"],
+            dynamic_shapes={"x": {1: time}},
+            optimize=False,
+        )
+        self.assertEqual(onnx_program.model.graph.inputs[0].shape[1].value, "time")
+        onnx_testing.assert_onnx_program(onnx_program, args=(torch.randn(2, 7, 4),))
+
     def test_dynamic_axes_enable_dynamic_shapes_with_fully_specified_axes(self):
         self.assert_export(
             SampleModelForDynamicShapes(),
