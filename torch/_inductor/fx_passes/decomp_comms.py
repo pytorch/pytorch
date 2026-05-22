@@ -422,11 +422,16 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
     graph = gm.graph
     transformed = 0
 
-    # 1. Find Gram mms and trace each to its all_gather source
+    # 1. Find Gram mms and trace each to its all_gather source.
+    # Tag Gram mms as symmetric for downstream kernel selection.
     ag_to_grams: dict[fx.Node, list[fx.Node]] = defaultdict(list)
     ag_infos: dict[fx.Node, AllGatherInfo] = {}
 
     for gram_mm in find_gram_mms(graph):
+        math_props = gram_mm.meta.get("math", {})
+        math_props["symmetric"] = True
+        gram_mm.meta["math"] = math_props
+
         info = find_all_gather_ancestor(gram_source(gram_mm))
         if info is None:
             continue
