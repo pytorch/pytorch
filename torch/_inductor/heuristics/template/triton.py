@@ -1031,12 +1031,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 else:
                     return None
             elif torch.xpu.is_available():
-                device = torch.xpu.current_device()
-                props = torch.xpu.get_device_properties(device)
-                if hasattr(props, "local_mem_size"):
-                    sm_available = int(props.local_mem_size)
-                else:
-                    return None
+                props = torch.xpu.get_device_properties()
+                sm_available = int(props.local_mem_size)
             else:
                 return None
         except Exception:
