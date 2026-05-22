@@ -3120,13 +3120,15 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             why("epilogue of user's Triton kernel is not Pointwise")
             return False
 
-        # TODO(jjvraw): Remove this when we can handle, note this is testing in epilogue_requires_new_store
         written_buffer_name = self.node.mutation_outputs[0].name
-        if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+        if self.epilogue_requires_new_store(node2) and not self.output_tile:
+            why(
+                "epilogue reads additional buffers but kernel has no output_tile annotation"
+            )
             return False
 
-        # The epilogue require additional index expressions, if the user has provided the
-        # dimensions of the "output tile", we may be able to attempt fusion.
+        # The epilogue may require additional index expressions.
+        # If the user has provided the dimensions of the "output tile", we may be able to fuse.
         if self.output_tile:
             # TODO(jjvraw): is_compatible
             pass
@@ -3164,7 +3166,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         # Any other tensor/s would require additional load expressions.
         written_buffer_name = self.node.mutation_outputs[0].name
         if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-            return True  # TODO(jjvraw): This should be True when finished testing.
+            return True
 
         # The epilogue may depend on expressions which may not available in the user triton kernel
         # (e.g. indexing exprs used not in a load)
@@ -3226,10 +3228,18 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         # Epilogue fusion is gated on pointwise operations, thus 1D tiling, with no reduction.
         tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
 
-        # TODO: What do we actually need from features here?
+        # TODO(jjvraw): What do we actually need from features here?
         kernel_features = SIMDKernelFeatures([self.epilogue], numel)
 
         formal_out_arg_name = next(iter(self.kernel_node.formal_writes)).name
+
+        written_buffer_name = ir_node.mutation_outputs[0].name
+        extra_reads = [
+            d
+            for d in self.fused_epilogue.read_writes.reads
+            if d.name != written_buffer_name
+        ]
+        additional_args = [(f"_fused_in_ptr{i}", dep.name) for i, dep in enumerate(extra_reads)]
 
         block_aliases = None
         pid_cache = {}
@@ -3254,13 +3264,13 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             self,
             formal_out_arg_name,
             self.introduce_new_store and ir_node.output_tile is not None,
+            additional_args,
             block_aliases=block_aliases,
             pid_cache=pid_cache,
         )
         new_kernel_src = fused_user_kernel.codegen()
-
         return self.kernel_node.node.codegen_with_epilogue_fusion(
-            wrapper, (self.epilogue.node, new_kernel_src)
+            wrapper, (self.epilogue.node, new_kernel_src, additional_args)
         )
 
     def is_extern(self) -> bool:

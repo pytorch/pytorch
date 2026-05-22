@@ -78,7 +78,12 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
-from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_of,
+    signature_to_meta,
+)
 
 
 if TYPE_CHECKING:
@@ -325,13 +330,14 @@ def user_defined_kernel_grid_fn_code(
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
-    kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
+    kernel,
+    epilogue_fusion: tuple[ir.ComputedBuffer, str, list[tuple[str, str]]] | None = None,
 ) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
     its dependencies
 
-    epilogue_fusion: Optional[(fused epilogue node, modified kerel src code)]
+    epilogue_fusion: Optional[(fused epilogue node, modified kernel src code, additional buf args)]
     """
     compile_wrapper = IndentedBuffer()
     kernel_src = kernel.src
@@ -2892,7 +2898,7 @@ class PythonWrapperCodegen(CodeGen):
         restore_value_args,
         reset_to_zero_args,
         grids: list[list[int | sympy.Expr]],
-        epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
+        epilogue_fusion: tuple[ir.ComputedBuffer, str, list[tuple[str, str]]] | None,
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
@@ -3029,6 +3035,24 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
         )
+        config_sig: list[KernelArgType] = signature
+        config_indices: list[int] = arg_indices
+        if epilogue_fusion is not None:
+            # New params are prepended in the modified kernel source, so prepend
+            # them in the signature dict too (order must match fn.arg_names for
+            # filtered_signature() in _interpret_args_grid).  Also shift the
+            # existing arg_indices so divisible_by_16 claims remain correct.
+            n_new = len(epilogue_fusion[2])
+            prepend: dict[str, str] = {}
+            new_sig_items: list[KernelArgType] = []
+            for param_name, buf_name in epilogue_fusion[2]:
+                buf = V.graph.get_buffer(buf_name)
+                arg = TensorArg(name=param_name, buffer=buf_name, dtype=buf.get_dtype())
+                new_sig_items.append(arg)
+                prepend[param_name] = signature_of(arg, size_dtype=None)
+            triton_signature = {**prepend, **triton_signature}
+            config_sig = new_sig_items + signature
+            config_indices = list(range(n_new)) + [i + n_new for i in arg_indices]
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
@@ -3045,8 +3069,8 @@ class PythonWrapperCodegen(CodeGen):
             },
             "configs": [
                 config_of(
-                    signature,
-                    indices=arg_indices,
+                    config_sig,
+                    indices=config_indices,
                     pointer_range_override=(),
                 )
             ],

@@ -7067,7 +7067,6 @@ class FusedUserTritonKernel(TritonKernel):
     """
 
     # TODO(jjvraw): indent buffer should respect the user's indent level.
-    # TODO(jjvraw): handle non-unary epilogues.
     # TODO(jjvraw): handle reduction ops.
     def __init__(
         self,
@@ -7076,6 +7075,7 @@ class FusedUserTritonKernel(TritonKernel):
         scheduler_node: FusedUserTritonSchedulerNode,
         out_arg_name: str,
         introduce_new_store: bool,
+        additional_buf_args: list[tuple[str, str]],
         block_aliases: dict[str, str] | None = None,
         pid_cache: dict[str, str] | None = None,
     ) -> None:
@@ -7092,8 +7092,9 @@ class FusedUserTritonKernel(TritonKernel):
         self.scheduler_node = scheduler_node
         self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
         self.out_arg_name = out_arg_name
-        self.block_aliases = block_aliases
         self.introduce_new_store = introduce_new_store
+        self.block_aliases = block_aliases
+        self.additional_buf_args = {buf: param for param, buf in additional_buf_args}
 
         self.kernel_ast = ast.parse(self.ir_node.kernel_src)
         self.kernel_stores = identify_triton_stores_from_ast(self.kernel_ast)
@@ -7122,8 +7123,19 @@ class FusedUserTritonKernel(TritonKernel):
                 self.loads, loaded_expr, dtype=dtype, shape=shape
             )
             return result_var
+        elif name in self.additional_buf_args:
+            param_name = self.additional_buf_args[name]
+            dtype = V.graph.get_dtype(name)
+            indexing = self.indexing(index, block_ptr=False)
+            if indexing.expand_shape:
+                shape = indexing.expand_shape
+            else:
+                shape = TritonSymbols.get_block_shape(indexing.index)
+            line = (
+                f"tl.load({param_name} + ({indexing.index_str}), {indexing.mask_str})"
+            )
+            return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
         else:
-            # The scheduler should prevent this.
             raise AssertionError(
                 f"Epilogue attempted to load from '{name}'. "
                 "Inductor indexing variables are not defined in user kernel scope. "
@@ -7142,6 +7154,11 @@ class FusedUserTritonKernel(TritonKernel):
                 self.new_store_cse_var = value
         else:
             super().store(name, index, value, mode)
+
+    def codegen_new_params(self) -> None:
+        new_args = [ast.arg(arg=p) for p in self.additional_buf_args.values()]
+        self.func_def.args.args[:0] = new_args
+        ast.fix_missing_locations(self.kernel_ast)
 
     def codegen_aliases(self) -> list[str]:
         assert self.block_aliases
@@ -7178,6 +7195,7 @@ class FusedUserTritonKernel(TritonKernel):
 
         # TODO(jjvraw): Should we gate on pid_remap as well?
         if self.introduce_new_store:
+            self.codegen_new_params()
             src_lines = ast.unparse(self.kernel_ast).splitlines()
             store_line_index = self.kernel_stores.stores[0].store_node.lineno - 1
             store_lines = [indentations + l for l in self.new_store_buf.get_lines_ref()]
