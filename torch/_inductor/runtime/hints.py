@@ -310,6 +310,8 @@ def runtime_device_properties(device_props: DeviceProperties) -> DevicePropertie
     if not _matches_device(device_props, device_type, None):
         return device_props
 
+    # Refresh Triton compile metadata for the runtime device. This does not
+    # make source-level architecture-specific constructs portable by itself.
     return DeviceProperties.create_from_device_str(device_str, parsed_index)
 
 
