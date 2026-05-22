@@ -575,7 +575,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(output_code.count("float('nan')"), 0)
 
     @requires_cuda_and_triton
-    def test_fp_self_sub_disables_triton_fp_fusion(self):
+    def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
         def fn(x):
             a = x * x
             return a - a
@@ -583,7 +583,9 @@ def forward(self, x_1, output_1):
         x = torch.randn(1024, device=GPU_TYPE)
         out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(out, torch.zeros_like(out), atol=0, rtol=0)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertIn("tl.where", code)
+        self.assertIn("libdevice.isinf", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
 
         special = torch.tensor(
             [float("nan"), float("inf"), -float("inf"), 2.0],
@@ -595,7 +597,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda_and_triton
     @common_utils.parametrize("per_subkernel", [False, True])
-    def test_combo_fp_self_sub_disables_triton_fp_fusion(self, per_subkernel):
+    def test_combo_fp_self_sub_rewrite(self, per_subkernel):
         def fn(a, b):
             c = a * a
             return c - c, b + 1
@@ -617,7 +619,8 @@ def forward(self, x_1, output_1):
         self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
         self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertIn("'combo_grid_meta':", code)
-        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertIn("tl.where", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
 
     @requires_cuda_and_triton
     def test_duplicate_mse_loss_operands_are_zero(self):
@@ -2943,6 +2946,25 @@ def forward(self, arg0_1, arg1_1):
             BLOCK_SIZE = 32
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             kernel[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    def test_kernel_with_backslash_in_docstring(self):
+        # https://github.com/pytorch/pytorch/issues/183420
+        # Backslash escapes in the kernel source text must be doubled before
+        # the source is spliced into the generated triple-quoted wrapper,
+        # otherwise '\n' becomes a real newline in the second-stage .py file
+        # and parsing fails with SyntaxError.
+        def fn(sz):
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel_with_backslash_in_docstring[grid](x, sz, BLOCK_SIZE)
             return x
 
         actual = fn(345)
