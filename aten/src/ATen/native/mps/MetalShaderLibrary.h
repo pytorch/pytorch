@@ -22,6 +22,7 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -140,6 +141,15 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  // Returns whether the library exposes a kernel under the given host_name.
+  bool hasFunction(const std::string& fname);
+  // Dispatch is probe-then-fallback for non-alpha calls: first try the direct
+  // per-(out,in) kernel; if it isn't registered, fall back to the
+  // `_dense_castout_<in>` / `_strided_castout_<in>` variant registered for the
+  // input dtype by REGISTER_UNARY_OP. The castout kernel computes the functor
+  // in the input dtype and casts the result to the user-supplied output dtype
+  // on store, matching CPU semantics. Alpha kernels skip the fallback (no
+  // alpha castout variants are registered).
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
@@ -199,6 +209,10 @@ class MetalShaderLibrary {
   // Cache for kernel functions returned by getCachedKernelFunctionPtr
   std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>>
       kernelCache;
+  // Lazily populated set of all kernel host_names in the library; used by
+  // hasFunction() to answer probes from exec_unary_kernel.
+  std::unordered_set<std::string> functionNames;
+  bool functionNamesPopulated = false;
 };
 
 class DynamicMetalShaderLibrary : public MetalShaderLibrary {
