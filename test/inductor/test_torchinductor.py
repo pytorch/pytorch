@@ -6458,6 +6458,61 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_bwd_weight_backends": "TRITON",
+            "max_autotune_conv_bwd_input_backends": "TRITON",
+        }
+    )
+    @parametrize("nhwc_weight", (False, True))
+    @parametrize("nhwc_input", (False, True))
+    @with_tf32_off
+    @skipIfRocmVersionAtLeast(
+        [7, 14]
+    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
+    def test_conv2d_backward_input_layout(self, nhwc_weight: bool, nhwc_input: bool):
+        in_channels, out_channels, groups = 3, 4, 1
+        stride, dilation, padding, kernel = 1, 1, 1, 3
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [out_channels],
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                False,
+                [0, 0],
+                groups,
+                [True, True, True],
+            )
+
+        input_h = input_w = 16
+        output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+
+        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        if nhwc_weight:
+            weight = weight.to(memory_format=torch.channels_last)
+        inp = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc_input:
+            inp = inp.to(memory_format=torch.channels_last)
+
+        self.common(
+            fn,
+            (torch.randn([2, out_channels, output_h, output_w]), inp, weight),
+            atol=3e-4,
+            rtol=0.001,
+            check_lowp=False,
+        )
+
+    @skip_if_cpu
     @skipIfRocm  # Triton conv backward kernels stay enabled on ROCm
     @config.patch(
         {
