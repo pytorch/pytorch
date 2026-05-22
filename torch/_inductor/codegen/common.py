@@ -721,7 +721,11 @@ def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_dtype_assert
+        and backend == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
@@ -747,7 +751,11 @@ def check_shape(
 ) -> None:
     backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_shape_assert
+        and backend == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -2717,11 +2725,9 @@ class CSEProxy(DefaultHandler):
             ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if (
-                config.test_configs.runtime_triton_shape_assert
-                and var_shape is not None
-            ):
-                check_shape(V.kernel.compute, csevar, var_shape)
+            if config.test_configs.runtime_triton_shape_assert:
+                assert output_shape is not None
+                check_shape(V.kernel.compute, csevar, output_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
