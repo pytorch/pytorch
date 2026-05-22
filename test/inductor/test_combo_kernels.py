@@ -789,6 +789,7 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def setUp(self):
         super().setUp()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         self._test_stack = contextlib.ExitStack()
         self._test_stack.enter_context(
@@ -806,6 +807,7 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def tearDown(self):
         self._test_stack.close()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         super().tearDown()
 
@@ -1935,9 +1937,9 @@ class ComboKernelMetadataTests(TestCase):
 
     @requires_gpu_and_triton
     def test_combo_rms_norm_forwards_persistent_reduction_metadata(self):
-        """rms_norm at (2048, 4096) meets the memory-savings persistent
-        reduction heuristic. Two parallel rms_norms forming a combo kernel must
-        keep the per-sub-kernel persistent heuristic and full-RBLOCK codegen."""
+        """When the memory-savings persistent reduction heuristic applies, two
+        parallel rms_norms forming a combo kernel must keep the per-sub-kernel
+        persistent heuristic and full-RBLOCK codegen."""
 
         def rms_norm(x, w, eps=1e-6):
             v = x.pow(2).mean(-1, keepdim=True)
@@ -1950,7 +1952,12 @@ class ComboKernelMetadataTests(TestCase):
         b = torch.rand(2048, 4096, device=GPU_TYPE)
         wa = torch.rand(4096, device=GPU_TYPE)
         wb = torch.rand(4096, device=GPU_TYPE)
-        code = self._combo_code(fn, [a, wa, b, wb])
+        with patch(
+            "torch._inductor.choices.InductorChoices."
+            "should_use_memory_savings_persistent_reduction_on_device",
+            return_value=True,
+        ):
+            code = self._combo_code(fn, [a, wa, b, wb])
 
         for num in range(2):
             self.assertIn(f"'heuristic_{num}': 'persistent_reduction'", code)

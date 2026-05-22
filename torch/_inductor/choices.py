@@ -490,6 +490,9 @@ class InductorChoices:
         if not V.graph.is_inference:
             return False
 
+        if not InductorChoices.should_use_memory_savings_persistent_reduction_on_device():
+            return False
+
         if not V.graph.sizevars.statically_known_leq(features.reduction_numel, 32768):
             return False
 
@@ -510,6 +513,15 @@ class InductorChoices:
             return False
 
         return looped_bytes * 10 >= persistent_bytes * 13
+
+    @staticmethod
+    def should_use_memory_savings_persistent_reduction_on_device() -> bool:
+        device = V.graph.get_current_device_or_throw()
+        props = DeviceProperties.create(device)
+
+        # The motivating issue was reported on H100. Local B200 measurements did
+        # not show a speedup, even when the modeled global memory traffic drops.
+        return props.type == "cuda" and props.major == 9
 
     @staticmethod
     def reduction_split_factor(

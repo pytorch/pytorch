@@ -110,7 +110,14 @@ class TestCodegenTriton(InductorTestCase):
 
             return Features()
 
-        with patch.object(self._graph, "is_inference", True):
+        with (
+            patch.object(self._graph, "is_inference", True),
+            patch.object(
+                InductorChoices,
+                "should_use_memory_savings_persistent_reduction_on_device",
+                return_value=True,
+            ),
+        ):
             self.assertTrue(
                 InductorChoices.should_use_persistent_reduction(
                     make_features(805306368, 536870912),
@@ -131,6 +138,26 @@ class TestCodegenTriton(InductorTestCase):
             )
         )
 
+    def test_memory_savings_persistent_reduction_is_hopper_only(self):
+        with (
+            self._graph.set_current_device(torch.device("cuda")),
+            patch("torch._inductor.choices.DeviceProperties.create") as create_props,
+        ):
+            create_props.return_value = SimpleNamespace(type="cuda", major=9)
+            self.assertTrue(
+                InductorChoices.should_use_memory_savings_persistent_reduction_on_device()
+            )
+
+            create_props.return_value = SimpleNamespace(type="cuda", major=10)
+            self.assertFalse(
+                InductorChoices.should_use_memory_savings_persistent_reduction_on_device()
+            )
+
+            create_props.return_value = SimpleNamespace(type="hip", major=9)
+            self.assertFalse(
+                InductorChoices.should_use_memory_savings_persistent_reduction_on_device()
+            )
+
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @inductor_config.patch(
         {"triton.persistent_reductions": True, "triton.multi_kernel": 0}
@@ -142,9 +169,14 @@ class TestCodegenTriton(InductorTestCase):
 
         x = torch.rand(512, 32768, device=GPU_TYPE)
         w = torch.rand(32768, device=GPU_TYPE)
-        _, source_codes = run_and_get_code(
-            torch.compile(rms_norm, fullgraph=True), x, w
-        )
+        with patch.object(
+            InductorChoices,
+            "should_use_memory_savings_persistent_reduction_on_device",
+            return_value=True,
+        ):
+            _, source_codes = run_and_get_code(
+                torch.compile(rms_norm, fullgraph=True), x, w
+            )
 
         self.assertEqual(len(source_codes), 1)
         self.assertIn("@triton_heuristics.persistent_reduction", source_codes[0])
