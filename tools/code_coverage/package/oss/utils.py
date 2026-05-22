@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from ..util.setting import CompilerType, TestType, TOOLS_FOLDER
 from ..util.utils import print_error, remove_file
