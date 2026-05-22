@@ -13,7 +13,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import ParamSpec, TypeIs
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
@@ -53,6 +53,8 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
 )
@@ -103,8 +105,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
-_R = TypeVar("_R")
-_SymbolicMagicArg = torch.SymInt | torch.SymFloat | torch.SymBool | sympy.Basic
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
@@ -2764,6 +2764,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -6297,10 +6298,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
@@ -8155,11 +8156,7 @@ def sym_numel(a):
     return a.get_numel()
 
 
-def _is_symbolic_magic_arg(x: object) -> TypeIs[_SymbolicMagicArg]:
-    return isinstance(x, (SymTypes, sympy.Basic))
-
-
-def _unwrap_symbolic_magic_arg(x: Any) -> Any:
+def _unwrap_symbolic_magic_arg(x):
     if isinstance(x, SymTypes):
         return x.node.expr
     if isinstance(x, (int, float, bool)):
@@ -8167,29 +8164,23 @@ def _unwrap_symbolic_magic_arg(x: Any) -> Any:
     return x
 
 
-def _make_magic_method_lowering(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    @functools.wraps(func)
-    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+for method, func in magic_methods.items():
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
         node = V.graph.current_node
         meta_val = node.meta.get("val") if node is not None else None
         if isinstance(meta_val, SymTypes):
-            return cast(_R, meta_val.node.expr)
-        has_symbolic_value = any(
-            _is_symbolic_magic_arg(x) for x in itertools.chain(args, kwargs.values())
-        )
-        if has_symbolic_value:
-            normalized_args = tuple(_unwrap_symbolic_magic_arg(x) for x in args)
-            normalized_kwargs = {
-                k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()
-            }
-            return cast(Callable[..., _R], func)(*normalized_args, **normalized_kwargs)
-        return func(*args, **kwargs)
-
-    return wrapped
-
-
-for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(_make_magic_method_lowering(func))  # type: ignore[arg-type]
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
@@ -8706,43 +8697,23 @@ register_symm_mem_lowerings()
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
-    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum with
+    online softmax reductions when profitable.
     """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
 
-    reduction_ranges = kwargs["reduction_ranges"]
-    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-    hint, num_split = ir.Reduction.num_splits(
-        **kwargs,
-        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
-        reduction_numel=rnumel,
-    )
+    rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
 
-    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+    if V.graph.sizevars.statically_known_geq(
         rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
-            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+            input_node=x, num_output=2, **kwargs
         )
         return max_tensor, sum_tensor
     else:
-        # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
-
-        log.debug(
-            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
-        )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
