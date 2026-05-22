@@ -65,6 +65,12 @@ provider-path = "tools/metadata"
 # scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
 # keep symbols (e.g. for torch.utils.cpp_extension, ABI checks in CI).
 strip = false
+# Restrict the wheel to install() rules tagged with these components. Rules
+# in third-party subprojects (wrapped via pytorch_add_thirdparty_subdirectory
+# in cmake/InstallComponents.cmake) default to "third_party" and are skipped,
+# keeping vendored static archives and their cmake configs out of the wheel.
+# See cmake/InstallComponents.cmake for the full list of components.
+components = ["libtorch", "torch", "dev"]
 
 [tool.scikit-build.wheel]
 # CMake install destinations (lib/, include/, share/cmake/) are relative to

@@ -437,9 +437,16 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
       set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
       set(PTHREADPOOL_ALLOW_DEPRECATED_API ON CACHE BOOL "")
-      add_subdirectory(
+      pytorch_add_thirdparty_subdirectory(
         "${PTHREADPOOL_SOURCE_DIR}"
         "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+      # pthreadpool's add_subdirectory transitively pulls in FXdiv, FP16,
+      # and psimd. Re-stage the public headers from each since the
+      # subprojects' own install rules were suppressed.
+      pytorch_install_thirdparty_headers("${PTHREADPOOL_SOURCE_DIR}/include")
+      pytorch_install_thirdparty_headers("${PROJECT_SOURCE_DIR}/third_party/FXdiv/include")
+      pytorch_install_thirdparty_headers("${PROJECT_SOURCE_DIR}/third_party/FP16/include")
+      pytorch_install_thirdparty_headers("${PROJECT_SOURCE_DIR}/third_party/psimd/include")
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
@@ -478,9 +485,17 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
         set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
       endif()
     endif()
-    add_subdirectory(
+    pytorch_add_thirdparty_subdirectory(
       "${CPUINFO_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+    # cpuinfo.h and clog.h are part of the libtorch public include surface;
+    # re-stage them since the subproject's own install rules were suppressed.
+    install(FILES "${CPUINFO_SOURCE_DIR}/include/cpuinfo.h"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+      COMPONENT libtorch)
+    install(FILES "${CPUINFO_SOURCE_DIR}/deps/clog/include/clog.h"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+      COMPONENT libtorch)
     # We build static version of cpuinfo but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -586,9 +601,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
     endif()
 
-    add_subdirectory(
+    pytorch_add_thirdparty_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
+    # xnnpack.h (and experiments-config.h next to it) are part of the
+    # libtorch public include surface; re-stage them since the subproject's
+    # own install rules were suppressed.
+    pytorch_install_thirdparty_headers("${XNNPACK_INCLUDE_DIR}")
 
     if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "14")
       foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
@@ -667,7 +686,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
 
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
+  pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
@@ -676,7 +695,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # We will not need to install benchmark since we link it statically.
   set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable benchmark install to avoid overwriting vendor install.")
   if(NOT USE_SYSTEM_BENCHMARK)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
+    pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   else()
     add_library(benchmark SHARED IMPORTED)
     find_library(BENCHMARK_LIBRARY benchmark)
@@ -701,7 +720,9 @@ if(USE_FBGEMM)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
-    add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    pytorch_add_thirdparty_subdirectory("${FBGEMM_SOURCE_DIR}")
+    # fbgemm public headers live under include/fbgemm/; mirror legacy install.
+    pytorch_install_thirdparty_headers("${FBGEMM_SOURCE_DIR}/include")
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
@@ -771,15 +792,18 @@ if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "FP16 is only cmake-2.8 compatible")
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    add_subdirectory(
+    pytorch_add_thirdparty_subdirectory(
       "${FP16_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
     unset(CMAKE_POLICY_VERSION_MINIMUM)
   else()
-    add_subdirectory(
+    pytorch_add_thirdparty_subdirectory(
       "${FP16_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
   endif()
+  # FP16 headers (fp16.h + fp16/ subdir) are part of the libtorch public
+  # include surface.
+  pytorch_install_thirdparty_headers("${FP16_SOURCE_DIR}/include")
 elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   add_library(fp16 STATIC "/usr/include/fp16.h")
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
@@ -1186,7 +1210,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    pytorch_add_thirdparty_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    # tensorpipe public headers live under tensorpipe/ at the repo root.
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/tensorpipe/tensorpipe/"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tensorpipe"
+      COMPONENT libtorch
+      FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
@@ -1247,7 +1276,7 @@ if(USE_GLOO)
       set(USE_RCCL_SAVED ${USE_RCCL})
       set(USE_NCCL OFF)
       set(USE_RCCL OFF)
-      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       set(USE_NCCL ${USE_NCCL_SAVED})
       set(USE_RCCL ${USE_RCCL_SAVED})
 
@@ -1344,7 +1373,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+    pytorch_add_thirdparty_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
   endif()
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
@@ -1531,7 +1560,7 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_KLEIDIAI_ENABLED 1)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
-    add_subdirectory(${KLEIDIAI_SRC})
+    pytorch_add_thirdparty_subdirectory(${KLEIDIAI_SRC})
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
@@ -1591,7 +1620,10 @@ endif()
 set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+pytorch_add_thirdparty_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+# fmt public headers (<fmt/format.h>, etc.) are part of the libtorch public
+# include surface; re-stage them since fmt's own install rules are suppressed.
+pytorch_install_thirdparty_headers("${PROJECT_SOURCE_DIR}/third_party/fmt/include")
 
 # Disable compiler feature checks for `fmt`.
 #
@@ -1661,7 +1693,10 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
-    add_subdirectory("${KINETO_SOURCE_DIR}")
+    pytorch_add_thirdparty_subdirectory("${KINETO_SOURCE_DIR}")
+    # kineto's public headers ship under torch/include/kineto/.
+    pytorch_install_thirdparty_headers("${KINETO_SOURCE_DIR}/include"
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kineto")
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)

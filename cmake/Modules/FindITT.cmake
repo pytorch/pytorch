@@ -14,7 +14,11 @@ IF (NOT ITT_FOUND)
   SET(ITT_ROOT "${PROJECT_SOURCE_DIR}/third_party/ittapi")
   FIND_PATH(ITT_INCLUDE_DIR ittnotify.h PATHS ${ITT_ROOT} PATH_SUFFIXES include)
   IF (ITT_INCLUDE_DIR)
-    ADD_SUBDIRECTORY(${ITT_ROOT})
+    pytorch_add_thirdparty_subdirectory(${ITT_ROOT})
+    # ittapi public headers (ittnotify.h, jitprofiling.h, etc.) ship in
+    # nightly under torch/include/. Re-stage them since ittapi's own
+    # install rules were suppressed.
+    pytorch_install_thirdparty_headers("${ITT_ROOT}/include")
     SET(ITT_LIBRARIES ittnotify)
     SET(ITT_FOUND ON)
   ENDIF (ITT_INCLUDE_DIR)

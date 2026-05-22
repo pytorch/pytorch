@@ -1199,7 +1199,7 @@ if(USE_XPU)
   list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
-  add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
+  pytorch_add_thirdparty_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
       ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
@@ -1217,6 +1217,15 @@ if(USE_XPU)
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/ATen/
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
+    # torch-xpu-ops' own install rules were suppressed by the wrap above,
+    # so re-stage the shared libraries that libtorch_xpu.so loads at runtime.
+    foreach(_xpu_ops_target IN ITEMS torch-xpu-ops-sycltla-mha_fwd torch-xpu-ops-sycltla-mha_bwd)
+      if(TARGET ${_xpu_ops_target})
+        install(TARGETS ${_xpu_ops_target}
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}"
+            COMPONENT libtorch)
+      endif()
+    endforeach()
   endif()
 endif()
 
