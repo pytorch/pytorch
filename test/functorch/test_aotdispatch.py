@@ -10335,6 +10335,30 @@ class TestAOTModuleSimplified(AOTTestCase):
     # But for models working in channels_last memory format this will add additional contiguous() calls.
     # The fix is predicting tangents memory format to be similar to outputs memory format.
     # And coerce runtime tangents to that traced memory format.
+    def test_output_strided_tangent_is_preserved_by_default(self):
+        self.assertTrue(torch._functorch.config.guess_tangent_strides_as_outputs)
+
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            def fn(x):
+                r = (x + 1).transpose(0, 1)
+                return torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
+
+            x = torch.randn(4, 8, requires_grad=True)
+            out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            self.assertEqual(out.stride(), (1, 8))
+
+            grad = torch.empty_strided(
+                out.shape,
+                out.stride(),
+                dtype=out.dtype,
+                device=out.device,
+            )
+            grad.normal_()
+            out.backward(grad)
+
+            self.assertEqual(ctx.tangent_strides, [out.stride()])
+
     def test_grads_no_force_contiguous_dense(self):
         with GradsNoForceContiguousContextManager() as ctx:
 
