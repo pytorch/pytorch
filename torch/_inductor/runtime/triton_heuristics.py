@@ -553,6 +553,9 @@ class CachingAutotuner(KernelInterface):
             and not self.dump_launch_params
             and not self.dump_launch_tensors
         )
+        # Tracks which launchers (by id) have already passed
+        # _check_launcher_call_args so the check only runs once per launcher.
+        self._launcher_arg_count_checked: set[int] = set()
 
         self._plugins = get_caching_autotuner_plugins(self)
 
@@ -897,12 +900,14 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         self._cached_launcher = None
+        self._launcher_arg_count_checked = set()
         self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
 
     def restore_after_unpickle(self, old_values: tuple[Any, ...] | None) -> None:
         self._cached_launcher = None
+        self._launcher_arg_count_checked = set()
         if old_values:
             (
                 self.fn.fn,
@@ -1262,13 +1267,7 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
-            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
-            self._check_launcher_call_args(
-                launcher,
-                cloned_args,
-                ("stream",),
-                kernel_name=kernel_name,
-            )
+            self._check_launcher_call_args(launcher, cloned_args)
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -2120,13 +2119,7 @@ class CachingAutotuner(KernelInterface):
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
-            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
-            self._check_launcher_call_args(
-                launcher,
-                args,
-                ("stream",),
-                kernel_name=kernel_name,
-            )
+            self._check_launcher_call_args(launcher, args)
             result = launcher(*args, **kwargs, stream=stream)
         finally:
             self._post_launch()
@@ -2144,6 +2137,35 @@ class CachingAutotuner(KernelInterface):
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
+
+    def _check_launcher_call_args(
+        self,
+        launcher: LauncherType,
+        args: tuple[Any, ...],
+    ) -> None:
+        """Raise TypeError with a helpful message when stream is passed positionally."""
+        # Fast path: we've already validated this launcher on a prior call.
+        # Cache the result on self (keyed by launcher id) so we never mutate
+        # the launcher function object and never silently swallow errors.
+        if id(launcher) in self._launcher_arg_count_checked:
+            return
+        self._launcher_arg_count_checked.add(id(launcher))
+
+        # _expected_positional_count is stashed by _gen_launcher_code at
+        # code-generation time, so no inspect.signature() call is needed.
+        expected = getattr(launcher, "_expected_positional_count", None)
+        if expected is None:
+            # Launcher was not produced by _gen_launcher_code (e.g. a test
+            # double).  Skip the check rather than falling back to inspection.
+            return
+
+        if len(args) > expected:
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            raise TypeError(
+                f"{kernel_name}: too many positional arguments — "
+                f"expected {expected}, got {len(args)}. "
+                "'stream' must be passed as a keyword argument."
+            )
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
@@ -2315,7 +2337,11 @@ class CompileResult(Generic[_T]):
         ]
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)
-        return scope["launcher"]
+        launcher = scope["launcher"]
+        # Stash expected positional arg count at codegen time so
+        # _check_launcher_call_args can validate without inspect.signature().
+        launcher._expected_positional_count = len(def_args)
+        return launcher
 
     def _get_arg_lists(
         self, arg_names, constexprs

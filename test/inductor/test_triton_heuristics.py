@@ -1246,6 +1246,95 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         mock_precompile.assert_called_once_with(dynamic_cfg)
 
 
+class TestCheckLauncherCallArgs(TestCase):
+    """Unit tests for CachingAutotuner._check_launcher_call_args.
+
+    These tests are pure-Python (no GPU / Triton compilation) and guard
+    against regressions in the improved arg-mismatch error path.
+    """
+
+    def _make_autotuner(self):
+        """Return a CachingAutotuner configured with the cos kernel fixture."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        return CachingAutotuner(**args)
+
+    def _make_launcher(self, n_positional: int):
+        """Return a minimal callable that looks like a generated launcher.
+
+        The only attribute _check_launcher_call_args inspects is
+        ``_expected_positional_count``, so we don't need real Triton machinery.
+        """
+
+        def launcher(*args, stream=None):
+            pass
+
+        launcher._expected_positional_count = n_positional
+        return launcher
+
+    def test_correct_arg_count_passes_silently(self):
+        """No exception when args exactly matches _expected_positional_count."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Pass exactly 3 positional args — should be a no-op.
+        autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+
+    def test_too_many_args_raises_type_error(self):
+        """TypeError with a helpful message when too many positional args are passed."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Simulate the 'stream' being passed positionally (4 args, expected 3).
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+        self.assertIn("stream", str(cm.exception).lower())
+        self.assertIn("keyword", str(cm.exception).lower())
+
+    def test_error_message_includes_kernel_name(self):
+        """The TypeError message should include the kernel name from inductor_meta."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {"kernel_name": "my_custom_kernel", "grid_type": "Grid1D"}
+        autotuner = CachingAutotuner(**args)
+        launcher = self._make_launcher(n_positional=2)
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+        self.assertIn("my_custom_kernel", str(cm.exception))
+
+    def test_check_runs_only_once_per_launcher(self):
+        """Second call with the same launcher is a no-op (fast-path via set)."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+
+        # First call: too many args → raises.
+        with self.assertRaises(TypeError):
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+
+        # Second call with the same launcher: already in checked set → no raise.
+        autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+
+    def test_launcher_without_expected_count_is_skipped(self):
+        """Launchers not produced by _gen_launcher_code lack the attribute; skip gracefully."""
+
+        def raw_launcher(*args, stream=None):
+            pass
+
+        # No _expected_positional_count attribute set.
+        autotuner = self._make_autotuner()
+        # Should not raise, even with many args.
+        autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
+
+    def test_checked_set_cleared_on_restore_after_unpickle(self):
+        """_launcher_arg_count_checked is reset by restore_after_unpickle."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+
+        # Populate the checked set.
+        autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+        self.assertIn(id(launcher), autotuner._launcher_arg_count_checked)
+
+        # After restore_after_unpickle the set must be empty.
+        autotuner.restore_after_unpickle(None)
+        self.assertEqual(autotuner._launcher_arg_count_checked, set())
+
+
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()
