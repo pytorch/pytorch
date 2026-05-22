@@ -20,14 +20,15 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
     statically_known_true,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -453,92 +454,140 @@ def _is_direct_graph_output(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bo
     return False
 
 
-def _try_replace_zero_bias_sdpa_with_flash(
-    gm: torch.fx.GraphModule, zeros: OrderedSet[torch.fx.Node]
-) -> None:
-    graph = gm.graph
+def _is_uniform_value_node(node: Any, value: int | float) -> bool:
+    if not isinstance(node, torch.fx.Node) or node.op != "call_function":
+        return False
 
-    for node in list(
-        graph.find_nodes(
-            op="call_function",
-            target=aten._scaled_dot_product_efficient_attention.default,
-        )
+    if (
+        node.target is aten.full.default
+        and len(node.args) == 2
+        and node.args[1] == value
     ):
-        if len(node.args) < 5 or node.args[3] not in zeros or node.args[4] is not False:
-            continue
+        return True
 
-        query, key, value = node.args[:3]
-        if not all(isinstance(arg, torch.fx.Node) for arg in (query, key, value)):
-            continue
+    if node.target is aten.as_strided.default and len(node.args) >= 1:
+        return _is_uniform_value_node(node.args[0], value)
 
-        dropout_p = (
-            node.args[5] if len(node.args) > 5 else node.kwargs.get("dropout_p", 0.0)
-        )
-        is_causal = (
-            node.args[6] if len(node.args) > 6 else node.kwargs.get("is_causal", False)
-        )
-        scale = node.kwargs.get("scale", None)
+    return False
 
+
+def _zero_bias_sdpa_replacement_args(
+    node: torch.fx.Node,
+) -> (
+    tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, float, bool, float | None] | None
+):
+    if (
+        len(node.args) < 5
+        or not _is_uniform_value_node(node.args[3], 0)
+        or node.args[4] is not False
+    ):
+        return None
+
+    query_arg, key_arg, value_arg = node.args[:3]
+    if not all(
+        isinstance(arg, torch.fx.Node) for arg in (query_arg, key_arg, value_arg)
+    ):
+        return None
+    query = typing.cast(torch.fx.Node, query_arg)
+    key = typing.cast(torch.fx.Node, key_arg)
+    value = typing.cast(torch.fx.Node, value_arg)
+
+    dropout_p = (
+        node.args[5] if len(node.args) > 5 else node.kwargs.get("dropout_p", 0.0)
+    )
+    is_causal = (
+        node.args[6] if len(node.args) > 6 else node.kwargs.get("is_causal", False)
+    )
+    scale = node.kwargs.get("scale", None)
+
+    if (
+        type(dropout_p) not in (int, float)
+        or dropout_p != 0.0
+        or not isinstance(is_causal, bool)
+        or not (scale is None or type(scale) in (int, float))
+    ):
+        return None
+    dropout_p = float(typing.cast(int | float, dropout_p))
+    scale = None if scale is None else float(typing.cast(int | float, scale))
+
+    # Efficient attention only exposes an empty logsumexp when
+    # compute_log_sumexp=False.  Rewriting is semantics-preserving for the
+    # attention output, but not for users that observe other tuple entries.
+    for user in typing.cast(dict[torch.fx.Node, Any], node.users):
         if (
-            not isinstance(dropout_p, (int, float))
-            or dropout_p != 0.0
-            or not isinstance(is_causal, bool)
-        ):
-            continue
-
-        # Efficient attention only exposes an empty logsumexp when
-        # compute_log_sumexp=False.  Rewriting is semantics-preserving for the
-        # attention output, but not for users that observe other tuple entries.
-        if any(
             user.op != "call_function"
             or user.target is not operator.getitem
             or (user.args[1] != 0 and len(user.users) > 0)
-            for user in node.users
         ):
-            continue
+            return None
 
-        query_meta = query.meta.get("val")
-        key_meta = key.meta.get("val")
-        value_meta = value.meta.get("val")
-        if not all(
-            isinstance(meta, torch.Tensor)
-            and meta.device.type == "cuda"
-            and not meta.is_meta
-            for meta in (query_meta, key_meta, value_meta)
-        ):
-            continue
+    query_meta = query.meta.get("val")
+    key_meta = key.meta.get("val")
+    value_meta = value.meta.get("val")
+    if (
+        not isinstance(query_meta, torch.Tensor)
+        or query_meta.device.type != "cuda"
+        or query_meta.is_meta
+        or not isinstance(key_meta, torch.Tensor)
+        or key_meta.device.type != "cuda"
+        or key_meta.is_meta
+        or not isinstance(value_meta, torch.Tensor)
+        or value_meta.device.type != "cuda"
+        or value_meta.is_meta
+    ):
+        return None
 
-        params = torch.backends.cuda.SDPAParams(
-            query_meta,
-            key_meta,
-            value_meta,
-            None,
-            dropout_p,
-            is_causal,
-            False,
-        )
-        can_use_flash = torch.backends.cuda.can_use_flash_attention(params)
+    params = torch.backends.cuda.SDPAParams(
+        query_meta,
+        key_meta,
+        value_meta,
+        None,
+        dropout_p,
+        is_causal,
+        False,
+    )
+    if not torch.backends.cuda.can_use_flash_attention(params):
+        return None
 
-        if not can_use_flash:
-            continue
+    return query, key, value, dropout_p, is_causal, scale
 
-        with graph.inserting_before(node):
-            flash_node = graph.call_function(
-                aten._scaled_dot_product_flash_attention.default,
-                args=(query, key, value, dropout_p, is_causal, False),
-                kwargs={} if scale is None else {"scale": scale},
-            )
-            for key_name in (
-                "stack_trace",
-                "source_fn_stack",
-                "nn_module_stack",
-                "torch_fn",
-            ):
-                if key_name in node.meta:
-                    flash_node.meta[key_name] = node.meta[key_name]
 
-        node.replace_all_uses_with(flash_node)
-        graph.erase_node(node)
+def _is_zero_bias_sdpa(match: Match) -> bool:
+    return _zero_bias_sdpa_replacement_args(match.output_node()) is not None
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(
+        aten._scaled_dot_product_efficient_attention.default,
+        MULTIPLE,
+    ),
+    extra_check=_is_zero_bias_sdpa,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+)
+def replace_zero_bias_sdpa_with_flash(match: Match, *args, **kwargs) -> None:
+    replacement_args = _zero_bias_sdpa_replacement_args(match.output_node())
+    if replacement_args is None:
+        return
+
+    query, key, value, dropout_p, is_causal, scale = replacement_args
+    node = match.output_node()
+    flash_node = match.graph.call_function(
+        aten._scaled_dot_product_flash_attention.default,
+        args=(query, key, value, dropout_p, is_causal, False),
+        kwargs={} if scale is None else {"scale": scale},
+    )
+    for key_name in (
+        "stack_trace",
+        "source_fn_stack",
+        "nn_module_stack",
+        "torch_fn",
+    ):
+        if key_name in node.meta:
+            flash_node.meta[key_name] = node.meta[key_name]
+
+    node.replace_all_uses_with(flash_node)
+    match.erase_nodes()
 
 
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
@@ -586,19 +635,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             if any(value is None for value in replaced):
                 return None
             return typing.cast(list[int | torch.fx.Node], replaced)
-
-        def meta_value(value: int | torch.fx.Node) -> int | torch.SymInt | None:
-            if isinstance(value, torch.fx.Node):
-                return value.meta.get("val")
-            return value
-
-        def meta_values(
-            values: Sequence[int | torch.fx.Node],
-        ) -> list[int | torch.SymInt] | None:
-            replaced = [meta_value(value) for value in values]
-            if any(value is None for value in replaced):
-                return None
-            return typing.cast(list[int | torch.SymInt], replaced)
 
         for node, value in node_replacements.items():
             if "val" not in node.meta:
@@ -687,25 +723,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
                     as_strided_args = (shapes, strides, storage_offset)
 
-                full_meta = None
-                if as_strided_args is not None:
-                    full_meta_shape = meta_values(full_shapes)
-                    fake_mode = torch._guards.detect_fake_mode(fake_tensor)
-                    if full_meta_shape is None or fake_mode is None:
-                        continue
-
-                    with fake_mode:
-                        full_meta = aten.full.default(
-                            full_meta_shape,
-                            value,
-                            dtype=fake_tensor.dtype,
-                            layout=torch.strided,
-                            device=fake_tensor.device,
-                            pin_memory=node.kwargs.get("pin_memory", False),
-                        )
-
                 # zeros and ones just get traced into full, so we insert those
-                full_node = graph.call_function(
+                new_node = graph.call_function(
                     aten.full.default,
                     args=(full_shapes, value),
                     kwargs={
@@ -716,12 +735,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     },
                 )
 
-                new_node = full_node
                 if as_strided_args is not None:
-                    assert full_meta is not None
-                    full_node.meta.update(node.meta)
-                    full_node.meta["val"] = full_meta
-                    full_node.meta["tensor_meta"] = _extract_tensor_metadata(full_meta)
                     with graph.inserting_after(new_node):
                         new_node = graph.call_function(
                             aten.as_strided.default,
@@ -737,7 +751,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 elif value == 1:
                     ones.add(new_node)
 
-        _try_replace_zero_bias_sdpa_with_flash(gm, zeros)
         remove_no_ops(gm, zeros, ones)
         remove_redundant_views(gm)
 
@@ -837,9 +850,9 @@ def joint_graph_passes(
     # must occur before other passes
     canonicalize_aten_ir_passes(graph)
 
-    if config.joint_custom_pre_pass is not None:
+    for joint_custom_pre_pass in get_custom_graph_passes(config.joint_custom_pre_pass):
         GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
+            joint_custom_pre_pass
         )
         count += 1
 
@@ -880,9 +893,11 @@ def joint_graph_passes(
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
-    if config.joint_custom_post_pass is not None:
+    for joint_custom_post_pass in get_custom_graph_passes(
+        config.joint_custom_post_pass
+    ):
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
-            config.joint_custom_post_pass
+            joint_custom_post_pass
         )
         count += 1
 
@@ -1144,6 +1159,14 @@ def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
     return CallFunction(aten.sub.Tensor, scaled, amax)
 
 
+def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
+    # This pattern also matches the raw scaled - amax(scaled) expression.  Only
+    # use the stable form when it preserves that expression's nonfinite behavior.
+    original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
+    return torch.where(finite_scaled, stable, original)
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -1183,7 +1206,9 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp * other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1196,7 +1221,10 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) * (sign * other)
+        stable = (inp - max_) * (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1213,7 +1241,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp / other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1226,7 +1256,10 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) / (sign * other)
+        stable = (inp - max_) / (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
