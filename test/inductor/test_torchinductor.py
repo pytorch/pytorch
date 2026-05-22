@@ -6548,6 +6548,29 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand([1, 17, 2048]),))
 
+    def test_mean_var_canonicalized_to_var_mean(self):
+        from torch._inductor.fx_passes.post_grad import (
+            canonicalize_mean_var_to_var_mean,
+        )
+
+        def fn(x):
+            mean = aten.mean.dim(x, [-1], True)
+            var = aten.var.correction(x, [-1], correction=1, keepdim=True)
+            return x - mean, var
+
+        x = torch.randn([2, 4, 16])
+        gm = make_fx(fn)(x)
+        canonicalize_mean_var_to_var_mean(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertIn(aten.var_mean.correction, targets)
+        self.assertNotIn(aten.mean.dim, targets)
+        self.assertNotIn(aten.var.correction, targets)
+        self.assertEqual(targets.count(operator.getitem), 2)
+        torch.testing.assert_close(gm(x), fn(x))
+
     def test_var_correction(self):
         def fn(x):
             dim = -1
