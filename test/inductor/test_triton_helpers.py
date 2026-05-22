@@ -71,21 +71,40 @@ if HAS_GPU:
         NORMAL: tl.constexpr,
     ):
         offsets = tl.arange(0, BLOCK_SIZE)
-        reduced_offsets = tl.arange(0, BLOCK_SIZE // 4)
 
-        if NORMAL:
-            helper = randn4x(seed, offsets, BLOCK_SIZE)
-            r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        if BLOCK_SIZE >= 4 and BLOCK_SIZE % 4 == 0:
+            reduced_offsets = tl.arange(0, BLOCK_SIZE // 4)
+
+            if NORMAL:
+                helper = randn4x(seed, offsets, BLOCK_SIZE)
+                r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+            else:
+                helper = rand4x(seed, offsets, BLOCK_SIZE)
+                r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+
+            expected0 = tl.cat(tl.ravel(r0), tl.ravel(r1))
+            expected1 = tl.cat(tl.ravel(r2), tl.ravel(r3))
+            expected = tl.cat(expected0, expected1)
         else:
-            helper = rand4x(seed, offsets, BLOCK_SIZE)
-            r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
-
-        expected0 = tl.cat(tl.ravel(r0), tl.ravel(r1))
-        expected1 = tl.cat(tl.ravel(r2), tl.ravel(r3))
-        expected = tl.cat(expected0, expected1)
+            if NORMAL:
+                helper = randn4x(seed, offsets, BLOCK_SIZE)
+                expected = tl.randn(seed, offsets)
+            else:
+                helper = rand4x(seed, offsets, BLOCK_SIZE)
+                expected = tl.rand(seed, offsets)
 
         tl.store(helper_result_ptr + offsets, helper)
         tl.store(expected_result_ptr + offsets, expected)
+
+    @triton.jit
+    def test_kernel_rand4x_distribution(
+        seed,
+        result_ptr,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        result = rand4x(seed, offsets, BLOCK_SIZE)
+        tl.store(result_ptr + offsets, result)
 
 
 class ExclusiveScanDecoupledLookback64Test(TestCase):
@@ -187,9 +206,8 @@ class SelectOneTest(TestCase):
 class Random4xTest(TestCase):
     """Test cases for rand4x/randn4x helper packing order."""
 
-    def _run_random_4x_order(self, normal: bool) -> None:
+    def _run_random_4x_order(self, normal: bool, block_size: int) -> None:
         device = torch.device(GPU_TYPE)
-        block_size = 16
         helper_result = torch.empty(block_size, dtype=torch.float32, device=device)
         expected_result = torch.empty(block_size, dtype=torch.float32, device=device)
 
@@ -205,11 +223,50 @@ class Random4xTest(TestCase):
 
     @requires_gpu()
     def test_rand4x_order(self) -> None:
-        self._run_random_4x_order(normal=False)
+        self._run_random_4x_order(normal=False, block_size=16)
 
     @requires_gpu()
     def test_randn4x_order(self) -> None:
-        self._run_random_4x_order(normal=True)
+        self._run_random_4x_order(normal=True, block_size=16)
+
+    @requires_gpu()
+    def test_rand4x_order_quarter_block_size_2(self) -> None:
+        self._run_random_4x_order(normal=False, block_size=8)
+
+    @requires_gpu()
+    def test_randn4x_order_quarter_block_size_2(self) -> None:
+        self._run_random_4x_order(normal=True, block_size=8)
+
+    @requires_gpu()
+    def test_rand4x_fallback_block_size_2(self) -> None:
+        self._run_random_4x_order(normal=False, block_size=2)
+
+    @requires_gpu()
+    def test_randn4x_fallback_block_size_2(self) -> None:
+        self._run_random_4x_order(normal=True, block_size=2)
+
+    @requires_gpu()
+    def test_rand4x_distribution(self) -> None:
+        device = torch.device(GPU_TYPE)
+        block_size = 1024
+        num_blocks = 128
+        sample_count = block_size * num_blocks
+        result = torch.empty(sample_count, dtype=torch.float32, device=device)
+
+        test_kernel_rand4x_distribution[(num_blocks,)](
+            1234,
+            result,
+            BLOCK_SIZE=block_size,
+        )
+
+        self.assertGreaterEqual(result.min().item(), 0.0)
+        self.assertLess(result.max().item(), 1.0)
+        self.assertLess(abs(result.mean().item() - 0.5), 0.01)
+        self.assertLess(abs(result.var(unbiased=False).item() - (1.0 / 12.0)), 0.01)
+
+        bins = torch.histc(result, bins=10, min=0.0, max=1.0)
+        max_bucket_error = (bins - sample_count / 10).abs().max().item()
+        self.assertLess(max_bucket_error / (sample_count / 10), 0.08)
 
 
 if __name__ == "__main__":
