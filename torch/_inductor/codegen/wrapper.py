@@ -682,10 +682,6 @@ class ExternKernelMultiOutLine(WrapperLine):
 
         code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
 
-        for out_node in node.out_variant_output_nodes:
-            if isinstance(out_node.layout, ir.Layout):
-                out_node.codegen_size_asserts(self.wrapper)
-
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -905,17 +901,6 @@ class AllocateLine(MemoryPlanningLine):
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
-        from ..scheduler import NopKernelSchedulerNode
-
-        # The empty_strided lowering zeros the ComputedBuffer ranges to signal
-        # "no compute," which makes is_no_op() true and routes here via
-        # NopKernelSchedulerNode. This covers torch.empty / empty_like /
-        # empty_strided / empty_permuted. Used to trigger deterministic fill
-        # when torch.use_deterministic_algorithms is active.
-        self.is_uninitialized = isinstance(
-            V.graph.scheduler.current_node,
-            NopKernelSchedulerNode,
-        )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
@@ -972,9 +957,7 @@ class AllocateLine(MemoryPlanningLine):
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
-            line = self.wrapper.make_buffer_allocation(
-                self.node, is_uninitialized=self.is_uninitialized
-            )
+            line = self.wrapper.make_buffer_allocation(self.node)
             code.writeline(line)
 
     def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
@@ -1237,10 +1220,11 @@ class AssertSizeStrideLine(WrapperLine):
     name: str
     size: str
     stride: str
+    op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper.write_assert_size_stride(
-            self.name, self.size, self.stride, "input"
+        self.wrapper._codegen_assert_size_stride(
+            code, self.name, self.size, self.stride, self.op_name
         )
 
     @staticmethod
@@ -1711,12 +1695,28 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(self, name, size, stride))
+                self.write_assert_size_stride(name, size, stride, "input")
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        """Queue an assert_size_stride for emission during replay."""
+        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
+
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
+    ) -> None:
+        """Emit one assert_size_stride line to `code` (replay-phase target).
+
+        Subclasses override to change the emitted form (e.g., C++ assert with
+        an AOTI runtime env guard).
+        """
+        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1918,6 +1918,9 @@ class PythonWrapperCodegen(CodeGen):
         for out_node in node.out_variant_output_nodes:
             self.codegen_allocation(out_node)
         self.writeline(ExternKernelMultiOutLine(self, node))
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -2803,6 +2806,15 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
+        """Codegen a user-defined Triton kernel and return its cache entry.
+
+        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        name (with a leading dunder stripped to avoid Python class-based name
+        mangling at the call site), and records the kernel in
+        ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
+        inductor_meta, extra_launcher_call_args)``; subsequent calls with the
+        same ``cache_key`` reuse the previously assigned name.
+        """
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -2947,6 +2959,7 @@ class PythonWrapperCodegen(CodeGen):
                 config_of(
                     signature,
                     indices=arg_indices,
+                    pointer_range_override=(),
                 )
             ],
         }
@@ -3033,6 +3046,11 @@ class PythonWrapperCodegen(CodeGen):
             )
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+        # when the generated call site is inside a class body.
+        # See https://github.com/pytorch/pytorch/issues/170398
+        if name.startswith("__") and not name.endswith("__"):
+            name = name[1:]
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
@@ -3066,6 +3084,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("\\", "\\\\")
         if config.cpp_wrapper:
             # With cpp_wrapper + autotune_at_compile_time=False, the source is
             # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
@@ -3186,12 +3205,14 @@ class PythonWrapperCodegen(CodeGen):
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     kernel.cuda_kernel_saved = False
+                    kernel.cpu_kernel_saved = False
             """
         )
 
     def generate_save_uncompiled_kernels(self):
         """
-        Precompile and save the CUBINs of the Triton kernels that haven't
+        Precompile and save the per-config kernel artifacts (CUBINs on GPU,
+        ``.so`` + launcher ``.so`` on CPU) for Triton kernels that haven't
         been precompiled and saved as a side effect of running the generated
         JIT model (Python wrapper). This can happen when the model contains
         control flow: only one pass through the control flow operators covers
@@ -3204,13 +3225,19 @@ class PythonWrapperCodegen(CodeGen):
             f"""
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
-                    if not kernel.cuda_kernel_saved:
-                        if len(kernel.launchers) == 0:
-                            kernel.precompile()
-                        kernel.save_gpu_kernel(
-                            stream="stream",  # use dummy stream
-                            launcher=kernel.launchers[0],
-                        )
+                    if kernel.device_props.type == "cpu":
+                        if not kernel.cpu_kernel_saved:
+                            if len(kernel.launchers) == 0:
+                                kernel.precompile()
+                            kernel.save_cpu_kernel(launcher=kernel.launchers[0])
+                    else:
+                        if not kernel.cuda_kernel_saved:
+                            if len(kernel.launchers) == 0:
+                                kernel.precompile()
+                            kernel.save_gpu_kernel(
+                                stream="stream",  # use dummy stream
+                                launcher=kernel.launchers[0],
+                            )
             """
         )
 
@@ -3613,9 +3640,7 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(
-        self, buffer: BufferLike, is_uninitialized: bool = False
-    ):
+    def make_buffer_allocation(self, buffer: BufferLike):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
@@ -3623,14 +3648,7 @@ class PythonWrapperCodegen(CodeGen):
         stride = tuple(buffer.get_stride())
         is_pinned = buffer.get_is_pinned()
         return self.make_allocation(
-            buffer.get_name(),
-            device,
-            dtype,
-            shape,
-            stride,
-            allocation_shape,
-            is_pinned,
-            is_uninitialized=is_uninitialized,
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned
         )
 
     @cache_on_self
@@ -3642,15 +3660,7 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(import_str, strip=True)
 
     def make_allocation(
-        self,
-        name,
-        device,
-        dtype,
-        shape,
-        stride,
-        allocation_shape=None,
-        is_pinned=False,
-        is_uninitialized=False,
+        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -3660,13 +3670,6 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-
-        is_deterministic = (
-            torch.are_deterministic_algorithms_enabled()
-            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-            and is_uninitialized
-        )
-
         if torch._inductor.config.test_configs.track_memory_lifecycle:
             out = (
                 f"{name} = tracked_empty_strided("
@@ -3676,14 +3679,14 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device.type}', "
                 f"name='{name}')"
             )
-        elif device.type == "cpu" and is_pinned and not is_deterministic:
+        elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia") and not is_deterministic:
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
@@ -3691,14 +3694,13 @@ class PythonWrapperCodegen(CodeGen):
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        # all other devices (or deterministic mode):
-        # NOTE: For deterministic mode, fallback to the slower path which correctly fills the buffer with NaN or MAX_INT
+        # all other devices:
         else:
             out = (
                 f"{name} = empty_strided("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype}, pin_memory={is_pinned})"
+                f"device='{device.type}', dtype={dtype})"
             )
         if codegen_shape_tuple != codegen_allocation_shape_tuple:
             # need an extra as_strided call

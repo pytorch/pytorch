@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Macros.h>
@@ -519,26 +520,29 @@ void bf16bf16_foreach_mm_impl(
       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
           stride_output + group_count);
 
-  // Build pointer arrays on host, copy to device.
-  // Synchronous copy because host_ptrs is stack-allocated and would be
-  // freed before an async copy completes.
-  std::vector<void*> host_ptrs(3 * aligned_group_count, nullptr);
+  // Build pointer arrays in pinned host memory, async-copy to device.
+  size_t ptrs_bytes = 3 * aligned_group_count * sizeof(void*);
+  auto* host_allocator = at::getHostAllocator(at::kCUDA);
+  auto pinned_buf = host_allocator->allocate(ptrs_bytes);
+  void** host_ptrs = static_cast<void**>(pinned_buf.get());
+  std::memset(host_ptrs, 0, ptrs_bytes);
   for (int i = 0; i < group_count; i++) {
     host_ptrs[i] = self_list[i].data_ptr();
     host_ptrs[aligned_group_count + i] = mat2_list[i].data_ptr();
     host_ptrs[2 * aligned_group_count + i] = outputs[i].data_ptr();
   }
-  auto stream = at::cuda::getCurrentCUDAStream().stream();
-  AT_CUDA_CHECK(cudaMemcpy(
-      buf_ptr, host_ptrs.data(),
-      3 * aligned_group_count * sizeof(void*),
-      cudaMemcpyHostToDevice));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      buf_ptr, host_ptrs, ptrs_bytes,
+      cudaMemcpyHostToDevice, stream.stream()));
+  host_allocator->record_event(
+      pinned_buf.get(), pinned_buf.get_context(), stream.unwrap());
 
   int64_t lda = a_row_major ? self_list[0].stride(-2) : self_list[0].stride(-1);
   int64_t ldb = b_row_major ? mat2_list[0].stride(-2) : mat2_list[0].stride(-1);
   int64_t ldoutput = outputs[0].stride(-2);
 
-  at::cuda::detail::prepare_foreach_mm_data<<<1, group_count, 0, stream>>>(
+  at::cuda::detail::prepare_foreach_mm_data<<<1, group_count, 0, stream.stream()>>>(
       problem_sizes, stride_A, stride_B, stride_output,
       M, N, K, lda, ldb, ldoutput);
   C10_CUDA_KERNEL_LAUNCH_CHECK();

@@ -266,23 +266,24 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for op_spec in input_strategy.strategies:
+        is_reduction_linear = reduction_linear
         if reduction_op == "avg":
             output_spec = op_spec.output_spec
             local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
             for dim in reduce_dims:
                 if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
                     # reduce(avg) is not linear for unevenly sharded tensors
-                    reduction_linear = False
+                    is_reduction_linear = False
                     break
 
         for p in op_spec.output_spec.placements:
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
             if isinstance(p, Partial) and p.reduce_op != reduction_op:
-                reduction_linear = False
+                is_reduction_linear = False
                 break
 
-        if not reduction_linear:
+        if not is_reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(

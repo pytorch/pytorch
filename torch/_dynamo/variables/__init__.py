@@ -22,8 +22,10 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
+    HasAttrBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
+    SetAttrBuiltinVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -65,7 +67,6 @@ from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
-    BuiltinMethodVariable,
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
@@ -127,7 +128,6 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CellVariable,
-    ConstantMethodWrapperVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
@@ -229,6 +229,7 @@ __all__ = [
     "GetAttrBuiltinVariable",
     "GetAttrVariable",
     "GradModeVariable",
+    "HasAttrBuiltinVariable",
     "InspectSignatureVariable",
     "InspectVariable",
     "IterBuiltinVariable",
@@ -256,6 +257,7 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
+    "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",

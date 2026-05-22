@@ -970,7 +970,7 @@ def _check_inputs(tupled_inputs) -> bool:
     if not any_input_requiring_grad:
         raise ValueError(
             "gradcheck expects at least one input tensor to require gradient, "
-            "but none of the them have requires_grad=True."
+            "but none of them have requires_grad=True."
         )
     return True
 
