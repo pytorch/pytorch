@@ -133,6 +133,278 @@ class DictTests(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             self.assertEqual(fn(x), opt_fn(x))
 
+    @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_const_dict_getitem_runtime_lookup_dynamic_module_key(self):
+        cache = {}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float) -> None:
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        for key in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0):
+            opt_mod = torch.compile(Module(key), backend=cnt)
+            self.assertEqual(opt_mod(x), x + cache[key])
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_const_dict_getitem_runtime_lookup_after_static_key_read(self):
+        cache = {1.0: torch.randn(16), 2.0: torch.randn(16), 3.0: torch.randn(16)}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float) -> None:
+                super().__init__()
+                self.key = key
+
+            def forward(self, x):
+                return x + cache[1.0] + cache[self.key]
+
+        x = torch.randn(16)
+
+        explain_output = torch._dynamo.explain(Module(1.0))(x)
+        guard_names = {guard.name for guard in explain_output.out_guards}
+        self.assertIn("dict.__getitem__(L['cache'], L['self'].key)", guard_names)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        for key in (2.0, 3.0):
+            opt_mod = torch.compile(Module(key), backend=cnt)
+            self.assertEqual(opt_mod(x), x + cache[1.0] + cache[key])
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_const_dict_getitem_runtime_lookup_allows_dict_growth(self):
+        cache = {1.0: torch.randn(4)}
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(4)
+        mod = Module()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnt)
+
+        self.assertEqual(opt_mod(x), x + cache[1.0])
+        cache[2.0] = torch.randn(4)
+        mod.key = 2.0
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(opt_mod(x), x + cache[2.0])
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_const_dict_getitem_runtime_lookup_missing_key(self):
+        cache = {1.0: torch.randn(4)}
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(4)
+        mod = Module()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertEqual(opt_mod(x), x + cache[1.0])
+        mod.key = 2.0
+        with self.assertRaisesRegex(KeyError, "2.0"):
+            opt_mod(x)
+
+    def test_const_dict_getitem_runtime_lookup_handled_missing_key_growth(self):
+        cache = {1.0: torch.randn(4)}
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 2.0
+
+            def forward(self, x):
+                try:
+                    return x + cache[self.key]
+                except KeyError:
+                    return x * 2
+
+        x = torch.randn(4)
+        mod = Module()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnt)
+
+        self.assertEqual(opt_mod(x), x * 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        cache[2.0] = torch.randn(4)
+        self.assertEqual(opt_mod(x), x + cache[2.0])
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_const_dict_getitem_runtime_lookup_skips_defaultdict(self):
+        cache = defaultdict(lambda: torch.randn(4))
+        cache[1.0] = torch.randn(4)
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+                self.use = True
+
+            def forward(self, x):
+                if self.use:
+                    return x + cache[self.key]
+                return x
+
+        x = torch.randn(4)
+        mod = Module()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertEqual(opt_mod(x), x + cache[1.0])
+        mod.use = False
+        mod.key = 2.0
+        self.assertNotIn(2.0, cache)
+        self.assertEqual(opt_mod(x), x)
+        self.assertNotIn(2.0, cache)
+
+    def test_const_dict_getitem_runtime_lookup_escapes_key_source_name(self):
+        cache = {1.0: torch.randn(4), 2.0: torch.randn(4)}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float) -> None:
+                super().__init__()
+                setattr(self, "key{name}", key)
+
+            def forward(self, x):
+                return x + cache[getattr(self, "key{name}")]
+
+        x = torch.randn(4)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        for key in (1.0, 2.0):
+            opt_mod = torch.compile(Module(key), backend=cnt)
+            self.assertEqual(opt_mod(x), x + cache[key])
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_const_dict_getitem_runtime_lookup_key_type_guard_is_side_effect_free(
+        self,
+    ):
+        cache = {1.0: torch.randn(4)}
+        events = []
+
+        class BadKey:
+            def __hash__(self):
+                events.append("hash")
+                return hash(1.0)
+
+            def __eq__(self, other):
+                events.append("eq")
+                return other == 1.0
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+                self.use = True
+
+            def forward(self, x):
+                if self.use:
+                    return x + cache[self.key]
+                return x
+
+        x = torch.randn(4)
+        mod = Module()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertEqual(opt_mod(x), x + cache[1.0])
+        mod.use = False
+        mod.key = BadKey()
+        self.assertEqual(opt_mod(x), x)
+        self.assertEqual(events, [])
+
+    def test_const_dict_getitem_runtime_lookup_guards_input_aliasing(self):
+        cache = {1.0: torch.ones(4)}
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+
+            def forward(self, x):
+                y = cache[self.key]
+                x.add_(1)
+                return y + x
+
+        mod = Module()
+        opt_mod = torch.compile(mod, backend="aot_eager")
+        self.assertEqual(opt_mod(torch.zeros(4)), torch.full((4,), 2.0))
+
+        x = torch.arange(4.0)
+        mod.key = 2.0
+        cache[2.0] = x
+        self.assertEqual(opt_mod(x), 2 * (torch.arange(4.0) + 1))
+
+        cache2 = {}
+
+        class Module2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+
+            def forward(self, x):
+                y = cache2[self.key]
+                x.add_(1)
+                return y + x
+
+        mod2 = Module2()
+        x = torch.arange(4.0)
+        cache2[1.0] = x
+        opt_mod2 = torch.compile(mod2, backend="aot_eager")
+        self.assertEqual(opt_mod2(x), 2 * (torch.arange(4.0) + 1))
+
+        x = torch.arange(4.0)
+        cache2[2.0] = torch.ones(4)
+        mod2.key = 2.0
+        self.assertEqual(opt_mod2(x), torch.ones(4) + torch.arange(4.0) + 1)
+        self.assertEqual(x, torch.arange(4.0) + 1)
+        self.assertEqual(cache2[2.0], torch.ones(4))
+
+        cache3 = {}
+
+        class Module3(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key = 1.0
+
+            def forward(self, x):
+                z = x * 0
+                y = cache3[self.key]
+                x.add_(1)
+                return y + x + z
+
+        mod3 = Module3()
+        x = torch.arange(4.0)
+        cache3[1.0] = x
+        opt_mod3 = torch.compile(mod3, backend="aot_eager")
+        self.assertEqual(opt_mod3(x), 2 * (torch.arange(4.0) + 1))
+
+        x = torch.arange(4.0)
+        cache3[2.0] = torch.ones(4)
+        mod3.key = 2.0
+        self.assertEqual(opt_mod3(x), torch.ones(4) + torch.arange(4.0) + 1)
+        self.assertEqual(x, torch.arange(4.0) + 1)
+        self.assertEqual(cache3[2.0], torch.ones(4))
+
     def test_dict_torch_size_dynamic_key(self):
         class DynamicShapeModel(torch.nn.Module):
             def __init__(self):

@@ -19,10 +19,12 @@ in sets.py.
 
 import collections
 import functools
+import math
 import types
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any, TYPE_CHECKING, Union
 
+import torch
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -37,6 +39,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
+    DynamicDictGetItemSource,
     is_constant_source,
     is_from_local_source,
 )
@@ -66,6 +69,22 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
+
+
+_MISSING = object()
+_RUNTIME_DICT_GETITEM_KEY_TYPES = (int, float, bool, str)
+
+
+def _runtime_dict_key_value(value: Any) -> Any:
+    if type(value) not in _RUNTIME_DICT_GETITEM_KEY_TYPES:
+        return _MISSING
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return _MISSING
+    try:
+        hash(value)
+    except TypeError:
+        return _MISSING
+    return value
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
@@ -384,6 +403,9 @@ class ConstDictVariable(VariableTracker):
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        runtime_lookup = self._maybe_getitem_runtime(tx, arg)
+        if runtime_lookup is not None:
+            return runtime_lookup
         key = HashableTracker(arg)
         if key not in self.items:
             raise_observed_exception(KeyError, tx, args=[arg])
@@ -392,6 +414,9 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        runtime_lookup = self._maybe_getitem_runtime(tx, arg)
+        if runtime_lookup is not None:
+            return runtime_lookup
         key = HashableTracker(arg)
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
@@ -405,6 +430,87 @@ class ConstDictVariable(VariableTracker):
                 ],
             )
         return self.items[key]
+
+    @staticmethod
+    def _runtime_key_value(arg: VariableTracker) -> Any:
+        if arg.source is None:
+            return _MISSING
+
+        if isinstance(arg, variables.LazyVariableTracker):
+            if arg.is_realized():
+                arg = arg.unwrap()
+            else:
+                return _runtime_dict_key_value(arg.original_value())
+
+        if isinstance(arg, ConstantVariable):
+            return _runtime_dict_key_value(arg.value)
+
+        return _MISSING
+
+    @staticmethod
+    def _constant_key_value(arg: VariableTracker) -> Any:
+        if isinstance(arg, ConstantVariable):
+            return _runtime_dict_key_value(arg.value)
+        if isinstance(arg, variables.LazyVariableTracker) and not arg.is_realized():
+            return _runtime_dict_key_value(arg.original_value())
+        return _MISSING
+
+    def _maybe_getitem_runtime(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
+        if self.source is None or arg.source is None:
+            return None
+        if tx.output.side_effects.is_modified(self):
+            return None
+        if not istype(tx.output.resolve_source_value(self.source), dict):
+            return None
+
+        key_value = self._runtime_key_value(arg)
+        if key_value is _MISSING:
+            return None
+
+        matched_value: VariableTracker | None = None
+        for key, value in self.items.items():
+            candidate = self._constant_key_value(key.vt)
+            if candidate is _MISSING:
+                return None
+            if candidate == key_value:
+                matched_value = value
+                break
+
+        if matched_value is None:
+            self.install_dict_keys_match_guard()
+            return None
+
+        from .builder import VariableBuilder
+
+        source = DynamicDictGetItemSource(self.source, arg.source, type(key_value))
+        if isinstance(matched_value, variables.LazyVariableTracker) and not (
+            matched_value.is_realized()
+        ):
+            value = matched_value.original_value()
+        elif isinstance(matched_value, ConstantVariable):
+            value = matched_value.value
+        else:
+            value = tx.output.resolve_source_value(source)
+
+        install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
+        builder = VariableBuilder(tx, source)
+        if isinstance(value, torch.Tensor) and value in tx.output.side_effects:
+            existing = tx.output.side_effects[value]
+            if existing.source is None:
+                return None
+            if existing.source != source:
+                install_guard(
+                    source.make_guard(
+                        functools.partial(
+                            GuardBuilder.DUPLICATE_INPUT,
+                            source_b=existing.source,
+                        )
+                    )
+                )
+            return existing
+        return builder(value)
 
     def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         key = HashableTracker(arg)

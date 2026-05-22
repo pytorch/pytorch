@@ -904,6 +904,42 @@ class DictSubclassGetItemSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class DynamicDictGetItemSource(ChainedSource):
+    index: Source
+    key_type: type
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.index, Source):
+            raise AssertionError(
+                f"DynamicDictGetItemSource index must be a Source, got {self.index!r}"
+            )
+        if not isinstance(self.key_type, type):
+            raise AssertionError(
+                f"DynamicDictGetItemSource key_type must be a type, got {self.key_type!r}"
+            )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Reconstruct dict.__getitem__(dct, key) to avoid possibly overridden
+        # __getitem__ methods on dict subclasses.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dict_getitem")
+        )
+        codegen(self.base)
+        codegen(self.index)
+        codegen.extend_output(create_call_function(2, False))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return (
+            f"dict.__getitem__({self.base.reconstruct_pycode(codegen)}, "
+            f"{self.index.reconstruct_pycode(codegen)})"
+        )
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"dict.__getitem__({{0}}, {_esc_str(self.index.name)})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class ListGetItemSource(GetItemSource):
     """
     Same as GetItemSource with reconstruct and name overridden to be list specific.

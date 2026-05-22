@@ -1000,6 +1000,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         handlers: list[_HandlerCallback] = []
 
         lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
+        if (
+            fn is operator.getitem
+            and not has_kwargs
+            and len(arg_types) == 2
+            and issubclass(arg_types[0], ConstDictVariable)
+            and issubclass(arg_types[1], LazyConstantVariable)
+        ):
+            return lambda tx, args, kwargs: vt_getitem(tx, args[0], args[1])
+
         if lazy_types:
             if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
                 # Realize non-constant lazy args and re-dispatch.  Any
