@@ -4123,6 +4123,14 @@ class RootGuardManager : public GuardManager {
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
 
+  LocalState get_local_state() const {
+    return _local_state;
+  }
+
+  void set_local_state(const LocalState& local_state) {
+    _local_state = local_state;
+  }
+
   void add_no_tensor_aliasing_guard(
       std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
     // stash a pointer to the _no_tensor_aliasing_guard
@@ -4290,6 +4298,8 @@ class RootGuardManager : public GuardManager {
       return nullptr;
     }
     RootGuardManager* cloned_root = new RootGuardManager();
+    cloned_root->_local_state = _local_state;
+    cloned_root->_init_local_state = _init_local_state;
     clone_common(cloned_root, cloned_root, clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
@@ -5021,9 +5031,8 @@ class TENSOR_MATCH : public LeafGuard {
     tensor_dims_stride = tensor_dims_stride.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : tensor_dims_stride;
-    LocalState state;
     _tensor_check = std::make_unique<TensorCheck>(
-        state,
+        _root_guard_manager->_local_state,
         (PyTypeObject*)pytype.ptr(),
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
@@ -7390,6 +7399,31 @@ PyObject* torch_c_dynamo_guards_init() {
       .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
       .def_readonly("user_stack", &GuardDebugInfo::user_stack);
 
+  py::class_<LocalState>(py_m, "LocalState")
+      .def(py::init<>())
+      .def(py::pickle(
+          [](const LocalState& state) {
+            return py::make_tuple(
+                state.dispatch_modifier.included_.raw_repr(),
+                state.dispatch_modifier.excluded_.raw_repr(),
+                state.override_dispatch_key_set.raw_repr(),
+                state.grad_mode_enabled,
+                state.should_mask_python_keys);
+          },
+          [](const py::tuple& t) {
+            TORCH_CHECK(t.size() == 5, "LocalState expected 5 values");
+            LocalState state;
+            state.dispatch_modifier.included_ = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[0].cast<uint64_t>());
+            state.dispatch_modifier.excluded_ = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[1].cast<uint64_t>());
+            state.override_dispatch_key_set = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[2].cast<uint64_t>());
+            state.grad_mode_enabled = t[3].cast<bool>();
+            state.should_mask_python_keys = t[4].cast<bool>();
+            return state;
+          }));
+
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard")
       .def("verbose_code_parts", &LeafGuard::verbose_code_parts);
@@ -8476,6 +8510,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
+      .def("get_local_state", &RootGuardManager::get_local_state)
+      .def("set_local_state", &RootGuardManager::set_local_state)
       .def(
           "clone_manager",
           &RootGuardManager::clone_manager,
