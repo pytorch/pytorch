@@ -4867,22 +4867,72 @@ def upsample_nearestnd(
         if scale is not None:
             inv_scales[i] = 1.0 / scale
 
-    def scale_fn(x, scale, size):
+    def nearest_indexing_mode():
+        device_type = x.get_device().type
+        if device_type == "cuda" and n == 2:
+            return "same_size"
+
+        if exact:
+            return "scale"
+
+        if device_type == "cpu":
+            if n == 2 and V.graph.sizevars.guard_or_false(
+                sympy.Le(o_sizes[0] + o_sizes[1], 128)
+            ):
+                return "nearest_idx"
+
+            x_stride = x.maybe_get_stride()
+            is_channels_last = (
+                x_stride is not None
+                and ir.Layout.is_channels_last_contiguous(x.get_size(), x_stride)
+            )
+            if (
+                n in (2, 3)
+                and is_channels_last
+                and V.graph.sizevars.guard_or_false(sympy.Gt(x.get_size()[1], 3))
+            ):
+                return "nearest_idx"
+
+        return "scale"
+
+    indexing_mode = nearest_indexing_mode()
+
+    def scale_fn(x, scale, size, osize):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
         #                            = floor(scale * (output_index + 0.5))
         # Nearest: input_index = floor(scale * output_index)
+        if indexing_mode in (
+            "nearest_idx",
+            "same_size",
+        ) and V.graph.sizevars.guard_or_false(sympy.Eq(osize, size)):
+            x = ops.index_expr(x, torch.int32)
+            return ops.indirect_indexing(x, size, check=False)
+        if indexing_mode == "nearest_idx" and V.graph.sizevars.guard_or_false(
+            sympy.Eq(osize, 2 * size)
+        ):
+            x = ops.index_expr(x, torch.int32)
+            x = ops.floordiv(x, ops.constant(2, torch.int32))
+            return ops.indirect_indexing(x, size, check=False)
+
         x = ops.index_expr(x, torch.float32)
         if exact:
             x = ops.add(x, ops.constant(0.5, torch.float32))
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
+        x = ops.minimum(x, ops.index_expr(size - 1, torch.int32))
         return ops.indirect_indexing(x, size, check=False)
 
     def fn(idx):
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
+            [
+                *b,
+                *[
+                    scale_fn(i, s, size, osize)
+                    for i, s, size, osize in zip(x, inv_scales, i_sizes, o_sizes)
+                ],
+            ]
         )
 
     return Pointwise.create(
