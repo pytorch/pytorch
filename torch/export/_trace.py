@@ -81,9 +81,12 @@ from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _DimHint,
     _DimHintType,
     _IntWrapper,
     _process_dynamic_shapes,
+    _tree_map_with_path,
+    Dim,
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -1448,7 +1451,154 @@ def _process_export_inputs(
         else:
             out_dynamic_shapes = dynamic_shapes
 
+    out_dynamic_shapes = _normalize_negative_dim_indices(
+        mod, args, kwargs, out_dynamic_shapes
+    )
     return args, kwargs, original_in_spec, out_dynamic_shapes, verify_additional_inputs
+
+
+def _dim_can_include_zero_or_one(dim: Dim) -> bool:
+    return dim.min <= 1 and dim.max >= 0
+
+
+def _normalize_dim_index(i: int, tensor: torch.Tensor) -> int:
+    if -tensor.dim() <= i < 0:
+        return tensor.dim() + i
+    return i
+
+
+def _normalize_negative_dim_indices(
+    mod: torch.nn.Module,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    dynamic_shapes: _DynamicShapesSpec | None,
+) -> _DynamicShapesSpec | None:
+    if not dynamic_shapes:
+        return dynamic_shapes
+
+    combined_args = _combine_args(mod, args, kwargs)
+    if isinstance(dynamic_shapes, (tuple, list)):
+        combined_args = type(dynamic_shapes)(  # type: ignore[assignment, misc]
+            combined_args.values()
+        )
+
+    class NegativeDimCollision(Exception):
+        pass
+
+    def normalize_shape(path, t, dynamic_shape):
+        if not isinstance(t, torch.Tensor) or not isinstance(dynamic_shape, dict):
+            return dynamic_shape
+        normalized_shape = {}
+        original_indices = {}
+        for i, dim in dynamic_shape.items():
+            normalized_i = _normalize_dim_index(i, t) if isinstance(i, int) else i
+            if normalized_i in normalized_shape:
+                raise NegativeDimCollision(
+                    f"Found multiple dynamic shape specs for dimension {normalized_i} "
+                    f"of input `inputs{pytree.keystr(path)}`: keys "
+                    f"{original_indices[normalized_i]!r} and {i!r} both refer "
+                    f"to the same dimension after normalizing negative indices."
+                )
+            normalized_shape[normalized_i] = dim
+            original_indices[normalized_i] = i
+        return normalized_shape
+
+    try:
+        return _tree_map_with_path(
+            normalize_shape, combined_args, dynamic_shapes, tree_name="inputs"
+        )
+    except NegativeDimCollision as e:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            str(e),
+            case_name="dynamic_shapes_validation",
+        ) from None
+    except Exception:
+        # Preserve the usual validation errors from the real dynamic_shapes path.
+        return dynamic_shapes
+
+
+def _get_backed_size_oblivious_export_info(
+    mod: torch.nn.Module,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    dynamic_shapes: _DynamicShapesSpec | None,
+) -> tuple[bool, list[str]]:
+    if not dynamic_shapes:
+        return False, []
+
+    combined_args = _combine_args(mod, args, kwargs)
+    if isinstance(dynamic_shapes, (tuple, list)):
+        combined_args = type(dynamic_shapes)(  # type: ignore[assignment, misc]
+            combined_args.values()
+        )
+
+    needs_context = False
+    dynamic_hint_violations = []
+
+    def check_dim(dim: object, tensor: torch.Tensor, i: int, path) -> None:
+        nonlocal needs_context
+        i = _normalize_dim_index(i, tensor)
+        if not 0 <= i < tensor.dim() or tensor.shape[i] not in (0, 1):
+            return
+        if isinstance(dim, Dim) and _dim_can_include_zero_or_one(dim):
+            needs_context = True
+        elif isinstance(dim, _DimHint) and dim.type == _DimHintType.DYNAMIC:
+            if (dim.min is not None and tensor.shape[i] < dim.min) or (
+                dim.max is not None and tensor.shape[i] > dim.max
+            ):
+                dynamic_hint_violations.append(
+                    f"- Received user-specified min/max range of [{dim.min}, {dim.max}], "
+                    f"conflicting with the inferred min/max range of [{tensor.shape[i]}, {tensor.shape[i]}], "
+                    f"for inputs{pytree.keystr(path)}.shape[{i}]."
+                )
+            else:
+                dynamic_hint_violations.append(
+                    f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                    f"but export 0/1 specialized due to hint of {tensor.shape[i]} "
+                    f"for dimension inputs{pytree.keystr(path)}.shape[{i}]."
+                )
+
+    def check_shape(path, t, dynamic_shape) -> None:
+        if not isinstance(t, torch.Tensor):
+            return
+        if isinstance(dynamic_shape, dict):
+            for i, dim in dynamic_shape.items():
+                if isinstance(i, int):
+                    check_dim(dim, t, i, path)
+        elif isinstance(dynamic_shape, (tuple, list)):
+            for i, dim in enumerate(dynamic_shape):
+                check_dim(dim, t, i, path)
+
+    try:
+        _tree_map_with_path(
+            check_shape, combined_args, dynamic_shapes, tree_name="inputs"
+        )
+    except Exception:
+        # Preserve the usual validation errors from the real dynamic_shapes path.
+        return False, []
+    return needs_context, dynamic_hint_violations
+
+
+def _backed_size_oblivious_export_context(
+    mod: torch.nn.Module,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    dynamic_shapes: _DynamicShapesSpec | None,
+):
+    needs_context, dynamic_hint_violations = _get_backed_size_oblivious_export_info(
+        mod, args, kwargs, dynamic_shapes
+    )
+    if not needs_context:
+        return nullcontext()
+    if dynamic_hint_violations:
+        raise ValueError(
+            "Found the following conflicts between user-specified ranges and "
+            "inferred ranges from model tracing:\n" + "\n".join(dynamic_hint_violations)
+        )
+    return torch.fx.experimental._config.patch(  # type: ignore[attr-defined]
+        backed_size_oblivious=True
+    )
 
 
 def _get_module_call_graph(
@@ -2297,16 +2447,17 @@ def _export_for_training(
 
         fake_tensor_tls.non_strict_export_fake_tensor_tracker.clear()
 
-    export_artifact = export_func(
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=orig_in_spec,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _to_aten_func=_export_to_aten_ir_make_fx,
-    )
+    with _backed_size_oblivious_export_context(mod, args, kwargs, dynamic_shapes):
+        export_artifact = export_func(
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=orig_in_spec,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _to_aten_func=_export_to_aten_ir_make_fx,
+        )
 
     # If we are tracing with fake inputs, it is expected to
     # see fake tensor constants.
@@ -2534,19 +2685,20 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=original_in_spec,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _to_aten_func=functools.partial(
-            _export_to_aten_ir,
-            pre_dispatch=pre_dispatch,
-        ),
-    )
+    with _backed_size_oblivious_export_context(mod, args, kwargs, dynamic_shapes):
+        export_artifact = export_func(  # type: ignore[operator]
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=original_in_spec,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _to_aten_func=functools.partial(
+                _export_to_aten_ir,
+                pre_dispatch=pre_dispatch,
+            ),
+        )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
