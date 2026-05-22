@@ -27,6 +27,7 @@ from torch._inductor.compile_fx import (
     static_input,
 )
 from torch._inductor.cudagraph_utils import (
+    log_cudagraph_skip_and_bump_counter,
     maybe_warning_due_to_dynamic_shape,
     ModelType,
     OutputType,
@@ -221,7 +222,34 @@ def cudagraphify_impl(
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(shape_cache, int_key)
 
-        fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
+        try:
+            fn, out = cudagraphify(
+                model, inputs, new_static_input_idxs, *args, **kwargs
+            )
+        except RuntimeError as e:
+            error = str(e)
+            unsupported_graph = (
+                "Captured CUDA graphs" in error
+                or "Failed to identify CUDA graph" in error
+                or "CUDA graph pointer did not map consistently" in error
+                or "memcpy nodes should have been removed" in error
+                or "memset nodes should have been removed" in error
+            )
+            if not unsupported_graph:
+                raise
+
+            log_cudagraph_skip_and_bump_counter(
+                "skipping parameterized cudagraph replay because graph "
+                f"metadata could not be made dynamic: {error}"
+            )
+
+            def fallback_no_cudagraph(inputs: list[InputType]) -> OutputType:
+                return model(list(inputs))
+
+            fn_cache[cache_key] = fallback_no_cudagraph
+            shape_cache[int_key] = fallback_no_cudagraph
+            return fallback_no_cudagraph(inputs)
+
         fn_cache[cache_key] = fn
         shape_cache[int_key] = fn
 
@@ -265,6 +293,102 @@ def _has_active_memory(segment: dict[str, Any]) -> bool:
     return int(segment.get("active_size", 0)) != 0 or any(
         block.get("state") != "inactive" for block in segment.get("blocks", ())
     )
+
+
+def _begin_capture_memory_history_recording() -> bool:
+    history_was_enabled = torch._C._cuda_isHistoryEnabled()
+    history_max_entries = int(
+        os.environ.get(
+            "TORCHINDUCTOR_CUDAGRAPH_CAPTURE_MEMORY_HISTORY_MAX_ENTRIES",
+            "1000000",
+        )
+    )
+    torch.cuda.memory._record_memory_history(
+        "all",
+        context=None,
+        max_entries=history_max_entries,
+        clear_history=True,
+    )
+    return history_was_enabled
+
+
+def _end_capture_memory_history_recording(history_was_enabled: bool) -> None:
+    if not history_was_enabled:
+        # Exact previous memory history settings are not exposed. Leave
+        # caller-enabled history alone, and only disable when history was
+        # initially off. Disabling clears the trace, so callers must take any
+        # trace-bearing snapshot before invoking this.
+        torch.cuda.memory._record_memory_history(None)
+
+
+def _raw_memory_snapshot(pool_id: tuple[int, int], include_traces: bool) -> Any:
+    return torch._C._cuda_memorySnapshot((pool_id[0], pool_id[1], include_traces))
+
+
+def _block_ranges_from_memory_snapshot(
+    memory_snapshot: list[dict[str, Any]],
+) -> tuple[list[int], list[int], list[torch.device], list[int]]:
+    address_starts: list[int] = []
+    sizes: list[int] = []
+    devices: list[torch.device] = []
+    segment_idxs: list[int] = []
+    for segment_idx, segment_snapshot in enumerate(memory_snapshot):
+        segment_start = int(segment_snapshot["address"])
+        segment_size = int(segment_snapshot["total_size"])
+        segment_device = torch.device("cuda", int(segment_snapshot["device"]))
+        block_address = segment_start
+        blocks = segment_snapshot.get("blocks", ())
+        if not blocks:
+            if segment_size:
+                address_starts.append(segment_start)
+                sizes.append(segment_size)
+                devices.append(segment_device)
+                segment_idxs.append(segment_idx)
+            continue
+        for block in blocks:
+            block_size = int(block["size"])
+            if block_size:
+                address_starts.append(int(block.get("address", block_address)))
+                sizes.append(block_size)
+                devices.append(segment_device)
+                segment_idxs.append(segment_idx)
+            block_address += block_size
+        assert block_address == segment_start + segment_size
+    return address_starts, sizes, devices, segment_idxs
+
+
+def _merge_overlapping_allocation_ranges(
+    address_starts: list[int],
+    sizes: list[int],
+    devices: list[torch.device],
+    segment_idxs: list[int],
+) -> tuple[list[int], list[int], list[torch.device], list[int]]:
+    order = sorted(range(len(address_starts)), key=lambda idx: address_starts[idx])
+    merged_starts: list[int] = []
+    merged_sizes: list[int] = []
+    merged_devices: list[torch.device] = []
+    merged_segment_idxs: list[int] = []
+    for idx in order:
+        start = address_starts[idx]
+        size = sizes[idx]
+        if size == 0:
+            continue
+        device = devices[idx]
+        segment_idx = segment_idxs[idx]
+        end = start + size
+        if not merged_starts or start >= merged_starts[-1] + merged_sizes[-1]:
+            merged_starts.append(start)
+            merged_sizes.append(size)
+            merged_devices.append(device)
+            merged_segment_idxs.append(segment_idx)
+            continue
+        if device != merged_devices[-1]:
+            raise RuntimeError("CUDA graph dynamic allocation ranges overlap")
+        merged_end = max(merged_starts[-1] + merged_sizes[-1], end)
+        merged_sizes[-1] = merged_end - merged_starts[-1]
+        if merged_segment_idxs[-1] < 0:
+            merged_segment_idxs[-1] = segment_idx
+    return merged_starts, merged_sizes, merged_devices, merged_segment_idxs
 
 
 def cudagraphify(
@@ -315,6 +439,16 @@ def cudagraphify(
         or (copy_outputs == "backward_only" and is_backward)
         or (copy_outputs == "forward_only" and not is_backward)
     )
+    allocate_blocks_env = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_ALLOCATE_BLOCKS")
+    if allocate_blocks_env is None:
+        allocate_blocks = False
+    elif allocate_blocks_env in ("0", "1"):
+        allocate_blocks = allocate_blocks_env == "1"
+    else:
+        raise RuntimeError(
+            "TORCHINDUCTOR_CUDAGRAPHS_ALLOCATE_BLOCKS must be '0' or '1', "
+            f"got {allocate_blocks_env!r}"
+        )
 
     reserved_mem_before_captures = torch.cuda.memory_reserved(device_index)
 
@@ -332,6 +466,10 @@ def cudagraphify(
             input_pool_keepalive.append(input_pool)
         else:
             input_pool = capture_pool
+
+        history_was_enabled: bool | None = None
+        if allocate_blocks:
+            history_was_enabled = _begin_capture_memory_history_recording()
 
         with torch.cuda.stream(stream):
             with torch.cuda.use_mem_pool(input_pool):
@@ -427,9 +565,19 @@ def cudagraphify(
             static_outputs = tuple(model_outputs)
         capture_keepalive.append(static_outputs)
 
-        graph_memory_snapshot: list[dict[str, Any]] = torch.cuda.memory_snapshot(
-            graph.pool(), include_traces=True
-        )
+        graph_pool_id = graph.pool()
+        graph_memory_snapshot_result: dict[str, Any] | None = None
+        if allocate_blocks:
+            graph_memory_snapshot_result = _raw_memory_snapshot(
+                graph_pool_id, include_traces=True
+            )
+            graph_memory_snapshot: list[dict[str, Any]] = graph_memory_snapshot_result[
+                "segments"
+            ]
+        else:
+            graph_memory_snapshot = torch.cuda.memory_snapshot(
+                graph_pool_id, include_traces=True
+            )
         if input_pool.id == graph.pool():
             memory_snapshot = graph_memory_snapshot
             input_memory_snapshot = graph_memory_snapshot
@@ -438,6 +586,9 @@ def cudagraphify(
                 input_pool.id, include_traces=True
             )
             memory_snapshot = graph_memory_snapshot
+
+        if history_was_enabled is not None:
+            _end_capture_memory_history_recording(history_was_enabled)
 
         segment_address_starts = [
             int(segment_snapshot["address"]) for segment_snapshot in memory_snapshot
@@ -464,6 +615,80 @@ def cudagraphify(
             segment_idx = segment_idxs_sorted_by_address[sorted_idx]
             if ptr < segment_address_starts[segment_idx] + segment_sizes[segment_idx]:
                 return segment_idx
+            return -1
+
+        if allocate_blocks:
+            (
+                allocation_address_starts,
+                allocation_sizes,
+                allocation_devices,
+                allocation_segment_idxs,
+            ) = _block_ranges_from_memory_snapshot(memory_snapshot)
+            assert graph_memory_snapshot_result is not None
+            synthetic_segment_idx = len(segment_address_starts)
+            graph_pool_id_tuple = tuple(graph_pool_id)
+            for device_idx, trace in enumerate(
+                graph_memory_snapshot_result.get("device_traces", ())
+            ):
+                device = torch.device("cuda", device_idx)
+                for trace_entry in trace:
+                    if trace_entry.get("action") != "alloc":
+                        continue
+                    if tuple(trace_entry.get("pool_id", (0, 0))) != graph_pool_id_tuple:
+                        continue
+                    ptr = int(trace_entry["addr"])
+                    size = int(trace_entry["size"])
+                    if size == 0:
+                        continue
+                    segment_idx = lookup_segment_idx(ptr)
+                    if segment_idx == -1:
+                        segment_idx = synthetic_segment_idx
+                        synthetic_segment_idx += 1
+                    allocation_address_starts.append(ptr)
+                    allocation_sizes.append(size)
+                    allocation_devices.append(device)
+                    allocation_segment_idxs.append(segment_idx)
+            (
+                allocation_address_starts,
+                allocation_sizes,
+                allocation_devices,
+                allocation_segment_idxs,
+            ) = _merge_overlapping_allocation_ranges(
+                allocation_address_starts,
+                allocation_sizes,
+                allocation_devices,
+                allocation_segment_idxs,
+            )
+        else:
+            allocation_address_starts = list(segment_address_starts)
+            allocation_sizes = list(segment_sizes)
+            allocation_devices = list(segment_devices)
+            allocation_segment_idxs = list(range(len(segment_sizes)))
+
+        allocation_idxs_by_segment: dict[int, list[int]] = {}
+        for allocation_idx, segment_idx in enumerate(allocation_segment_idxs):
+            allocation_idxs_by_segment.setdefault(segment_idx, []).append(
+                allocation_idx
+            )
+        allocation_idxs_sorted_by_address = sorted(
+            range(len(allocation_address_starts)),
+            key=lambda idx: allocation_address_starts[idx],
+        )
+        allocation_address_starts_sorted = [
+            allocation_address_starts[idx] for idx in allocation_idxs_sorted_by_address
+        ]
+
+        def lookup_allocation_idx(ptr: int) -> int:
+            sorted_idx = bisect.bisect(allocation_address_starts_sorted, ptr) - 1
+            if sorted_idx == -1:
+                return -1
+            allocation_idx = allocation_idxs_sorted_by_address[sorted_idx]
+            if (
+                ptr
+                < allocation_address_starts[allocation_idx]
+                + allocation_sizes[allocation_idx]
+            ):
+                return allocation_idx
             return -1
 
         input_segment_address_starts = [
@@ -536,22 +761,34 @@ def cudagraphify(
                     )
                 )
                 continue
-            segment_idx = lookup_segment_idx(input_info.data_ptr)
-            if segment_idx == -1:
+            allocation_idx = lookup_allocation_idx(input_info.data_ptr)
+            if allocation_idx == -1:
                 raise RuntimeError(
                     "Non-static CUDA graph input was not allocated in the "
                     f"capture pool {input_info.device}"
                 )
             storage_offset = (
-                input_info.data_ptr - segment_address_starts[segment_idx]
+                input_info.data_ptr - allocation_address_starts[allocation_idx]
             )
             assert storage_offset % input_info.itemsize == 0
-            assert storage_offset + input_info.nbytes <= segment_sizes[segment_idx]
+            if storage_offset + input_info.nbytes > allocation_sizes[allocation_idx]:
+                raise RuntimeError(
+                    "Non-static CUDA graph input spans multiple replay "
+                    "allocations: "
+                    f"input_idx={input_info.input_idx} "
+                    f"data_ptr={input_info.data_ptr} "
+                    f"nbytes={input_info.nbytes} "
+                    f"allocation_idx={allocation_idx} "
+                    f"allocation_start={allocation_address_starts[allocation_idx]} "
+                    f"allocation_size={allocation_sizes[allocation_idx]} "
+                    f"storage_offset={storage_offset}"
+                )
+            segment_idx = allocation_segment_idxs[allocation_idx]
             input_segment_idxs.setdefault(segment_idx, []).append(input_info.input_idx)
             input_slot_specs.append(
                 InputSlotSpec(
                     input_idx=input_info.input_idx,
-                    segment_idx=segment_idx,
+                    segment_idx=allocation_idx,
                     storage_offset=storage_offset // input_info.itemsize,
                     device=input_info.device,
                     dtype=input_info.dtype,
@@ -612,8 +849,8 @@ def cudagraphify(
                 output_specs.append(input_alias_spec)
                 continue
 
-            segment_idx = lookup_segment_idx(static_output.data_ptr())
-            if segment_idx == -1:
+            allocation_idx = lookup_allocation_idx(static_output.data_ptr())
+            if allocation_idx == -1:
                 # In this case, the output must be part of a
                 # non-dynamic input tensor (which we should
                 # verify!). In that situation, the output tensor
@@ -625,19 +862,23 @@ def cudagraphify(
                     nbytes_underlying_storage(static_output),
                 )
             storage_offset = (
-                static_output.data_ptr() - segment_address_starts[segment_idx]
+                static_output.data_ptr() - allocation_address_starts[allocation_idx]
             )
-            assert storage_offset < segment_sizes[segment_idx]
-            assert nbytes_underlying_storage(static_output) <= segment_sizes[segment_idx]
+            assert storage_offset < allocation_sizes[allocation_idx]
+            assert (
+                nbytes_underlying_storage(static_output)
+                <= allocation_sizes[allocation_idx]
+            )
             assert (
                 storage_offset + nbytes_underlying_storage(static_output)
-                <= segment_sizes[segment_idx]
+                <= allocation_sizes[allocation_idx]
             )
             assert storage_offset % static_output.itemsize == 0
+            segment_idx = allocation_segment_idxs[allocation_idx]
             output_segment_idxs.setdefault(segment_idx, []).append(static_output_idx)
             output_specs.append(
                 SegmentOutputSpec(
-                    segment_idx=segment_idx,
+                    segment_idx=allocation_idx,
                     storage_offset=storage_offset // static_output.itemsize,
                     device=static_output.device,
                     dtype=static_output.dtype,
@@ -653,47 +894,59 @@ def cudagraphify(
             (idx for idx in output_segment_idxs if idx not in input_segment_idxs),
             key=lambda idx: tuple(output_segment_idxs[idx]),
         )
-        remaining_segments = sorted(
-            (
-                idx
-                for idx in range(len(segment_sizes))
-                if idx not in input_segment_idxs and idx not in output_segment_idxs
-            ),
-            key=lambda idx: (
-                segment_sizes[idx],
-                tuple(
+        all_replay_segment_idxs = sorted(allocation_idxs_by_segment)
+
+        def segment_order_key(idx: int) -> tuple[int, tuple[Any, ...]]:
+            if idx < len(segment_sizes):
+                size = segment_sizes[idx]
+                block_key = tuple(
                     (
                         block.get("size"),
                         block.get("requested_size", 0),
                         block.get("state"),
                     )
                     for block in memory_snapshot[idx].get("blocks", ())
-                ),
+                )
+                return size, block_key
+            allocation_total = sum(
+                allocation_sizes[allocation_idx]
+                for allocation_idx in allocation_idxs_by_segment[idx]
+            )
+            return allocation_total, ()
+
+        remaining_segments = sorted(
+            (
+                idx
+                for idx in all_replay_segment_idxs
+                if idx not in input_segment_idxs and idx not in output_segment_idxs
             ),
+            key=segment_order_key,
         )
         segment_order = input_segments + output_segments + remaining_segments
-        old_to_new_segment_idx = {
-            old_idx: new_idx for new_idx, old_idx in enumerate(segment_order)
-        }
+        allocation_order = [
+            allocation_idx
+            for segment_idx in segment_order
+            for allocation_idx in allocation_idxs_by_segment[segment_idx]
+        ]
         num_direct_input_allocations = len(direct_input_infos)
         old_to_new_allocation_idx = {
             old_idx: num_direct_input_allocations + new_idx
-            for old_idx, new_idx in old_to_new_segment_idx.items()
+            for new_idx, old_idx in enumerate(allocation_order)
         }
         segment_address_starts = [
             input_info.data_ptr for input_info in direct_input_infos
         ] + [
-            segment_address_starts[idx] for idx in segment_order
+            allocation_address_starts[idx] for idx in allocation_order
         ]
         segment_sizes = [input_info.nbytes for input_info in direct_input_infos] + [
-            segment_sizes[idx] for idx in segment_order
+            allocation_sizes[idx] for idx in allocation_order
         ]
         segment_devices = [input_info.device for input_info in direct_input_infos] + [
-            segment_devices[idx] for idx in segment_order
+            allocation_devices[idx] for idx in allocation_order
         ]
         segment_input_idxs = [
             input_info.input_idx for input_info in direct_input_infos
-        ] + [None for _ in segment_order]
+        ] + [None for _ in allocation_order]
         input_slot_specs = [
             dataclasses.replace(
                 input_slot_spec,

@@ -1833,7 +1833,7 @@ class triton:
     # Allocate parameterized CUDAGraph replay input slots in a separate private
     # pool from stream-capture intermediates/outputs.
     cudagraphs_separate_input_pool = (
-        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_SEPARATE_INPUT_POOL") == "1"
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPHS_SEPARATE_INPUT_POOL", "1") == "1"
     )
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
