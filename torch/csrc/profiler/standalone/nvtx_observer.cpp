@@ -40,7 +40,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
       at::TensorImpl* tensor,
       at::RecordFunctionHandle op_id,
       int output_nr) {
-    producer_tensor_map_[(void*)tensor] =
+    producer_tensor_map_[static_cast<const void*>(tensor)] =
         std::pair<at::RecordFunctionHandle, int>{op_id, output_nr};
   }
 
@@ -50,7 +50,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
   // at::TensorImpl* is the actual type of the key, but using void*
   // to indicate the pointer is just being used as a key
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<void*, std::pair<at::RecordFunctionHandle, int>>
+  std::unordered_map<const void*, std::pair<at::RecordFunctionHandle, int>>
       producer_tensor_map_;
 };
 
@@ -60,8 +60,8 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   if (tensor.defined()) {
     const at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
-      producer_op_pair = producer_tensor_map_[(void*)ten_addr];
+    if (producer_tensor_map_.contains(ten_addr)) {
+      producer_op_pair = producer_tensor_map_[ten_addr];
     }
   }
   return producer_op_pair;
