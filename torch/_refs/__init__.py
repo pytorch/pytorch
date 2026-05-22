@@ -3258,6 +3258,8 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
         raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
+    if a.ndim == 0:
+        return torch.clone(a)
     return prims.rev(a, dims)
 
 

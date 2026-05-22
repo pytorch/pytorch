@@ -18,6 +18,7 @@
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
 #include <ATen/ops/var_mean_native.h>
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -154,42 +155,18 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (N != 0) {
-      dgamma = at::native::empty_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dgamma = at::empty({C});
     } else {
-      dgamma = at::native::zeros_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dgamma = at::zeros({C});
     }
   }
 
   Tensor dbeta;
   if (grad_input_mask[2]) {
     if (N != 0) {
-      dbeta = at::native::empty_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dbeta = at::empty({C});
     } else {
-      dbeta = at::native::zeros_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dbeta = at::zeros({C});
     }
   }
 
@@ -282,42 +259,18 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (dgamma_dbeta_output_defined) {
-      dgamma = at::native::empty_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+        dgamma = at::empty({C});
     } else {
-      dgamma = at::native::zeros_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+        dgamma = at::zeros({C});
     }
   }
 
   Tensor dbeta;
   if (grad_input_mask[2]) {
     if (dgamma_dbeta_output_defined) {
-      dbeta = at::native::empty_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dbeta = at::empty({C});
     } else {
-      dbeta = at::native::zeros_like(
-          gamma,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          at::MemoryFormat::Contiguous);
+      dbeta = at::zeros({C});
     }
   }
 
