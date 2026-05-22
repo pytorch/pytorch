@@ -111,6 +111,24 @@ class CapabilityBasedPartitioner:
         ] = {}  # mapping from partition_id to partition users
         new_partition_id = itertools.count()
 
+        def downstream_partitions(
+            user_nodes: Iterable[Node], source_ids: Iterable[int]
+        ) -> set[int]:
+            source_ids_set = set(source_ids)
+            downstream_partition_ids: set[int] = set()
+            for user_node in user_nodes:
+                for path_node in itertools.chain(
+                    (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                ):
+                    target_id = assignment.get(path_node)
+                    if target_id is None:
+                        continue
+                    downstream_partition_ids.add(target_id)
+                    downstream_partition_ids.update(partition_map[target_id])
+
+            downstream_partition_ids.difference_update(source_ids_set)
+            return downstream_partition_ids
+
         # try to merge partition other_id into partition self_id
         # merge only happens if the end graph doesn't contain cyclic dependency
         # returns `True` when merge happens, `False` otherwise.
@@ -184,19 +202,20 @@ class CapabilityBasedPartitioner:
             partition_users[merge_id] = all_user_nodes
             del partition_users[removed_id]
 
+            partition_map[merge_id].update(
+                downstream_partitions(all_user_nodes, (merge_id, removed_id))
+            )
+            partition_map[merge_id].discard(merge_id)
+            partition_map[merge_id].discard(removed_id)
+
             return merge_id, True
 
         def merge_single_node(
             node: Node, node_order: int | None, id: int | None
         ) -> None:
             def _update_partition_map(node: Node, id: int) -> None:
-                # Iterate through all the users of this node and update the partition map to indicate
-                # that there is a path from the partition id of this node to the target partition id.
-                for user_node in node.users:
-                    target_id = assignment.get(user_node)
-                    if target_id is not None:
-                        partition_map[id].add(target_id)
-                        partition_map[id].update(partition_map[target_id])
+                # Update reachability through both assigned and unsupported users.
+                partition_map[id].update(downstream_partitions(node.users, (id,)))
 
             if node in assignment:
                 partitions_by_id[assignment[node]].remove_node(node)
