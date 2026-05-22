@@ -78,11 +78,13 @@ jobs:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
-    # Pin to the default runner group (us-east-2) where the BuildKit cluster
-    # is deployed; the us-west-1 group has no BuildKit to talk to.
+    # Use the release runner pool: its nodes carry osdc.io/runner-class=release,
+    # which exempts them from the cache-enforcer DaemonSet's iptables block on
+    # outbound ghcr.io traffic so the "Mirror image to GHCR" step can succeed.
+    # The regular mt-l-* pool blocks ghcr.io egress at the host iptables layer.
     runs-on:
-      group: default
-      labels: mt-l-x86iavx512-2-4
+      group: release-runners
+      labels: mt-rel-l-x86iavx512-8-64
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:
@@ -133,13 +135,6 @@ jobs:
           set -ex
           ./build.sh "${{ matrix.docker-image-name }}" -t "${DOCKER_IMAGE}"
 
-      # crane does server-side cross-registry copies via the OCI distribution
-      # API. Picked over `docker buildx imagetools create` so the mirror step
-      # doesn't depend on the remote BuildKit being healthy.
-      - name: Install crane
-        if: github.event_name == 'push' && github.ref_type == 'branch'
-        uses: imjasonh/setup-crane@31b88efe9de28ae0ffa220711af4b60be9435f6e # v0.4
-
       - name: Mirror image to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
         env:
@@ -148,9 +143,12 @@ jobs:
         shell: bash
         run: |
           set -ex
-          DST="${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
-          crane copy "${ECR_DOCKER_IMAGE}" "${DST}"
-          crane tag  "${DST}" "${{ matrix.docker-image-name }}"
+          # `buildx imagetools create` does a server-side cross-registry copy,
+          # so we don't need a local pull/push round-trip.
+          docker buildx imagetools create \
+            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}" \
+            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}" \
+            "${ECR_DOCKER_IMAGE}"
 
       - name: Generate output
         if: contains(matrix.docker-image-name, 'rocm')
