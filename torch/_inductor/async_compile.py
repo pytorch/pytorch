@@ -707,9 +707,53 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def helion(self, kernel_name: str, source_code: str):
+        """
+        Compile Helion kernels.
+
+        Args:
+            kernel_name: Name of the kernel function defined in source_code
+            source_code: Source code of the Helion kernel, as a string
+
+        Note:
+            Helion kernels are Python code that uses Helion's @helion.kernel decorator.
+            We use the PyCodeCache to write the source code to a file and load it.
+            The kernel is compiled via Helion's normal pipeline (bind + compile_config).
+        """
+        from torch._inductor.codegen.helion_backend import HelionKernelWrapper
+
+        kernel_code_log.info("Helion Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find the kernel function in the module
+            # The kernel function name is "_inductor_helion_kernel"
+            kernel_fn_name = "_inductor_helion_kernel"
+            if not hasattr(mod, kernel_fn_name):
+                available = [
+                    name
+                    for name in dir(mod)
+                    if callable(getattr(mod, name)) and not name.startswith("_")
+                ]
+                raise RuntimeError(
+                    f"Could not find Helion kernel function '{kernel_fn_name}'. "
+                    f"Available callables: {available}"
+                )
+
+            kernel_fn = getattr(mod, kernel_fn_name)
+            return HelionKernelWrapper(kernel_fn)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
     def nv_universal_gemm(
         self, kernel_name: str, source_code: str, precompile_metadata=None
-    ):
+    ):        
         """
         Compile NVIDIA Universal GEMM kernels.
 

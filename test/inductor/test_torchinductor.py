@@ -17447,6 +17447,64 @@ if RUN_TPU:
 
     SweepInputsTpuTest.populate()
 
+    def check_model_tpu(
+        self: TestCase,
+        model,
+        example_inputs,
+        kwargs=None,
+        *,
+        atol=None,
+        rtol=None,
+        grad_atol=None,
+        grad_rtol=None,
+        check_lowp=False,
+        exact_dtype=False,
+        nopython=True,
+        copy_to_tpu=True,
+        reference_in_float=False,
+        assert_equal=True,
+        check_gradient=False,
+        check_has_compiled=True,
+        output_process_fn_grad=lambda x: x,
+        exact_stride=False,
+    ):
+        kwargs = kwargs or {}
+        if hasattr(model, "to"):
+            model = model.to(device="tpu")
+
+        if copy_to_tpu:
+            example_inputs = tuple(
+                x.detach().clone().to(device="tpu")
+                if isinstance(x, torch.Tensor)
+                else x
+                for x in example_inputs
+            )
+
+        check_model(
+            self,
+            model,
+            example_inputs,
+            kwargs,
+            atol=atol,
+            rtol=rtol,
+            grad_atol=grad_atol,
+            grad_rtol=grad_rtol,
+            exact_dtype=exact_dtype,
+            nopython=nopython,
+            reference_in_float=reference_in_float,
+            assert_equal=assert_equal,
+            check_gradient=check_gradient,
+            check_has_compiled=check_has_compiled,
+            output_process_fn_grad=output_process_fn_grad,
+            exact_stride=exact_stride,
+        )
+
+    class TpuTests(TestCase):
+        common = check_model_tpu
+        device = "tpu"
+
+    copy_tests(CommonTemplate, TpuTests, "tpu")
+
 if RUN_GPU:
 
     @instantiate_parametrized_tests
