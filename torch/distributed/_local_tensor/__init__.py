@@ -1333,15 +1333,21 @@ class LocalTensorMode(TorchDispatchMode):
             and func.namespace == "device_mesh"
             and func.overloadpacket.__name__ == "_runtime_compute_coordinate_on_dim"
         ):
-            # Schema is "(Tensor full_mesh, int index) -> SymInt" so we accept
-            # both positional and keyword forms by looking up names from the
-            # op's schema. This avoids silently mis-unpacking if a caller
-            # passes either argument as a kwarg.
-            schema_args = func._schema.arguments
-            bound = dict(zip((a.name for a in schema_args), args))
-            bound.update(kwargs)
-            full_mesh = bound["full_mesh"]
-            index = bound["index"]
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized = normalize_function(
+                func,
+                args,
+                kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            if normalized is None:
+                raise AssertionError(
+                    "LocalTensorMode could not normalize arguments for "
+                    "device_mesh::_runtime_compute_coordinate_on_dim"
+                )
+            full_mesh = normalized.kwargs["full_mesh"]
+            index = normalized.kwargs["index"]
             rank_results: dict[int, int] = {}
             for r in self.ranks:
                 mesh_tensor = DeviceMesh._get_mesh_tensor_from_full_mesh(
