@@ -3341,11 +3341,40 @@ def _upsample_nearest_exact_vec(
 
 
 def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # For each dim in output_size, compute the set of input indices used
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
     offset = 0.5 if exact else 0.0
+
+    def nearest_indexing_mode():
+        device_type = input.device.type
+        if device_type == "cuda" and num_spatial_dims == 2:
+            return "same_size"
+
+        if exact:
+            return "scale"
+
+        if device_type == "cpu":
+            if num_spatial_dims == 2:
+                if guard_or_false(output_size[0] + output_size[1] <= 128):
+                    return "nearest_idx"
+                if input.is_contiguous(
+                    memory_format=torch.channels_last
+                ) and guard_or_false(input.shape[1] > 3):
+                    return "nearest_idx"
+            if (
+                num_spatial_dims == 3
+                and input.is_contiguous(memory_format=torch.channels_last_3d)
+                and guard_or_false(input.shape[1] > 3)
+            ):
+                return "nearest_idx"
+
+        return "scale"
+
+    indexing_mode = nearest_indexing_mode()
 
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
@@ -3353,25 +3382,39 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Indices are computed as following:
         # scale = isize / osize
         # Case: exact=False
-        # input_index = floor(output_index * scale)
+        # input_index = floor(output_index * scale), except for nearest_idx's
+        # legacy output_size == input_size and output_size == 2 * input_size
+        # special-cases.
         # Same as OpenCV INTER_NEAREST
         #
-        # Case: exact=False
-        # index_f32 = (output_index + 0.5) * scale - 0.5
-        # input_index = round(index_f32)
+        # Case: exact=True
+        # input_index = floor((output_index + 0.5) * scale)
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
 
-        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
-        scale = (
-            isize / (isize * scales[d])
-            if scales[d] is not None and scales[d] > 0
-            else isize / osize
-        )
+        if indexing_mode in ("nearest_idx", "same_size") and guard_or_false(
+            osize == isize
+        ):
+            input_indices = torch.arange(osize, dtype=torch.int64, device=input.device)
+        elif indexing_mode == "nearest_idx" and guard_or_false(osize == 2 * isize):
+            input_indices = torch.arange(osize, dtype=torch.int64, device=input.device)
+            input_indices = torch.div(input_indices, 2, rounding_mode="floor")
+        else:
+            # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
+            scale = (
+                1.0 / scales[d]
+                if scales[d] is not None and scales[d] > 0
+                else isize / osize
+            )
 
-        output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
-        input_indices = ((output_indices + offset) * scale).to(torch.int64)
+            output_indices = torch.arange(
+                osize, dtype=torch.float32, device=input.device
+            )
+            input_indices = torch.floor((output_indices + offset) * scale).to(
+                torch.int64
+            )
+            input_indices = torch.clamp(input_indices, max=isize - 1)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)

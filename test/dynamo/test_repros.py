@@ -1218,6 +1218,55 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_out = compiled_fn(x)
         self.assertEqual(eager_out, compiled_out)
 
+    # https://github.com/pytorch/pytorch/issues/175154
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_interpolate_nearest_fractional_scale(self, backend: str):
+        cases = (
+            ((1, 1, 1, 2), 1.3),
+            ((1, 1, 2, 2), 2.3),
+            ((1, 1, 5, 5), 1.3),
+        )
+
+        for shape, scale_factor in cases:
+            with self.subTest(shape=shape, scale_factor=scale_factor):
+                x = torch.arange(
+                    torch.tensor(shape).prod().item(), dtype=torch.float64
+                ).reshape(shape)
+
+                def fn(x, scale_factor=scale_factor):
+                    return F.interpolate(x, scale_factor=scale_factor, mode="nearest")
+
+                torch._dynamo.reset()
+                expected = fn(x)
+                actual = torch.compile(fn, backend=backend)(x.clone())
+                self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_interpolate_nearest_exact_same_size(self):
+        def fn(x):
+            return F.interpolate(x, scale_factor=1.3, mode="nearest-exact")
+
+        x = torch.arange(3, device="cuda", dtype=torch.float64).reshape(1, 1, 1, 3)
+        expected = fn(x)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                actual = torch.compile(fn, backend=backend)(x.clone())
+                self.assertEqual(expected, actual)
+
+    def test_inductor_interpolate_nearest_nhwc_like_non_contiguous(self):
+        def fn(x):
+            return F.interpolate(x, scale_factor=1.001, mode="nearest")
+
+        storage = torch.arange(1024, dtype=torch.float64)
+        x = torch.as_strided(storage, (1, 4, 1, 128), (1024, 1, 1024, 8))
+        self.assertEqual(x.stride()[1], 1)
+        self.assertFalse(x.is_contiguous(memory_format=torch.channels_last))
+
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+        self.assertEqual(expected, actual)
+
     # https://github.com/pytorch/pytorch/issues/166626
     def test_inplace_add_from_meta_tensor_factory(self):
         def fn(x):

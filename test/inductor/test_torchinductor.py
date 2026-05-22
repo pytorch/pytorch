@@ -8609,6 +8609,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
+                aten.upsample_nearest2d(a, [37, 38], 1.3, 1.3),
                 aten.upsample_nearest2d(a, [74, 76]),
                 aten.upsample_nearest2d(a, [70, 75]),
                 aten.upsample_nearest2d(a, [45, 74]),
