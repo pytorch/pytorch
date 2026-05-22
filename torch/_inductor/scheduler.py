@@ -3137,6 +3137,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             return False
 
         written_buffer_name = self.node.mutation_outputs[0].name
+
         def _is_other_node_that_references_mutation_buffer(
             other_node: BaseSchedulerNode,
         ):
@@ -3188,9 +3189,6 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
         self.outputs = epilogue.outputs
-        self.introduce_new_store = self.kernel_node.epilogue_requires_new_store(
-            self.epilogue
-        )
 
     @classmethod
     def epilogue_fuse(
@@ -3219,13 +3217,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
 
         ir_node = self.kernel_node.node
         numel = math.prod(ir_node.mutable_args[0].shape)
-        # Epilogue fusion is gated on pointwise operations, thus 1D tiling, with no reduction.
-        tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
 
         # TODO(jjvraw): What do we actually need from features here?
         kernel_features = SIMDKernelFeatures([self.epilogue], numel)
-
-        formal_out_arg_name = next(iter(self.kernel_node.formal_writes)).name
 
         written_buffer_name = ir_node.mutation_outputs[0].name
         extra_reads = [
@@ -3233,22 +3227,31 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             for d in self.fused_epilogue.read_writes.reads
             if d.name != written_buffer_name
         ]
-        additional_args = [(f"_fused_in_ptr{i}", dep.name) for i, dep in enumerate(extra_reads)]
+        additional_args = [
+            (f"_fused_in_ptr{i}", dep.name) for i, dep in enumerate(extra_reads)
+        ]
 
         block_aliases = None
         pid_cache = {}
         if ir_node.output_tile:
-            # TODO(jjvraw): Assert against grid size.
-            _axes = ["XBLOCK", "YBLOCK", "ZBLOCK"]
-            block_aliases = {_axes[i]: name for i, name in enumerate(ir_node.output_tile)}
-            pid_cache = {}
+            k = len(ir_node.output_tile)
+            _all_axes = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+            block_aliases = dict(zip(_all_axes[:k], ir_node.output_tile))
+
+            if k == 1:
+                tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
+            else:
+                output_shape = ir_node.mutable_args[0].shape
+                tiling = SIMDScheduling.create_tiling(
+                    list(output_shape[-k:]), [sympy.S.One]
+                )
+        else:
+            tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
 
         fused_user_kernel = FusedUserTritonKernel(
             tiling,
             kernel_features,
             self,
-            formal_out_arg_name,
-            self.introduce_new_store and ir_node.output_tile is not None,
             additional_args,
             block_aliases=block_aliases,
             pid_cache=pid_cache,

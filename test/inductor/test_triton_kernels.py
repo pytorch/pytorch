@@ -6016,7 +6016,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
-            out = out * c # Non-unary epilogue
+            out = out * c  # Non-unary epilogue
 
             out2 = torch.empty_like(a)
             add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
@@ -6047,7 +6047,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
-            out = out * c # Non-unary epilogue
+            out = out * c  # Non-unary epilogue
 
             out2 = torch.empty_like(a)
             add_kernel[grid](out, a, out2, a.numel(), BLOCK_SIZE=1024)
@@ -6061,6 +6061,85 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
+    @requires_cuda_and_triton
+    def test_wrap_fusion_2d_matmul(self):
+        @triton.jit
+        def naive_matmul_kernel(
+            A,
+            B,
+            C,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+            stride_cm,
+            stride_cn,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            pid_n = tl.program_id(0)
+            pid_m = tl.program_id(1)
+
+            rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+            rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            rk = tl.arange(0, BLOCK_K)
+
+            A_ptr = A + (rm[:, None] * stride_am + rk[None, :] * stride_ak)
+            B_ptr = B + (rk[:, None] * stride_bk + rn[None, :] * stride_bn)
+
+            acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            for _ in range(0, K, BLOCK_K):
+                a = tl.load(A_ptr)
+                b = tl.load(B_ptr)
+                acc += tl.dot(a, b)
+                A_ptr += BLOCK_K * stride_ak
+                B_ptr += BLOCK_K * stride_bk
+
+            C_ptr = C + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
+            mask = (rm[:, None] < M) & (rn[None, :] < N)
+            tl.store(C_ptr, acc, mask=mask)
+
+        def fn(A, B, b):
+            M, K = A.shape
+            K, N = B.shape
+
+            C = torch.empty((M, N), device=A.device, dtype=A.dtype)
+
+            BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
+            grid = (triton.cdiv(N, BLOCK_N), triton.cdiv(M, BLOCK_M))
+
+            torch.library.wrap_triton(
+                naive_matmul_kernel, output_tile=("BLOCK_N", "BLOCK_M")
+            )[grid](
+                A,
+                B,
+                C,
+                M,
+                N,
+                K,
+                A.stride(0),
+                A.stride(1),
+                B.stride(0),
+                B.stride(1),
+                C.stride(0),
+                C.stride(1),
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+
+            return C + b
+
+        A = torch.randn(1024, 512, device="cuda")
+        B = torch.randn(512, 2048, device="cuda")
+        b = torch.randn(2048, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), A, B, b)
+        self.assertEqual(out, fn(A, B, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
 
 if HAS_CUDA_AND_TRITON:

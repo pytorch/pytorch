@@ -7061,7 +7061,7 @@ class FusedUserTritonKernel(TritonKernel):
     """
 
     # TODO(jjvraw): indent buffer should respect the user's indent level.
-    # TODO(jjvraw): alias args for input pointers in case of in-place pointer arithmetic. 
+    # TODO(jjvraw): alias args for input pointers in case of in-place pointer arithmetic.
     #               e.g. out += BLOCK_SIZE.
     # TODO(jjvraw): handle reduction ops.
     def __init__(
@@ -7069,8 +7069,6 @@ class FusedUserTritonKernel(TritonKernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         scheduler_node: FusedUserTritonSchedulerNode,
-        out_arg_name: str,
-        introduce_new_store: bool,
         additional_buf_args: list[tuple[str, str]],
         block_aliases: dict[str, str] | None = None,
         pid_cache: dict[str, str] | None = None,
@@ -7087,8 +7085,6 @@ class FusedUserTritonKernel(TritonKernel):
         )
         self.scheduler_node = scheduler_node
         self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
-        self.out_arg_name = out_arg_name
-        self.introduce_new_store = introduce_new_store
         self.block_aliases = block_aliases
         self.additional_buf_args = {buf: param for param, buf in additional_buf_args}
 
@@ -7101,7 +7097,6 @@ class FusedUserTritonKernel(TritonKernel):
         self.func_def = self.kernel_stores.func_def
 
         self.new_store_cse_var: CSEVariable | None = None
-        self.new_store_buf = IndentedBuffer()
 
     def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
         assert len(self.ir_node.mutable_args) == 1
@@ -7142,12 +7137,7 @@ class FusedUserTritonKernel(TritonKernel):
     ) -> None:
         assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
         if name == self.scheduler_node.fused_epilogue.node.get_name():
-            if self.introduce_new_store:
-                indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
-                line = f"tl.store({self.out_arg_name} + ({indexing.index_str}), {value}, {indexing.mask_str})"
-                self.new_store_buf.writeline(line)
-            else:
-                self.new_store_cse_var = value
+            self.new_store_cse_var = value
         else:
             super().store(name, index, value, mode)
 
@@ -7189,12 +7179,29 @@ class FusedUserTritonKernel(TritonKernel):
         load_lines = [indentations + l for l in self.loads.get_lines_ref()]
         compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
 
-        # TODO(jjvraw): Should we gate on pid_remap as well?
-        if self.introduce_new_store:
+        if self.additional_buf_args:
             self.codegen_new_params()
-            src_lines = ast.unparse(self.kernel_ast).splitlines()
-            store_line_index = self.kernel_stores.stores[0].store_node.lineno - 1
-            store_lines = [indentations + l for l in self.new_store_buf.get_lines_ref()]
+
+        def _replace_arg(call_node, arg_name, positional_index, new_arg):
+            if len(call_node.args) > positional_index:
+                call_node.args[positional_index] = new_arg
+            for keyword in call_node.keywords:
+                if keyword.arg == arg_name:
+                    keyword.value = new_arg
+
+        _replace_arg(
+            self.kernel_stores.stores[0].store_node,
+            "value",
+            1,
+            ast.Name(self.new_store_cse_var.name),
+        )
+        src_with_store_replaced = ast.unparse(self.kernel_ast)
+        src_lines = src_with_store_replaced.splitlines()
+        # Re-parse to get correct line numbers after AST modification + unparse.
+        kernel_stores = identify_triton_stores(src_with_store_replaced)
+        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+
+        if self.block_aliases:
             numel_buf = IndentedBuffer()
             self.codegen_static_numels(numel_buf)
             numel_lines = [indentations + l for l in numel_buf.get_lines_ref()]
@@ -7202,7 +7209,7 @@ class FusedUserTritonKernel(TritonKernel):
             indexing_lines = [
                 indentations + l for l in self.indexing_code.get_lines_ref()
             ]
-            def_line_index = self.func_def.lineno - 1
+            def_line_index = kernel_stores.func_def.lineno - 1
             new_src_lines = (
                 src_lines[: def_line_index + 1]
                 + self.codegen_aliases()
@@ -7212,29 +7219,9 @@ class FusedUserTritonKernel(TritonKernel):
                 + indexing_lines
                 + load_lines
                 + compute_lines
-                + store_lines
-                + src_lines[store_line_index + 1 :]
+                + src_lines[store_line_index:]
             )
         else:
-
-            def _replace_arg(call_node, arg_name, positional_index, new_arg):
-                if len(call_node.args) > positional_index:
-                    call_node.args[positional_index] = new_arg
-                for keyword in call_node.keywords:
-                    if keyword.arg == arg_name:
-                        keyword.value = new_arg
-
-            _replace_arg(
-                self.kernel_stores.stores[0].store_node,
-                "value",
-                1,
-                ast.Name(self.new_store_cse_var.name),
-            )
-            src_with_store_replaced = ast.unparse(self.kernel_ast)
-            src_lines = src_with_store_replaced.splitlines()
-            kernel_stores = identify_triton_stores(src_with_store_replaced)
-            # identify the store again — parse-modify-unparse may shift its line
-            store_line_index = kernel_stores.stores[0].store_node.lineno - 1
             new_src_lines = (
                 src_lines[:store_line_index]
                 + load_lines
