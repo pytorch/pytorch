@@ -4323,6 +4323,111 @@ def forward(self, causal_mask, fill_value):
                 },
             )
 
+    def test_dynamic_dim_min_one_example_input(self):
+        class MLP(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x @ x.T)
+
+        dynamic_shapes = ({0: Dim("batch", min=1, max=32)},)
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                ep = export(
+                    MLP().eval(),
+                    (torch.randn(1, 128),),
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict,
+                )
+
+                self.assertEqual(
+                    tuple(ep.module()(torch.randn(4, 128)).shape),
+                    (4, 4),
+                )
+
+    def test_dynamic_dim_min_one_negative_index(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        dynamic_shapes = {"x": {-1: Dim("last", min=1, max=32)}}
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                ep = export(
+                    Foo(),
+                    (torch.randn(4, 1),),
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict,
+                )
+
+                self.assertEqual(
+                    tuple(ep.module()(torch.randn(4, 3)).shape),
+                    (4, 3),
+                )
+
+    def test_dynamic_dim_negative_index_collision(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        dynamic_shapes = {"x": {1: 4, -1: Dim("last", min=1, max=32)}}
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.UserError,
+                    r"multiple dynamic shape specs.*keys 1 and -1",
+                ):
+                    export(
+                        Foo(),
+                        (torch.randn(4, 1),),
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
+    def test_dynamic_dim_min_one_preserves_dim_dynamic_specialization(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        dynamic_shapes = {
+            "x": {0: Dim("batch", min=1, max=32)},
+            "y": {0: Dim.DYNAMIC},
+        }
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"Dim\.DYNAMIC.*0/1 specialized.*inputs\['y'\]\.shape\[0\]",
+                ):
+                    export(
+                        Foo(),
+                        (torch.randn(1, 4), torch.randn(1, 4)),
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
+    def test_dynamic_dim_min_one_preserves_dim_dynamic_range_conflict(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        dynamic_shapes = {
+            "x": {0: Dim("batch", min=1, max=32)},
+            "y": {0: Dim.DYNAMIC(min=2)},
+        }
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"min/max range of \[2, None\].*"
+                    r"inferred min/max range of \[1, 1\].*"
+                    r"inputs\['y'\]\.shape\[0\]",
+                ):
+                    export(
+                        Foo(),
+                        (torch.randn(1, 4), torch.randn(1, 4)),
+                        dynamic_shapes=dynamic_shapes,
+                        strict=strict,
+                    )
+
     def test_unbacked_slice_forward(self):
         class Foo(torch.nn.Module):
             def forward(self, x, xs):
