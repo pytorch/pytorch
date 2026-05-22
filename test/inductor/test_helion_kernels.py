@@ -2,7 +2,12 @@
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_HELION, requires_helion, requires_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_HELION,
+    requires_helion,
+    requires_triton,
+)
 
 
 if HAS_HELION:
