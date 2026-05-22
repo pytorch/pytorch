@@ -14,6 +14,7 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 
@@ -628,6 +629,10 @@ class DictTest(__TestCase):
                 del d[0]
                 d[0] = 0
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_mutating_lookup(self):
         # changing dict during a lookup (issue #14417)
         class NastyKey:
@@ -894,7 +899,8 @@ class DictTest(__TestCase):
                      'd.pop(x2)',
                      'd.update({x2: 2})']:
             with self.assertRaises(CustomException):
-                exec(stmt, locals())
+                with torch._dynamo.error_on_graph_break(False):
+                    exec(stmt, locals())
 
     def test_resize1(self):
         # Dict resizing bug, found by Jack Jansen in 2.2 CVS development.
@@ -912,6 +918,10 @@ class DictTest(__TestCase):
         for i in range(5, 9):  # i==8 was the problem
             d[i] = i
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_resize2(self):
         # Another dict resizing bug (SF bug #1456209).
         # This caused Segmentation faults or Illegal instructions.
@@ -1343,6 +1353,10 @@ class DictTest(__TestCase):
                 d.popitem()
         self.check_reentrant_insertion(mutate)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_merge_and_mutate(self):
         class X:
             def __hash__(self):
@@ -1364,6 +1378,10 @@ class DictTest(__TestCase):
         support.check_free_after_iterating(self, lambda d: iter(d.values()), dict)
         support.check_free_after_iterating(self, lambda d: iter(d.items()), dict)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_equal_operator_modifying_operand(self):
         # test fix for seg fault reported in bpo-27945 part 3.
         class X():
@@ -1391,6 +1409,10 @@ class DictTest(__TestCase):
         dict_d = {0: set()}
         self.assertTrue(dict_c == dict_d)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_fromkeys_operator_modifying_dict_operand(self):
         # test fix for seg fault reported in issue 27945 part 4a.
         class X(int):
@@ -1409,6 +1431,10 @@ class DictTest(__TestCase):
         except RuntimeError:  # implementation defined
             pass
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_fromkeys_operator_modifying_set_operand(self):
         # test fix for seg fault reported in issue 27945 part 4b.
         class X(int):
@@ -1427,6 +1453,10 @@ class DictTest(__TestCase):
         except RuntimeError:  # implementation defined
             pass
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_dictitems_contains_use_after_free(self):
         class X:
             def __eq__(self, other):
@@ -1436,6 +1466,10 @@ class DictTest(__TestCase):
         d = {0: set()}
         (0, X()) in d.items()
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_dict_contain_use_after_free(self):
         # bpo-40489
         class S(str):
@@ -1449,6 +1483,10 @@ class DictTest(__TestCase):
         d = {S(): 'value'}
         self.assertFalse('test' in d)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_init_use_after_free(self):
         class X:
             def __hash__(self):
@@ -1458,6 +1496,10 @@ class DictTest(__TestCase):
         pair = [X(), 123]
         dict([pair])
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_oob_indexing_dictiter_iternextitem(self):
         class X(int):
             def __del__(self):

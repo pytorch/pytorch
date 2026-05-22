@@ -2057,6 +2057,61 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         self.assertTrue(pg._aborted)
 
+    def test_new_group_delegates_to_pg(self):
+        """dist.new_group delegates to default_pg.new_group if available."""
+
+        new_group_called = False
+        new_group_ranks = None
+
+        class _DelegatingPG(DummyProcessGroup):
+            def new_group(
+                self,
+                ranks,
+                timeout=None,
+                pg_options=None,
+                group_name=None,
+                group_desc=None,
+            ):
+                nonlocal new_group_called, new_group_ranks
+                new_group_called = True
+                new_group_ranks = list(ranks)
+                my_rank = self.rank()
+                if my_rank not in ranks:
+                    return None
+                return DummyProcessGroup(ranks.index(my_rank), len(ranks))
+
+        dist.Backend.register_backend(
+            "delegating",
+            lambda *args, **kwargs: _DelegatingPG(
+                args[0].group_rank, args[0].group_size
+            ),
+            extended_api=True,
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group(
+            "delegating", rank=self.rank, world_size=self.world_size
+        )
+
+        try:
+            sub_pg = dist.new_group(ranks=[0])
+            self.assertTrue(new_group_called)
+            self.assertEqual(new_group_ranks, [0])
+
+            if self.rank == 0:
+                self.assertIsNotNone(sub_pg)
+                self.assertNotEqual(
+                    sub_pg, dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+                )
+            else:
+                self.assertTrue(
+                    sub_pg is None
+                    or sub_pg == dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+                )
+        finally:
+            dist.destroy_process_group()
+
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 

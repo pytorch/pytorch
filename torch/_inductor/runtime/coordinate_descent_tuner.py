@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
-from .hints import TRITON_MAX_BLOCK
+from .hints import (
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
+)
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -240,6 +245,19 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+        if self.is_native_matmul:
+            r0_block = None
+            if "R0_BLOCK" not in config.kwargs:
+                r0_block = self.inductor_meta.get("native_matmul_persistent_rblock")
+                if r0_block is None and self.size_hints is not None:
+                    r0_block_hint = self.size_hints.get("r0_")
+                    if r0_block_hint is not None:
+                        r0_block = native_matmul_persistent_rblock(r0_block_hint)
+            if (
+                native_matmul_block_numel(config.kwargs, r0_block=r0_block)
+                > TRITON_MAX_TENSOR_NUMEL
+            ):
+                return False
         return True
 
     def get_all_tuning_directions(
