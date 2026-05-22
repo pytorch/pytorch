@@ -421,18 +421,10 @@ class DeferredTritonCallWrapper:
             prefix.splice(
                 maybe_hipify_code_wrapper(
                     f"""\
-                {device_ptr_type} {var} = 0;
+                int64_t {var}_numel = {size_expr} * {grid_extent};
                 RAIIAtenTensorHandle {var}_tensor;
-                if ({size_expr} > 0) {{
-                    int64_t {var}_size[] = {{{size_expr} * {grid_extent}}};
-                    int64_t {var}_stride[] = {{1}};
-                    AtenTensorHandle {var}_handle;
-                    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
-                        1, {var}_size, {var}_stride, {dtype_str},
-                        {device_type}, device_idx_, &{var}_handle));
-                    {var}_tensor = RAIIAtenTensorHandle({var}_handle);
-                    {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
-                }}
+                {device_ptr_type} {var} = allocate_scratch_tensor<{device_ptr_type}>(
+                    {var}_numel, {dtype_str}, {device_type}, device_idx_, {var}_tensor);
             """
                 )
             )
