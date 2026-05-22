@@ -145,11 +145,11 @@ class MetalShaderLibrary {
   bool hasFunction(const std::string& fname);
   // Dispatch is probe-then-fallback for non-alpha calls: first try the direct
   // per-(out,in) kernel; if it isn't registered, fall back to the
-  // `_dense_castout_<in>` / `_strided_castout_<in>` variant (which must be
-  // registered for the input dtype via REGISTER_UNARY_OP_CASTOUT). The castout
-  // kernel computes the functor in the input dtype and casts the result to the
-  // user-supplied output dtype on store, matching CPU semantics. Alpha kernels
-  // skip the fallback (no alpha castout variants are registered).
+  // `_dense_castout_<in>` / `_strided_castout_<in>` variant registered for the
+  // input dtype by REGISTER_UNARY_OP. The castout kernel computes the functor
+  // in the input dtype and casts the result to the user-supplied output dtype
+  // on store, matching CPU semantics. Alpha kernels skip the fallback (no
+  // alpha castout variants are registered).
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,

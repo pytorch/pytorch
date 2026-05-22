@@ -15,8 +15,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #endif
 
 // exec_unary_kernel auto-falls back to `_dense_castout_<in>` / `_strided_castout_<in>` when the direct per-(out,in)
-// kernel isn't registered. Ops register castout variants via REGISTER_UNARY_OP_CASTOUT per input dtype (see
-// INSTANTIATE_UNARY_CASTOUT_* in UnaryKernel.metal).
+// kernel isn't registered. Castout variants are registered by REGISTER_UNARY_OP itself, keyed on the input dtype.
 #define REGISTER_UNARY_TI_DISPATCH(NAME)                    \
   static void NAME##_kernel_mps(TensorIteratorBase& iter) { \
     lib.exec_unary_kernel(iter, #NAME);                     \
