@@ -18,6 +18,7 @@ from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config, distributed_autotune
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
@@ -931,7 +932,7 @@ def tuned_scaled_mm_v2(
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
 
     def check_supported_recipe(recipe: list[int]) -> bool:
-        disallowed = {ScalingType.BlockWise1x16, ScalingType.BlockWise1x32}
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
         return all(ScalingType(r) not in disallowed for r in recipe)
 
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
