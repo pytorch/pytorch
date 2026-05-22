@@ -838,6 +838,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        # Class-level __setitem__: looked up on the metaclass.
+        # `cls[k] = v` invokes type(cls).__setitem__(cls, k, v).
+        m = self._maybe_get_baseclass_method("__setitem__")
+        if isinstance(m, types.FunctionType):
+            source = self.source and AttrSource(self.source, "__setitem__")
+            variables.UserMethodVariable(m, self, source_fn=source).call_function(
+                tx, [key, value], {}
+            )
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -2028,6 +2047,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_vt is not None:
             return self._base_vt.sq_inplace_repeat_impl(tx, count)
         return super().sq_inplace_repeat_impl(tx, count)
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        # slot_mp_ass_subscript: routes user-defined __setitem__ via the
+        # mp_ass_subscript slot.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c
+        method, source_fn = self._lookup_slot_type_attr(tx, "__setitem__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        if isinstance(method, types.FunctionType):
+            variables.UserMethodVariable(
+                method, self, source_fn=source_fn, source=self.source
+            ).call_function(tx, [key, value], {})
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
 
     def _vectorcall_maybe(
         self,
@@ -4164,6 +4208,18 @@ class OrderedDictVariable(UserDefinedDictVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L323-L325
         self.call_method(tx, "update", [other], {})
         return self
+
+    def mp_ass_subscript_impl(
+        self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__setitem__")
+        if method in self._base_methods:
+            if self._base_vt is None:
+                raise AssertionError(
+                    "_base_vt must not be None in mp_ass_subscript_impl"
+                )
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        return super().mp_ass_subscript_impl(tx, key, value)
 
     def call_method(
         self,
