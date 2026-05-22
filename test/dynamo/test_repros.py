@@ -1497,6 +1497,69 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             opt_fn(torch.tensor([1]), torch.tensor([0]))
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @unittest.skipUnless(torch._C.has_lapack, "LAPACK not available")
+    def test_linalg_pinv_tensor_tolerances_compile(self, backend):
+        def check(fn, args, expected_shape):
+            expected = fn(*args)
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+            self.assertEqual(expected.shape, expected_shape)
+            self.assertEqual(actual.shape, expected_shape)
+            self.assertEqual(actual, expected)
+
+        def pinv_rcond(x, rcond):
+            return torch.ops.aten.linalg_pinv(x, rcond=rcond, hermitian=False)
+
+        check(
+            pinv_rcond,
+            (
+                torch.randn(8, 3, dtype=torch.float64),
+                torch.tensor([0.1], dtype=torch.float64),
+            ),
+            torch.Size([3, 8]),
+        )
+
+        def pinv_rtol(x, rtol):
+            return torch.linalg.pinv(x, rtol=rtol, hermitian=False)
+
+        check(
+            pinv_rtol,
+            (
+                torch.randn(8, 3, dtype=torch.float64),
+                torch.tensor([0.1], dtype=torch.float64),
+            ),
+            torch.Size([3, 8]),
+        )
+
+        check(
+            pinv_rtol,
+            (
+                torch.randn(8, 3, dtype=torch.float64),
+                torch.full((1,), 0.1, dtype=torch.float64),
+            ),
+            torch.Size([3, 8]),
+        )
+        check(
+            pinv_rtol,
+            (
+                torch.randn(5, 8, 3, dtype=torch.float64),
+                torch.full((1, 1), 0.1, dtype=torch.float64),
+            ),
+            torch.Size([5, 3, 8]),
+        )
+
+        def pinv_hermitian(x, rtol):
+            return torch.linalg.pinv(x, rtol=rtol, hermitian=True)
+
+        check(
+            pinv_hermitian,
+            (
+                torch.randn(4, 4, dtype=torch.float64),
+                torch.tensor([0.1], dtype=torch.float64),
+            ),
+            torch.Size([4, 4]),
+        )
+
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
