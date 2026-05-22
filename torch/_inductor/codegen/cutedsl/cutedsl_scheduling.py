@@ -146,7 +146,7 @@ class CuteDSLScheduling(BaseScheduling):
         else:
             src_code_str = src_code
 
-        precompile_metadata = self._build_precompile_metadata(kernel, ctb)
+        precompile_metadata = self._build_precompile_metadata(kernel, ctb, src_code_str)
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
@@ -158,7 +158,7 @@ class CuteDSLScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
-    def _build_precompile_metadata(self, kernel, ctb):
+    def _build_precompile_metadata(self, kernel, ctb, src_code_str=None):
         """Extract shapes and dtypes from kernel inputs/output for subprocess precompilation.
 
         Returns None if shapes are symbolic (dynamic shapes), in which case the
@@ -197,9 +197,55 @@ class CuteDSLScheduling(BaseScheduling):
         device = ctb.layout.device
         device_index = device.index if device.index is not None else 0
 
-        return {
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
+        metadata: dict[str, object] = {
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
+            "device_capability": device_capability,
         }
+
+        hw_info = self._build_hw_info(src_code_str)
+        if hw_info is not None:
+            metadata["hw_info"] = hw_info
+
+        return metadata
+
+    @staticmethod
+    def _build_hw_info(
+        src_code_str: str | None,
+    ) -> tuple[int, int] | None:
+        """Compute (sm_count, max_active_clusters) in the main process.
+
+        Parses CLUSTER_M/N from the rendered template source and queries
+        HardwareInfo so subprocess workers never touch CUDA driver APIs.
+        Returns None if CUTLASS is unavailable or the template has no cluster config.
+        """
+        if src_code_str is None:
+            return None
+        try:
+            import re
+
+            import cutlass.utils
+
+            m_match = re.search(r"CLUSTER_M\b.*?=\s*(\d+)", src_code_str)
+            n_match = re.search(r"CLUSTER_N\b.*?=\s*(\d+)", src_code_str)
+            if m_match is None or n_match is None:
+                return None
+
+            cluster_product = int(m_match.group(1)) * int(n_match.group(1))
+            hw = cutlass.utils.HardwareInfo()
+            sm_count = hw.get_max_active_clusters(1)
+            max_active_clusters = hw.get_max_active_clusters(cluster_product)
+            return (sm_count, max_active_clusters)
+        except Exception:
+            log.debug(
+                "Could not compute hw_info for CuTe DSL precompile", exc_info=True
+            )
+            return None

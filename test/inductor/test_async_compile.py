@@ -76,7 +76,9 @@ import tempfile
 
 _PRECOMPILE_SENTINEL = os.path.join(tempfile.gettempdir(), "SENTINEL_PLACEHOLDER")
 
-def {{kernel_name}}_precompile(precompile_shapes, precompile_dtypes, device_index=0):
+def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
+                                precompile_dtypes=None, device_index=0,
+                                device_capability=None, hw_info=None):
     with open(_PRECOMPILE_SENTINEL, "w") as f:
         import json
         f.write(json.dumps({"shapes": precompile_shapes, "dtypes": precompile_dtypes}))
@@ -1027,6 +1029,110 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 out = torch.empty(4, 4, device=device, dtype=torch.float32)
                 kernel_wrapper.run(x, y, out)
                 self.assertEqual(out, x + y)
+
+    def test_cutedsl_subprocess_precompile_no_cuda_init(self):
+        """Regression: precompile in subprocess workers must not call torch.cuda.*.
+
+        SubprocPool workers are forked from a sidecar that has already initialized
+        CUDA via caching_device_properties(). Calling torch.cuda.* in the forked
+        worker triggers "Cannot re-initialize CUDA in forked subprocess". The fix
+        passes device_capability in metadata so precompile functions never query
+        the GPU directly. This test exercises the real SubprocPool path with
+        precompile_metadata to verify the fix.
+        """
+        import json
+        import uuid
+
+        sentinel_name = f"cutedsl_precompile_nocuda_{uuid.uuid4().hex[:8]}"
+        sentinel_path = os.path.join(tempfile.gettempdir(), sentinel_name)
+
+        source = textwrap.dedent(f"""\
+            import json
+            import os
+            import torch
+
+            _SENTINEL_PATH = {sentinel_path!r}
+
+            def test_kernel_main(input_a, input_b, output, stream=None):
+                for i in range(input_a.shape[0]):
+                    for j in range(input_a.shape[1]):
+                        output[i, j] = input_a[i, j] + input_b[i, j]
+
+            def test_kernel_precompile(precompile_shapes, precompile_strides,
+                                       precompile_dtypes, device_index=0,
+                                       device_capability=None, hw_info=None):
+                with open(_SENTINEL_PATH, "w") as f:
+                    json.dump({{
+                        "device_index": device_index,
+                        "device_capability": list(device_capability) if device_capability else None,
+                        "shapes": precompile_shapes,
+                        "strides": precompile_strides,
+                        "dtypes": precompile_dtypes,
+                    }}, f)
+        """)
+
+        dev_idx = torch.cuda.current_device()
+        dev_cap = torch.cuda.get_device_capability(dev_idx)
+        metadata = {
+            "precompile_shapes": {
+                "input_a": [4, 4],
+                "input_b": [4, 4],
+                "output": [4, 4],
+            },
+            "precompile_strides": {
+                "input_a": [4, 1],
+                "input_b": [4, 1],
+                "output": [4, 1],
+            },
+            "precompile_dtypes": {
+                "input_a": "float32",
+                "input_b": "float32",
+                "output": "float32",
+            },
+            "device_index": dev_idx,
+            "device_capability": dev_cap,
+        }
+
+        try:
+            shutdown_compile_workers()
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+
+                with fresh_cache():
+                    async_compile = AsyncCompile()
+                    wrapper = async_compile.cutedsl(
+                        "test_kernel", source, precompile_metadata=metadata
+                    )
+                    kernel_wrapper = wrapper.result()
+
+                    device = f"cuda:{dev_idx}"
+                    x = torch.randn(4, 4, device=device, dtype=torch.float32)
+                    y = torch.randn(4, 4, device=device, dtype=torch.float32)
+                    out = torch.empty(4, 4, device=device, dtype=torch.float32)
+                    kernel_wrapper.run(x, y, out)
+                    self.assertEqual(out, x + y)
+
+            self.assertTrue(
+                os.path.exists(sentinel_path),
+                "Subprocess precompile was not invoked -- sentinel file missing. "
+                "Precompile likely crashed (e.g., CUDA re-init in forked worker).",
+            )
+
+            with open(sentinel_path) as f:
+                sentinel_data = json.load(f)
+            self.assertEqual(sentinel_data["device_index"], dev_idx)
+            self.assertIsNotNone(
+                sentinel_data["device_capability"],
+                "device_capability was None -- main process should pass it in metadata",
+            )
+            self.assertEqual(
+                sentinel_data["device_capability"],
+                list(dev_cap),
+            )
+        finally:
+            if os.path.exists(sentinel_path):
+                os.unlink(sentinel_path)
 
     def test_concurrent_disk_cache_set_atomic(self):
         """Verify concurrent disk_cache_set calls to the same key don't corrupt the .o file.
