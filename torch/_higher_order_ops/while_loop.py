@@ -710,6 +710,18 @@ def while_loop_vmap(
     flat_additional, _ = pytree.tree_flatten(unwrapped_additional)
     flat_additional_bdims, _ = pytree.tree_flatten(additional_bdims)
 
+    # The masking strategy below (unsqueeze/expand + torch.where) requires every
+    # carried leaf to be a Tensor. `torch.while_loop` accepts int/SymInt carries
+    # in the non-vmap path, but lifting those to per-batch values has no obvious
+    # semantics, so reject them up front with a clear error.
+    for i, t in enumerate(flat_carried):
+        if not isinstance(t, torch.Tensor):
+            raise NotImplementedError(
+                "vmap over `torch.while_loop` with non-Tensor carried_inputs is "
+                f"not supported. Got {type(t).__name__} at carried position {i}. "
+                "Wrap the value in a 0-dim tensor as a workaround."
+            )
+
     batch_size = interpreter.batch_size()
     randomness = interpreter.randomness()
 
@@ -747,7 +759,7 @@ def while_loop_vmap(
 
         def wrapped_cond_fn(*flat_args):
             n_carried = len(flat_carried)
-            fn, per_elem_bdims = restore_vmap(
+            fn, _ = restore_vmap(
                 lambda *args: (cond_fn(*args[:n_carried], *args[n_carried:]),),
                 all_in_dims,
                 batch_size,
@@ -780,7 +792,7 @@ def while_loop_vmap(
                 randomness,
             )(*flat_args)
 
-            flat_new, new_spec = pytree.tree_flatten(new_carried)
+            flat_new, _ = pytree.tree_flatten(new_carried)
             flat_new_bdims, _ = pytree.tree_flatten(new_bdims)
 
             # Move all new outputs to have batch dim at 0

@@ -8653,6 +8653,27 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertTrue(result[0][0].abs().sum() <= 0.1)
         self.assertTrue(result[0][1].abs().sum() <= 0.1)
 
+    def test_while_loop_in_vmap_int_carry_unsupported(self):
+        # vmap of while_loop with an int/SymInt carry is not supported because
+        # the masking strategy has no obvious semantics for scalar carries. Make
+        # sure we fail with a clear, actionable error rather than crashing in
+        # tensor-only code (e.g. AttributeError on int.unsqueeze).
+        def fn(x):
+            def cond_fn(i, x):
+                return i < 3
+
+            def body_fn(i, x):
+                return (i + 1, x * 2.0)
+
+            return torch.while_loop(cond_fn, body_fn, (0, x))
+
+        x = torch.tensor([[1.0], [2.0], [3.0]])
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "non-Tensor carried_inputs is not supported",
+        ):
+            torch.vmap(fn)(x)
+
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
