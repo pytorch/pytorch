@@ -3125,7 +3125,6 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
             return False
 
-
         # The epilogue require additional index expressions, if the user has provided the
         # dimensions of the "output tile", we may be able to attempt fusion.
         if self.output_tile:
@@ -3165,7 +3164,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         # Any other tensor/s would require additional load expressions.
         written_buffer_name = self.node.mutation_outputs[0].name
         if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-            return True # TODO(jjvraw): This should be True when finished testing.
+            return True  # TODO(jjvraw): This should be True when finished testing.
 
         # The epilogue may depend on expressions which may not available in the user triton kernel
         # (e.g. indexing exprs used not in a load)
@@ -3173,9 +3172,9 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         for symbol in node2_inner_fn_free_symbols:
             usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
             if any(usage != "load" for usage in usages):
-                return True 
+                return True
 
-        return False 
+        return False
 
 
 class FusedUserTritonSchedulerNode(FusedSchedulerNode):
@@ -3193,7 +3192,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
         self.outputs = epilogue.outputs
-        self.introduce_new_store = self.kernel_node.epilogue_requires_new_store(self.fused_epilogue)
+        self.introduce_new_store = self.kernel_node.epilogue_requires_new_store(
+            self.epilogue
+        )
 
     @classmethod
     def epilogue_fuse(
