@@ -139,7 +139,7 @@ class TestLinalg(TestCase):
                 try:
                     caps = torch.accelerator.get_device_capability(other)
                 except Exception:
-                    pass
+                    return None
                 else:
                     if dtype not in caps["supported_dtypes"]:
                         return None
