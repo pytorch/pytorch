@@ -1,11 +1,17 @@
+import builtins
+import contextlib
 import functools
 import inspect
+import os
+import re
+import tempfile
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate
+from typing import Any, cast, Concatenate
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -28,6 +34,141 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+_GPU_BENCHMARK_LOCK_STATE_NAME = "_torchinductor_gpu_benchmark_lock_state"
+
+
+def _gpu_benchmark_process_lock_state() -> dict[str, object]:
+    state = getattr(builtins, _GPU_BENCHMARK_LOCK_STATE_NAME, None)
+    if state is None:
+        state = {
+            "mutex": threading.RLock(),
+            "local": threading.local(),
+        }
+        setattr(builtins, _GPU_BENCHMARK_LOCK_STATE_NAME, state)
+    return state
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _gpu_benchmark_lock_enabled() -> bool:
+    return _env_flag_enabled("INDUCTOR_GPU_BENCH_LOCK") or _env_flag_enabled(
+        "TORCHINDUCTOR_GPU_BENCH_LOCK"
+    )
+
+
+def _safe_lock_component(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()) or "unknown"
+
+
+def _visible_cuda_device_for_lock() -> str:
+    if torch.version.hip:
+        visible_devices_env = (
+            os.environ.get("HIP_VISIBLE_DEVICES")
+            or os.environ.get("ROCR_VISIBLE_DEVICES")
+            or os.environ.get("CUDA_VISIBLE_DEVICES")
+            or ""
+        )
+    else:
+        visible_devices_env = (
+            os.environ.get("CUDA_VISIBLE_DEVICES")
+            or os.environ.get("HIP_VISIBLE_DEVICES")
+            or os.environ.get("ROCR_VISIBLE_DEVICES")
+            or ""
+        )
+    visible_devices = [
+        device.strip()
+        for device in visible_devices_env.split(",")
+        if device.strip()
+    ]
+    try:
+        current_device = torch.cuda.current_device()
+    except Exception:
+        current_device = 0
+
+    if 0 <= current_device < len(visible_devices):
+        return visible_devices[current_device]
+    return str(current_device)
+
+
+@contextlib.contextmanager
+def maybe_gpu_benchmark_lock() -> Iterator[None]:
+    if not _gpu_benchmark_lock_enabled():
+        yield
+        return
+
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+
+    lock_dir = (
+        os.environ.get("INDUCTOR_GPU_BENCH_LOCK_DIR")
+        or os.environ.get("TORCHINDUCTOR_GPU_BENCH_LOCK_DIR")
+        or os.environ.get("COMPILE_UTILS_GPU_LOCK_DIR")
+        or os.path.join(tempfile.gettempdir(), "compile_utils_gpu_locks")
+    )
+    os.makedirs(lock_dir, exist_ok=True)
+    device = _safe_lock_component(_visible_cuda_device_for_lock())
+    lock_path = os.path.join(lock_dir, f"gpu_{device}.lock")
+
+    state = _gpu_benchmark_process_lock_state()
+    mutex = cast(Any, state["mutex"])
+    local = cast(Any, state["local"])
+
+    held_locks = getattr(local, "held_locks", None)
+    if held_locks is None:
+        held_locks = {}
+        local.held_locks = held_locks
+
+    if held_locks.get(lock_path, 0) > 0:
+        held_locks[lock_path] += 1
+        try:
+            yield
+        finally:
+            held_locks[lock_path] -= 1
+        return
+
+    with mutex:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                os.ftruncate(fd, 0)
+                os.write(
+                    fd,
+                    (
+                        f"pid={os.getpid()}\n"
+                        f"gpu={device}\n"
+                        "mode=exclusive\n"
+                        "label=inductor_benchmark\n"
+                        f"acquired_unix={time.time():.0f}\n"
+                    ).encode(),
+                )
+                os.fsync(fd)
+            except OSError:
+                pass
+            held_locks[lock_path] = 1
+            try:
+                yield
+            finally:
+                del held_locks[lock_path]
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+
+def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with maybe_gpu_benchmark_lock():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 # Device-type → benchmarking function registry.
@@ -239,8 +380,14 @@ class Benchmarker:
         warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
         rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
+        cuda_device_ctx = (
+            torch.cuda.device(inferred_device)
+            if inferred_device.type == "cuda" and inferred_device.index is not None
+            else contextlib.nullcontext()
+        )
+
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
-        with DebugMode._benchmarking_inductor():
+        with DebugMode._benchmarking_inductor(), cuda_device_ctx:
             # First, try a registered device-specific benchmarker
             benchmark_fn: Callable[..., Any] | None = _BENCHMARK_DISPATCH.get(
                 inferred_device.type
@@ -295,6 +442,7 @@ class Benchmarker:
         raise NotImplementedError
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu_with_cuda_graph(
         self: Self,
         _callable: Callable[[], Any],
@@ -349,6 +497,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
@@ -431,6 +580,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
@@ -551,6 +701,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
     """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
