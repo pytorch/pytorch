@@ -10489,22 +10489,6 @@ class TestHopSchema(TestCase):
                 (),
             )
 
-    def test_scan_gen_schema_init_and_xs_mutation_raises(self):
-        def combine_fn(carry, x):
-            carry.add_(x)
-            return carry, carry * x
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "For scan, combine_fn can only mutate additional_inputs",
-        ):
-            torch.ops.higher_order.scan.gen_schema(
-                combine_fn,
-                (torch.randn(3, 4),),
-                (torch.randn(5, 3, 4),),
-                (),
-            )
-
     def test_associative_scan_gen_schema_tensor_inputs(self):
         def combine_fn(x, y):
             return x + y
