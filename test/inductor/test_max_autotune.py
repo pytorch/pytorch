@@ -862,11 +862,36 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(100, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN",
-            }
+        extern_bias_shape = None
+        original_bmreq_init = ExternKernelBenchmarkRequest.__init__
+
+        def tracking_bmreq_init(self, *args, **kwargs):
+            nonlocal extern_bias_shape
+            original_bmreq_init(self, *args, **kwargs)
+            extern_bias_shape = tuple(self.input_tensor_meta[0].sizes)
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "test_configs.max_mm_configs": 1,
+                }
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+            mock.patch.object(
+                ExternKernelBenchmarkRequest,
+                "__init__",
+                tracking_bmreq_init,
+            ),
         ):
             Y_compiled, code = run_and_get_code(torch.compile(addmm), x, a, b)
             Y = addmm(x, a, b)
@@ -875,6 +900,8 @@ class TestMaxAutotune(TestCase):
             # Verify addmm is called without reinterpret_tensor on bias
             FileCheck().check("addmm").run(code[0])
             self.assertNotIn("addmm(reinterpret_tensor", code[0])
+
+            self.assertEqual((100,), extern_bias_shape)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -4587,22 +4614,41 @@ class TestPrologueFusion(TestCase):
         x = torch.rand([128, 16], device=GPU_TYPE)
         y = torch.rand([128, 32], device=GPU_TYPE)
 
-        out, code = run_and_get_code(torch.compile(multi_use), x, y)
+        # Mock benchmarks to keep this pending-fusion test focused on scheduler
+        # behavior instead of noisy GPU microbenchmarks.
+        benchmark_patches = (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        )
 
-        FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 2, exactly=True
-        ).run(code[0])
-        self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
+        with contextlib.ExitStack() as stack:
+            for patcher in benchmark_patches:
+                stack.enter_context(patcher)
 
-        def resolve_pending(x):
-            return (x @ x).relu()
+            out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        x = torch.rand([128, 128], device=GPU_TYPE)
-        out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 1, exactly=True
-        ).run(code[0])
-        self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
+            FileCheck().check(get_func_call()).check_count(
+                get_kernel_launch(), 2, exactly=True
+            ).run(code[0])
+            self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
+
+            def resolve_pending(x):
+                return (x @ x).relu()
+
+            x = torch.rand([128, 128], device=GPU_TYPE)
+            out, code = run_and_get_code(torch.compile(resolve_pending), x)
+            FileCheck().check(get_func_call()).check_count(
+                get_kernel_launch(), 1, exactly=True
+            ).run(code[0])
+            self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
     @config.patch(
         {
