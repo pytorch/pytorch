@@ -39,6 +39,51 @@ from typing_extensions import (
 )
 
 
+# In scikit-build-core editable installs (redirect mode with rebuild=true),
+# the meta path finder triggers a cmake rebuild for every import of a
+# wheel-only file (e.g. torch/version.py which is cmake-generated).
+# rebuild() sets SKBUILD_EDITABLE_SKIP only in the subprocess env, so every
+# wheel-file import in the same process starts a fresh cmake cycle (cascade).
+# Also, pytest --capture=sys replaces sys.stderr with a capture object that
+# lacks fileno(), crashing the subprocess.run(stdout=sys.stderr) call.
+# Patch rebuild() to: (1) restore real stderr for the subprocess, and
+# (2) propagate SKBUILD_EDITABLE_SKIP to the current process env so
+# subsequent wheel-file imports skip the rebuild.
+def _patch_skbuild_editable_rebuild() -> None:
+    _MARKER = "SKBUILD_EDITABLE_SKIP"
+    for _finder in sys.meta_path:
+        if type(_finder).__name__ == "ScikitBuildRedirectingFinder" and getattr(
+            _finder, "path", None
+        ):
+            # At this point we know that _finder is the ScikitBuildRedirectingFinder,
+            # but we can't usefully cast, because that type is only injected
+            # for editable installs, hence we ignore the error.
+            # pyrefly: ignore[missing-attribute]
+            _orig = _finder.rebuild
+            _path = _finder.path
+
+            def _rebuild_once(_orig=_orig, _path=_path) -> None:
+                _real_stderr = getattr(sys, "__stderr__", None)
+                _saved_stderr = sys.stderr
+                if _real_stderr is not None:
+                    sys.stderr = _real_stderr
+                try:
+                    _orig()
+                finally:
+                    sys.stderr = _saved_stderr
+                os.environ[_MARKER] = os.pathsep.join(
+                    filter(None, [os.environ.get(_MARKER, ""), _path])
+                )
+
+            # pyrefly: ignore[missing-attribute]
+            _finder.rebuild = _rebuild_once
+            break
+
+
+_patch_skbuild_editable_rebuild()
+del _patch_skbuild_editable_rebuild
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -375,6 +420,26 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
+
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
         # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
@@ -401,6 +466,27 @@ def _load_global_deps() -> None:
         _preload_cuda_deps(err)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
+
+# In scikit-build-core editable installs with redirect mode, C extensions are
+# installed to the dist package directory (site-packages/torch/) rather than
+# the source tree. Extend __path__ to include that directory so that
+# submodule lookups (e.g. torch._C) find the C extension rather than the
+# torch/_C/ stub directory.
+_source_dir = os.path.dirname(os.path.abspath(__file__))
+if not any(
+    os.path.exists(os.path.join(_source_dir, f"_C{_s}"))
+    for _s in importlib.machinery.EXTENSION_SUFFIXES
+):
+    try:
+        from importlib.metadata import distribution as _dist
+
+        _pkg_dir = str(_dist("torch").locate_file("torch"))
+        if _pkg_dir != _source_dir and _pkg_dir not in __path__:
+            __path__.append(_pkg_dir)  # type: ignore[attr-defined]
+        del _pkg_dir
+    except Exception:
+        pass
+del _source_dir
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
     platform.system() != "Windows"
