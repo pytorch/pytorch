@@ -30,10 +30,15 @@ class TestFixRpath(unittest.TestCase):
             txt.write_text("not a library")
 
             with (
-                patch("extract_libtorch_from_wheel.shutil.which", return_value="/usr/local/bin/patchelf"),
+                patch(
+                    "extract_libtorch_from_wheel.shutil.which",
+                    return_value="/usr/local/bin/patchelf",
+                ),
                 patch("extract_libtorch_from_wheel.subprocess.run") as mock_run,
             ):
-                mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=[], returncode=0
+                )
                 fix_rpath(Path(d), "linux")
 
                 mock_run.assert_called_once()
@@ -51,7 +56,10 @@ class TestFixRpath(unittest.TestCase):
             lib.write_bytes(b"fake")
 
             with (
-                patch("extract_libtorch_from_wheel.shutil.which", return_value="/usr/local/bin/patchelf"),
+                patch(
+                    "extract_libtorch_from_wheel.shutil.which",
+                    return_value="/usr/local/bin/patchelf",
+                ),
                 patch("extract_libtorch_from_wheel.subprocess.run") as mock_run,
             ):
                 fix_rpath(Path(d), "linux")
