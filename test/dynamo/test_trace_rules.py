@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import importlib
 import inspect
 import math
 import types
 import unittest
 import warnings
+import weakref
 from typing import Any
 
 import torch
@@ -14,6 +16,7 @@ import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.trace_rules import (
+    FunctionIdSet,
     LEGACY_MOD_INLINELIST,
     load_object,
     lookup_inner,
@@ -308,6 +311,99 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
+    def test_function_id_set_uses_weakrefs(self):
+        ids = FunctionIdSet(dict)
+
+        def fn(x):
+            return x + 1
+
+        fn_id = id(fn)
+        fn_ref = weakref.ref(fn)
+        ids.add(fn)
+        self.assertIn(fn, ids)
+        self.assertIn(fn_id, ids())
+
+        del fn
+        gc.collect()
+
+        self.assertIsNone(fn_ref())
+        self.assertNotIn(fn_id, ids())
+
+    def test_function_id_set_non_weakrefable_fallback(self):
+        class CallableWithoutWeakref:
+            __slots__ = ()
+
+            def __call__(self, x):
+                return x + 1
+
+        fn = CallableWithoutWeakref()
+        ids = FunctionIdSet(dict)
+        fn_id = id(fn)
+
+        with self.assertRaisesRegex(TypeError, "weak reference"):
+            weakref.ref(fn)
+
+        ids.add(fn)
+        self.assertIn(fn, ids)
+        del fn
+        gc.collect()
+
+        for _ in range(1000):
+            other = CallableWithoutWeakref()
+            self.assertNotIn(other, ids)
+            self.assertNotEqual(id(other), fn_id)
+
+        removable = CallableWithoutWeakref()
+        ids.add(removable)
+        self.assertIn(removable, ids)
+        ids.remove(removable)
+        self.assertNotIn(removable, ids)
+
+    def test_function_id_set_uses_identity_not_equality(self):
+        class EqualCallable:
+            def __call__(self, x):
+                return x + 1
+
+            def __eq__(self, other):
+                return isinstance(other, EqualCallable)
+
+        first = EqualCallable()
+        second = EqualCallable()
+        ids = FunctionIdSet(dict)
+
+        ids.add(first)
+        ids.add(second)
+        self.assertIn(first, ids)
+        self.assertIn(second, ids)
+
+        ids.remove(first)
+        self.assertNotIn(first, ids)
+        self.assertIn(second, ids)
+
+    def test_allow_in_graph_unhashable_callable_lookup(self):
+        class UnhashableCallable:
+            def __call__(self, x):
+                return x + 1
+
+            def __eq__(self, other):
+                return isinstance(other, UnhashableCallable)
+
+        fn = UnhashableCallable()
+        self.assertFalse(hashable(fn))
+
+        try:
+            torch._dynamo.allow_in_graph(fn)
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup_callable(fn),
+                TorchInGraphFunctionVariable,
+            )
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup(fn),
+                TorchInGraphFunctionVariable,
+            )
+        finally:
+            torch._dynamo.trace_rules._allowed_callable_ids.remove(fn)
+
     def _check_set_equality(self, generated, used, rule_map, ignored_set):
         x = generated - used
         y = used - generated

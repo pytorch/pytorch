@@ -4,7 +4,6 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 
 import functools
 import inspect
-import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
@@ -196,15 +195,8 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     if not callable(fn):
         raise AssertionError("allow_in_graph expects a callable")
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
-        fn_id = id(fn)
-        trace_rules._disallowed_callable_ids.remove(fn_id)
-        trace_rules._allowed_callable_ids.add(fn_id)
-
-        # Avoid id reuse which creates subtle bugs.
-        def deregister() -> None:
-            trace_rules._allowed_callable_ids.remove(fn_id)
-
-        weakref.finalize(fn, deregister)
+        trace_rules._disallowed_callable_ids.remove(fn)
+        trace_rules._allowed_callable_ids.add(fn)
     return fn
 
 
@@ -297,20 +289,11 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return traceable_fn(*args, **kwargs)
 
-    wrapped_id = id(wrapped)
-
     # This line allows us to reuse much of the `allow_in_graph` impl.
-    trace_rules._allowed_callable_ids.add(wrapped_id)
+    trace_rules._allowed_callable_ids.add(wrapped)
 
     # This line allows us to diverge the impl from `allow_in_graph`.
-    trace_rules._nonstrict_trace_callable_ids.add(wrapped_id)
-
-    # Avoid id reuse which creates subtle bugs.
-    def deregister() -> None:
-        trace_rules._allowed_callable_ids.remove(wrapped_id)
-        trace_rules._nonstrict_trace_callable_ids.remove(wrapped_id)
-
-    weakref.finalize(wrapped, deregister)
+    trace_rules._nonstrict_trace_callable_ids.add(wrapped)
 
     return wrapped
 
@@ -765,15 +748,8 @@ def leaf_function(
     inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
     # Follow nonstrict_trace implementation
-    wrapped_id = id(inner)
-    trace_rules._allowed_callable_ids.add(wrapped_id)
-    trace_rules._leaf_function_ids.add(wrapped_id)
-
-    def deregister() -> None:
-        trace_rules._allowed_callable_ids.remove(wrapped_id)
-        trace_rules._leaf_function_ids.remove(wrapped_id)
-
-    weakref.finalize(inner, deregister)
+    trace_rules._allowed_callable_ids.add(inner)
+    trace_rules._leaf_function_ids.add(inner)
 
     def register_fake_setter(fake_fn: Callable[..., Any]) -> Callable[..., Any]:
         inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
@@ -807,9 +783,9 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
-        trace_rules._allowed_callable_ids.remove(id(fn))
-        trace_rules._nonstrict_trace_callable_ids.remove(id(fn))
-        trace_rules._disallowed_callable_ids.add(id(fn))
+        trace_rules._allowed_callable_ids.remove(fn)
+        trace_rules._nonstrict_trace_callable_ids.remove(fn)
+        trace_rules._disallowed_callable_ids.add(fn)
         return fn
 
     return inner
@@ -1021,7 +997,7 @@ def substitute_in_graph(
                 "already registered in VariableBuilder's id dispatch map"
             )
 
-        if id(original_fn) in _polyfilled_function_ids:
+        if original_fn in _polyfilled_function_ids:
             raise ValueError(f"Duplicate polyfilled object {original_fn}")
 
         rule_map: dict[Any, type[VariableTracker]] = get_torch_obj_rule_map()
@@ -1064,8 +1040,8 @@ def substitute_in_graph(
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
-        _polyfilled_function_ids.add(id(original_fn))
-        _polyfilled_function_ids.add(id(wrapped))
+        _polyfilled_function_ids.add(original_fn)
+        _polyfilled_function_ids.add(wrapped)
         rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
         polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = wrapped  # type: ignore[assignment]
 
