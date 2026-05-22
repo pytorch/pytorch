@@ -5987,7 +5987,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         def fn(a, b):
             out = torch.empty_like(a)
             grid = (triton.cdiv(a.numel(), 1024),)
-            wrap_triton(add_kernel, output_tile={"x": "BLOCK_SIZE"})[grid](
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
             return out + torch.cumsum(torch.ones_like(out), dim=0)
@@ -6013,7 +6013,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         def fn(a, b, c):
             out = torch.empty_like(a)
             grid = (triton.cdiv(a.numel(), 1024),)
-            wrap_triton(add_kernel, output_tile={"x": "BLOCK_SIZE"})[grid](
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
             out = out * c # Non-unary epilogue
@@ -6044,7 +6044,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         def fn(a, b, c):
             out = torch.empty_like(a)
             grid = (triton.cdiv(a.numel(), 1024),)
-            wrap_triton(add_kernel, output_tile={"x": "BLOCK_SIZE"})[grid](
+            wrap_triton(add_kernel, output_tile=("BLOCK_SIZE",))[grid](
                 a, b, out, a.numel(), BLOCK_SIZE=1024
             )
             out = out * c # Non-unary epilogue

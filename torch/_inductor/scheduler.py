@@ -3238,18 +3238,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         block_aliases = None
         pid_cache = {}
         if ir_node.output_tile:
-
-            def _construct_block_aliases(mapping: dict[str, str]):
-                expected_keys = OrderedSet(["x", "y", "z"])
-                block_aliases = {}
-                for prefix, alias in mapping.items():
-                    if prefix not in expected_keys:
-                        raise
-                    block_aliases[f"{prefix.upper()}BLOCK"] = alias
-
-                return block_aliases
-
-            block_aliases = _construct_block_aliases(ir_node.output_tile)
+            # TODO(jjvraw): Assert against grid size.
+            _axes = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+            block_aliases = {_axes[i]: name for i, name in enumerate(ir_node.output_tile)}
             pid_cache = {}
 
         fused_user_kernel = FusedUserTritonKernel(
