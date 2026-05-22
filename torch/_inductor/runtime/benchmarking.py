@@ -65,9 +65,23 @@ def _safe_lock_component(value: str) -> str:
 
 
 def _visible_cuda_device_for_lock() -> str:
+    if torch.version.hip:
+        visible_devices_env = (
+            os.environ.get("HIP_VISIBLE_DEVICES")
+            or os.environ.get("ROCR_VISIBLE_DEVICES")
+            or os.environ.get("CUDA_VISIBLE_DEVICES")
+            or ""
+        )
+    else:
+        visible_devices_env = (
+            os.environ.get("CUDA_VISIBLE_DEVICES")
+            or os.environ.get("HIP_VISIBLE_DEVICES")
+            or os.environ.get("ROCR_VISIBLE_DEVICES")
+            or ""
+        )
     visible_devices = [
         device.strip()
-        for device in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+        for device in visible_devices_env.split(",")
         if device.strip()
     ]
     try:
@@ -106,13 +120,17 @@ def maybe_gpu_benchmark_lock() -> Iterator[None]:
     mutex = cast(Any, state["mutex"])
     local = cast(Any, state["local"])
 
-    depth = getattr(local, "depth", 0)
-    if depth > 0:
-        local.depth = depth + 1
+    held_locks = getattr(local, "held_locks", None)
+    if held_locks is None:
+        held_locks = {}
+        local.held_locks = held_locks
+
+    if held_locks.get(lock_path, 0) > 0:
+        held_locks[lock_path] += 1
         try:
             yield
         finally:
-            local.depth -= 1
+            held_locks[lock_path] -= 1
         return
 
     with mutex:
@@ -134,11 +152,11 @@ def maybe_gpu_benchmark_lock() -> Iterator[None]:
                 os.fsync(fd)
             except OSError:
                 pass
-            local.depth = 1
+            held_locks[lock_path] = 1
             try:
                 yield
             finally:
-                local.depth = 0
+                del held_locks[lock_path]
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -362,8 +380,14 @@ class Benchmarker:
         warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
         rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
+        cuda_device_ctx = (
+            torch.cuda.device(inferred_device)
+            if inferred_device.type == "cuda" and inferred_device.index is not None
+            else contextlib.nullcontext()
+        )
+
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
-        with DebugMode._benchmarking_inductor():
+        with DebugMode._benchmarking_inductor(), cuda_device_ctx:
             # First, try a registered device-specific benchmarker
             benchmark_fn: Callable[..., Any] | None = _BENCHMARK_DISPATCH.get(
                 inferred_device.type
@@ -418,6 +442,7 @@ class Benchmarker:
         raise NotImplementedError
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu_with_cuda_graph(
         self: Self,
         _callable: Callable[[], Any],
