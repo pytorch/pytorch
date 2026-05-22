@@ -739,7 +739,7 @@ class DelayGraphBreakVariable(UnknownVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "" if self.source is None else self.source.name
@@ -774,7 +774,7 @@ class ComptimeVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..comptime import ComptimeContext
@@ -1077,7 +1077,7 @@ class AutogradFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "AutogradFunctionVariable":
         return AutogradFunctionVariable(self.fn_cls)
@@ -1188,7 +1188,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     @staticmethod
     def create(
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker] | None = None,
+        args: list[VariableTracker] | None = None,
         kwargs: dict[str, VariableTracker] | None = None,
     ) -> VariableTracker:
         needs_input_grad = None
@@ -1378,7 +1378,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.fn(*args, **kwargs)
@@ -1465,10 +1465,10 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def mp_subscript_impl(
         self,
@@ -1725,7 +1725,7 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not config.trace_numpy:
@@ -1900,7 +1900,7 @@ class StringFormatVariable(VariableTracker):
     def create(
         cls,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if all(
@@ -1918,7 +1918,7 @@ class StringFormatVariable(VariableTracker):
     def __init__(
         self,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
         **kwargs: Any,
     ) -> None:
@@ -2014,7 +2014,7 @@ class DebuggingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if tx.export:
@@ -2081,7 +2081,7 @@ class IgnoredFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return variables.ConstantVariable.create(None)
@@ -2260,7 +2260,7 @@ class RandomClassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "RandomVariable":
         if len(args) > 1 or kwargs:
@@ -2470,7 +2470,7 @@ class WeakRefVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.referent_vt
