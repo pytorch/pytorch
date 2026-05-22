@@ -4678,6 +4678,87 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_class_dict_python_descriptor_get(self):
+        class Foo:
+            @staticmethod
+            def sm(x):
+                return x + 1
+
+            @classmethod
+            def cm(cls, x):
+                return x + 2
+
+            @property
+            def prop(self):
+                return 7
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            sm = Foo.__dict__["sm"].__get__(None, Foo)
+            cm = Foo.__dict__["cm"].__get__(None, Foo)
+            prop_is_self = (
+                Foo.__dict__["prop"].__get__(None, Foo) is Foo.__dict__["prop"]
+            )
+            return sm(x) + cm(x) + int(prop_is_self)
+
+        x = torch.tensor(5)
+        self.assertEqual(fn(x), torch.tensor(14))
+
+    def test_class_dict_c_descriptor_get_none_returns_descriptor(self):
+        class Slotted:
+            __slots__ = ("x",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            method_is_self = (
+                list.__dict__["append"].__get__(None, list) is list.__dict__["append"]
+            )
+            wrapper_is_self = (
+                list.__dict__["__len__"].__get__(None, list) is list.__dict__["__len__"]
+            )
+            member_is_self = (
+                Slotted.__dict__["x"].__get__(None, Slotted) is Slotted.__dict__["x"]
+            )
+            getset_is_self = (
+                type.__dict__["__dict__"].__get__(None, type)
+                is type.__dict__["__dict__"]
+            )
+            return (
+                x
+                + int(method_is_self)
+                + int(wrapper_is_self)
+                + int(member_is_self)
+                + int(getset_is_self)
+            )
+
+        x = torch.tensor(5)
+        self.assertEqual(fn(x), torch.tensor(9))
+
+    def test_class_dict_classmethod_descriptor_get(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            make = dict.__dict__["fromkeys"].__get__(None, dict)
+            out = make(("a",), x)
+            return out["a"]
+
+        x = torch.tensor(5)
+        self.assertEqual(fn(x), x)
+
+    def test_sourceless_mappingproxy_descriptor_values(self):
+        def fn(x):
+            Point = collections.namedtuple("Point", ["a"])
+            make = Point.__dict__["_make"].__get__(None, Point)
+            p = make([x])
+            field = Point.__dict__["a"].__get__(p, Point)
+            descriptor_is_self = (
+                Point.__dict__["a"].__get__(None, Point) is Point.__dict__["a"]
+            )
+            return field + int(descriptor_is_self)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(5)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
 
