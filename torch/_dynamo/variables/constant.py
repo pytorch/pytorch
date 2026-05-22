@@ -610,7 +610,9 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5574 (long_and)
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
         # bool inherits int's nb_and via slot inheritance.
-        if not isinstance(self.value, (int, frozenset, type)):
+        from .object_protocol import type_implements_nb_and
+
+        if not type_implements_nb_and(type(self.value)):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
@@ -634,7 +636,9 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5587 (long_xor)
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
         # bool inherits int's nb_xor via slot inheritance.
-        if not isinstance(self.value, (int, frozenset)):
+        from .object_protocol import type_implements_nb_xor
+
+        if not type_implements_nb_xor(type(self.value)):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
