@@ -5539,8 +5539,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             expected = torch.nn.functional.kl_div(input, target)
             real_dtypes = (torch.float32, torch.float64, torch.float16)
             for input_dtype, target_dtype in product(real_dtypes, repeat=2):
-                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                    continue
                 input = input.to(input_dtype)
                 target = target.to(target_dtype)
                 result = torch.nn.functional.kl_div(input, target)
@@ -5553,8 +5551,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
             real_dtypes = (torch.float32, torch.float64, torch.float16)
             for input_dtype, target_dtype in product(real_dtypes, repeat=2):
-                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                    continue
                 input = input.to(input_dtype)
                 target = target.to(target_dtype)
                 result = torch.nn.functional.kl_div(input, target, log_target=True)
