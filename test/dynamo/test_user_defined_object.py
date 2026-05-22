@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class SlotsOnly:
@@ -847,6 +848,241 @@ class TestClassSetattr(TestCase):
         self.assertEqual(result, 20)
 
         MyModule.x = 10
+
+
+# ---------------------------------------------------------------------------
+# __setitem__ on user-defined classes / metaclasses
+# ---------------------------------------------------------------------------
+
+
+class _NoSetitem:
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+
+class _ValidatingSetitem:
+    def __init__(self):
+        self.data = {}
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        if not isinstance(key, str):
+            raise TypeError("only string keys allowed")
+        if value < 0:
+            raise ValueError("negative values forbidden")
+        self.data[key] = value
+
+
+class _TransformingSetitem:
+    def __init__(self):
+        self.data = {}
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value * 2
+
+
+class _BaseWithSetitem:
+    def __init__(self):
+        self.data = {}
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+
+class _InheritedSetitem(_BaseWithSetitem):
+    pass
+
+
+class _OverridingSetitem(_BaseWithSetitem):
+    def __setitem__(self, key, value):
+        self.data[key] = value + 100
+
+
+class _SetitemReturnsValue:
+    def __init__(self):
+        self.data = {}
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+        return "ignored"
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+
+class _SetitemUsesArgs:
+    def __init__(self):
+        self.data = {}
+        self.last_key = None
+        self.last_value = None
+        self.call_count = 0
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.last_key = key
+        self.last_value = value
+        self.call_count += 1
+        self.data[key] = value
+
+
+class _SetitemMeta(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+
+class _ClassWithSetitemMeta(metaclass=_SetitemMeta):
+    _store: dict = {}
+
+
+class _SetitemMetaPerClass(type):
+    def __setitem__(cls, key, value):
+        cls.entries[key] = value
+
+    def __getitem__(cls, key):
+        return cls.entries[key]
+
+
+class _PerClassEntries(metaclass=_SetitemMetaPerClass):
+    entries: dict = {}
+
+
+class _SetitemMetaValidating(type):
+    def __setitem__(cls, key, value):
+        if not isinstance(key, str):
+            raise TypeError("class registry expects string keys")
+        cls.registry[key] = value
+
+
+class _ValidatingClass(metaclass=_SetitemMetaValidating):
+    registry: dict = {}
+
+
+class TestUserDefinedSetitem(TestCase):
+    """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV)."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # -- instance __setitem__ --
+
+    @make_dynamo_test
+    def test_validating_ok(self):
+        obj = _ValidatingSetitem()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_validating_raises_type(self):
+        obj = _ValidatingSetitem()
+        with self.assertRaises(TypeError):
+            obj[1] = 5
+
+    @make_dynamo_test
+    def test_validating_raises_value(self):
+        obj = _ValidatingSetitem()
+        with self.assertRaises(ValueError):
+            obj["a"] = -1
+
+    @make_dynamo_test
+    def test_transforming_value(self):
+        obj = _TransformingSetitem()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 10)
+
+    @make_dynamo_test
+    def test_inherited_method(self):
+        obj = _InheritedSetitem()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_overriding_method(self):
+        obj = _OverridingSetitem()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 105)
+
+    @make_dynamo_test
+    def test_return_value_ignored(self):
+        obj = _SetitemReturnsValue()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_side_effects_in_method(self):
+        obj = _SetitemUsesArgs()
+        obj["a"] = 1
+        obj["b"] = 2
+        self.assertEqual(obj.call_count, 2)
+        self.assertEqual(obj.last_key, "b")
+        self.assertEqual(obj.last_value, 2)
+        self.assertEqual(obj["a"], 1)
+        self.assertEqual(obj["b"], 2)
+
+    @make_dynamo_test
+    def test_explicit_method_call(self):
+        obj = _BaseWithSetitem()
+        obj.__setitem__("a", 5)
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_multiple_keys(self):
+        obj = _BaseWithSetitem()
+        for i in range(5):
+            obj[i] = i * 10
+        for i in range(5):
+            self.assertEqual(obj[i], i * 10)
+
+    @make_dynamo_test
+    def test_no_setitem_raises_typeerror(self):
+        obj = _NoSetitem([1, 2, 3])
+        with self.assertRaises(TypeError):
+            obj[0] = 100
+
+    # -- metaclass __setitem__: Cls[k] = v --
+
+    @make_dynamo_test
+    def test_metaclass_basic(self):
+        _ClassWithSetitemMeta["a"] = 1
+        self.assertEqual(_ClassWithSetitemMeta["a"], 1)
+
+    @make_dynamo_test
+    def test_metaclass_multiple(self):
+        _PerClassEntries["x"] = 10
+        _PerClassEntries["y"] = 20
+        self.assertEqual(_PerClassEntries["x"], 10)
+        self.assertEqual(_PerClassEntries["y"], 20)
+
+    @make_dynamo_test
+    def test_metaclass_validating_ok(self):
+        _ValidatingClass["k"] = 99
+        self.assertEqual(_ValidatingClass.registry["k"], 99)
+
+    @make_dynamo_test
+    def test_metaclass_validating_raises(self):
+        with self.assertRaises(TypeError):
+            _ValidatingClass[123] = 99
 
 
 if __name__ == "__main__":
