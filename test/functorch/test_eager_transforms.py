@@ -58,6 +58,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
+    expectedFailureCPU,
+    expectedFailureCUDA,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -1462,8 +1464,26 @@ class TestAutogradFunction(TestCase):
         self.assertEqual(names, ["FooBarGeneratedBackward"])
 
     def test_set_data_does_not_propagate_functorch_keys(self, device):
-        # Regression: Tensor.set_data used to copy FuncTorchGradWrapper onto a
-        # plain destination, triggering an unchecked cast in maybeGetTensorWrapper.
+        # set_data used to copy FuncTorchGradWrapper onto a plain destination,
+        # which then triggered an unchecked TensorWrapper cast. The return is
+        # x*x so functorch does not try to unwrap weight on output.
+        weight = nn.Parameter(torch.randn(8, 8, device=device))
+
+        def f(x):
+            weight.data = x.new_zeros(8, 8) + weight.detach()
+            return (x * x).sum()
+
+        x = torch.randn(8, 8, device=device)
+        grad(f)(x)
+        self.assertFalse(
+            torch._C._dispatch_keys(weight).has(DispatchKey.FuncTorchGradWrapper)
+        )
+
+    @expectedFailureCPU
+    @expectedFailureCUDA
+    def test_set_data_under_grad_raises(self, device):
+        # Used to SIGSEGV before the c10 fix. Now raises a Python error
+        # because the wrapper has no direct storage to copy from.
         weight = nn.Parameter(torch.randn(8, 8, device=device))
 
         def f(x):
@@ -1471,14 +1491,7 @@ class TestAutogradFunction(TestCase):
             return (x * weight).sum()
 
         x = torch.randn(8, 8, device=device)
-        # may raise on backends where the wrapper has no storage
-        try:
-            grad(f)(x)
-        except RuntimeError:
-            pass
-        self.assertFalse(
-            torch._C._dispatch_keys(weight).has(DispatchKey.FuncTorchGradWrapper)
-        )
+        grad(f)(x)
 
 
 @markDynamoStrictTest
