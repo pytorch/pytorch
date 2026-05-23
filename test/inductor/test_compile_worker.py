@@ -6,6 +6,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import unittest
 from threading import Event
 
 import torch._inductor.config as config
@@ -16,7 +17,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -326,6 +327,11 @@ class TestTimer(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @unittest.skipIf(
+        IS_FBCODE,
+        "knobs.nvidia.libdevice_path mismatch in fbcode CI environment; "
+        "matches sibling test_libdevice_path_* disables",
+    )
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""

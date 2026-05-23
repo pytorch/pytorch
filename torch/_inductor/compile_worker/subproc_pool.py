@@ -499,6 +499,8 @@ class SubprocMain:
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
         )
+        # Track before registering the callback. If the future already
+        # completed, add_done_callback invokes callback immediately and removes it.
         with self.pending_futures_lock:
             self.pending_futures.add(future)
         future.add_done_callback(callback)
