@@ -98,7 +98,7 @@ class F64 {
   }
 
  private:
-  double value_;
+  double value_{};
 };
 
 inline void to_json(nlohmann::json& j, const F64& f) {
