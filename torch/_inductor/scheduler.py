@@ -7035,13 +7035,13 @@ class Scheduler:
     ) -> bool:
         reduction_reads = self._memory_reads_by_name(reduction_node)
         pw_reads = self._memory_reads_by_name(pw_node)
-        written_names = {
+        written_names = OrderedSet(
             dep.name
             for dep in itertools.chain(
                 reduction_node.read_writes.writes, pw_node.read_writes.writes
             )
             if isinstance(dep, MemoryDep)
-        }
+        )
 
         for name in (reduction_reads.keys() & pw_reads.keys()) - written_names:
             if any(
