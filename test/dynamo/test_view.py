@@ -123,6 +123,15 @@ class ViewTests(torch._dynamo.test_case.TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_torch_size_from_float_tensor_raises_type_error(self):
+        def test_fn():
+            return torch.Size(torch.ones(3))
+
+        with self.assertRaisesRegex(
+            TypeError, r"torch\.Size\(\) takes an iterable of 'int'"
+        ):
+            torch.compile(test_fn, backend="eager")()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
