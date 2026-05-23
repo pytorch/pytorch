@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
+import sympy
+
 import torch
 from torch.utils._ordered_set import OrderedSet
 
@@ -134,6 +136,9 @@ class InputDescriptor:
     device: torch.device
 
 
+SubgraphInput = InputDescriptor | int | sympy.Basic
+
+
 class TracingOpsHandler(WrapperHandler):
     def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
@@ -155,21 +160,25 @@ class TracingOpsHandler(WrapperHandler):
 
 
 def lower_pointwise_subgraph(
-    subgraph: ir.Subgraph, inputs: list[InputDescriptor]
+    subgraph: ir.Subgraph, inputs: list[SubgraphInput]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(loop_idx: int, input_idx: int) -> ir.Expr | ir.TensorBox | None:
         return ops.placeholder(input_idx)
 
-    graph_inputs = [
-        ir.Pointwise.create(
-            device=desc.device,
-            dtype=desc.dtype,
-            inner_fn=functools.partial(fake_inner_fn, input_idx=i),
-            ranges=[],
-        )
-        for i, desc in enumerate(inputs)
-    ]
+    graph_inputs = []
+    for i, desc in enumerate(inputs):
+        if isinstance(desc, InputDescriptor):
+            graph_inputs.append(
+                ir.Pointwise.create(
+                    device=desc.device,
+                    dtype=desc.dtype,
+                    inner_fn=functools.partial(fake_inner_fn, input_idx=i),
+                    ranges=[],
+                )
+            )
+        else:
+            graph_inputs.append(desc)
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
