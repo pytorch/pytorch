@@ -196,6 +196,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         _remove_profiler_ops
     )
 
+    # Memory-aware CSE: fold identical computations (same op + same inputs)
+    from .inductor_cse import inductor_cse_pass
+
+    GraphTransformObserver(gm, "inductor_cse").apply_graph_pass(inductor_cse_pass)
+
     if config.pattern_matcher:
         lazy_init()
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
