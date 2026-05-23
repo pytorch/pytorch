@@ -544,6 +544,33 @@ class GemmEpilogueFusionTests(TestCase):
         ).check("cute.math.tanh").run("\n".join(codes))
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_epilogue_fast_math_silu_uses_tanh_identity(self):
+        try:
+            import quack  # noqa: F401
+        except ImportError:
+            self.skipTest("QuACK is not available")
+
+        def fn(a, b):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: F.silu(acc),
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
+        FileCheck().check("@cute.jit").check("cute.math.tanh").check(
+            "fastmath=True"
+        ).check_not("cute.math.exp").run("\n".join(codes))
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_epilogue_tuned_kernel_option_codegen(self):
         try:
             import quack  # noqa: F401

@@ -1617,6 +1617,84 @@ def _propagate_quack_grouped_tensorssa_info(
     )
 
 
+def _is_quack_scalar_one(value: Any) -> bool:
+    return isinstance(value, (int, float)) and value == 1
+
+
+def _match_quack_negated_node(value: Any, source: torch.fx.Node) -> bool:
+    if not isinstance(value, torch.fx.Node) or value.op != "call_function":
+        return False
+    if value.target in (torch.ops.aten.neg.default, operator.neg):
+        return value.args[0] is source
+    if value.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        return (
+            (value.args[0] is source and len(value.args) > 1 and value.args[1] == -1)
+            or (value.args[1] is source and value.args[0] == -1)
+        )
+    return False
+
+
+def _match_quack_fast_silu_source(node: torch.fx.Node) -> torch.fx.Node | None:
+    if node.op != "call_function" or node.target not in (
+        torch.ops.aten.div.Tensor,
+        torch.ops.aten.div.Scalar,
+        operator.truediv,
+    ):
+        return None
+    source, denominator = node.args[:2]
+    if not isinstance(source, torch.fx.Node) or not isinstance(denominator, torch.fx.Node):
+        return None
+    if denominator.op != "call_function" or denominator.target not in (
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.add.Scalar,
+        operator.add,
+    ):
+        return None
+    lhs, rhs = denominator.args[:2]
+    exp_node = rhs if _is_quack_scalar_one(lhs) else lhs if _is_quack_scalar_one(rhs) else None
+    if not isinstance(exp_node, torch.fx.Node):
+        return None
+    if exp_node.op != "call_function" or exp_node.target not in (
+        torch.ops.aten.exp.default,
+        torch.exp,
+    ):
+        return None
+    if _match_quack_negated_node(exp_node.args[0], source):
+        return source
+    return None
+
+
+def _is_quack_fast_silu_intermediate(node: torch.fx.Node) -> bool:
+    if node.op != "call_function":
+        return False
+    if node.target in (torch.ops.aten.neg.default, operator.neg):
+        source = node.args[0]
+        return any(
+            exp_user.op == "call_function"
+            and exp_user.target in (torch.ops.aten.exp.default, torch.exp)
+            and _is_quack_fast_silu_intermediate(exp_user)
+            for exp_user in node.users
+        )
+    if node.target in (torch.ops.aten.exp.default, torch.exp):
+        return any(
+            add_user.op == "call_function"
+            and add_user.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
+            and _is_quack_fast_silu_intermediate(add_user)
+            for add_user in node.users
+        )
+    if node.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add):
+        return any(
+            div_user.op == "call_function"
+            and div_user.target
+            in (torch.ops.aten.div.Tensor, torch.ops.aten.div.Scalar, operator.truediv)
+            and len(div_user.args) > 1
+            and div_user.args[1] is node
+            and _match_quack_fast_silu_source(div_user) is not None
+            for div_user in node.users
+        )
+    return False
+
+
 def _emit_quack_fast_unary(
     kernel: _QuackCuteDSLKernel,
     source: Any,
@@ -1736,6 +1814,15 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
+                    if fast_math and _is_quack_fast_silu_intermediate(node):
+                        continue
+                    if fast_math:
+                        silu_source = _match_quack_fast_silu_source(node)
+                        if silu_source is not None:
+                            source = _quack_cute_arg(silu_source, env)
+                            env[node] = _emit_quack_fast_silu(kernel, source)
+                            _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                            continue
                     if fast_math and node.target in (
                         torch.nn.functional.silu,
                         torch.ops.aten.silu.default,
