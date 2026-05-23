@@ -5416,8 +5416,9 @@ def _small_unrolled_max_pool_with_offsets(
         for rindex in rest:
             value = inner_fn(index, rindex)
             offset = ops.index_expr(flatten_index(rindex), torch.int64)
-            best_value, best_offset = combine_fn(
-                (best_value, best_offset), (value, offset)
+            best_value, best_offset = cast(
+                tuple[Any, Any],
+                combine_fn((best_value, best_offset), (value, offset)),
             )
         return best_value, best_offset
 
