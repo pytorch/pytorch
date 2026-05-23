@@ -728,13 +728,6 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             }
             run = lambda lt: all_to_all_single(lt, None, None, group=fake_pg)  # noqa: E731
         elif op_name == "shard_dim_alltoall":
-            # shard_dim_alltoall is reachable with a live ProcessGroup under
-            # compile_on_one_rank=True via DTensor redistribute (see
-            # torch/distributed/tensor/_collective_utils.py: shard_dim_alltoall
-            # forwards funcol._group_or_group_name(group) into the op). Each
-            # rank contributes a (1, ws) row; after gather along dim 0 and
-            # shard along dim 1, rank r should receive the r-th column of the
-            # (ws, ws) gathered matrix as a (ws, 1) shard.
             per_rank = {
                 r: torch.arange(ws, dtype=torch.float32).reshape(1, ws) * 100 + r
                 for r in range(ws)
