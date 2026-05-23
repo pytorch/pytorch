@@ -976,6 +976,12 @@ class TestSingletonInt(TestCase):
         test_eq(j1, j1x2, False)
         test_eq(j1, sympy.Integer(1), False)
         test_eq(j1, sympy.Integer(3), False)
+        self.assertEqual(j1, j1_copy)
+        self.assertNotEqual(j1, j2)
+        self.assertNotEqual(j1, j1x2)
+        self.assertEqual(hash(j1), hash(j1_copy))
+        self.assertNotEqual(hash(j1), hash(j1x2))
+        self.assertEqual(pickle.loads(pickle.dumps(j1x2)), j1x2)
 
         def test_ineq(a, b, expected, *, strict=True):
             greater = (sympy.Gt, is_gt) if strict else (sympy.Ge, is_ge)
