@@ -3620,17 +3620,13 @@ def has_cpp_wrapper_codegen(choice: ChoiceCaller) -> bool:
         extern_choice.cpp_kernel_name is not None
         or isinstance(extern_choice.op_overload, torch._ops.OpOverload)
         or extern_choice.kernel_creator is not None
-        or (
-            extern_choice.use_fallback_kernel
-            and isinstance(extern_choice.op_overload, torch._ops.OpOverload)
-        )
     )
 
 
 def filter_cpp_wrapper_unsupported_choices(
     choices: list[ChoiceCaller],
 ) -> list[ChoiceCaller]:
-    if not getattr(V.graph, "cpp_wrapper", False):
+    if not V.graph.cpp_wrapper:
         return choices
 
     return [c for c in choices if has_cpp_wrapper_codegen(c)]
@@ -4686,8 +4682,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 needed_size = torch._prims_common.compute_required_storage_length(
                     sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.untyped_storage().size()
-
+                current_size = base.untyped_storage().size() // base.element_size()
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
                     if base.dtype == torch.float4_e2m1fn_x2:
