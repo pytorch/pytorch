@@ -9421,6 +9421,10 @@ class TestNNDeviceType(NNTestCase):
             "must be a positive integer"
         ):
             torch.nn.GroupNorm(-1, 4)
+        with self.assertRaisesRegex(ValueError,
+            "must be a positive integer"
+        ):
+            torch.nn.GroupNorm(0, 0)
 
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
