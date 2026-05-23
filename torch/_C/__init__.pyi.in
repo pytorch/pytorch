@@ -1,6 +1,4 @@
 # ${generated_comment}
-# mypy: disable-error-code="type-arg"
-# mypy: allow-untyped-defs
 # ruff: noqa: F401
 
 from collections.abc import Callable, Iterable, Iterator, Sequence
