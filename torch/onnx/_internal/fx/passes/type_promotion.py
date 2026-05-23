@@ -22,7 +22,7 @@ from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _spec
 from torch._refs.nn import functional as _functional_refs
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, type_utils as fx_type_utils
-from torch.utils import _python_dispatch, _pytree
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -1260,23 +1260,6 @@ def get_type_promotion_rule(
     return rule
 
 
-class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
-    """Trace ops that were dispatched.
-
-    Utilize the dispatch mechanism in [`__torch_dispatch__`](https://dev-discuss.pytorch.org/t/what-and-why-is-torch-dispatch/557)
-    to trace op overloads that were dispatched to. This is used to find the compatible
-    op overload for a given op overload packet for different set of args and kwargs.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.traced_ops = []
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        self.traced_ops.append(func)
-        return func(*args, **kwargs)
-
-
 def find_compatible_op_overload(
     op: torch._ops.OpOverloadPacket, args: tuple, kwargs: dict
 ) -> torch._ops.OpOverload:
@@ -1311,22 +1294,27 @@ def find_compatible_op_overload(
         >>> find_compatible_op_overload(packet, args, {})._overloadname
         'Tensor_Tensor'
     """
-    # Utilize the dispatch mechanism to find the compatible op overload.
-    op_trace_dispatch_mode = _OpTraceDispatchMode()
-    with op_trace_dispatch_mode:
-        op(*args, **kwargs)
-    if len(op_trace_dispatch_mode.traced_ops) < 1:
-        raise AssertionError("Expected at least 1 traced op, got 0")
+    exceptions = {}
+    for overload_name in op.overloads():
+        op_overload = getattr(op, overload_name)
+        if not isinstance(op_overload, torch._ops.OpOverload):
+            raise AssertionError(f"Expected OpOverload, got {type(op_overload)}")
+        try:
+            torch._C._check_schema_allow_fake_script_object(
+                op_overload._schema, *args, **kwargs
+            )
+        except RuntimeError as e:
+            exceptions[overload_name] = e
+        else:
+            return op_overload
 
-    new_op_overload = op_trace_dispatch_mode.traced_ops[0]
-    if not isinstance(new_op_overload, torch._ops.OpOverload):
-        raise AssertionError(f"Expected OpOverload, got {type(new_op_overload)}")
-    if new_op_overload.overloadpacket != op:
-        raise AssertionError(
-            f"Expected same OpOverload packet, got {new_op_overload.overloadpacket} != {op}"
-        )
-
-    return new_op_overload
+    error_messages = "\n".join(
+        f"Overload name {name}:\n{exception}" for name, exception in exceptions.items()
+    )
+    raise RuntimeError(
+        f"Cannot find a compatible OpOverload for {op} with the provided "
+        f"arguments. Tried overloads:\n{error_messages}"
+    )
 
 
 class _TypePromotionInterpreter(torch.fx.Interpreter):
