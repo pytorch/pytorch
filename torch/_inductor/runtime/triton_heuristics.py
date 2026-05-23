@@ -2075,12 +2075,11 @@ class CachingAutotuner(KernelInterface):
         args: tuple[Any, ...],
     ) -> None:
         """Raise TypeError with a helpful message when stream is passed positionally."""
-        # Fast path: we've already validated this launcher on a prior call.
-        # Cache the result on self (keyed by launcher id) so we never mutate
-        # the launcher function object and never silently swallow errors.
+        # Fast path: this launcher has already passed validation.
+        # Cache successful validations on self (keyed by launcher id) so we
+        # never mutate the launcher function object.
         if id(launcher) in self._launcher_arg_count_checked:
             return
-        self._launcher_arg_count_checked.add(id(launcher))
 
         # _expected_positional_count is stashed by _gen_launcher_code at
         # code-generation time, so no inspect.signature() call is needed.
@@ -2093,10 +2092,11 @@ class CachingAutotuner(KernelInterface):
         if len(args) > expected:
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             raise TypeError(
-                f"{kernel_name}: too many positional arguments — "
+                f"{kernel_name}: too many positional arguments - "
                 f"expected {expected}, got {len(args)}. "
                 "'stream' must be passed as a keyword argument."
             )
+        self._launcher_arg_count_checked.add(id(launcher))
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
@@ -2167,6 +2167,7 @@ class CachingAutotuner(KernelInterface):
                 "cache_hash",
                 "store_cubin",
                 "_is_static",
+                "_expected_positional_count",
             ):
                 val = getattr(launcher, attr, None)
                 if val is not None:

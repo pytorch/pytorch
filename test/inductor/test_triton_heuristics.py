@@ -25,6 +25,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     requires_gpu_with_enough_memory,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -1275,7 +1276,7 @@ class TestCheckLauncherCallArgs(TestCase):
         """No exception when args exactly matches _expected_positional_count."""
         autotuner = self._make_autotuner()
         launcher = self._make_launcher(n_positional=3)
-        # Pass exactly 3 positional args — should be a no-op.
+        # Pass exactly 3 positional args - should be a no-op.
         autotuner._check_launcher_call_args(launcher, (1, 2, 3))
 
     def test_too_many_args_raises_type_error(self):
@@ -1306,15 +1307,16 @@ class TestCheckLauncherCallArgs(TestCase):
         autotuner = self._make_autotuner()
         launcher = self._make_launcher(n_positional=3)
 
-        # First call: too many args → raises.
+        # First call: too many args raises.
         with self.assertRaises(TypeError):
             autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
 
-        # Second call with the same launcher: already in checked set → no raise.
-        autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+        # Failed validations are not cached, so the improved error is stable.
+        with self.assertRaises(TypeError):
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
 
     def test_launcher_without_expected_count_is_skipped(self):
-        """Launchers not produced by _gen_launcher_code lack the attribute; skip gracefully."""
+        """Launchers without the generated metadata are skipped gracefully."""
 
         def raw_launcher(*args, stream=None):
             pass
@@ -1335,7 +1337,7 @@ class TestCheckLauncherCallArgs(TestCase):
 
         # After restore_after_unpickle the set must be empty.
         autotuner.restore_after_unpickle(None)
-        self.assertEqual(autotuner._launcher_arg_count_checked, set())
+        self.assertEqual(autotuner._launcher_arg_count_checked, OrderedSet())
 
 
 if __name__ == "__main__":
