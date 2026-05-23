@@ -1863,6 +1863,30 @@ command = [
 ]
 
 [[linter]]
+code = 'SYMPY_MINMAX'
+include_patterns = [
+    'torch/_inductor/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=sympy\.(Min|Max)',
+    '--line-allowlist-pattern=isinstance|\.has\(|@allow-raw-sympy-minmax',
+    '--linter-name=SYMPY_MINMAX',
+    '--error-name=raw sympy.Min/Max in Inductor',
+    """--error-description=\
+        Use torch.utils._sympy.functions.Min/Max instead of \
+        sympy.Min/Max in Inductor. The builtin sympy.Min/Max \
+        trigger expensive is-connected simplification. \
+        isinstance/has checks on sympy.Min/Max are allowed. \
+        If you have a legitimate need for the raw sympy version, \
+        add @allow-raw-sympy-minmax to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'GENERATED_SHIMS_VERSION'
 include_patterns = [
     'torchgen/aoti/fallback_ops.py',
