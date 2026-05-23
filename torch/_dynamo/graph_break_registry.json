@@ -499,6 +499,16 @@
       "Context": "context",
       "Explanation": "Higher order ops do not support aliasing. Found in {name}",
       "Hints": [
+        "Return a clone when outputs are views of inputs or alias other outputs.",
+        "Consider using the debug context to change user code to avoid aliasing.",
+        "Please open an issue."
+      ]
+    },
+    {
+      "Gb_type": "Encountered aliasing during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support aliasing. Found in {name}",
+      "Hints": [
         "Replace `return input` with `return input.clone()` to avoid aliasing.",
         "Consider using the debug context to change user code to avoid aliasing.",
         "Please open an issue."

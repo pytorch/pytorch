@@ -822,6 +822,7 @@ def _call_while_loop(
         set_subgraph_inputs="flatten_manual",
         supports_input_mutation=self.supports_input_mutation,
         supports_aliasing=self.supports_aliasing,
+        allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         remove_consts_from_outputs=False,
     )
     cond_nn_modules = dict(tx.output.nn_modules)
@@ -872,6 +873,7 @@ def _call_while_loop(
         should_flatten_outputs=True,
         supports_input_mutation=self.supports_input_mutation,
         supports_aliasing=self.supports_aliasing,
+        allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
@@ -1431,6 +1433,7 @@ def check_aliasing_and_input_mutation(
     supports_input_mutation: bool,
     supports_aliasing: bool,
     source_target: Optional["HigherOrderOperator"],
+    allow_input_output_alias_to_inputs: bool = False,
 ) -> None:
     name = source_target.name if source_target else "<UNKNOWN>"
     if not supports_input_mutation:
@@ -1448,7 +1451,9 @@ def check_aliasing_and_input_mutation(
             )
 
     if not supports_aliasing:
-        aliasing_info = subtracer.has_aliasing()
+        aliasing_info = subtracer.has_aliasing(
+            allow_input_output_alias_to_inputs=allow_input_output_alias_to_inputs
+        )
         if aliasing_info.has_aliasing:
             context = f"{aliasing_info.msg} in\n {graph}"
             unimplemented(
@@ -1456,7 +1461,7 @@ def check_aliasing_and_input_mutation(
                 context=context,
                 explanation=f"Higher order ops do not support aliasing. Found in {name}",
                 hints=[
-                    "Replace `return input` with `return input.clone()` to avoid aliasing.",
+                    "Return a clone when outputs are views of inputs or alias other outputs.",
                     "Consider using the debug context to change user code to avoid aliasing.",
                     "Please open an issue.",
                 ],
@@ -1673,6 +1678,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
+    allow_input_output_alias_to_inputs: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -1939,6 +1945,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 supports_input_mutation,
                 supports_aliasing,
                 source_target,
+                allow_input_output_alias_to_inputs,
             )
             # Return both the output VT and the graph output VTs separately:
             # - `output`: The VT that Dynamo continues tracing with (may be
@@ -2008,6 +2015,7 @@ def speculate_subgraph(
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
+    allow_input_output_alias_to_inputs: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -2147,6 +2155,7 @@ def speculate_subgraph(
                     supports_input_mutation,
                     supports_aliasing,
                     source_target,
+                    allow_input_output_alias_to_inputs,
                 )
                 mutation_info = subtracer.has_input_mutation()
                 graph._dynamo_mutated_input_indices = (  # pyrefly: ignore[missing-attribute]
@@ -2352,6 +2361,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2483,6 +2493,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 remove_consts_from_outputs=False,
                 supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=self.supports_aliasing,
+                allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
             )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
@@ -2663,6 +2674,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2683,6 +2695,7 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2945,6 +2958,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -3099,6 +3113,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         )
 
         # Ensure that the output of scan is a flattened list of elements,

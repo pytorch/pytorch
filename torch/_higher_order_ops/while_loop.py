@@ -197,7 +197,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn must not mutate python variables (e.g. list/dict) created outside of the body_fn.
 
-        - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
+        - body_fn and cond_fn outputs may return input tensors unchanged, but
+          otherwise cannot alias any inputs or other outputs. A clone is
+          required when returning a view of an input.
 
         - During inference, body_fn and cond_fn can in-place mutate tensors that are not
           carried_inputs, such as module buffers and captured tensors from the enclosing scope.
@@ -650,7 +652,13 @@ def while_loop_func(
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
+            _check_alias_and_mutation(
+                fn,
+                unwrapped_inputs,
+                fn_name,
+                pre_dispatch,
+                allow_input_output_alias_to_inputs=True,
+            )
         op_kwargs = {}
         if not stack_output and mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices

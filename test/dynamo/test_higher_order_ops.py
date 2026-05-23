@@ -26,6 +26,8 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.scan import scan
+from torch._higher_order_ops.while_loop import while_loop
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -137,6 +139,12 @@ def default_args_generator(seed_value):
 
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    def _check_passthrough_compile(self, fn, args):
+        expected = fn(*args)
+        for backend in ("eager", "aot_eager"):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            self.assertEqual(compiled_fn(*args), expected)
+
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -212,6 +220,64 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             "HOP: Unsafe side effect",
         ):
             f(x)
+
+    def test_cond_input_passthrough(self):
+        def true_fn(x, y):
+            return x, y + 1
+
+        def false_fn(x, y):
+            return x + 1, y
+
+        def f(pred, x, y):
+            return torch.cond(pred, true_fn, false_fn, [x, y])
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        for pred in (torch.tensor(True), torch.tensor(False)):
+            self._check_passthrough_compile(f, (pred, x, y))
+
+    def test_while_loop_input_passthrough(self):
+        def f(x):
+            i = torch.tensor(0)
+
+            def cond_fn(i, x):
+                return i < 3
+
+            def body_fn(i, x):
+                return i + 1, x
+
+            return while_loop(cond_fn, body_fn, (i, x))[1]
+
+        self._check_passthrough_compile(f, (torch.randn(4),))
+
+    def test_scan_carry_passthrough(self):
+        def combine(carry, x):
+            return carry, x + carry
+
+        def f(init, xs):
+            return scan(combine, init, xs)
+
+        init = torch.randn(2)
+        xs = torch.randn(3, 2)
+        self._check_passthrough_compile(f, (init, xs))
+
+    def test_view_alias_still_errors(self):
+        def true_fn(x):
+            return x.view_as(x)
+
+        def false_fn(x):
+            return x + 1
+
+        def f(pred, x):
+            return torch.cond(pred, true_fn, false_fn, [x])
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                torch.tensor(True), torch.randn(4)
+            )
 
     def test_no_freevars(self):
         def f(x):

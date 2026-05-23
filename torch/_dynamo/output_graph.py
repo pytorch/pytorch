@@ -4610,7 +4610,9 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "", ())
 
-    def has_aliasing(self) -> AliasingInfo:
+    def has_aliasing(
+        self, *, allow_input_output_alias_to_inputs: bool = False
+    ) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
@@ -4645,6 +4647,12 @@ class SubgraphTracer(fx.Tracer):
                         output_storages[storage] = out_node
 
         intersected_storages = input_storages.keys() & output_storages.keys()
+        if allow_input_output_alias_to_inputs:
+            intersected_storages = {
+                s
+                for s in intersected_storages
+                if input_storages[s] is not output_storages[s]
+            }
         if len(intersected_storages) > 0:
             # input-output aliasing
             aliased = [
