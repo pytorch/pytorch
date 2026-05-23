@@ -603,12 +603,18 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 #   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
+        self,
+        arg: Callable[[], torch.Tensor],
+        /,
+        *,
+        device: torch.device | str,
+        layout: torch.layout | None = None,
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: torch.device | str
+    layout: torch.layout | None
 
 
 # A callback where the device may not be provided (is optional).
@@ -948,6 +954,7 @@ class MetaConverter(Generic[_TensorT]):
         cls,
         t: Callable[[], torch.Tensor],
         device: torch.device | str | None = None,
+        layout: torch.layout | None = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -1611,7 +1618,8 @@ class MetaConverter(Generic[_TensorT]):
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
-                        )
+                        ),
+                        layout=t.layout,
                     )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():

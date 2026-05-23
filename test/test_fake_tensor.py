@@ -155,8 +155,10 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode() as mode:
             fake_mkldnn = mode.from_tensor(mkldnn)
             self.assertTrue(fake_mkldnn.is_mkldnn)
+            self.assertEqual(fake_mkldnn.layout, torch.__dict__["_mkldnn"])
             dense = aten._to_dense.default(fake_mkldnn)
             self.assertFalse(dense.is_mkldnn)
+            self.assertEqual(dense.layout, torch.strided)
 
             fake_strided = mode.from_tensor(strided)
             self.assertFalse(fake_strided.is_mkldnn)
@@ -1575,6 +1577,14 @@ for t in threads:
             self.assertEqual(fake_unique.dtype, real_unique.dtype)
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
+
+    def test_select_out_of_bounds(self):
+        with FakeTensorMode():
+            x = torch.randn(3, 4)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=10)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=-10)
 
 
 instantiate_parametrized_tests(FakeTensorTest)

@@ -318,8 +318,6 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if value.is_mkldnn:
-            props["layout"] = _MKLDNN_LAYOUT
         try:
             props["has_grad_fn"] = value.grad_fn is not None
         except Exception:
@@ -749,7 +747,7 @@ class TensorVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return map_fn.call_function(tx, [self, *rest], {})
@@ -809,7 +807,7 @@ class TensorVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
@@ -971,8 +969,26 @@ class TensorVariable(VariableTracker):
         # after wrap_fx_proxy (which runs get_fake_value internally).
         # We only synchronize when there's a tensor argument, since that's when
         # metadata propagation is relevant.
+
+        # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
+        # and reasoning.
+        from .torch import methods_consuming_unbacked_scalars
+
+        ctx = (
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+            if tx.fake_mode
+            and tx.fake_mode.shape_env
+            and name in methods_consuming_unbacked_scalars
+            and any(
+                isinstance(v, TensorVariable) and v.ndim == 0
+                for v in chain(args, kwargs.values())
+            )
+            else nullcontext
+        )
+
         version_before = self._get_fake_version()
-        result = wrap_fx_proxy(tx, proxy)
+        with ctx():
+            result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(
             tx, version_before, any(arg.is_tensor() for arg in args)
         )
@@ -1645,6 +1661,25 @@ class TensorVariable(VariableTracker):
     def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_positive_impl(tx)
 
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.abs,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___abs__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_absolute_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2155,7 +2190,7 @@ class TensorVariable(VariableTracker):
                 for a in args
             )
         ):
-            return self.call_method(tx, "new_empty", args, kwargs)
+            return self.call_method(tx, "new_empty", list(args), kwargs)
         return None
 
     def method_new_tensor(
@@ -2214,6 +2249,40 @@ class TensorVariable(VariableTracker):
         # Tensor dominates: any of Tensor+Tensor, Tensor+SymNode, Tensor+scalar
         # produces a Tensor.
         return wrap_fx_proxy(tx=tx, proxy=proxy)
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
 
     def nb_or_impl(
         self,
@@ -2385,7 +2454,7 @@ class SymNodeVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -2398,6 +2467,20 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymInt / SymBool define __index__ as `self.node.int_()`, which
+        # specializes the symbolic value to a concrete int (with guard).
+        # SymFloat has no __index__.
+        # ref: torch/__init__.py SymInt.__index__ / SymBool.__index__
+
+        pytype = self.python_type()
+        if pytype in (int, bool):
+            return variables.ConstantVariable.create(self.evaluate_expr())
+        return super().nb_index_impl(tx)
 
     def nb_int_impl(
         self,
@@ -2417,18 +2500,6 @@ class SymNodeVariable(VariableTracker):
                 {},
             ),
         )
-
-    def nb_index_impl(
-        self,
-        tx: "InstructionTranslator",
-    ) -> VariableTracker:
-        # SymInt.__index__ / SymBool.__index__ specialize to a concrete int.
-        if not issubclass(self.python_type(), int):
-            raise AssertionError(
-                f"nb_index_impl called on SymNode with python_type {self.python_type()}; "
-                "SymFloat has no nb_index slot and shouldn't reach here."
-            )
-        return variables.ConstantVariable.create(self.evaluate_expr())
 
     def method___int__(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
@@ -2465,6 +2536,40 @@ class SymNodeVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_lshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        args = [other, self] if reverse else [self, other]
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
             ),
             sym_num=None,
         )
@@ -2558,6 +2663,21 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_positive_impl(tx)
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___abs__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_absolute_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True
@@ -2677,8 +2797,8 @@ class NumpyNdarrayVariable(TensorVariable):
 
     @staticmethod
     def patch_args(
-        name: str, args: Sequence[VariableTracker], kwargs: dict[str, VariableTracker]
-    ) -> tuple[Sequence[VariableTracker], dict[str, VariableTracker]]:
+        name: str, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> tuple[list[VariableTracker], dict[str, VariableTracker]]:
         if name == "clip":
             kwargs_rename = {"a_min": "min", "a_max": "max"}
             kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
@@ -2688,7 +2808,7 @@ class NumpyNdarrayVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..exc import unimplemented
@@ -2806,7 +2926,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Handle `Subclass(existing_tensor, ...)` calls.

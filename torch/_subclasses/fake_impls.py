@@ -34,7 +34,6 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     run_fallback_kernel,
-    set_fake_mkldnn,
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import _normalize_function_or_error
@@ -535,6 +534,13 @@ def meta_select(
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
@@ -1572,8 +1578,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(
@@ -1917,9 +1923,9 @@ def fast_detach(
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     real_tensor = x.real_tensor if include_real else None
-    result = FakeTensor(fake_mode, out, x.device, real_tensor=real_tensor)
-    set_fake_mkldnn(result, x.is_mkldnn)
-    return result
+    return FakeTensor(
+        fake_mode, out, x.device, real_tensor=real_tensor, layout=x.layout
+    )
 
 
 @functools.cache
