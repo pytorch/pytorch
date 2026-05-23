@@ -5638,6 +5638,190 @@ def scaled_dot_product_flash_attention_for_cpu(
     return output, attn
 
 
+def _scaled_dot_product_flash_attention_for_cpu_scores(
+    query: Tensor,
+    key: Tensor,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> Tensor:
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    scores = torch.matmul(query_acc, key_acc.transpose(-2, -1)) * scale_factor
+
+    if is_causal:
+        torch._check(
+            attn_mask is None,
+            lambda: "Explicit attn_mask should not be set when is_causal=True",
+        )
+        causal_mask = torch.ones(
+            (query.size(-2), key.size(-2)), dtype=torch.bool, device=query.device
+        ).tril()
+        scores = torch.where(
+            causal_mask, scores, torch.full_like(scores, float("-inf"))
+        )
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            scores = torch.where(
+                attn_mask, scores, torch.full_like(scores, float("-inf"))
+            )
+        else:
+            scores = scores + attn_mask
+
+    return scores
+
+
+def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
+    query: Tensor, attn_mask: Tensor | None
+) -> None:
+    if attn_mask is None:
+        return
+
+    torch._check(
+        not (attn_mask.requires_grad and torch.is_grad_enabled()),
+        lambda: "The function '_scaled_dot_product_flash_attention_for_cpu' is not differentiable with respect to argument 'attn_mask'. This input cannot have requires_grad True.",
+    )
+    torch._check(
+        attn_mask.dtype == torch.float32 or attn_mask.dtype == query.dtype,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query",
+    )
+    torch._check(
+        attn_mask.dim() == 2 or attn_mask.dim() == 4,
+        lambda: "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}",
+    )
+
+
+def _requires_grad(*args, **kwargs) -> bool:
+    flat_args, _ = pytree.tree_flatten((args, kwargs))
+    return any(isinstance(arg, Tensor) and arg.requires_grad for arg in flat_args)
+
+
+def _cpu_flash_attention_backward_layout(grad: Tensor) -> Tensor:
+    return grad.transpose(1, 2).contiguous().transpose(1, 2)
+
+
+def _collapse_grouped_query_attention_grad(
+    grad: Tensor, num_key_value_heads: int
+) -> Tensor:
+    if grad.size(1) == num_key_value_heads:
+        return grad
+    return grad.unflatten(
+        1, (num_key_value_heads, grad.size(1) // num_key_value_heads)
+    ).sum(2)
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_math(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Tensor | None,
+    scale: float | None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        dropout_p == 0.0,
+        lambda: "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0",
+    )
+    _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
+
+    num_key_value_heads = key.size(1)
+    if query.size(1) != key.size(1):
+        key = key.repeat_interleave(query.size(1) // key.size(1), dim=1)
+        value = value.repeat_interleave(query.size(1) // value.size(1), dim=1)
+
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    value_acc = value.to(computation_dtype)
+    grad_out_acc = grad_out.to(computation_dtype)
+
+    scores = _scaled_dot_product_flash_attention_for_cpu_scores(
+        query_acc,
+        key_acc,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+    masked_rows = torch.all(scores == float("-inf"), dim=-1, keepdim=True)
+    safe_scores = torch.where(masked_rows, torch.zeros_like(scores), scores)
+    attn = torch.softmax(safe_scores, dim=-1)
+    attn = torch.where(masked_rows, torch.zeros_like(attn), attn)
+
+    grad_value = torch.matmul(attn.transpose(-2, -1), grad_out_acc)
+    grad_attn = torch.matmul(grad_out_acc, value_acc.transpose(-2, -1))
+    grad_scores = attn * (grad_attn - torch.sum(grad_attn * attn, dim=-1, keepdim=True))
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    grad_query = torch.matmul(grad_scores, key_acc) * scale_factor
+    grad_key = torch.matmul(grad_scores.transpose(-2, -1), query_acc) * scale_factor
+
+    grad_key = _collapse_grouped_query_attention_grad(grad_key, num_key_value_heads)
+    grad_value = _collapse_grouped_query_attention_grad(grad_value, num_key_value_heads)
+    return (
+        _cpu_flash_attention_backward_layout(grad_query).to(query.dtype),
+        _cpu_flash_attention_backward_layout(grad_key).to(key.dtype),
+        _cpu_flash_attention_backward_layout(grad_value).to(value.dtype),
+    )
+
+
+@aten._scaled_dot_product_flash_attention_for_cpu_backward.default.py_impl(
+    DispatchKey.Autograd
+)
+def scaled_dot_product_flash_attention_for_cpu_backward_autograd(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    def native_backward() -> tuple[Tensor, Tensor, Tensor]:
+        with torch._C._AutoDispatchBelowAutograd():
+            return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                dropout_p,
+                is_causal,
+                attn_mask=attn_mask,
+                scale=scale,
+            )
+
+    if not torch.is_grad_enabled() or not _requires_grad(
+        grad_out, query, key, value, out, logsumexp, attn_mask
+    ):
+        return native_backward()
+
+    native_grads = native_backward()
+    math_grads = _scaled_dot_product_flash_attention_for_cpu_backward_math(
+        grad_out,
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+    return (
+        native_grads[0] + (math_grads[0] - math_grads[0].detach()),
+        native_grads[1] + (math_grads[1] - math_grads[1].detach()),
+        native_grads[2] + (math_grads[2] - math_grads[2].detach()),
+    )
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
