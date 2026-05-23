@@ -17,7 +17,6 @@ variable tracking system.
 import collections
 import operator
 import sys
-from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch
@@ -44,12 +43,18 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
+    unpack_and_apply_fn,
+    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
-from .object_protocol import type_implements_nb_index, validate_sequence_index
+from .object_protocol import (
+    pyindex_check,
+    type_implements_nb_index,
+    validate_sequence_index,
+)
 
 
 if TYPE_CHECKING:
@@ -67,6 +72,14 @@ def pytuple_check(obj: VariableTracker) -> bool:
 
 def pylist_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), list)
+
+
+def pylist_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is list
+
+
+def pyslice_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), slice)
 
 
 class BaseListVariable(VariableTracker):
@@ -180,7 +193,7 @@ class BaseListVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not isinstance(self, (ListVariable, TupleVariable)):
@@ -224,7 +237,7 @@ class BaseListVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -406,11 +419,11 @@ class BaseListVariable(VariableTracker):
             ):
                 if name == "__eq__":
                     return SourcelessBuilder.create(tx, operator.is_).call_function(
-                        tx, (left, right), {}
+                        tx, [left, right], {}
                     )
                 elif name == "__ne__":
                     return SourcelessBuilder.create(tx, operator.is_not).call_function(
-                        tx, (left, right), {}
+                        tx, [left, right], {}
                     )
                 else:
                     op_str = cmp_name_to_op_str_mapping[name]
@@ -441,7 +454,7 @@ class RangeVariable(BaseListVariable):
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
 
-    def __init__(self, items: Sequence[VariableTracker], **kwargs: Any) -> None:
+    def __init__(self, items: list[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -815,15 +828,30 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if not args[0].has_force_unpack_var_sequence(tx):
-                raise_observed_exception(
-                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
+            # CPython has a series of checks to optimize list.extend for different data types
+            # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
+            from .dicts import ConstDictVariable
+            from .sets import SetVariable
+            from .user_defined import UserDefinedObjectVariable
+
+            sz = len(self.items)
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                self.items.extend(args[0].items)
+            elif isinstance(args[0], UserDefinedObjectVariable):
+                self.items.extend(unpack_iterable(tx, args[0]))
+            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
+                items = [item.vt for item in args[0].items]
+                self.items.extend(items)
+            elif isinstance(args[0], ConstantVariable):
+                items = unpack_iterable(tx, args[0])
+                self.items.extend(items)
+            else:
+                unpack_and_apply_fn(
+                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
                 )
 
-            (arg,) = args
-            arg.force_apply_to_var_sequence(
-                tx, lambda item: self.call_method(tx, "append", [item], {})
-            )
+            if len(self.items) > sz:
+                tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
@@ -872,77 +900,6 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
-        elif name == "__setitem__" and self.is_mutable() and args:
-            # Realize args[0] to get the concrete type for proper type checking
-            key = args[0].realize()
-            if not (
-                key.is_python_constant()
-                or isinstance(key, SymNodeVariable)
-                or (
-                    isinstance(key, SliceVariable)
-                    and all(
-                        s.is_python_constant() or isinstance(s, SymNodeVariable)
-                        for s in key.items
-                    )
-                )
-            ):
-                return super().call_method(tx, name, args, kwargs)
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            value = args[1]
-            tx.output.side_effects.mutation(self)
-            if isinstance(key, SymNodeVariable):
-                # pyrefly: ignore[unsupported-operation]
-                self.items[key.evaluate_expr()] = value
-            elif isinstance(key, SliceVariable):
-                if key.is_python_constant():
-                    self.items[key.as_python_constant()] = list(value.items)  # type: ignore[attr-defined]
-                else:
-                    items_slice = slice(
-                        *[
-                            (
-                                s.evaluate_expr()
-                                if isinstance(s, SymNodeVariable)
-                                else s.as_python_constant()
-                            )
-                            for s in key.items
-                        ]
-                    )
-                    self.items[items_slice] = list(value.items)  # type: ignore[attr-defined]
-            else:
-                self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
-        elif name == "__delitem__" and self.is_mutable():
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            tx.output.side_effects.mutation(self)
-            if args[0].is_python_constant() and isinstance(
-                args[0].as_python_constant(), (int, slice)
-            ):
-                if isinstance(args[0], SymNodeVariable):
-                    idx = args[0].evaluate_expr()
-                else:
-                    idx = args[0].as_python_constant()
-
-                try:
-                    self.items.__delitem__(idx)  # type: ignore[arg-type]
-
-                except (IndexError, ValueError) as exc:
-                    raise_observed_exception(
-                        type(exc),
-                        tx,
-                        args=list(exc.args),
-                    )
-            else:
-                msg = f"list indices must be integers or slices, not {args[0].python_type_name()}"
-                raise_type_error(tx, msg)
             return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
@@ -1050,56 +1007,6 @@ class ListVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setitem__" and self.is_mutable():
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            key, value = args
-
-            if not key.is_python_constant():
-                # probably will graph-break
-                super().call_method(tx, name, args, kwargs)
-
-            tx.output.side_effects.mutation(self)
-            if isinstance(key, SliceVariable):
-                if not value.has_force_unpack_var_sequence(tx):
-                    raise_observed_exception(
-                        TypeError, tx, args=["can only assign an iterable"]
-                    )
-
-                key_as_const = key.as_python_constant()
-                if key_as_const.step == 0:
-                    raise_observed_exception(
-                        ValueError, tx, args=["slice step cannot be zero"]
-                    )
-
-                value_unpack = value.force_unpack_var_sequence(tx)
-                try:
-                    self.items[key_as_const] = value_unpack
-                except Exception as exc:
-                    raise_observed_exception(
-                        type(exc),
-                        tx,
-                        args=list(exc.args),
-                    )
-            else:
-                # Use guard_if_dyn to handle SymNodeVariable and LazyVariableTracker
-                # that may realize to SymNodeVariable
-                key = guard_if_dyn(key)
-
-                try:
-                    # pyrefly: ignore[unsupported-operation]
-                    self.items[key] = value
-                except (IndexError, TypeError) as e:
-                    raise_observed_exception(
-                        type(e), tx, args=[VariableTracker.build(tx, a) for a in e.args]
-                    )
-            return ConstantVariable.create(None)
-
         if name == "sort" and self.is_mutable():
             if len(args) != 0:
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
@@ -1166,10 +1073,10 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
-            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+            elif len(args) == 1:
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
-                self.items[:] = arg.force_unpack_var_sequence(tx)
+                self.items[:] = unpack_iterable(tx, arg)
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1190,6 +1097,90 @@ class ListVariable(CommonListMethodsVariable):
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
+
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L865-L890 (list_ass_item)
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        idx = key.nb_index_impl(tx).as_python_constant()
+        if not (0 <= idx < len(self.items)):
+            raise_observed_exception(
+                IndexError, tx, args=["list assignment index out of range"]
+            )
+        try:
+            if value is None:
+                self.items.__delitem__(idx)
+            else:
+                self.items[idx] = value
+        except (IndexError, TypeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        return ConstantVariable.create(None)
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3119-L3150 (list_ass_subscript)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        if pyindex_check(key.python_type()):
+            i = key.nb_index_impl(tx).as_python_constant()
+            if i < 0:
+                i += len(self.items)
+            return self.sq_ass_item_impl(tx, ConstantVariable(i), value)
+        elif pyslice_check(key):
+            # CPython runs PySlice_Unpack first, which raises ValueError on
+            # step==0 before the iterable check.
+            key_as_const = key.as_python_constant()
+            if key_as_const.step == 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
+                )
+            if value is None:
+                # delete slice
+                try:
+                    self.items.__delitem__(key_as_const)
+                except ValueError as exc:
+                    raise_observed_exception(
+                        ValueError,
+                        tx,
+                        args=list(exc.args),
+                    )
+                tx.output.side_effects.mutation(self)
+            else:
+                # assign slice
+                # CPython list_ass_subscript runs PySequence_Fast on value
+                # before the step==1 branch, so this message applies to all
+                # slice forms.
+                if not value.has_force_unpack_var_sequence(tx):
+                    raise_type_error(tx, "must assign iterable to extended slice")
+
+                value_unpack = value.force_unpack_var_sequence(tx)
+                try:
+                    self.items[key_as_const] = value_unpack
+                except ValueError as exc:
+                    raise_observed_exception(
+                        ValueError,
+                        tx,
+                        args=list(exc.args),
+                    )
+                tx.output.side_effects.mutation(self)
+        else:
+            raise_type_error(
+                tx,
+                f"list indices must be integers or slices, not {key.python_type_name()}",
+            )
+        return ConstantVariable.create(None)
 
     def sq_concat_impl(
         self,
@@ -1273,6 +1264,29 @@ class DequeVariable(CommonListMethodsVariable):
             return self.items[index]
         except IndexError:
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
+
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_ass_item)
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        idx = key.nb_index_impl(tx).as_python_constant()
+        length = len(self.items)
+        if idx < 0:
+            idx += length
+        if not (0 <= idx < length):
+            raise_observed_exception(IndexError, tx, args=["deque index out of range"])
+        tx.output.side_effects.mutation(self)
+        if value is None:
+            self.items.__delitem__(idx)
+        else:
+            self.items[idx] = value
+        return ConstantVariable.create(None)
 
     def sq_concat_impl(
         self,
@@ -1358,30 +1372,6 @@ class DequeVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if (
-            name == "__setitem__"
-            and self.is_mutable()
-            and args
-            and args[0].is_python_constant()
-        ):
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            key, value = args
-            if not key.is_python_constant():
-                raise AssertionError("deque __setitem__ key must be a Python constant")
-            if not isinstance(key.as_python_constant(), int):
-                raise AssertionError(
-                    f"deque __setitem__ key must be an int, got {type(key.as_python_constant()).__name__}"
-                )
-            tx.output.side_effects.mutation(self)
-            self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
-
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
             slice_within_maxlen = slice(-maxlen, None)
@@ -1807,7 +1797,7 @@ class SliceVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Sequence[VariableTracker],
+        items: list[VariableTracker],
         tx: Optional["InstructionTranslator"] = None,
         **kwargs: Any,
     ) -> None:
