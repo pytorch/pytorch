@@ -75,6 +75,79 @@ class TestCatMultiConsumer(TestCase):
             f"Expected {expected_bytes} bytes, got {metrics.num_bytes_accessed}.",
         )
 
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    @requires_gpu()
+    def test_complex_output_cat_uses_concat_kernel(self):
+        """Do not inline mutually exclusive complex cat branches."""
+
+        def branch(x, mean, var, weight, bias):
+            mean = mean[None, :, None, None]
+            var = var[None, :, None, None]
+            weight = weight[None, :, None, None]
+            bias = bias[None, :, None, None]
+            return (x - mean) * torch.rsqrt(var + 1e-5) * weight + bias
+
+        def fn(x0, x1, x2, x3, mean, var, weight, bias):
+            return torch.cat(
+                [
+                    branch(x0, mean, var, weight, bias),
+                    branch(x1, mean, var, weight, bias),
+                    branch(x2, mean, var, weight, bias),
+                    branch(x3, mean, var, weight, bias),
+                ],
+                dim=1,
+            )
+
+        inputs = [
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE).abs(),
+            torch.randn(4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE),
+        ]
+        result, (code,) = run_and_get_code(torch.compile(fn), *inputs)
+        self.assertEqual(result, fn(*inputs))
+        self.assertNotIn("tl.where", code)
+
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    @requires_gpu()
+    def test_complex_cat_with_pointwise_consumer_still_fuses(self):
+        """Keep pointwise_cat when downstream pointwise fusion can use it."""
+
+        def branch(x, mean, var, weight, bias):
+            mean = mean[None, :, None, None]
+            var = var[None, :, None, None]
+            weight = weight[None, :, None, None]
+            bias = bias[None, :, None, None]
+            return (x - mean) * torch.rsqrt(var + 1e-5) * weight + bias
+
+        def fn(x0, x1, mean, var, weight, bias):
+            cat = torch.cat(
+                [
+                    branch(x0, mean, var, weight, bias),
+                    branch(x1, mean, var, weight, bias),
+                ],
+                dim=1,
+            )
+            return cat + 1
+
+        inputs = [
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(2, 4, 4, 4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE).abs(),
+            torch.randn(4, device=GPU_TYPE),
+            torch.randn(4, device=GPU_TYPE),
+        ]
+        compiled = torch.compile(fn)
+        metrics.reset()
+        result = compiled(*inputs)
+        self.assertEqual(result, fn(*inputs))
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
 
 class TestPadAsCat(TestCase):
     @requires_gpu()
