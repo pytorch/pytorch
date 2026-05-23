@@ -201,18 +201,20 @@ def get_plain_tensors(
     return out
 
 
-def is_fake(x: object) -> TypeGuard[Tensor]:
+def _append_fake_tensor_leaves(x: object, fake_tensors: list[FakeTensor]) -> bool:
+    if isinstance(x, FakeTensor):
+        fake_tensors.append(x)
+        return True
+
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(x, FakeTensor):
-        return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         got_fake: bool | None = None
         for attr in attrs:
             match getattr(x, attr):
                 case Tensor() as v:
-                    fake = is_fake(v)
+                    fake = _append_fake_tensor_leaves(v, fake_tensors)
                     if got_fake is None:
                         got_fake = fake
                     elif got_fake != fake:
@@ -225,15 +227,25 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
                     )
         return got_fake or False
     elif isinstance(x, FunctionalTensor):
-        return is_fake(x.elem)
+        return _append_fake_tensor_leaves(x.elem, fake_tensors)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
-        return is_fake(unwrapped)
+        return _append_fake_tensor_leaves(unwrapped, fake_tensors)
     elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
         unwrapped = torch._C._functorch.get_unwrapped(x)
-        return is_fake(unwrapped)
+        return _append_fake_tensor_leaves(unwrapped, fake_tensors)
     return False
+
+
+def _fake_tensor_leaves(x: object) -> list[FakeTensor]:
+    fake_tensors: list[FakeTensor] = []
+    _append_fake_tensor_leaves(x, fake_tensors)
+    return fake_tensors
+
+
+def is_fake(x: object) -> TypeGuard[Tensor]:
+    return _append_fake_tensor_leaves(x, [])
 
 
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
@@ -1008,11 +1020,9 @@ class FakeTensor(Tensor):
         def cpu_zero_dim(t: Tensor) -> bool:
             return is_device_cpu(t.device) and t.dim() == 0
 
-        def merge_devices(t: object) -> None:
+        def merge_fake_device(t: FakeTensor) -> None:
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, FakeTensor):
-                return
 
             if common_device is None:
                 common_device = t.device
@@ -1072,6 +1082,10 @@ class FakeTensor(Tensor):
             raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
+
+        def merge_devices(t: object) -> None:
+            for fake_tensor in _fake_tensor_leaves(t):
+                merge_fake_device(fake_tensor)
 
         for arg in flat_args:
             merge_devices(arg)
@@ -2480,8 +2494,11 @@ class FakeTensorMode(TorchDispatchMode):
             return NotImplemented
 
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
+        flat_arg_fake_tensor_leaves = [
+            fake_tensor for arg in flat_args for fake_tensor in _fake_tensor_leaves(arg)
+        ]
         has_symbolic_sizes = any(
-            i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
+            i._has_symbolic_sizes_strides for i in flat_arg_fake_tensor_leaves
         ) or any(isinstance(a, SymInt) for a in flat_args)
 
         converter = self.fake_tensor_converter
@@ -2518,10 +2535,10 @@ class FakeTensorMode(TorchDispatchMode):
         #    (Note that you can always call a lift fn manually, so we do
         #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if (is_lift_func and not flat_arg_fake_tensors) or (
+        if (is_lift_func and not flat_arg_fake_tensor_leaves) or (
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
-            and not flat_arg_fake_tensors
+            and not flat_arg_fake_tensor_leaves
             and not device_conversion_skip_const_prop
         ):
             if not all(t.constant is not None for t in flat_arg_fake_tensors):
@@ -2565,6 +2582,18 @@ class FakeTensorMode(TorchDispatchMode):
         )
         del args, kwargs  # Invalidated
 
+        flat_arg_fake_tensor_leaves = []
+        has_wrapped_fake_tensor_leaf = False
+        for arg in flat_args:
+            fake_tensor_leaves = _fake_tensor_leaves(arg)
+            flat_arg_fake_tensor_leaves.extend(fake_tensor_leaves)
+            has_wrapped_fake_tensor_leaf = has_wrapped_fake_tensor_leaf or (
+                bool(fake_tensor_leaves) and not self.is_our_fake(arg)
+            )
+        has_symbolic_sizes = any(
+            i._has_symbolic_sizes_strides for i in flat_arg_fake_tensor_leaves
+        ) or any(isinstance(a, SymInt) for a in flat_args)
+
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
@@ -2588,6 +2617,7 @@ class FakeTensorMode(TorchDispatchMode):
             )
             and all_constant
             and len(flat_arg_fake_tensors) != 0
+            and not has_wrapped_fake_tensor_leaf
             and not has_symbolic_sizes
             and not avoiding_device_init
             and func is not aten._nested_tensor_from_tensor_list.default
@@ -2668,6 +2698,7 @@ class FakeTensorMode(TorchDispatchMode):
         real_out = nil
         if (
             self.propagate_real_tensors
+            and not has_wrapped_fake_tensor_leaf
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
             and not any(
                 (
@@ -2940,7 +2971,11 @@ class FakeTensorMode(TorchDispatchMode):
                     func, *args, **kwargs
                 )
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
+            if (
+                has_symbolic_sizes
+                or has_wrapped_fake_tensor_leaf
+                or not self.can_run_unsafe_fallback(func)
+            ):
                 raise UnsupportedOperatorException(func)
             if error is None:
                 error = UnsupportedOperatorException(func)
@@ -3016,31 +3051,38 @@ class FakeTensorMode(TorchDispatchMode):
                 return x
 
             nonlocal flat_arg_fake_tensors
-            if not self.is_our_fake(x):
-                if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
-                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise AssertionError(
-                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
-                    )
-                allow_non_fake_inputs = (
-                    self.allow_non_fake_inputs
-                    if fake_tensor_tls.allow_non_fake_inputs_override is None
-                    else fake_tensor_tls.allow_non_fake_inputs_override
-                )
-                if not allow_non_fake_inputs:
-                    if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError(
-                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
-                        )
-                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise AssertionError(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
-                    )
+            if self.is_our_fake(x):
+                flat_arg_fake_tensors.append(x)
+                return x
 
-                out = converter.from_real_tensor(self, x)
-            else:
-                out = x
+            fake_tensor_leaves = _fake_tensor_leaves(x)
+            if fake_tensor_leaves and all(
+                self.is_our_fake(fake_tensor) for fake_tensor in fake_tensor_leaves
+            ):
+                return x
+
+            if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
+                args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                raise AssertionError(
+                    f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
+                )
+            allow_non_fake_inputs = (
+                self.allow_non_fake_inputs
+                if fake_tensor_tls.allow_non_fake_inputs_override is None
+                else fake_tensor_tls.allow_non_fake_inputs_override
+            )
+            if not allow_non_fake_inputs:
+                if isinstance(x, FakeTensor) and x.fake_mode is not self:
+                    raise AssertionError(
+                        f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
+                    )
+                args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                raise AssertionError(
+                    f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                    f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
+                )
+
+            out = converter.from_real_tensor(self, x)
 
             flat_arg_fake_tensors.append(out)
             return out

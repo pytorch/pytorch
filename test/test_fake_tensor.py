@@ -162,6 +162,49 @@ class FakeTensorTest(TestCase):
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
 
+    def test_compile_custom_op_fake_impl_with_vjp(self):
+        ns = "_test_fake_tensor_issue_172428"
+
+        @torch.library.custom_op(f"{ns}::simple_op", mutates_args=())
+        def simple_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.mm(x, weight)
+
+        @simple_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            def func(w: torch.Tensor) -> torch.Tensor:
+                return torch.mm(x, w)
+
+            output, _ = torch.func.vjp(func, weight)
+            return output
+
+        op = getattr(torch.ops, ns).simple_op
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def forward(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return op(x, weight)
+
+        x = torch.randn(4, 8)
+        weight = torch.randn(8, 16)
+        try:
+            self.assertEqual(forward(x, weight), simple_op(x, weight))
+        finally:
+            torch.compiler.reset()
+
+    def test_functorch_wrapper_only_symbolic_fake(self):
+        fake_mode, (weight,) = self.fake_with_unbacked_batch(torch.randn(4, 8))
+
+        with fake_mode:
+
+            def func(w: torch.Tensor) -> torch.Tensor:
+                return torch.sin(w)
+
+            output, _ = torch.func.vjp(func, weight)
+
+        self.assertIsInstance(output, FakeTensor)
+        self.assertEqual(output.device, weight.device)
+        self.assertTrue(output._has_symbolic_sizes_strides)
+        self.assertTrue(free_unbacked_symbols(output.shape[0]))
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
