@@ -188,6 +188,15 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 ]
 
 
+_RUNTIME_BACKEND_KEYS = torch._C._dispatch_keyset_full_after(
+    torch._C.DispatchKey.BackendSelect
+).remove(torch._C.DispatchKey.PythonDispatcher)
+
+
+def _has_backend_kernel(op_overload: torch._ops.OperatorBase) -> bool:
+    return op_overload.has_kernel_for_any_dispatch_key(_RUNTIME_BACKEND_KEYS)
+
+
 @contextmanager
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
@@ -293,13 +302,16 @@ def _split_decomp_table_to_cia_and_python_decomp(
         #        decomp_table = {aten.linear: some_op}
         # For (1), we want to remove all the CIA ops that weren't handled by user as
         # it suggests they are safe to decompose, so we should remove from preservable_list.
-        # for (2), we just plumb the custom decomp to AOTDIspatcher.
-        # In both cases, we want to remove this CIA op from the decomp_table as it is special
-        # handled.
+        # for (2), we just plumb the custom decomp to AOTDispatcher.
+        # In both cases, we handle this CIA op specially for AOTDispatcher.
+        # Ops with backend kernels must also remain in the regular decomp table
+        # because proxy tracing preserves those kernels instead of redispatching
+        # through CompositeImplicitAutograd.
         if op in all_preservable_cia_ops:
             cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
-            del decomp_table[op]
+            if not _has_backend_kernel(op):
+                del decomp_table[op]
         # If it is a custom op, we want to still preserve or do whatever
         # with it if it is a functional CIA. The reason we don't remove
         # from CIA list is because we don't query custom ops.
