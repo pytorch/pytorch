@@ -320,6 +320,167 @@ def forward(self, args_0):
         self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_mask_mod_tensor_closure_in_pytree_context(self):
+        from torch import Tensor
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        class BlockMaskContext:
+            def __init__(self, block_mask):
+                self.block_mask = block_mask
+
+        def block_mask_context_flatten(ctx):
+            block_mask = ctx.block_mask
+            return (
+                [
+                    block_mask.kv_num_blocks,
+                    block_mask.kv_indices,
+                    block_mask.full_kv_num_blocks,
+                    block_mask.full_kv_indices,
+                ],
+                {
+                    "BLOCK_SIZE": block_mask.BLOCK_SIZE,
+                    "mask_mod": block_mask.mask_mod,
+                    "seq_lengths": block_mask.seq_lengths,
+                },
+            )
+
+        def block_mask_context_unflatten(values, context):
+            kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices = values
+            return BlockMaskContext(
+                BlockMask.from_kv_blocks(
+                    kv_num_blocks,
+                    kv_indices,
+                    full_kv_num_blocks,
+                    full_kv_indices,
+                    BLOCK_SIZE=context["BLOCK_SIZE"],
+                    mask_mod=context["mask_mod"],
+                    seq_lengths=context["seq_lengths"],
+                )
+            )
+
+        pytree.register_pytree_node(
+            BlockMaskContext,
+            block_mask_context_flatten,
+            block_mask_context_unflatten,
+        )
+        try:
+
+            def visibility_mask_fn(*, visibility: Tensor, tokens: Tensor):
+                lower = torch.zeros_like(visibility)
+                upper = visibility
+
+                def fn(b_idx: Tensor, h_idx: Tensor, q_idx: Tensor, k_idx: Tensor):
+                    del h_idx
+                    _ = tokens
+                    b_exp = b_idx.unsqueeze(-1) if b_idx.dim() == 0 else b_idx
+                    q_exp = q_idx.unsqueeze(-1) if q_idx.dim() == 0 else q_idx
+                    lower_val = lower[b_exp, q_exp].squeeze(-1)
+                    upper_val = upper[b_exp, q_exp].squeeze(-1)
+                    return (lower_val <= k_idx) & (k_idx <= upper_val)
+
+                return fn
+
+            class Model(torch.nn.Module):
+                def forward(self, visibility, tokens):
+                    mask_fn = visibility_mask_fn(visibility=visibility, tokens=tokens)
+                    block_mask = create_block_mask(
+                        mask_fn,
+                        B=2,
+                        H=4,
+                        Q_LEN=16,
+                        KV_LEN=16,
+                        device=visibility.device,
+                    )
+                    return tokens.sum(), BlockMaskContext(block_mask)
+
+            visibility = torch.randint(0, 16, (2, 16), device="cuda")
+            tokens = torch.randn(2, 16, 64, device="cuda")
+            model = Model()
+
+            eager_loss, eager_ctx = model(visibility, tokens)
+            gm = _dynamo_graph_capture_for_export(model)(visibility, tokens)
+            compiled_loss, compiled_ctx = gm(visibility, tokens)
+
+            self.assertEqual(eager_loss, compiled_loss)
+            self.assertEqual(
+                eager_ctx.block_mask.kv_num_blocks,
+                compiled_ctx.block_mask.kv_num_blocks,
+            )
+            mask_args = (
+                torch.tensor(0, device="cuda"),
+                torch.tensor(0, device="cuda"),
+                torch.tensor(0, device="cuda"),
+                torch.tensor(0, device="cuda"),
+            )
+            self.assertEqual(
+                eager_ctx.block_mask.mask_mod(*mask_args),
+                compiled_ctx.block_mask.mask_mod(*mask_args),
+            )
+        finally:
+            pytree._deregister_pytree_node(BlockMaskContext)
+
+    def test_export_out_spec_tensor_closure_mixed_with_self_recursive_closure(self):
+        class FunctionContext:
+            def __init__(self, fn):
+                self.fn = fn
+
+        pytree.register_pytree_node(
+            FunctionContext,
+            lambda ctx: ([], ctx.fn),
+            lambda values, context: FunctionContext(context),
+        )
+        try:
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    a_tensor = x + 1
+
+                    def fn(y):
+                        _ = a_tensor
+                        _ = fn
+                        return y
+
+                    return x.sum(), FunctionContext(fn)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "nested function with non-constructible closure in output",
+            ):
+                _dynamo_graph_capture_for_export(Model())(torch.randn(2, 3))
+        finally:
+            pytree._deregister_pytree_node(FunctionContext)
+
+    def test_export_out_spec_tensor_closure_without_flat_outputs(self):
+        class FunctionContext:
+            def __init__(self, fn):
+                self.fn = fn
+
+        pytree.register_pytree_node(
+            FunctionContext,
+            lambda ctx: ([], ctx.fn),
+            lambda values, context: FunctionContext(context),
+        )
+        try:
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    closure_tensor = x + 1
+
+                    def fn(y):
+                        _ = closure_tensor
+                        return y
+
+                    return FunctionContext(fn)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "nested function with non-constructible closure in output",
+            ):
+                _dynamo_graph_capture_for_export(Model())(torch.randn(2, 3))
+        finally:
+            pytree._deregister_pytree_node(FunctionContext)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_self_recursive(self):
         from torch.nn.attention.flex_attention import create_block_mask
 
