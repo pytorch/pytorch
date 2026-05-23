@@ -375,7 +375,8 @@ struct log10_functor {
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(M_LN10_F, 0));
+    constexpr float inv_log_base = 1.0f / M_LN10_F;
+    return T(inv_log_base * real, inv_log_base * imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -419,7 +420,8 @@ struct log2_functor {
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(M_LN2_F, 0));
+    constexpr float inv_log_base = 1.0f / M_LN2_F;
+    return T(inv_log_base * real, inv_log_base * imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
