@@ -1087,6 +1087,22 @@ def forward(self, x_1):
         self.assertTrue(shape_env.evaluate_expr(test1))
         self.assertTrue(shape_env.evaluate_expr(test2))
 
+    def test_singleton_int_coeff_in_static_eval_cache(self):
+        from torch._dynamo.source import EphemeralSource
+
+        def check(coeff):
+            shape_env = ShapeEnv(duck_shape=False)
+            s0 = shape_env.create_symbol(
+                torch._C._get_nested_int(7, 1), source=EphemeralSource("lhs")
+            )
+            s1 = shape_env.create_symbol(
+                torch._C._get_nested_int(7, coeff), source=EphemeralSource("rhs")
+            )
+            return shape_env._maybe_evaluate_static(sympy.Eq(s0, s1))
+
+        self.assertEqual(check(1), sympy.true)
+        self.assertEqual(check(2), sympy.false)
+
     def test_sympy_optimized_add(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 2)

@@ -4068,8 +4068,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):
@@ -4084,6 +4082,20 @@ class GraphModule(torch.nn.Module):
 
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    def test_as_nested_tensor_from_intermediate_layer_norm(self):
+        def fn(nt, i):
+            expanded_i = i.expand(nt.shape[0], -1, -1)
+            nested_i = torch.nested.as_nested_tensor(expanded_i, layout=torch.jagged)
+            return torch.nn.functional.layer_norm(nested_i, (4,))
+
+        nt = torch.nested.nested_tensor(
+            [torch.randn(2, 4), torch.randn(3, 4)], layout=torch.jagged
+        )
+        i = torch.randn(1, 5, 4)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        self.assertEqualIgnoringNestedInts(fn(nt, i), opt_fn(nt, i))
 
     #
     # Case 3: in-graph construction where offsets are both direct graph inputs

@@ -11,13 +11,13 @@ class SingletonInt(sympy.AtomicExpr):
     # situations with other more exotic Expr types.
     _op_priority = 99999
 
-    def __new__(cls, *args, coeff=None, **kwargs):
-        instance = super().__new__(cls, *args, **kwargs)
+    def __new__(cls, val, coeff=1):
+        instance = super().__new__(cls, sympy.sympify(val), sympy.sympify(coeff))
         return instance
 
     # The semantics of this class should match that of NestedIntSymNodeImpl in
     # c10/core/NestedIntSymNodeImpl.h
-    def __init__(self, val, *, coeff=1) -> None:
+    def __init__(self, val, coeff=1) -> None:
         self._val = val
         self._coeff = coeff
         super().__init__()

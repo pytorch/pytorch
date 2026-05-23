@@ -2509,7 +2509,7 @@ def safe_expand(r: _SympyT) -> _SympyT:
 class _SymbolInfo(NamedTuple):
     k: sympy.Symbol
     vr: ValueRanges[sympy.Expr] | None
-    val: sympy.Integer | None
+    val: sympy.Basic | None
     is_size_like: bool
 
 
@@ -2531,11 +2531,16 @@ def _maybe_evaluate_static_worker(
     # Simplify making use of value range lower bound
     new_shape_env = {}
     new_range_env = {}
+    has_singleton_int = False
     for idx, sinfo in enumerate(symbol_info):
         k, vr, val, is_size_like = sinfo
         if isinstance(val, SingletonInt):
-            # Skip var_ranges logic for SingletonInt which is only used
-            # for jagged layout NestedTensors today
+            # SingletonInt represents nested-int identity, not a runtime size.
+            # Fold identity comparisons here; tensor aliasing guards track when
+            # input nested-int identities can change.
+            has_singleton_int = True
+            if not unbacked_only:
+                new_shape_env[k] = val
             continue
         if vr is None:
             raise AssertionError(f"vr must not be None for symbol {k}")
@@ -2595,16 +2600,28 @@ def _maybe_evaluate_static_worker(
     try:
         # pyrefly: ignore [missing-attribute]
         new_expr = expr.xreplace(new_shape_env)
-    except RecursionError:
-        log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+    except (RecursionError, ValueError, NotImplementedError) as e:
+        if isinstance(e, RecursionError):
+            log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+        elif has_singleton_int:
+            return None
+        else:
+            raise
         return None
 
     # We need to canonicalize, as after expand we may have something like `a + b = a` and
     # sympy will not simplify the a. The two appearances of the a will then make value ranges
     # analysis give lose bounds
-    new_expr = canonicalize_bool_expr(safe_expand(new_expr))
+    try:
+        new_expr = canonicalize_bool_expr(safe_expand(new_expr))
+    except (ValueError, NotImplementedError):
+        if has_singleton_int:
+            return None
+        raise
     if new_expr.is_number:
         return new_expr
+    if has_singleton_int and new_expr.has(SingletonInt):
+        return None
 
     # Check if the range can solve it statically
     out = bound_sympy(new_expr, new_range_env)
