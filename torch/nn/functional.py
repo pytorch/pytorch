@@ -6841,9 +6841,7 @@ def multi_head_attention_forward(
         if not torch.jit.is_scripting():
             del v
 
-        attn_output = (
-            attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-        )
+        attn_output = attn_output.transpose(0, 1).reshape(tgt_len * bsz, embed_dim)
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
@@ -6878,14 +6876,12 @@ def multi_head_attention_forward(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         # Free q, k, v and their backing projection storage before the
-        # .contiguous() call below allocates.  In self-attention the three
-        # tensors are views of a single packed projection, so releasing all
-        # references here lets the allocator reclaim that memory immediately.
+        # reshape() below allocates.  In self-attention the three tensors are
+        # views of a single packed projection, so releasing all references
+        # here lets the allocator reclaim that memory immediately.
         if not torch.jit.is_scripting():
             del q, k, v
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+        attn_output = attn_output.permute(2, 0, 1, 3).reshape(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
