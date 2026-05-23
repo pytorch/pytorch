@@ -589,6 +589,18 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def test_export_copy_copy_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2),)
+        ep = export(M(), inp)
+        self.assertEqual(ep.module()(*inp), inp[0])
+        self.assertEqual(
+            [node.op for node in ep.graph_module.graph.nodes], ["placeholder", "output"]
+        )
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,
