@@ -407,6 +407,32 @@ inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
   return RAIIAtenTensorHandle(handle);
 }
 
+template <typename DevicePtr>
+inline DevicePtr allocate_scratch_tensor(
+    int64_t numel,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    RAIIAtenTensorHandle& scratch_tensor) {
+  DevicePtr scratch_ptr = 0;
+  if (numel > 0) {
+    int64_t scratch_size[] = {numel};
+    int64_t scratch_stride[] = {1};
+    AtenTensorHandle scratch_handle;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+        1,
+        scratch_size,
+        scratch_stride,
+        dtype,
+        device_type,
+        device_index,
+        &scratch_handle));
+    scratch_tensor = RAIIAtenTensorHandle(scratch_handle);
+    scratch_ptr = reinterpret_cast<DevicePtr>(scratch_tensor.data_ptr());
+  }
+  return scratch_ptr;
+}
+
 class ConstantHandle {
  public:
   ConstantHandle() = default;
@@ -452,11 +478,31 @@ inline void assert_size_stride(
     AtenTensorHandle tensor,
     std::initializer_list<int64_t> expected_sizes,
     std::initializer_list<int64_t> expected_strides,
-    const char* op_name = nullptr) {
+    const char* op_name = nullptr,
+    int32_t expected_dtype = -1,
+    const char* expected_dtype_name = nullptr) {
+  std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
+  if (expected_dtype >= 0) {
+    int32_t dtype;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+    if (dtype != expected_dtype) {
+      std::string dtype_name = expected_dtype_name
+          ? std::string(expected_dtype_name)
+          : std::to_string(expected_dtype);
+      AOTI_RUNTIME_CHECK(
+          false,
+          "expected dtype " + dtype_name + " but got dtype code " +
+              std::to_string(dtype) + op_msg +
+              "\nThis error most often comes from an incorrect fake (aka meta) "
+              "kernel for a custom op."
+              "\nUse torch.library.opcheck to test your custom op."
+              "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");
+    }
+  }
+
   int64_t ndim;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &ndim));
   int64_t expected_ndim = static_cast<int64_t>(expected_sizes.size());
-  std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
   AOTI_RUNTIME_CHECK(
       ndim == expected_ndim,
       "expected ndim " + std::to_string(expected_ndim) + " but got " +
@@ -499,28 +545,6 @@ inline void assert_size_stride(
             "\nUse torch.library.opcheck to test your custom op."
             "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");
   }
-}
-
-inline void assert_dtype(
-    AtenTensorHandle tensor,
-    int32_t expected_dtype,
-    const char* expected_dtype_name,
-    const char* op_name = nullptr) {
-  int32_t dtype;
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
-  if (dtype == expected_dtype) {
-    return;
-  }
-
-  std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
-  AOTI_RUNTIME_CHECK(
-      false,
-      "expected dtype " + std::string(expected_dtype_name) +
-          " but got dtype code " + std::to_string(dtype) + op_msg +
-          "\nThis error most often comes from an incorrect fake (aka meta) "
-          "kernel for a custom op."
-          "\nUse torch.library.opcheck to test your custom op."
-          "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");
 }
 
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {

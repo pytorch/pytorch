@@ -112,14 +112,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         size: str,
         stride: str,
         op_name: str,
+        dtype: torch.dtype | None = None,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
-        return
-
-    def write_assert_dtype(self, name: str, dtype: torch.dtype, op_name: str) -> None:
-        # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
-        # assert_dtype would fail to compile.
         return
 
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):

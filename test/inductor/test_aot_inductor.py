@@ -5037,8 +5037,8 @@ class AOTInductorTestsTemplate:
         )
         package_path, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, M(), sample)
         FileCheck().check(
-            "if (_check_aoti_runtime_check_inputs_env()) { assert_dtype("
-        ).run(code)
+            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
+        ).check('"torch.bfloat16"').run(code)
 
         aoti_module = torch._inductor.aoti_load_package(package_path)
         with self.assertRaisesRegex(
