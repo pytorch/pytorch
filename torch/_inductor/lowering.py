@@ -8460,6 +8460,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
     tuned = kernel_options.get("tuned", False)
+    fast_math = kernel_options.get("fast_math", False)
     if gemm_op == torch.ops.aten._scaled_mm_v2.default:
         if backend != "TRITON" or split_k:
             raise NotImplementedError(
@@ -8616,7 +8617,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             local_reduce,
             aux_output,
             main_output_transform,
-        ) = materialize_quack_epilogue(subgraph.graph_module)
+        ) = materialize_quack_epilogue(subgraph.graph_module, fast_math=fast_math)
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = (
             quack_args[gemm_op_info.mat1_index],

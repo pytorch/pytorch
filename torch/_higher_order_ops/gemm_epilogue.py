@@ -1617,6 +1617,47 @@ def _propagate_quack_grouped_tensorssa_info(
     )
 
 
+def _emit_quack_fast_unary(
+    kernel: _QuackCuteDSLKernel,
+    source: Any,
+    expr: str,
+) -> Any:
+    return _emit_quack_tensorssa_expr(kernel, expr.format(x=source), like=source)
+
+
+def _emit_quack_fast_sigmoid(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
+    return _emit_quack_fast_unary(
+        kernel,
+        source,
+        "(cute.full_like({x}, 1.0) / (cute.full_like({x}, 1.0) + cute.math.exp(-{x}, fastmath=True)))",
+    )
+
+
+def _emit_quack_fast_silu(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
+    half = _emit_quack_tensorssa_expr(
+        kernel,
+        f"({source} * cute.full_like({source}, 0.5))",
+        like=source,
+    )
+    return _emit_quack_tensorssa_expr(
+        kernel,
+        f"({half} * cute.math.tanh({half}, fastmath=True) + {half})",
+        like=source,
+    )
+
+
+def _emit_quack_fast_gelu(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
+    return _emit_quack_tensorssa_expr(
+        kernel,
+        "(cute.full_like({x}, 0.5) * {x} * "
+        "(cute.full_like({x}, 1.0) + cute.math.tanh("
+        "{x} * (cute.full_like({x}, 0.7978845608028654) + "
+        "cute.full_like({x}, 0.035677408136300125) * {x} * {x}), "
+        "fastmath=True)))".format(x=source),
+        like=source,
+    )
+
+
 def _compile_quack_pointwise_nodes(
     graph_module: torch.fx.GraphModule,
     mm_node: torch.fx.Node,
@@ -1624,6 +1665,8 @@ def _compile_quack_pointwise_nodes(
     env: dict[torch.fx.Node, Any],
     kernel: _QuackCuteDSLKernel,
     handler: Any,
+    *,
+    fast_math: bool = False,
 ) -> None:
     from torch._inductor.virtualized import ops, V
 
@@ -1693,6 +1736,61 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
+                    if fast_math and node.target in (
+                        torch.nn.functional.silu,
+                        torch.ops.aten.silu.default,
+                    ):
+                        if node.kwargs:
+                            raise NotImplementedError(
+                                f"unsupported kwargs for QUACK fast_math silu epilogue op {node.target}: {node.kwargs}"
+                            )
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_silu(kernel, source)
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch.ops.aten.tanh.default,
+                        torch.tanh,
+                    ):
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_unary(
+                            kernel, source, "cute.math.tanh({x}, fastmath=True)"
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch.ops.aten.exp.default,
+                        torch.exp,
+                    ):
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_unary(
+                            kernel, source, "cute.math.exp({x}, fastmath=True)"
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch.ops.aten.sigmoid.default,
+                        torch.sigmoid,
+                    ):
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_sigmoid(kernel, source)
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch._C._nn.gelu,
+                        torch.ops.aten.gelu.default,
+                    ):
+                        approximate = node.kwargs.get(
+                            "approximate", node.args[1] if len(node.args) > 1 else "none"
+                        )
+                        if approximate not in ("none", "tanh"):
+                            raise NotImplementedError(
+                                f"unsupported gelu approximate mode for QUACK fast_math epilogue: {approximate}"
+                            )
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_gelu(kernel, source)
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
                     if node.target in (torch.ops.aten.abs.default, torch.abs):
                         input_info = grouped_tensors.get(node.args[0])
                         if input_info is not None and input_info.nonnegative:
@@ -1758,6 +1856,8 @@ def _compile_quack_pointwise_nodes(
 
 def _quack_cute_epilogue_code(
     graph_module: torch.fx.GraphModule,
+    *,
+    fast_math: bool = False,
 ) -> tuple[
     list[str],
     str,
@@ -1815,7 +1915,13 @@ def _quack_cute_epilogue_code(
             )
 
     _compile_quack_pointwise_nodes(
-        graph_module, mm_node, output_plan.skip_nodes, env, kernel, handler
+        graph_module,
+        mm_node,
+        output_plan.skip_nodes,
+        env,
+        kernel,
+        handler,
+        fast_math=fast_math,
     )
 
     if local_norm is not None and local_norm.dim == 0:
@@ -1862,6 +1968,8 @@ def _render_quack_gemm_epilogue(
 
 def materialize_quack_epilogue(
     graph_module: torch.fx.GraphModule,
+    *,
+    fast_math: bool = False,
 ) -> tuple[
     str,
     str,
@@ -1871,11 +1979,11 @@ def materialize_quack_epilogue(
     QuackMainOutputTransformInfo | None,
 ]:
     lines, result, aux_placeholder_nodes, local_reduce, aux_output, main_output_transform = (
-        _quack_cute_epilogue_code(graph_module)
+        _quack_cute_epilogue_code(graph_module, fast_math=fast_math)
     )
     key = (
         "flex_gemm_quack_epilogue_"
-        + hashlib.sha256(graph_module.code.encode()).hexdigest()[:16]
+        + hashlib.sha256(f"fast_math={fast_math}\n{graph_module.code}".encode()).hexdigest()[:16]
     )
     return (
         key,
