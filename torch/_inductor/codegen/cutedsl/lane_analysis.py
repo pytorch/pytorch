@@ -11,10 +11,17 @@ from ...virtualized import V
 
 @dataclasses.dataclass(frozen=True)
 class LaneExprInfo:
-    """Lane-wise uniformity and contiguity classification for an expression.
+    """How an index expression changes across vectorized lanes.
 
-    ``is_contiguous`` means the expression is aligned and contiguous for the
-    full ``max_width`` requested by ``classify_lane_expr``.
+    A lane is one element of =a vectorized CuteDSL computation. For a 32-lane
+    mask/load, lane 0 is the first element in the group and lane 31 is the last.
+
+    Attributes:
+        is_uniform: All lanes evaluate to the same value, e.g. for flex-flash``b_idx``.
+        is_contiguous: Lanes evaluate to consecutive aligned values for the
+            requested width, e.g. ``kv_idx + lane`` when lane 0 is aligned.
+        contiguous_width: Largest aligned contiguous power-of-two width proven,
+            or None if no vector-width contiguity is proven.
     """
 
     is_uniform: bool
@@ -29,7 +36,24 @@ def classify_lane_expr(
     max_width: int,
     uniform_symbols: OrderedSet[sympy.Symbol] | None = None,
 ) -> LaneExprInfo:
-    """Classify whether an expression is uniform or full-width contiguous."""
+    """Classify how ``expr`` varies across ``lane_var`` vector lanes.
+
+    ``max_width`` is the requested vector width. We start with this as the
+    maximum width to check and then decrease in powers of two trying to find a width
+    that satisfies contiguity across lanes. We cap since we are trying to get vectorized loads
+    which are at 128 and 256(B200) bits so no need to check higher.
+
+    For example a ``lane_var = kv_idx`` and ``max_width = 8``:
+
+    - No dependency on lane var: ``q_idx`` returns
+      ``LaneExprInfo(is_uniform=True, is_contiguous=False, contiguous_width=None)``.
+    - ``kv_idx`` at an 8-aligned group start returns
+      ``LaneExprInfo(is_uniform=False, is_contiguous=True, contiguous_width=8)``.
+    - ``kv_idx + 4`` at a 4-aligned but not 8-aligned group start returns
+      ``LaneExprInfo(is_uniform=False, is_contiguous=False, contiguous_width=4)``.
+    - ``kv_idx * 2`` returns
+      ``LaneExprInfo(is_uniform=False, is_contiguous=False, contiguous_width=None)``.
+    """
     if max_width <= 1:
         return LaneExprInfo(True, False, None)
 
@@ -76,14 +100,34 @@ def aligned_contiguous_width(
 
 
 def lane_group_start(expr: sympy.Expr, lane_var: sympy.Symbol) -> sympy.Expr:
-    """Return the expression value at the first lane in the lane group."""
+    """Return the lane-group base value by evaluating ``expr`` at lane 0.
+
+    For example, if ``expr = base + lane_var``, this returns ``base``. This is
+    useful when checking vector-load alignment: a contiguous lane expression is only
+    safe to vectorize when the first lane's address is sufficiently aligned.
+    """
     return V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
 
 
 def decompose_affine_lane_expr(
     expr: sympy.Expr, lane_var: sympy.Symbol
 ) -> tuple[sympy.Expr, sympy.Expr] | None:
-    """Decompose an affine lane expression into ``(lane_coeff, rest)``."""
+    """Return ``(stride, base)`` when ``expr`` is affine in ``lane_var``.
+
+    The result satisfies ``expr == stride * lane_var + base``, where neither
+    ``stride`` nor ``base`` depends on ``lane_var``.
+    For example: ``stride == 0`` means lane-uniform, ``stride == 1`` means
+    consecutive lanes access consecutive indices, and other strides are
+    non-contiguous gathers.
+
+    Examples with ``lane_var = i``:
+        ``b + i`` -> ``(1, b)``
+        ``b + 2 * i`` -> ``(2, b)``
+        ``b`` -> ``(0, b)``
+
+    Returns ``None`` for non-affine expressions or when the extracted stride or
+    base still depends on ``lane_var``.
+    """
     expr = V.graph.sizevars.simplify(expr)
     lane_coeff = expr.coeff(lane_var)
     rest = lane_group_start(expr, lane_var)
