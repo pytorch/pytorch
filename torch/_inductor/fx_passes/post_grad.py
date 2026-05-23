@@ -209,7 +209,7 @@ def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
         if (
             normalized_cat_dim is None
             or any(dim is None for dim in normalized_reduce_dims)
-            or len(set(normalized_reduce_dims)) != len(normalized_reduce_dims)
+            or len(OrderedSet(normalized_reduce_dims)) != len(normalized_reduce_dims)
             or normalized_cat_dim in normalized_reduce_dims
         ):
             continue
