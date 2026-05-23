@@ -3242,6 +3242,38 @@ def triton_config(
     return config
 
 
+_FP64_HEAVY_POINTWISE_OP_THRESHOLD = 16
+
+
+def _is_cuda_device(triton_meta: dict[str, Any]) -> bool:
+    device = triton_meta.get("device")
+    return getattr(device, "type", None) == "cuda" and torch.version.hip is None
+
+
+def _should_add_fp64_heavy_pointwise_config(
+    size_hints: dict[str, int],
+    triton_meta: dict[str, Any],
+    inductor_meta: dict[str, Any],
+) -> bool:
+    return (
+        len(size_hints) == 1
+        and size_hints["x"] > 256
+        and _is_cuda_device(triton_meta)
+        and inductor_meta.get("num_fp64_compute_ops", 0)
+        >= _FP64_HEAVY_POINTWISE_OP_THRESHOLD
+    )
+
+
+def _append_unique_config(configs: list[Config], new_config: Config) -> None:
+    if not any(
+        cfg.kwargs == new_config.kwargs
+        and cfg.num_warps == new_config.num_warps
+        and cfg.num_stages == new_config.num_stages
+        for cfg in configs
+    ):
+        configs.append(new_config)
+
+
 def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
     """
     Converts a linear reduction numel to ND, in row major order.
@@ -3772,6 +3804,15 @@ def pointwise(
                     [  # intel-xpu-backend-for-triton #5133
                         triton_config_with_settings(size_hints, 32),
                     ]
+                )
+            if _should_add_fp64_heavy_pointwise_config(
+                size_hints, triton_meta, inductor_meta
+            ):
+                _append_unique_config(
+                    configs,
+                    triton_config_with_settings(
+                        size_hints, 256, num_warps=8, num_stages=1
+                    ),
                 )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds

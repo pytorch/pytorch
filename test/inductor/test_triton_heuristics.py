@@ -58,6 +58,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotunerPlugin,
     DEFER,
     make_matmul_triton_config,
+    pointwise,
     template,
     triton_config,
 )
@@ -102,6 +103,46 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_fp64_heavy_pointwise_config_guard(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=90,
+            major=9,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+
+        def get_configs(signature, num_fp64_compute_ops):
+            return pointwise(
+                {"x": 2**20},
+                triton_meta={"signature": signature, "device": device},
+                inductor_meta={
+                    "autotune_pointwise": True,
+                    "num_fp64_compute_ops": num_fp64_compute_ops,
+                },
+                return_configs=True,
+            )
+
+        def has_fp64_heavy_candidate(configs):
+            return any(
+                cfg.kwargs == {"XBLOCK": 256}
+                and cfg.num_warps == 8
+                and cfg.num_stages == 1
+                for cfg in configs
+            )
+
+        self.assertTrue(
+            has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp64"}, 16))
+        )
+        self.assertFalse(
+            has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp32"}, 0))
+        )
+        self.assertFalse(
+            has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp64"}, 15))
+        )
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(

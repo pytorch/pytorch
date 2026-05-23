@@ -5990,6 +5990,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
         }
+        if self.num_fp64_compute_ops:
+            out["num_fp64_compute_ops"] = self.num_fp64_compute_ops
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
@@ -6235,6 +6237,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self.codegen_body()
         self._filter_pdl(self.body)
+        if self.num_fp64_compute_ops:
+            inductor_meta["num_fp64_compute_ops"] = self.num_fp64_compute_ops
 
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
