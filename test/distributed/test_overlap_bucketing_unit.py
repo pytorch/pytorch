@@ -1651,6 +1651,65 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
 
+    def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        torch.cuda.init()
+
+        def func(a, b, rng_state):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            rng = graphsafe_run_with_rng_state(
+                torch.ops.aten.mm.default, a, b, rng_state=rng_state
+            )
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return rng + wait
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            gen = torch.cuda.default_generators[0].clone_state()
+            traced = make_fx(func)(a, b, gen)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target is graphsafe_run_with_rng_state:
+                return 10.0
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        rng_placeholder = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
+        )
+        user = next(iter(rng_placeholder.users))
+        self.assertIs(user.target, control_deps)
+
+        graph = GraphLowering(traced, [a, b, gen])
+        with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
+            graph.run(a, b, gen)
+
 
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
