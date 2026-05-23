@@ -9,12 +9,12 @@ import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -385,7 +385,6 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @skipIfXpu(msg="Remove this skip after issue #154949 resolved.")
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
@@ -725,18 +724,24 @@ class CondTests(TestCase):
     def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
-        def pre_grad_pass_counter(gm):
-            counters["pre_grad"] += 1
+        class PreGradPassCounter(CustomGraphPass):
+            def __call__(self, graph):
+                counters["pre_grad"] += 1
 
-        def post_grad_pass_counter(gm):
-            counters["post_grad"] += 1
+            def uuid(self):
+                return "PreGradPassCounter"
+
+        class PostGradPassCounter(CustomGraphPass):
+            def __call__(self, graph):
+                counters["post_grad"] += 1
+
+            def uuid(self):
+                return "PostGradPassCounter"
 
         with torch._inductor.config.patch(
             {
-                "pre_grad_custom_pass": pre_grad_pass_counter,
-                "post_grad_custom_pre_pass": post_grad_pass_counter,
-                # The above patches don't pickle
-                "fx_graph_cache": False,
+                "pre_grad_custom_pass": PreGradPassCounter(),
+                "post_grad_custom_pre_pass": PostGradPassCounter(),
             }
         ):
             self._run_test(
@@ -2005,6 +2010,7 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2])
     @parametrize("autograd", [True, False])
+    @torch._inductor.config.patch(shape_padding=False)
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_pytree_in_out(self, device, dynamic, reverse, dim, autograd):
         self._run_test(

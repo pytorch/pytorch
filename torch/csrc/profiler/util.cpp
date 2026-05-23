@@ -10,6 +10,7 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
+#include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
@@ -508,6 +509,20 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       if (rank >= 0 && rank < nRanks) {
         map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
       }
+    }
+
+    auto seqNum = debugInfo->getSequenceNumber();
+    if (seqNum >= 0) {
+      map.emplace(kSeqNum, std::to_string(seqNum));
+
+      size_t comms_id = c10::get_hash(
+          debugInfo->getProcessGroupName(),
+          seqNum,
+          debugInfo->getIsP2P(),
+          globalRankStart,
+          globalRankStride,
+          debugInfo->getWorldSize());
+      map.emplace(kCommsId, std::to_string(comms_id));
     }
   }
 

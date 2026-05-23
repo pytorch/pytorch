@@ -55,6 +55,7 @@ run_if_exists cuda_allocator_test
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's
   # unclear if valgrind -> python -> gtest would work
+  export LD_LIBRARY_PATH="${CPP_TESTS_DIR}:${LD_LIBRARY_PATH}"
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/basic" --gtest_filter='-*CUDA'
   if [[ -x ${CPP_TESTS_DIR}/tensor_interop_test ]]; then
     valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/tensor_interop_test"

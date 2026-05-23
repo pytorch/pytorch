@@ -29,7 +29,7 @@ use_torchcomms: bool = Config(
 
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 # adds patch, save_config, invalid config checks, etc

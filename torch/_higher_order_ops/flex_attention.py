@@ -1,3 +1,4 @@
+import contextlib
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -28,6 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.traceback import annotate, current_meta
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -86,7 +88,7 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
         fill_order = [last_dim] + fill_order
         out_strides = _construct_strides(out.shape, fill_order)
 
-    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out = out.new_empty_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
 
@@ -761,6 +763,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         *score_mod_other_buffers: tuple[Any, ...],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         ctx.set_materialize_grads(False)
+        # Capture sparsity_hint from tracing metadata so backward can re-annotate
+        ctx._sparsity_hint = current_meta.get("custom", {}).get("sparsity_hint", 0.0)
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
@@ -849,41 +853,47 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         # We have asserted that mask_mod_other_buffers do not require grad,
         # but score_mod_other_buffers can require grad.
         none_grads = [None] * 6
-        (
-            grad_query,
-            grad_key,
-            grad_value,
-            grad_score_mod_captured,
-        ) = flex_attention_backward(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            fw_graph,
-            joint_graph,
-            (
-                query_lengths,
-                kv_lengths,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_q_num_blocks,
-                full_q_indices,
-                Q_BLOCK_SIZE,
-                KV_BLOCK_SIZE,
-                mask_graph,
-            ),
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
+        _sparsity_ctx = (
+            annotate({"sparsity_hint": ctx._sparsity_hint})
+            if ctx._sparsity_hint > 0
+            else contextlib.nullcontext()
         )
+        with _sparsity_ctx:
+            (
+                grad_query,
+                grad_key,
+                grad_value,
+                grad_score_mod_captured,
+            ) = flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                grad_logsumexp,
+                fw_graph,
+                joint_graph,
+                (
+                    query_lengths,
+                    kv_lengths,
+                    kv_num_blocks,
+                    kv_indices,
+                    full_kv_num_blocks,
+                    full_kv_indices,
+                    q_num_blocks,
+                    q_indices,
+                    full_q_num_blocks,
+                    full_q_indices,
+                    Q_BLOCK_SIZE,
+                    KV_BLOCK_SIZE,
+                    mask_graph,
+                ),
+                scale,
+                kernel_options,
+                score_mod_other_buffers,
+                mask_mod_other_buffers,
+            )
         return grad_query, grad_key, grad_value, *none_grads, *grad_score_mod_captured
 
 
@@ -966,6 +976,17 @@ def sdpa_dense_backward(
             f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
             f"and value.dtype={value.dtype}"
         )
+    if joint_graph is None:
+        example_vals = (
+            query.new_zeros((), requires_grad=True),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+        )
+        _, joint_graph = create_fw_bw_graph(
+            fw_graph, example_vals, score_mod_other_buffers
+        )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape
@@ -1012,7 +1033,9 @@ def sdpa_dense_backward(
     if grad_logsumexp is None:
         grad_logsumexp = torch.zeros_like(logsumexp)
 
-    # We're undoing the log -> log2 change of base in the forwards
+    # logsumexp is expected in log2 scale (as returned by the forward HOP).
+    # The public flex_attention API converts lse to natural log before returning,
+    # so callers using the public API must not pass that value here directly.
     logsumexp = logsumexp * math.log(2)
     # The backwards formula for the log -> log2 change of base in the forwards
     grad_logsumexp = grad_logsumexp / math.log(2)

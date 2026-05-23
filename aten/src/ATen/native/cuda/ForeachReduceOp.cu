@@ -28,22 +28,25 @@
 
 namespace at::native {
 
-// _foreach_norm supports only L1, L2, and inf norm
-enum class NormType { L1, L2, LInf };
+// _foreach_norm supports L0, L1, L2, and inf norm
+enum class NormType { L0, L1, L2, LInf };
 
 // NOTE: This is a simple variant of TensorListMetadata in MultiTensorApply.cuh
 // as we only need to track addresses for the lpnorm_cleanup function below.
 // Why is this struct necessary? For the same reason the TensorListMetadata
 // struct is necessary--which is to ferry static metadata to the CUDA kernel
-// while complying with the 4kb size constraint. Since we only need to track
-// addresses, we introduce this struct to be able to fit more Tensor pointers at
-// a time, currently 400 empirically, compared to the much smaller values in
-// depth_to_max_tensors. This way, we can launch fewer kernels for better
-// performance.
+// while complying with the kernel arg size constraint. Since we only need to
+// track addresses, we introduce this struct to be able to fit more Tensor
+// pointers at a time compared to depth_to_max_tensors. This way, we can
+// launch fewer kernels for better performance.
 //
 // IF YOU USE THIS STRUCT, PLEASE ADD A ONE-OFF TEST IN test_foreach.py AS THIS
 // IS CURRENTLY ONLY TESTED FOR _foreach_norm.
-const size_t MAX_TENSORS_PER_KERNEL = 400;
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000 && !defined(USE_ROCM)
+static constexpr size_t MAX_TENSORS_PER_KERNEL = 3200;
+#else
+static constexpr size_t MAX_TENSORS_PER_KERNEL = 400;
+#endif
 struct TensorListAddresses {
   const void* addresses[MAX_TENSORS_PER_KERNEL];
 };
@@ -133,17 +136,19 @@ __global__ void lpmax_cleanup(
 
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
-  if (!can_use_fast_route(tensors)) {
-    return foreach_tensor_max_slow(tensors);
-  }
 
-  // for parity with max in ReduceAllOps.cpp, as max(empty) is ???
+  // for parity with max in ReduceAllOps.cpp, as max(empty) is undefined
+  // Check this early before routing to slow path
   TORCH_CHECK(
       std::all_of(
           tensors.begin(),
           tensors.end(),
           [](const auto& t) { return t.numel() > 0; }),
-      "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
+      "_foreach_max cannot compute the maximum of an empty tensor; max over zero elements is undefined.");
+
+  if (!can_use_fast_route(tensors)) {
+    return foreach_tensor_max_slow(tensors);
+  }
 
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
@@ -281,7 +286,10 @@ struct LpNormFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           const auto next = static_cast<out_opmath_t>(r_x[ii]);
-          if constexpr (norm_type == NormType::LInf) {
+          if constexpr (norm_type == NormType::L0) {
+            vals[ii] +=
+                next != out_opmath_t(0) ? out_opmath_t(1) : out_opmath_t(0);
+          } else if constexpr (norm_type == NormType::LInf) {
             vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
           } else {
             vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
@@ -296,7 +304,10 @@ struct LpNormFunctor {
           int i = i_start + threadIdx.x + ii * blockDim.x;
           if (i < n && i < chunk_size) {
             const auto next = static_cast<out_opmath_t>(x[i]);
-            if constexpr (norm_type == NormType::LInf) {
+            if constexpr (norm_type == NormType::L0) {
+              vals[ii] +=
+                  next != out_opmath_t(0) ? out_opmath_t(1) : out_opmath_t(0);
+            } else if constexpr (norm_type == NormType::LInf) {
               vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
             } else {
               vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
@@ -314,7 +325,8 @@ struct LpNormFunctor {
         val += vals[i];
       }
     }
-    auto final_val = norm_type == NormType::L1 || norm_type == NormType::L2
+    auto final_val = norm_type == NormType::L0 || norm_type == NormType::L1 ||
+            norm_type == NormType::L2
         ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
         : at::native::cuda_utils::BlockReduceMax(val, s_vals);
 
@@ -348,8 +360,8 @@ __global__ void lpnorm_cleanup(
       val += output_this_tensor[i];
     }
   }
-  out_opmath_t final_val =
-      norm_type == NormType::L1 || norm_type == NormType::L2
+  out_opmath_t final_val = norm_type == NormType::L0 ||
+          norm_type == NormType::L1 || norm_type == NormType::L2
       ? at::native::cuda_utils::BlockReduceSum<out_opmath_t>(val, vals)
       : at::native::cuda_utils::BlockReduceMax(val, vals);
   if (threadIdx.x == 0) {
@@ -476,7 +488,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
         AT_DISPATCH_OUT_DTYPES(
             output_dtype, ForeachNormDispatchName<apply_root>::value, [&]() {
               using out_opmath_t = typename at::opmath_type<out_t>;
-              if (p == static_cast<double>(1)) {
+              if (p == static_cast<double>(0)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L0, out_t>(),
+                    output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
+                    max_chunks_per_tensor);
+              } else if (p == static_cast<double>(1)) {
                 multi_tensor_apply<1>(
                     tensor_lists,
                     LpNormFunctor<scalar_t, NormType::L1, out_t>(),
@@ -519,7 +537,16 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                           .template mutable_data_ptr<out_t>();
                 }
 
-                if (p == static_cast<double>(1)) {
+                if (p == static_cast<double>(0)) {
+                  lpnorm_cleanup<scalar_t, NormType::L0, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor
+                                  .template const_data_ptr<out_opmath_t>() +
+                              i * MAX_TENSORS_PER_KERNEL *
+                                  max_chunks_per_tensor,
+                          addr_struct,
+                          max_chunks_per_tensor);
+                } else if (p == static_cast<double>(1)) {
                   lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
                           output_per_tensor
@@ -613,7 +640,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         });
   }
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
-      !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
+      !(p == static_cast<double>(0) || p == static_cast<double>(1) ||
+        p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {
     return foreach_tensor_norm_slow(tensors, ord, dtype);
   }

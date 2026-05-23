@@ -30,7 +30,7 @@ std::tuple<Tensor, Tensor> matmul_backward_nested(
   if (grad_input_mask[1]) {
     grad_other = at::matmul(self.transpose(-1, -2), grad);
   }
-  return std::make_tuple(grad_self, grad_other);
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(

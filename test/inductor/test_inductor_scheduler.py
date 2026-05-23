@@ -3,13 +3,18 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
+import sympy
+
 import torch
+import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -22,9 +27,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfXpu,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -77,8 +84,189 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+            simple_write = MemoryDep("buf", w0, (w0,), (16,))
+            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+            cases = [
+                (
+                    "quotient broadcast",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128),
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    True,
+                ),
+                (
+                    "quotient tail remains",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    False,
+                ),
+                (
+                    "pure broadcast",
+                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
+                    simple_write,
+                    False,
+                    True,
+                ),
+                (
+                    "dynamic dense",
+                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
+                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
+                    False,
+                    True,
+                ),
+                (
+                    "exact gapped",
+                    exact_gapped,
+                    exact_gapped,
+                    True,
+                    True,
+                ),
+                (
+                    "producer broadcast",
+                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
+                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
+                    False,
+                    False,
+                ),
+                (
+                    "producer alias",
+                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
+                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
+                    False,
+                    False,
+                ),
+            ]
+            for name, read, write, expected_default, expected_relaxed in cases:
+                with self.subTest(name):
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(read, write),
+                        expected_default,
+                    )
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(
+                            read,
+                            write,
+                            allow_index_equivalence=True,
+                        ),
+                        expected_relaxed,
+                    )
+
+            normalized_exact_gapped_read = MemoryDep(
+                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
+            )
+            normalized_exact_gapped_write = MemoryDep(
+                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
+            )
+            with inductor_config.patch(loop_ordering_after_fusion=True):
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                    )
+                )
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                        allow_index_equivalence=True,
+                    )
+                )
+
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
@@ -97,6 +285,7 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
+    @xfailIfNoAcceleratorTriton
     @skipIfXpu(
         msg="InvalidModule: Invalid SPIR-V module, "
         "https://github.com/intel/torch-xpu-ops/issues/2329"
@@ -116,7 +305,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
-    @torch._inductor.config.patch({"force_disable_caches": True})
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
@@ -219,6 +410,7 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
         """
@@ -259,6 +451,7 @@ class TestScheduler(TestCase):
             f"compiled={compiled_result.mean().item():.6f}",
         )
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_atomic_add_no_fusion_correctness(self):
         """
@@ -290,7 +483,143 @@ class TestScheduler(TestCase):
         )
 
 
+class TestScoreFusionMemory(TestCase):
+    """
+    Tests for _score_fusion_memory_by_buffer_overlap.
+
+    These tests validate the fusion scoring logic that determines when nodes
+    should be fused together based on their memory access patterns.
+
+    Key scenarios:
+    1. Exact matches: read/write has exact matches → should fuse (1 kernel)
+    2. Large overlap (split/cat): reads on different offset but overlap is huge
+       → should fuse because the benefit is large (1 kernel)
+    3. Small overlap: reads on different offset but overlap is small → don't fuse (2 kernels)
+    """
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    @inductor_config.patch("min_overlap_ratio", 0.5)
+    def test_exact_same_reads_should_fuse(self) -> None:
+        """
+        Case 1: Exact matches in read/write → should fuse into 1 kernel.
+
+        Two operations reading from the exact same input tensor should be
+        fused together since they can share the data read from memory.
+        """
+
+        def exact_reads(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            # Both operations read the exact same input
+            out1 = x * 2
+            out2 = x + 1
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(exact_reads, backend="inductor", fullgraph=True)
+        out1_eager, out2_eager = exact_reads(x)
+        out1_compiled, out2_compiled = compiled_fn(x)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should fuse into 1 kernel since both ops read exact same buffer
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    @inductor_config.patch("min_overlap_ratio", 0.5)
+    def test_split_cat_large_overlap_should_fuse(self) -> None:
+        """
+        Case 2: Reads on different offset but overlap is huge (split/cat) → should fuse into 1 kernel.
+
+        Split operations read from the same input buffer at different offsets.
+        Since the overlap is large (same underlying buffer), fusing these
+        operations together saves reads and kernel launches.
+        """
+
+        def split_and_process(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            s1, s2, s3, s4 = torch.split(x, x.shape[-1] // 4, dim=-1)
+            out1 = torch.cat([s4, s3], dim=-1)
+            out2 = torch.cat([s2, s1], dim=-1)
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(
+            split_and_process, backend="inductor", fullgraph=True
+        )
+        out1_eager, out2_eager = split_and_process(x)
+        out1_compiled, out2_compiled = compiled_fn(x)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should fuse into 1 kernel since all ops read from the same underlying buffer
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    def test_partial_overlap_below_threshold(self) -> None:
+        """
+        Case 3: Partial overlap below the 0.5 threshold → should NOT fuse (2 kernels).
+
+        Similar to test_split_cat_large_overlap_should_fuse, but each operation
+        also reads from a separate large tensor, making the shared buffer portion
+        less than 50% of total reads.
+
+        Example scenario:
+        - Split x into 4 slices: s1, s2, s3, s4 (each 25% of x)
+        - op1 reads: s1 (from x, ~25%) + y (separate tensor, ~75%) → total 100%
+        - op2 reads: s2 (from x, ~25%) + z (separate tensor, ~75%) → total 100%
+        - Common buffer is x, but each op only reads 25% of their total from x
+        - overlap_ratio = 25% / 100% = 0.25 < 0.5 threshold → score = 0
+        - Result: 2 separate kernels (not fused)
+        """
+
+        def partial_overlap_split(
+            x: torch.Tensor, y: torch.Tensor, z: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Split x into 4 parts, use different slices in each output
+            s1, s2, _, _ = torch.split(x, x.shape[-1] // 4, dim=-1)
+            # op1 reads: s1 (small slice of x) + y (large separate tensor)
+            # op2 reads: s2 (small slice of x) + z (large separate tensor)
+            # The slices s1 and s2 come from the same buffer x,
+            # but each is only ~25% of total reads for that op
+            out1 = torch.cat([s1, y, y, y], dim=-1)
+            out2 = torch.cat([s2, z, z, z], dim=-1)
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        # x is split into 4 parts (each 128 elements)
+        # y and z are 3x larger (384 elements each)
+        # So each op reads: 128 (from x slice) + 384 (from y or z) = 512 total
+        # overlap_ratio = 128 / 512 = 0.25 < 0.5 threshold
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+        z = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(
+            partial_overlap_split, backend="inductor", fullgraph=True
+        )
+        out1_eager, out2_eager = partial_overlap_split(x, y, z)
+        out1_compiled, out2_compiled = compiled_fn(x, y, z)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should NOT fuse (2 kernels) because overlap_ratio = 0.25 < 0.5 threshold
+        # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

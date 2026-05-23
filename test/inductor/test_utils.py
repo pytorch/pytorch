@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import importlib.util
 import unittest
 
 from sympy import I, Max, Min, Symbol, sympify
@@ -12,7 +13,11 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+    xfailIfNoAcceleratorTriton,
+)
 from torch.utils._sympy.functions import Identity
 
 
@@ -86,6 +91,22 @@ class TestUtils(TestCase):
         expr = Min(2, Max(0, Identity(q0)))
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
+
+    def testIdentityComparisonNoRecursion(self):
+        self.assertTrue(Identity(sympify("0")) >= 0)
+        self.assertFalse(Identity(sympify("-6")) >= 0)
+        self.assertTrue(0 >= Identity(sympify("-6")))
+
+    def testIdentityComparableNumbersInMinMax(self):
+        expr = Identity(sympify("-6"))
+        self.assertTrue(expr.is_number)
+        self.assertTrue(expr.is_comparable)
+        self.assertEqual(Max(0, expr), 0)
+
+    def testIdentityRationalComparisonNoRecursion(self):
+        expr = Identity(sympify("1/7"))
+        self.assertTrue(expr >= 0)
+        self.assertTrue(Max(0, expr).has(expr))
 
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
@@ -217,6 +238,58 @@ class TestUtils(TestCase):
                     countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
                 )
 
+    def test_flops_fx_higher_order_op(self):
+        """count_flops_fx must use the registered formula for HOP targets
+        rather than invoking the HOP. flex_attention.__call__ requires a
+        Dynamo/proxy tracing context (TransformGetItemToIndex) and raises
+        TypeError when invoked on bare (fake) tensors.
+        """
+        from torch.utils.flop_counter import flop_registry
+
+        flex_attention = torch.ops.higher_order.flex_attention
+        self.assertIn(flex_attention, flop_registry)
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        with V.set_fake_mode(
+            torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        ):
+            graph = torch.fx.Graph()
+            q = graph.placeholder("q")
+            k = graph.placeholder("k")
+            v = graph.placeholder("v")
+            q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+            k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+            v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+            node = graph.call_function(flex_attention, args=(q, k, v))
+            node.meta["val"] = (
+                torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+            )
+
+            self.assertTrue(countable_fx(node))
+            flops = count_flops_fx(node)
+            expected = flop_registry[flex_attention](
+                q.meta["val"], k.meta["val"], v.meta["val"], out_val=node.meta["val"]
+            )
+            self.assertEqual(flops, expected)
+
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
@@ -225,6 +298,75 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestRuntimeEstimation(TestCase):
+    def test_get_compute_time_units(self):
+        """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
+        from unittest.mock import patch
+
+        from torch.utils._runtime_estimation import get_compute_time
+
+        M, K, N = 64, 64, 64
+        known_tflops = 1000.0
+        a = torch.randn(M, K)
+        b = torch.randn(K, N)
+        out = torch.mm(a, b)
+
+        with patch(
+            "torch.utils._runtime_estimation.get_device_tflops",
+            return_value=known_tflops,
+        ):
+            result_ns = get_compute_time(
+                torch.ops.aten.mm, (a, b), {}, out, {torch.float32}
+            )
+
+        # mm flops = 2*M*K*N, divided by 2 for MACs, then time = macs / (0.75 * peak) * 1e9
+        expected_macs = 2 * M * K * N / 2
+        expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9
+        self.assertAlmostEqual(result_ns, expected_ns)
+
+
+class TestFP4Support(TestCase):
+    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or importlib.util.find_spec("cutlass_api") is None,
+        "requires CUDA and cutlass_api",
+    )
+    def test_ensure_fp4_dtype_registered(self):
+        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+        _ensure_fp4_dtype_registered()
+        import cutlass
+        import cutlass_api.utils
+
+        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        self.assertEqual(result, cutlass.Float4E2M1FN)
+
+        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        self.assertEqual(result_fp32, cutlass.Float32)
+
+    def test_rand_strided_fp4(self):
+        """rand_strided should produce valid FP4 tensors."""
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((4, 8), (8, 1), dtype=torch.float4_e2m1fn_x2, device="cpu")
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (4, 8))
+        self.assertEqual(t.stride(), (8, 1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_rand_strided_fp4_cuda(self):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertTrue(t.is_cuda)
+
 
 if __name__ == "__main__":
     run_tests()

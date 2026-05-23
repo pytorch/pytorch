@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -29,8 +28,8 @@ class FakeTensorProp(torch.fx.Interpreter):
     """
 
     def __init__(
-        self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None
-    ):
+        self, module: torch.fx.GraphModule, mode: FakeTensorMode | None = None
+    ) -> None:
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
@@ -39,7 +38,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         mode.reset_nt_tensor_id_counter()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
-    def run_node(self, n: Node):
+    def run_node(self, n: Node) -> Any:
         from torch.fx.experimental.symbolic_shapes import (
             compute_unbacked_bindings,
             rebind_unbacked,
@@ -80,7 +79,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
 
-        def extract_val(obj):
+        def extract_val(obj: Any) -> Any:
             if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
@@ -102,13 +101,13 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         return result
 
-    def propagate(self, *args):
+    def propagate(self, *args: object) -> Any:
         fake_args = [
             self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
             for a in args
         ]
         return self.propagate_dont_convert_inputs(*fake_args)
 
-    def propagate_dont_convert_inputs(self, *args):
+    def propagate_dont_convert_inputs(self, *args: object) -> Any:
         with self._mode:
             return super().run(*args)

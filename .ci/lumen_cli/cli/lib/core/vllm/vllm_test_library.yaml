@@ -20,8 +20,7 @@ vllm_basic_models_test:
     - pytest -v -s models/test_registry.py
     - pytest -v -s models/test_utils.py
     - pytest -v -s models/test_vision.py
-    - pytest -v -s models/test_initialization.py -k 'not voxtral'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/test_initialization.py -k voxtral
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/test_initialization.py
 
 vllm_entrypoints_test:
   title: Entrypoints Test
@@ -47,12 +46,13 @@ vllm_lora_tp_test_distributed:
   id: vllm_lora_tp_test_distributed
   env_vars:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
+    PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
   num_gpus: 4
   steps:
     - pytest -v -s -x lora/test_chatglm3_tp.py
     - pytest -v -s -x lora/test_llama_tp.py -k 'not test_tp2_serialize_and_deserialize_lora'
     - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s -x lora/test_llama_tp.py -k test_tp2_serialize_and_deserialize_lora
-    - pytest -v -s -x lora/test_llm_with_multi_loras.py
+    - pytest -v -s -x lora/test_qwen3_with_multi_loras.py
 
 vllm_distributed_test_28_failure_test:
   title: Distributed Tests (2 GPUs) pytorch 2.8 release failure
@@ -75,10 +75,15 @@ vllm_multi_model_processor_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py
-    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k mistralai
+    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py --ignore models/multimodal/processing/test_moondream3.py
+    # mistralai and moonshotai ship custom tiktoken tokenizers without a tokenizer.json; transformers v5's
+    # TokenizersBackend needs Hub access to resolve tokenizer_file. moondream3's HF config points at a
+    # separate language-model repo (moondream/starmie-v1) whose config.json is not in the pre-populated
+    # cache, so loading it also requires Hub access. Run all three with OFFLINE=0.
+    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai and not moonshotai and not moondream'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k 'mistralai or moonshotai or moondream'
     - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_glm4_1v.py
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_moondream3.py
 
 vllm_multi_model_test_28_failure_test:
   title: Multi-Model Test (Failed 2.8 release)
@@ -125,4 +130,4 @@ vllm_lora_test:
   id: lora_test
   parallelism: 4
   steps:
-    - pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_llm_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py
+    - pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_qwen3_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py --ignore=lora/test_qwen35_densemodel_lora.py

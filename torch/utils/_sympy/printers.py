@@ -97,6 +97,9 @@ class ExprPrinter(StrPrinter):
             f"_print_NegativeInfinity not implemented for {type(self)}"
         )
 
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        raise NotImplementedError(f"_print_NaN not implemented for {type(self)}")
+
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
 
@@ -176,6 +179,9 @@ class PythonPrinter(ExprPrinter):
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return "-math.inf"
 
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "math.nan"
+
     # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
@@ -191,8 +197,17 @@ class PythonPrinter(ExprPrinter):
         return self.stringify(expr.args, " / ", PRECEDENCE["Atom"] - 0.5)
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
+        # NB: We use torch._sym_sqrt here instead of math.sqrt because the
+        # guard expression may be evaluated with SymInt/SymFloat inputs (e.g.
+        # during cache hit re-evaluation in evaluate_guards_expression).
+        # math.sqrt on a SymFloat triggers evaluate_expr which forces
+        # concretization/specialization of the symbol, creating spurious
+        # guards that didn't exist in the original program.
+        # torch._sym_sqrt properly propagates through the symbolic system
+        # without forcing specialization.
+        # See https://github.com/pytorch/pytorch/issues/152435
         # pyrefly: ignore [missing-attribute]
-        return f"math.sqrt({self._print(expr)})"
+        return f"torch._sym_sqrt({self._print(expr)})"
 
     def _print_OpaqueUnaryFn_sqrt(self, expr: sympy.Expr) -> str:
         return self._helper_sqrt(expr.args[0])
@@ -371,6 +386,9 @@ class CppPrinter(ExprPrinter):
             self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
         )
         return f"{c} ? {p} : {q}"
+
+    def _print_Or(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " || ", precedence(expr))
 
     def _print_Piecewise(self, expr: sympy.Expr) -> str:
         # Convert Piecewise(expr_cond_pairs) to nested ternary operators
@@ -643,3 +661,6 @@ class CppPrinter(ExprPrinter):
 
     def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
         return f"-{self._print_Infinity(expr)}"
+
+    def _print_NaN(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::quiet_NaN()"

@@ -20,7 +20,6 @@ import torch
 import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
@@ -204,6 +203,32 @@ class IterationRangesRoot(IterationRanges):
     def __repr__(self) -> str:
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
 
+    def block_size(self) -> sympy.Expr:
+        return sympy.Symbol(f"{self.prefix.upper()}BLOCK", integer=True, positive=True)
+
+    def block_size_str(self) -> str:
+        return str(self.block_size())
+
+    def block_offset(self) -> sympy.Expr:
+        # iteration_ranges_codegen_header uses this to derive the tile-local
+        # base index for the tree.
+        return sympy.Symbol(f"{self.prefix}offset", integer=True, nonnegative=True)
+
+    def mask_name(self) -> str:
+        return f"{self.prefix}mask"
+
+    def owns_mask(self, mask_var: str) -> bool:
+        return mask_var == self.mask_name()
+
+    def supports_constant_mask(self) -> bool:
+        return True
+
+    def has_custom_codegen_header(self) -> bool:
+        return False
+
+    def named_constants(self) -> tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...]:
+        return ()
+
     def cache_clear(self) -> None:
         for node in self.nodes.values():
             node.cache_clear()
@@ -233,6 +258,14 @@ class IterationRangesRoot(IterationRanges):
             self.var_ranges[node.symbol()] = length
             self.nodes[expr] = node
         return self.nodes[expr]
+
+    def full_range(self) -> IterationRangesEntry:
+        """Return the canonical entry for this root's unsplit logical index.
+
+        This is ``lookup(1, numel)``, so the entry is interned in
+        ``range_tree_nodes`` just like split entries.
+        """
+        return self.lookup(sympy.S.One, self.numel)
 
     def construct_entries(
         self, lengths: list[sympy.Expr]
@@ -265,7 +298,7 @@ class IterationRangesRoot(IterationRanges):
             return (divisor_hint, not length_is_one_hint)
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
-        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes = [n for n in nodes if n and n.root is self]
         nodes.sort(key=lambda x: get_sort_key(x))
         divisor = sympy.S.One
         index_vars = []
@@ -318,9 +351,27 @@ class IterationRangesEntry(IterationRanges):
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name: str) -> None:
+        old_symbol = self.symbol()
         self.codegen = lambda: name  # type: ignore[assignment]
         self.codegen.cache_clear = lambda: None  # type: ignore[method-assign]
         self.name = name
+        new_symbol = self.symbol()
+        if old_symbol == new_symbol:
+            return
+
+        existing_node = self.kernel.range_tree_nodes.get(new_symbol)
+        if existing_node is not None and existing_node is not self:
+            # Some templates reuse the same textual index name for different
+            # live range entries.  Keep the existing owner in that case.
+            return
+
+        if old_symbol in self.var_list:
+            self.var_list[self.var_list.index(old_symbol)] = new_symbol
+        if old_symbol in self.var_ranges:
+            self.var_ranges[new_symbol] = self.var_ranges.pop(old_symbol)
+        if self.kernel.range_tree_nodes.get(old_symbol) is self:
+            del self.kernel.range_tree_nodes[old_symbol]
+        self.kernel.range_tree_nodes[new_symbol] = self
 
     def cache_clear(self) -> None:
         self.codegen.cache_clear()
@@ -352,6 +403,76 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+class DerivedIterationRangesRoot(IterationRangesRoot):
+    """A root with reduced numel/block_size derived from a parent tree.
+
+    Used for the grouped reduction output: if the parent R tree covers 1024
+    columns with group_size=128, the derived root covers 8 groups. It shares
+    the parent's loop structure (same is_loop, prefix, loop variable) but
+    has its own block geometry:
+
+        parent R:  numel=1024, block_size=RBLOCK, offset=roffset
+        derived R: numel=8,    block_size=RBLOCK//128, offset=roffset//128
+
+    This lets the grouped reduction store at reduced-resolution offsets
+    while still running inside the parent's reduction loop.
+    """
+
+    def __init__(
+        self,
+        parent: IterationRangesRoot,
+        *,
+        numel: sympy.Expr,
+        block_size: sympy.Expr,
+        block_offset: sympy.Expr,
+        name_suffix: str = "reduced",
+        named_constants: tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...] = (),
+    ) -> None:
+        super().__init__(
+            name=f"{name_suffix}_{parent.name}",
+            numel=numel,
+            prefix=parent.prefix,
+            index=parent.index,
+            kernel=parent.kernel,
+            pid_cache=parent.pid_cache,
+            # Outer reductions are not always persistent. When the parent
+            # reduction tree is looped, any derived view of it must also stay
+            # loop-local; otherwise its block offset is emitted once in the
+            # kernel prologue and closes over a stale reduction offset from a
+            # previous loop iteration.
+            is_loop=parent.is_loop,
+            tensor_dim=parent.tensor_dim,
+            grid_dim=parent.grid_dim,
+            has_zdim=parent.has_zdim,
+        )
+        self._block_size = block_size
+        self._block_offset = block_offset
+        self._named_constants = named_constants
+
+    def block_size(self) -> sympy.Expr:
+        return self._block_size
+
+    def block_offset(self) -> sympy.Expr:
+        return self._block_offset
+
+    def index_sym(self) -> sympy.Symbol:
+        return sympy_index_symbol(self.name)
+
+    def mask_name(self) -> str:
+        return f"{self.name}_mask"
+
+    def supports_constant_mask(self) -> bool:
+        # Derived roots use expressions like R0_BLOCK // G rather than
+        # fixed-config block keys, so keep their masks explicit.
+        return False
+
+    def named_constants(self) -> tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...]:
+        return self._named_constants
+
+    def has_custom_codegen_header(self) -> bool:
+        return True
+
+
 def constant_repr(value: int | float) -> str:
     if value == float("inf"):
         return 'float("inf")'
@@ -379,6 +500,7 @@ class NodeInfo(NamedTuple):
 
     node_schedule: list
     tiling: dict
+    tiling_scores: dict | None
     numel: Any
     rnumel: Any
     features: SIMDKernelFeatures
@@ -461,9 +583,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.initialize_range_tree(pid_cache)
 
         self.rsplit_size = 0
+        self.min_xblock: int | None = None
+        self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
 
-    def codegen_template_override(
+    def codegen_template_body(
         self,
         scheduling,
         template_node,
@@ -472,14 +596,26 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         buf_name_to_prologue_group,
         prologue_preserves_zero_mask_fn,
         render,
-        only_gen_src_code: bool,
-    ) -> str | None:
-        """Override template codegen. Return None to use default flow.
+    ) -> str:
+        """Generate template source code with fused prologues and epilogues.
 
-        External template handlers (e.g. Helion) can override this method
-        to implement custom code generation.
+        Subclasses override this to implement custom code generation.
+        The default implementation raises NotImplementedError — the actual
+        standard path lives in ``TritonTemplateKernel.codegen_template_body``.
         """
-        return None
+        raise NotImplementedError
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        """Return epilogue nodes that were not fused into the kernel.
+
+        These nodes need separate codegen (via ``call_kernel``) and must
+        be excluded from ``mark_run`` in ``_codegen_single_template``.
+
+        The standard path fuses all epilogues, so this returns ``[]``.
+        ``ExternalTritonTemplateKernel`` overrides this for epilogues that
+        don't read exactly one template output and cannot be fused.
+        """
+        return []
 
     def _get_store_output_subgraph_name(self, i: int) -> str:
         return f"<STORE_OUTPUT_{i}>"
@@ -599,39 +735,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             )
         )
 
-    def triton_tensor_ndim(self) -> int:
-        return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
-
-    def indexing_size_str(self, i: int) -> str:
-        sizes = ["None"] * self.triton_tensor_ndim()
-        sizes[i] = ":"
-        return f"[{', '.join(sizes)}]"
-
-    def dense_size_list(self) -> list[str]:
-        sizes = ["1"] * self.triton_tensor_ndim()
-        for tree in self.range_trees:
-            if tree.tensor_dim is None:
-                continue
-
-            if not tree.is_reduction or self.inside_reduction:
-                sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
-        return sizes
-
-    def create_constant_mask(self, entry) -> str:
-        x = entry.prefix
-        if entry.tensor_dim is None:
-            sizestr = self.dense_size_str()
-            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
-        sizes = ["None"] * self.triton_tensor_ndim()
-        sizes[entry.tensor_dim] = ":"
-        suffix = ", ".join(sizes)
-        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
-        return out
-
-    def dense_size_str(self) -> str:
-        sizes = self.dense_size_list()
-        return f"[{', '.join(sizes)}]"
-
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         if not isinstance(index, ModularIndexing):
             return index
@@ -643,11 +746,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # the index now contains xindex/etc, which is nonstandard, fix it up
         return sympy_subs(
             new_index,
-            {
-                tree_node.root.index_sym(): tree_node.root.lookup(
-                    sympy.S.One, tree_node.root.numel
-                ).symbol()
-            },
+            {tree_node.root.index_sym(): tree_node.root.full_range().symbol()},
         )
 
     def combine_contiguous_dims(
@@ -790,7 +889,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
-                        raise CantSplit
+                        raise CantSplit(
+                            size,
+                            remaining[current_group] * remaining[current_group + 1],
+                        )
 
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]
@@ -844,11 +946,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    if current_group < len(remaining):
-                        return_getters.append(
-                            # pyrefly: ignore [bad-argument-type]
-                            operator.itemgetter(add_range(current_group, size))
-                        )
+                    if current_group >= len(remaining):
+                        raise CantSplit(size, 0)
+                    return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
+                        operator.itemgetter(add_range(current_group, size))
+                    )
             return_getters_groups.append(return_getters)
 
         assert all(
@@ -964,21 +1067,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         if self.is_indirect_indexing(index):
             return False
 
-        index_numels = [1] * len(self.numels)
+        active_trees = self.active_range_trees()
+        index_numels = [1] * len(active_trees)
         for symbol in index.free_symbols:
-            if symbol not in self.range_tree_nodes:
+            entry = self.range_tree_nodes.get(symbol)
+            if entry is None:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
             assert isinstance(entry.parent, IterationRangesRoot)
-            index_numels[entry.parent.index] *= entry.length
+            # Find which active tree this entry belongs to (identity check
+            # because derived trees may shadow the same prefix).
+            tree_pos = next(
+                (i for i, tree in enumerate(active_trees) if tree is entry.parent),
+                None,
+            )
+            if tree_pos is None:
+                # The symbol belongs to an inactive tree family, e.g. a
+                # reduction symbol outside the reduction or a temporarily
+                # swapped-out derived tree.
+                continue
+            index_numels[tree_pos] *= entry.length
 
         # If the index variables only iterate over a subset of the kernel
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
             simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
-            for idx_range, iter_range in zip(index_numels, self.numels.values())
+            for idx_range, iter_range in zip(
+                index_numels, (tree.numel for tree in active_trees)
+            )
         )
 
     def index_to_str(self, index: sympy.Expr) -> str:
@@ -1033,9 +1150,27 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return self.codegen_indexing(simp_index)
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
+        # Hide reduction trees outside reduction loops so indexing and mask
+        # generation only see axes active in the current stage.
         return [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
+
+    @contextlib.contextmanager
+    def use_range_trees(
+        self, range_trees: Sequence[IterationRangesRoot]
+    ) -> Iterator[None]:
+        """Temporarily codegen against an alternate range-tree family."""
+        saved = self.range_trees
+        self.range_trees = list(range_trees)
+        # simplify_indexing depends on the active range trees, so swapping the
+        # tree family must invalidate any cached simplifications.
+        self.simplify_indexing.cache_clear()
+        try:
+            yield
+        finally:
+            self.range_trees = saved
+            self.simplify_indexing.cache_clear()
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -1056,6 +1191,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def codegen_nan_check(self) -> None:
         raise NotImplementedError("NYI: codegen_nan_check")
+
+    def iteration_ranges_codegen_header(
+        self,
+        entry: IterationRangesRoot,
+        code: IndentedBuffer,
+    ) -> None:
+        raise NotImplementedError("NYI: iteration_ranges_codegen_header")
 
     def deallocate_workspaces(self):
         wrapper = V.graph.wrapper_code
@@ -1635,6 +1777,7 @@ class SIMDScheduling(BaseScheduling):
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return kernel, ws_name, src_code
 
+    # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
         self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:
@@ -1759,7 +1902,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-        # a extra round of reduction
+        # an extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + split_size - 1) // split_size
@@ -1767,7 +1910,7 @@ class SIMDScheduling(BaseScheduling):
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
-            stride_str = f"{nsplit} * {rnumel}"
+            stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
             end = f"({idx} + 1) * {stride_str}"
             reduction_type2op = {
@@ -1777,8 +1920,19 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
-
             final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+
+            # Restore the exact original shape via .view() to handle keepdim
+            # and multi-dimensional reductions correctly.
+            buffer = V.graph.get_buffer(buffer_name)
+            if buffer is not None:
+                final_shape = [
+                    V.graph.wrapper_code.codegen_python_sizevar(s)
+                    for s in buffer.get_layout().size
+                ]
+                final_shape_str = f"[{', '.join(final_shape)}]"
+                final_reduce += f".view({final_shape_str})"
+
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.
             if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
@@ -1834,7 +1988,7 @@ class SIMDScheduling(BaseScheduling):
             if len(nodes) != len(node.get_nodes()):
                 assert self.scheduler
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
-            coalesce_analysis = analyze_memory_coalescing(node)
+            coalesce_analysis = node.get_coalesce_analysis()
         else:
             coalesce_analysis = None
 
@@ -1953,27 +2107,14 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         # filter out NodeScheduleMarker
-        base_scheduler_nodes = [
+        base_scheduler_nodes: list[BaseSchedulerNode] = [
             node for node in node_schedule if isinstance(node, BaseSchedulerNode)
         ]
-        self.codegen_comment(base_scheduler_nodes, final_kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_begin()
-            V.graph.wrapper_code.write_kernel_context_guard(
-                final_kernel.kernel_name,
-                base_scheduler_nodes,  # type: ignore[arg-type]
-            )
-        final_kernel.call_kernel(final_kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_end()
-
-        if config.nan_asserts:
-            final_kernel.codegen_nan_check()
-        if config.warn_mix_layout:
-            final_kernel.warn_mix_layout(kernels[0].kernel_name)
-
-        V.graph.removed_buffers |= final_kernel.removed_buffers
-        V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
+        self._launch_kernel_and_cleanup(
+            final_kernel,
+            base_scheduler_nodes,
+            free_buffers=False,
+        )
 
         if (
             V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
@@ -1995,6 +2136,35 @@ class SIMDScheduling(BaseScheduling):
                     )
 
         self.free_buffers_in_scheduler()
+
+    def _launch_kernel_and_cleanup(
+        self,
+        kernel,
+        base_scheduler_nodes: list[BaseSchedulerNode],
+        *,
+        free_buffers: bool = True,
+    ) -> None:
+        self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_begin()
+            V.graph.wrapper_code.write_kernel_context_guard(
+                kernel.kernel_name,
+                base_scheduler_nodes,
+            )
+        kernel.call_kernel(kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_end()
+
+        if config.nan_asserts:
+            kernel.codegen_nan_check()
+        if config.warn_mix_layout:
+            kernel.warn_mix_layout(kernel.kernel_name)
+
+        V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
+        if free_buffers:
+            self.free_buffers_in_scheduler()
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
@@ -2069,8 +2239,15 @@ class SIMDScheduling(BaseScheduling):
         # all prologue groups should have finalized with use in template
         assert len(prologue_group) == 0
 
-        # External template handlers (e.g. Helion) can override codegen
-        result = kernel.codegen_template_override(
+        # Remove prologue-fused inputs from input_buffers so that
+        # remove_kernel_local_buffers can remove them.
+        for buf_name in kernel.prologue_fused_inputs:
+            kernel.args.input_buffers.pop(buf_name, None)
+
+        # Dispatch to the kernel for source generation.  TritonTemplateKernel
+        # handles the standard Triton path; ExternalTritonTemplateKernel
+        # handles external backends (e.g. Helion).
+        src_code = kernel.codegen_template_body(
             self,
             template_node,
             epilogue_nodes,
@@ -2078,110 +2255,35 @@ class SIMDScheduling(BaseScheduling):
             buf_name_to_prologue_group,
             prologue_preserves_zero_mask,
             render,
-            only_gen_src_code,
         )
-        if result is not None:
-            return result
 
-        with kernel:
-            if not only_gen_src_code:
-                # prologue nodes can only be fused if their only use is in the template,
-                # so they are necessarily not allocated
-                for node in [template_node, *epilogue_nodes]:
-                    node.mark_run()
+        if config.benchmark_kernel:
+            num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+            src_code = (
+                f"{kernel.imports_for_benchmark_kernel()}\n"
+                f"{src_code}\n"
+                f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+            )
 
-            partial_code = render()
+        node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-                with kernel.set_subgraph_body(subgraph_name):
-                    for node in epilogue_nodes:
-                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                    kernel.cse.invalidate(OrderedSet())
+        if only_gen_src_code:
+            return src_code
 
-            for input_name, buffer in kernel.named_input_nodes.items():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), []
-                ):
-                    can_codegen_without_upcast = all(
-                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
-                    )
-
-                    # TODO - this doesn't work with libdevice calls, potentially other bugs
-                    # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
-                        with kernel.set_subgraph_body(subgraph_name):
-                            for prologue_node in prologue_group:
-                                if (
-                                    len(prologue_node.get_buffer_names()) == 1
-                                    and len(prologue_group) == 1
-                                ):
-                                    if prologue_preserves_zero_mask(prologue_node):
-                                        kernel.prologue_fused_inputs_preserve_zero |= (
-                                            prologue_node.get_buffer_names()
-                                        )
-
-                                prologue_node.codegen(
-                                    kernel.split_and_set_ranges(
-                                        prologue_node.get_ranges()
-                                    )
-                                )
-                            kernel.cse.invalidate(OrderedSet())
-
-        # Template hooks must be finalised after kernel.remove_kernel_local_buffers
-        # is called (this is called when the kernel context is exited above), and when
-        # the kernel handler is set (as below). This is because the hooks may add
-        # DeferredLine type lines, which preclude lines involving buffers that have
-        # been removed
-
-        # finalize must be called after adding epilogue above
+        # Unfused epilogues are codegen'd separately in call_kernel;
+        # exclude them from mark_run.
+        unfused_set = OrderedSet([id(n) for n in kernel.get_unfused_epilogues()])
         with V.set_kernel_handler(kernel):
-            if not isinstance(partial_code, str):
-                # This is used to calculate flops in TritonTemplateKernels
-                with ir.IRNode.current_origins(template_node.node.origins):
-                    partial_code.finalize_hook("<DEF_KERNEL>")
-                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+            template_node.mark_run()
+            for node in epilogue_nodes:
+                if id(node) not in unfused_set:
+                    node.mark_run()
+            for node in prologue_nodes:
+                node.mark_run()
 
-            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
+        kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            for input_name in kernel.named_input_nodes:
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-
-                partial_code.finalize_hook(subgraph_name, strict=False)
-
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-
-                partial_code.finalize_hook(subgraph_name)
-
-            if isinstance(partial_code, str):
-                src_code = partial_code
-            else:
-                # Ensure all hooks are finalized before the kernel is defined.
-                # Note: some of these hooks may have been registered by a kernel subclass
-                src_code = partial_code.finalize_remaining()
-
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-
-            if config.benchmark_kernel:
-                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                src_code = (
-                    f"{kernel.imports_for_benchmark_kernel()}\n"
-                    f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
-                )
-
-            if only_gen_src_code:
-                return src_code
-
-            kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-
-            return kernel
+        return kernel
 
     def _get_multikernel_shapes(
         self, node: MultiTemplateBuffer
@@ -2375,8 +2477,27 @@ class SIMDScheduling(BaseScheduling):
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiling = self.select_tiling(node_schedule, numel, rnumel)
-            features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+            tiling_scores = None
+            if config.combo_kernel_per_subkernel_blocks:
+                if torch._inductor.config.triton.coalesce_tiling_analysis:
+                    assert isinstance(
+                        pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
+                    )
+                    coalesce_analysis = pn.get_coalesce_analysis()
+                else:
+                    coalesce_analysis = None
+                features = SIMDKernelFeatures(
+                    node_schedule, numel, rnumel, coalesce_analysis=coalesce_analysis
+                )
+                tiling, tiling_scores = self.get_tiling_and_scores(
+                    node_schedule,
+                    numel,
+                    rnumel,
+                    features.coalesce_analysis,
+                )
+            else:
+                features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+                tiling = self.select_tiling(node_schedule, numel, rnumel)
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
@@ -2386,6 +2507,7 @@ class SIMDScheduling(BaseScheduling):
             node_schedule_map[pn] = NodeInfo(
                 node_schedule=node_schedule,
                 tiling=tiling,
+                tiling_scores=tiling_scores,
                 numel=numel,
                 rnumel=rnumel,
                 features=features,
@@ -2441,6 +2563,7 @@ class SIMDScheduling(BaseScheduling):
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
                         triton_kernel_cls=self.kernel_type,
+                        tiling_scores=node_info.tiling_scores,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -2610,10 +2733,16 @@ class SIMDScheduling(BaseScheduling):
         """
         Create a tiling dict from pointwise and reduction splits.
         """
-        pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
-        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
+        pw_prefixes = ("z", "y", "x")
+        reduction_prefixes = ("r0_", "r1_")
+        assert len(pw_tiling) <= len(pw_prefixes)
+        assert len(reduction_tiling) <= len(reduction_prefixes)
+
         return immutable_dict(
-            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
+            [
+                *zip(pw_prefixes[-len(pw_tiling) :], pw_tiling, strict=False),
+                *zip(reduction_prefixes, reduction_tiling, strict=False),
+            ]
         )
 
     @classmethod
@@ -2671,6 +2800,12 @@ class SIMDScheduling(BaseScheduling):
             if not dims:
                 return (fallback_numel,)
             max_tiles = get_max_tiles(2)
+            if V.graph.sizevars.statically_known_equals(
+                pointwise_numel, 1
+            ) and V.graph.sizevars.statically_known_gt(reduction_numel, 1):
+                # We only have at most two dimensions to tile over when emitting a
+                # reduction-only kernel.
+                max_tiles = min(max_tiles, 2)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])

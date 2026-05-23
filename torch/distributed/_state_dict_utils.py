@@ -4,7 +4,7 @@ import io
 import math
 import weakref
 from collections.abc import Callable, Mapping, MutableMapping
-from typing import Any, cast, NamedTuple, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
@@ -494,7 +494,7 @@ def _check_state_dict_similarity(
     """
     Given two state_dicts, check if the structures are the same. And
     if a [key, tensor] pair exist in one state_dict there must be
-    the a corresponding pait, [key, other_tensor], in the other state_dict,
+    a corresponding pair, [key, other_tensor], in the other state_dict,
     where tensor and other_tensor have the same size and dtype.
 
     Return the check result.
@@ -731,7 +731,7 @@ def _distribute_state_dict(
 # These APIs are from torch.distributed.checkpoint.
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
-PATH_ITEM = Union[str, int]
+PATH_ITEM = str | int
 OBJ_PATH = tuple[PATH_ITEM, ...]
 FLATTEN_MAPPING = dict[str, OBJ_PATH]
 STATE_DICT_TYPE = dict[str, Any]

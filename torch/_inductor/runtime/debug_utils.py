@@ -125,7 +125,12 @@ def check_memory_step(
 
 @functools.lru_cache(None)
 def register_check_mem_op() -> None:
-    lib = torch.library.Library("_inductor_debug", "FRAGMENT")  # noqa: TOR901
+    lib = torch.library.Library("_inductor_debug", "FRAGMENT")
+    # Keep `lib` alive: this function is lru_cached, so it runs once, but the
+    # registered op must remain accessible via torch.ops for the rest of the
+    # process's lifetime. Letting `lib` die triggers the finalizer, which
+    # clears torch.ops._inductor_debug.check_memory_step.
+    torch.library._keep_alive.append(lib)
     lib.define(
         "check_memory_step(str[] allocated, str[] freed, bool is_final_step) -> ()"
     )

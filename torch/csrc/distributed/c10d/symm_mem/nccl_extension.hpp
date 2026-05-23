@@ -18,4 +18,16 @@ TORCH_API void nccl_put_with_signal(
     int64_t signal,
     int64_t peer);
 
+// Simultaneously reduce N blocks of a 2-D input tensor from a shared symmetric
+// memory buffer, routing each to a specific destination rank. Blocks are
+// described by inclusive-prefix-sum offsets along `dim` (0 or 1); all blocks
+// must have equal size.
+TORCH_API void nccl_reduce_scatter_offset(
+    const at::Tensor& input,
+    at::TensorList out,
+    const std::string& group_name,
+    int64_t dim,
+    std::optional<at::IntArrayRef> offsets,
+    std::optional<at::IntArrayRef> dst_ranks,
+    const std::string& red_op);
 } // namespace c10d::nccl_extension

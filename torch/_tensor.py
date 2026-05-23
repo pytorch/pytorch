@@ -43,7 +43,7 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
             # See https://github.com/pytorch/pytorch/issues/75462
             sargs = self, *args
             if has_torch_function(sargs):
-                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+                return handle_torch_function(wrapped, sargs, self, *args, **kwargs)
             return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
@@ -613,10 +613,12 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other tensors will be ignored. If not
-                provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the :attr:`tensors`. Defaults to ``None``.
+            inputs (Sequence[Tensor] or dict[str, Tensor], optional): Inputs w.r.t. which
+                the gradient will be accumulated into ``.grad``. All other tensors will be
+                ignored. If not provided, the gradient is accumulated into all the leaf
+                Tensors that were used to compute the :attr:`tensors`. A dict of tensors
+                (e.g. ``dict(model.named_parameters())``) is also accepted.
+                Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -900,7 +902,7 @@ class Tensor(torch._C.TensorBase):
         keepdim=False,
         dtype=None,
     ):
-        r"""See :func:`torch.norm`"""
+        r"""See :func:`torch.linalg.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype
@@ -1201,9 +1203,9 @@ class Tensor(torch._C.TensorBase):
         return self.shape[0]
 
     def __iter__(self):
-        # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
-        # generator and don't eagerly perform all the indexes.  This could
-        # save us work, and also helps keep trace ordering deterministic
+        # NB: we use 'imap' and not 'map' here, so that we get a generator
+        # and don't eagerly perform all the indexes.  This could save us
+        # work, and also helps keep trace ordering deterministic
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
@@ -1294,10 +1296,10 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(
+            return handle_torch_function(  # pyrefly: ignore [bad-argument-count]
                 Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
                 (self,),
-                self,
+                self,  # pyrefly: ignore [bad-argument-type]
             )
 
         # raise AttributeError for unsupported tensors, so that
@@ -1364,8 +1366,6 @@ class Tensor(torch._C.TensorBase):
         :attr:`names` to the same length as ``self.dim()`` using names from the
         corresponding indices of ``self.names``.
 
-        Python 2 does not support Ellipsis but one may use a string literal
-        instead (``'...'``).
 
         Args:
             names (iterable of str): The desired names of the output tensor. May
@@ -1408,8 +1408,6 @@ class Tensor(torch._C.TensorBase):
         that are not mentioned in :attr:`names`, in the order that they appear
         in :attr:`self`.
 
-        Python 2 does not support Ellipsis but one may use a string literal
-        instead (``'...'``).
 
         Args:
             names (iterable of str): The desired dimension ordering of the
@@ -1617,7 +1615,7 @@ class Tensor(torch._C.TensorBase):
 
             The tensor is considered to have multiple legal dim orders if either of the following conditions is met:
 
-            * Singleton Dimensions: There's at least one singleteon dimension in the tensor.
+            * Singleton Dimensions: There's at least one singleton dimension in the tensor.
               Since their size is 1, they don't affect the memory offset (stride * index
               is zero because index is always zero). Therefore, they can be placed anywhere
               in the dimension order without changing how data is accessed.

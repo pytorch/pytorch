@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -182,9 +182,9 @@ class NestedModel(torch.nn.Module):
     @staticmethod
     def wrap(
         model: torch.nn.Module,
-        group: Optional[dist.ProcessGroup] = None,
+        group: dist.ProcessGroup | None = None,
         ignore_modules: bool = False,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
     ) -> torch.nn.Module:
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
@@ -220,8 +220,8 @@ class NestedModel(torch.nn.Module):
     @staticmethod
     def wrap_alt(
         model: torch.nn.Module,
-        group: Optional[dist.ProcessGroup] = None,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        group: dist.ProcessGroup | None = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
     ) -> torch.nn.Module:
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
@@ -336,7 +336,7 @@ class TestFSDPOptimState(FSDPTest):
         optim_class: type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
         use_diff_optim_inputs: bool = False,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
     ):
         model = NestedModel().to(device)
         if wrap:
@@ -1464,7 +1464,7 @@ class TestFSDPOptimState(FSDPTest):
         self,
         should_check_method_fn: Callable[[str], bool],
         context_fn: Callable,
-        fsdp_kwargs: Optional[dict[str, Any]],
+        fsdp_kwargs: dict[str, Any] | None,
     ):
         """
         Runs through all optimizer state checkpointing APIs with a context
