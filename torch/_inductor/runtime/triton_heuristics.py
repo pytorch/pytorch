@@ -4010,6 +4010,8 @@ def pointwise(
         raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    if cap := inductor_meta.get("max_autotune_configs"):
+        configs = configs[:cap]
     if return_configs:
         return configs
 
@@ -4535,6 +4537,8 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    if cap := inductor_meta.get("max_autotune_configs"):
+        configs = configs[:cap]
 
     if return_configs:
         return configs
@@ -4839,6 +4843,8 @@ def persistent_reduction(
         configs = unique_configs(new_configs)
 
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    if cap := inductor_meta.get("max_autotune_configs"):
+        configs = configs[:cap]
 
     if return_configs:
         return configs
