@@ -1654,6 +1654,25 @@ def _is_quack_scalar_one(value: Any) -> bool:
     return _is_quack_scalar_value(value, 1.0)
 
 
+def _quack_fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
+    if lhs is rhs:
+        return True
+    if depth <= 0 or not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+        return False
+    if lhs.op != rhs.op or lhs.target != rhs.target or lhs.kwargs != rhs.kwargs:
+        return False
+    if lhs.op == "get_attr":
+        return True
+    if len(lhs.args) != len(rhs.args):
+        return False
+    return all(
+        _quack_fx_equivalent(left_arg, right_arg, depth=depth - 1)
+        if isinstance(left_arg, torch.fx.Node) or isinstance(right_arg, torch.fx.Node)
+        else left_arg == right_arg
+        for left_arg, right_arg in zip(lhs.args, rhs.args)
+    )
+
+
 def _match_quack_mul_scalar(node: Any, scalar: float) -> torch.fx.Node | None:
     if not isinstance(node, torch.fx.Node) or node.op != "call_function":
         return None
@@ -1677,6 +1696,72 @@ def _match_quack_negated_node(value: Any, source: torch.fx.Node) -> bool:
             (value.args[0] is source and len(value.args) > 1 and value.args[1] == -1)
             or (value.args[1] is source and value.args[0] == -1)
         )
+    return False
+
+
+def _match_quack_scaled_sigmoid_source(node: Any) -> tuple[torch.fx.Node, float] | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if node.op != "call_function" or node.target not in (
+        torch.ops.aten.sigmoid.default,
+        torch.sigmoid,
+    ):
+        return None
+    scale_node = node.args[0]
+    if not isinstance(scale_node, torch.fx.Node) or scale_node.op != "call_function":
+        return None
+    if scale_node.target not in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
+        return None
+    lhs, rhs = scale_node.args[:2]
+    if isinstance(lhs, torch.fx.Node) and isinstance(rhs, (int, float)):
+        return lhs, float(rhs)
+    if isinstance(rhs, torch.fx.Node) and isinstance(lhs, (int, float)):
+        return rhs, float(lhs)
+    return None
+
+
+def _match_quack_fast_quick_gelu(node: torch.fx.Node) -> tuple[torch.fx.Node, float] | None:
+    if node.op != "call_function" or node.target not in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
+        return None
+    lhs, rhs = node.args[:2]
+    for source, sigmoid_node in ((lhs, rhs), (rhs, lhs)):
+        if not isinstance(source, torch.fx.Node):
+            continue
+        sigmoid_match = _match_quack_scaled_sigmoid_source(sigmoid_node)
+        if sigmoid_match is None:
+            continue
+        sigmoid_source, alpha = sigmoid_match
+        if _quack_fx_equivalent(source, sigmoid_source):
+            return source, alpha
+    return None
+
+
+def _is_quack_fast_quick_gelu_intermediate(node: torch.fx.Node) -> bool:
+    if node.op != "call_function":
+        return False
+    if node.target in (torch.ops.aten.sigmoid.default, torch.sigmoid):
+        return any(_match_quack_fast_quick_gelu(user) is not None for user in node.users)
+    if node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        if any(
+            sigmoid_user.op == "call_function"
+            and sigmoid_user.target in (torch.ops.aten.sigmoid.default, torch.sigmoid)
+            and _is_quack_fast_quick_gelu_intermediate(sigmoid_user)
+            for sigmoid_user in node.users
+        ):
+            return True
+        return False
+    if len(node.users) == 1:
+        user = next(iter(node.users))
+        if _is_quack_fast_quick_gelu_intermediate(user):
+            return True
     return False
 
 
@@ -1814,6 +1899,17 @@ def _emit_quack_fast_sigmoid(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
     )
 
 
+def _emit_quack_fast_softplus(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
+    return _emit_quack_tensorssa_expr(
+        kernel,
+        "cute.where({x} > cute.full_like({x}, 20.0), {x}, "
+        "cute.math.log(cute.math.exp({x}, fastmath=True) + cute.full_like({x}, 1.0), fastmath=True))".format(
+            x=source
+        ),
+        like=source,
+    )
+
+
 def _emit_quack_fast_silu(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
     half = _emit_quack_tensorssa_expr(
         kernel,
@@ -1823,6 +1919,27 @@ def _emit_quack_fast_silu(kernel: _QuackCuteDSLKernel, source: Any) -> Any:
     return _emit_quack_tensorssa_expr(
         kernel,
         f"({half} * cute.math.tanh({half}, fastmath=True) + {half})",
+        like=source,
+    )
+
+
+def _emit_quack_fast_quick_gelu(
+    kernel: _QuackCuteDSLKernel, source: Any, alpha: float
+) -> Any:
+    half_alpha = 0.5 * alpha
+    half_source = _emit_quack_tensorssa_expr(
+        kernel,
+        f"({source} * cute.full_like({source}, 0.5))",
+        like=source,
+    )
+    tanh_arg = _emit_quack_tensorssa_expr(
+        kernel,
+        f"({source} * cute.full_like({source}, {half_alpha!r}))",
+        like=source,
+    )
+    return _emit_quack_tensorssa_expr(
+        kernel,
+        f"({half_source} * cute.math.tanh({tanh_arg}, fastmath=True) + {half_source})",
         like=source,
     )
 
@@ -1917,11 +2034,20 @@ def _compile_quack_pointwise_nodes(
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                 if node.op == "call_function":
+                    if fast_math and _is_quack_fast_quick_gelu_intermediate(node):
+                        continue
                     if fast_math and _is_quack_fast_silu_intermediate(node):
                         continue
                     if fast_math and _is_quack_fast_gelu_intermediate(node):
                         continue
                     if fast_math:
+                        quick_gelu_match = _match_quack_fast_quick_gelu(node)
+                        if quick_gelu_match is not None:
+                            quick_gelu_source, alpha = quick_gelu_match
+                            source = _quack_cute_arg(quick_gelu_source, env)
+                            env[node] = _emit_quack_fast_quick_gelu(kernel, source, alpha)
+                            _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                            continue
                         silu_source = _match_quack_fast_silu_source(node)
                         if silu_source is not None:
                             source = _quack_cute_arg(silu_source, env)
@@ -1964,6 +2090,41 @@ def _compile_quack_pointwise_nodes(
                         env[node] = _emit_quack_fast_unary(
                             kernel, source, "cute.math.exp({x}, fastmath=True)"
                         )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch.ops.aten.log.default,
+                        torch.log,
+                    ):
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_unary(
+                            kernel, source, "cute.math.log({x}, fastmath=True)"
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target in (
+                        torch.ops.aten.log1p.default,
+                        torch.log1p,
+                    ):
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_unary(
+                            kernel,
+                            source,
+                            "cute.math.log(cute.full_like({x}, 1.0) + {x}, fastmath=True)",
+                        )
+                        _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                        continue
+                    if fast_math and node.target == torch.ops.aten.softplus.default:
+                        beta = node.args[1] if len(node.args) > 1 else node.kwargs.get("beta", 1)
+                        threshold = (
+                            node.args[2] if len(node.args) > 2 else node.kwargs.get("threshold", 20)
+                        )
+                        if beta != 1 or threshold != 20:
+                            raise NotImplementedError(
+                                "QUACK fast_math softplus currently supports only beta=1, threshold=20"
+                            )
+                        source = _quack_cute_arg(node.args[0], env)
+                        env[node] = _emit_quack_fast_softplus(kernel, source)
                         _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if fast_math and node.target in (

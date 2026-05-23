@@ -527,7 +527,14 @@ class GemmEpilogueFusionTests(TestCase):
             return mm_epilogue(
                 a,
                 b,
-                lambda acc: torch.tanh(acc) + torch.sigmoid(acc) + F.silu(acc) + F.gelu(acc),
+                lambda acc: (
+                    torch.tanh(acc)
+                    + torch.sigmoid(acc)
+                    + F.silu(acc)
+                    + F.gelu(acc)
+                    + F.softplus(acc)
+                    + torch.log1p(acc.abs())
+                ),
                 kernel_options={"backend": "QUACK", "fast_math": True},
             )
 
@@ -541,7 +548,36 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
         FileCheck().check("@cute.jit").check("fastmath=True").check(
             "cute.math.exp"
-        ).check("cute.math.tanh").check_not("cute.math.erf").run("\n".join(codes))
+        ).check("cute.math.log").check("cute.math.tanh").check_not("cute.math.erf").run(
+            "\n".join(codes)
+        )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_epilogue_fast_math_quick_gelu_uses_tanh_identity(self):
+        try:
+            import quack  # noqa: F401
+        except ImportError:
+            self.skipTest("QuACK is not available")
+
+        def fn(a, b):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: acc * torch.sigmoid(1.702 * acc),
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        a = torch.randn(16, 32, device="cuda", dtype=torch.float16)
+        b = torch.randn(32, 16, device="cuda", dtype=torch.float16)
+
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
+        FileCheck().check("@cute.jit").check("cute.math.tanh").check(
+            "fastmath=True"
+        ).check_not("cute.math.exp").run("\n".join(codes))
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_epilogue_fast_math_silu_uses_tanh_identity(self):
