@@ -168,9 +168,9 @@ def flex_attention(
     # Early check for FLASH backend: detect unsupported captured scalars before
     # building subgraph buffers (which can trigger unbacked_bindings errors)
     if backend == "FLASH":
-        from .flex_flash_attention import _has_unsupported_captured_scalars
+        from .flex_flash_attention import has_unsupported_captured_scalars
 
-        if _has_unsupported_captured_scalars(
+        if has_unsupported_captured_scalars(
             score_mod_other_buffers, mask_mod_other_buffers
         ):
             raise RuntimeError(
