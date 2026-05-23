@@ -625,6 +625,10 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:
+        if step_size <= 0:
+            raise ValueError(
+                f"Expected positive step_size, but got step_size={step_size}"
+            )
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -810,9 +814,9 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if factor > 1.0 or factor < 0:
+        if factor > 1.0 or factor <= 0:
             raise ValueError(
-                "Constant multiplicative factor expected to be between 0 and 1."
+                "Constant multiplicative factor expected to be strictly between 0 and 1."
             )
 
         self.factor = factor
@@ -1267,6 +1271,10 @@ class PolynomialLR(LRScheduler):
         power: float = 1.0,
         last_epoch: int = -1,
     ) -> None:
+        if total_iters <= 0:
+            raise ValueError(
+                f"Expected positive total_iters, but got total_iters={total_iters}"
+            )
         self.total_iters = total_iters
         self.power = power
         super().__init__(optimizer, last_epoch)
@@ -1391,6 +1399,10 @@ class CosineAnnealingLR(LRScheduler):
         eta_min: float = 0.0,
         last_epoch: int = -1,
     ) -> None:
+        if T_max <= 0:
+            raise ValueError(
+                f"Expected positive T_max, but got T_max={T_max}"
+            )
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)

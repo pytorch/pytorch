@@ -550,6 +550,22 @@ class TestLRScheduler(TestCase):
         closed_form_scheduler = ConstantLR(self.opt, factor=1.0 / 3, total_iters=4)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
+    def test_constantlr_factor_zero_raises(self):
+        with self.assertRaises(ValueError):
+            ConstantLR(self.opt, factor=0.0, total_iters=5)
+
+    def test_step_lr_step_size_zero_raises(self):
+        with self.assertRaises(ValueError):
+            StepLR(self.opt, step_size=0)
+
+    def test_polynomial_lr_total_iters_zero_raises(self):
+        with self.assertRaises(ValueError):
+            PolynomialLR(self.opt, total_iters=0)
+
+    def test_cosine_annealing_lr_t_max_zero_raises(self):
+        with self.assertRaises(ValueError):
+            CosineAnnealingLR(self.opt, T_max=0)
+
     def test_closed_form_multi_step_lr(self):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         closed_form_scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
