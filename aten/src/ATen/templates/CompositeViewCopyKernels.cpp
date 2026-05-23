@@ -9,6 +9,7 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/clone.h>
+#include <ATen/ops/empty_like.h>
 $ops_headers
 #endif
 
@@ -29,6 +30,29 @@ std::vector<at::Tensor> clone_arg(const at::TensorList& t_list) {
         out[i] = t_list[i].clone();
     }
     return out;
+}
+
+at::Tensor clone_preserve_pin_memory(
+    const at::Tensor& t,
+    at::MemoryFormat memory_format) {
+    if (t.is_pinned()) {
+        auto out = at::empty_like(t, t.options().pinned_memory(true), memory_format);
+        out.copy_(t);
+        return out;
+    }
+    return t.clone(/*memory_format=*/memory_format);
+}
+
+at::Tensor preserve_pin_memory_if_needed(
+    const at::Tensor& t,
+    bool preserve_pin_memory) {
+    if (preserve_pin_memory && !t.is_pinned()) {
+        auto out = at::empty_like(
+            t, t.options().pinned_memory(true), at::MemoryFormat::Contiguous);
+        out.copy_(t);
+        return out;
+    }
+    return t;
 }
 
 // duped with gen_resize_out_helper from structured kernels
