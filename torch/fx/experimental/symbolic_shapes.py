@@ -3495,6 +3495,26 @@ class DimConstraints:
                 and dim.max == c.get("max", int_oo)  # type: ignore[attr-defined]
             )
 
+        def _root_range_for_derived_expr(
+            expr: sympy.Expr,
+            root: sympy.Symbol,
+            c: Mapping[str, Any],
+        ) -> dict[str, Any]:
+            modulus, remainder = sympy.polys.polytools.div(expr, root)
+            if not isinstance(modulus, sympy.Integer) or modulus == 0:
+                raise AssertionError(
+                    f"Expected {expr} to have a nonzero integer coefficient for {root}"
+                )
+            c_min = c.get("min", 2)
+            c_max = c.get("max", int_oo)
+            if modulus > 0:
+                min_ = math.ceil((c_min - remainder) / modulus)
+                max_ = math.floor((c_max - remainder) / modulus)
+            else:
+                min_ = math.ceil((c_max - remainder) / modulus)
+                max_ = math.floor((c_min - remainder) / modulus)
+            return {"min": min_, "max": max_}
+
         # 1) newly introduced roots
         # this part we handle adding newly introduced roots
         # these arise from guards like "x.shape[0] % 3 == 0"
@@ -3511,15 +3531,13 @@ class DimConstraints:
                 root = next(iter(c["eq"].free_symbols))
                 if str(root) not in name_to_dim:
                     introduced_roots[str(root)] = k
-                    # calculate necessary min & max
-                    modulus, remainder = sympy.polys.polytools.div(c["eq"], root)
-                    c_min = c.get("min", 2)
-                    min_ = math.ceil((c_min - remainder) / modulus)
-                    c_max = c.get("max", int_oo)
-                    max_ = math.floor((c_max - remainder) / modulus)
+                    # calculate necessary min & max for the new root
+                    root_range = _root_range_for_derived_expr(c["eq"], root, c)
                     # create result & dim
-                    results[str(root)] = {"min": min_, "max": max_}
-                    name_to_dim[str(root)] = Dim(str(root), min=min_, max=max_)
+                    results[str(root)] = root_range
+                    name_to_dim[str(root)] = Dim(
+                        str(root), min=root_range["min"], max=root_range["max"]
+                    )
                     # remove old root min/max bounds
                     c.pop("min", None)
                     c.pop("max", None)
@@ -3593,10 +3611,7 @@ class DimConstraints:
                         if "min" in c or "max" in c:
                             expr = sympy.sympify(k)
                             s = next(iter(expr.free_symbols))
-                            result = {
-                                "min": try_solve(sympy.Eq(expr, c["min"]), s)[1],  # type: ignore[arg-type, index]
-                                "max": try_solve(sympy.Eq(expr, c["max"]), s)[1],  # type: ignore[arg-type, index]
-                            }
+                            result = _root_range_for_derived_expr(expr, s, c)
                             if not _check_same_range(
                                 result,
                                 name_to_dim[mroot],  # type: ignore[index, arg-type]
