@@ -156,8 +156,24 @@ private:
     return lhs.get_iterator_() == rhs.get_iterator_();
   }
 
-  friend auto operator<=>(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.get_iterator_() <=> rhs.get_iterator_();
+  friend bool operator!=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() != rhs.get_iterator_();
+  }
+
+  friend bool operator<(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() < rhs.get_iterator_();
+  }
+
+  friend bool operator<=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() <= rhs.get_iterator_();
+  }
+
+  friend bool operator>(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() > rhs.get_iterator_();
+  }
+
+  friend bool operator>=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() >= rhs.get_iterator_();
   }
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
