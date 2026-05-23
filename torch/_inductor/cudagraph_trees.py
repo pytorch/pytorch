@@ -2224,16 +2224,39 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
+    def _new_inputs_alias_current_path(self, new_inputs: list[InputType]) -> bool:
+        """Return whether this invocation consumes a live output from the path."""
+        if self.current_node is None:
+            return False
+
+        live_pool_data_ptrs = OrderedSet(
+            storage_ref.data_ptr()
+            for storage_ref in self.current_node.path_live_weakrefs()
+        )
+        if not live_pool_data_ptrs:
+            return False
+
+        def aliases_current_path(x: Any) -> bool:
+            if (
+                isinstance(x, torch.Tensor)
+                and x.is_cuda
+                and x.untyped_storage().data_ptr() in live_pool_data_ptrs
+            ):
+                return True
+            return False
+
+        return any(aliases_current_path(inp) for inp in pytree.tree_leaves(new_inputs))
+
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording(function_id)
+            self.try_end_curr_recording(function_id, new_inputs)
 
         if self.in_warmup:
-            self.try_end_curr_warmup(function_id)
+            self.try_end_curr_warmup(function_id, new_inputs)
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2313,7 +2336,7 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                self.try_end_curr_execution(new_inputs)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2353,7 +2376,7 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            self.try_end_curr_execution(new_inputs)
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2555,7 +2578,9 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self) -> bool:
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self, function_id: FunctionID) -> None:
+    def try_end_curr_recording(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -2566,6 +2591,8 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
+            if self._new_inputs_alias_current_path(new_inputs):
+                return
             self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
@@ -2576,7 +2603,7 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(self, new_inputs: list[InputType]) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2588,14 +2615,20 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation():
+            if self._new_inputs_alias_current_path(new_inputs):
+                return
             self.clear_current_path_state_and_set_to_none()
             return
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+    def try_end_curr_warmup(
+        self, function_id: FunctionID, new_inputs: list[InputType]
+    ) -> None:
         if self.can_start_new_generation():
+            if self._new_inputs_alias_current_path(new_inputs):
+                return
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
