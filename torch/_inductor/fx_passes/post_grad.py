@@ -209,6 +209,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
+        GraphTransformObserver(gm, "fold_ce_backward_one_hot_row_sum").apply_graph_pass(
+            fold_ce_backward_one_hot_row_sum
+        )
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
@@ -886,6 +889,310 @@ def register_lowering_pattern(
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
     )
+
+
+def _node_tensor_shape(node: torch.fx.Node) -> torch.Size | None:
+    val = node.meta.get("val")
+    if isinstance(val, torch.Tensor):
+        return val.shape
+    return None
+
+
+def _shapes_match(
+    lhs: Sequence[torch.SymInt | int], rhs: Sequence[torch.SymInt | int]
+) -> bool:
+    return len(lhs) == len(rhs) and all(
+        statically_known_true(sym_eq(lhs_dim, rhs_dim))
+        for lhs_dim, rhs_dim in zip(lhs, rhs)
+    )
+
+
+_ANY_SCALAR = object()
+
+
+def _is_scalar_constant_node(node: Any, value: object = _ANY_SCALAR) -> bool:
+    if not isinstance(node, torch.fx.Node) or node.op != "call_function":
+        return False
+
+    if node.target is aten.scalar_tensor.default:
+        if len(node.args) < 1:
+            return False
+        scalar_value = node.args[0]
+    elif node.target is aten.full.default:
+        shape = get_arg_value(node, 0, "size")
+        if shape != [] and shape != ():
+            return False
+        scalar_value = get_arg_value(node, 1, "fill_value")
+    else:
+        return False
+
+    return value is _ANY_SCALAR or scalar_value == value
+
+
+def _is_zero_arg(arg: Any) -> bool:
+    return (isinstance(arg, (int, float)) and arg == 0) or _is_scalar_constant_node(
+        arg, 0
+    )
+
+
+def _match_single_dim_sum(
+    node: torch.fx.Node,
+) -> tuple[torch.fx.Node, torch.Size, int, bool] | None:
+    if node.op != "call_function" or node.target is not aten.sum.dim_IntList:
+        return None
+    if get_arg_value(node, 3, "dtype") is not None:
+        return None
+
+    dims = get_arg_value(node, 1, "dim")
+    if not isinstance(dims, (list, tuple)) or len(dims) != 1:
+        return None
+
+    input_node = node.args[0]
+    if not isinstance(input_node, torch.fx.Node):
+        return None
+    input_val = input_node.meta.get("val")
+    if not isinstance(input_val, torch.Tensor):
+        return None
+    if is_integer_dtype(input_val.dtype) or is_boolean_dtype(input_val.dtype):
+        return None
+    input_shape = input_val.shape
+
+    dim = dims[0]
+    if dim < 0:
+        dim += len(input_shape)
+    if dim < 0 or dim >= len(input_shape):
+        return None
+    keepdim = get_arg_value(node, 2, "keepdim")
+    return input_node, input_shape, dim, bool(keepdim) if keepdim is not None else False
+
+
+def _strip_sum_input_conversions(
+    node: torch.fx.Node,
+) -> tuple[torch.fx.Node, list[torch.dtype]]:
+    dtypes = []
+    while (
+        node.op == "call_function"
+        and node.target is prims.convert_element_type.default
+        and isinstance(node.args[0], torch.fx.Node)
+    ):
+        dtype = get_arg_value(node, 1, "dtype")
+        if not isinstance(dtype, torch.dtype):
+            break
+        dtypes.append(dtype)
+        node = node.args[0]
+    return node, dtypes
+
+
+def _find_iota_length(node: torch.fx.Node, reduce_dim: int) -> Any | None:
+    cur = node
+    while cur.op == "call_function" and cur.target in (
+        aten.expand.default,
+        aten.view.default,
+        aten.reshape.default,
+        aten.unsqueeze.default,
+    ):
+        if cur.target is aten.unsqueeze.default:
+            dim = get_arg_value(cur, 1, "dim")
+            shape = _node_tensor_shape(cur)
+            if shape is None:
+                return None
+            if dim < 0:
+                dim += len(shape)
+            if dim != reduce_dim:
+                return None
+        if not isinstance(cur.args[0], torch.fx.Node):
+            return None
+        cur = cur.args[0]
+
+    if cur.op != "call_function" or cur.target is not prims.iota.default:
+        return None
+
+    start = cur.kwargs.get("start", 0)
+    step = cur.kwargs.get("step", 1)
+    if start != 0 or step != 1:
+        return None
+
+    length = cur.args[0]
+    if isinstance(length, torch.fx.Node):
+        return None
+    shape = _node_tensor_shape(node)
+    if shape is not None:
+        dim = 0 if len(shape) == 1 else reduce_dim
+        if dim >= len(shape) or not statically_known_true(sym_eq(shape[dim], length)):
+            return None
+    return length
+
+
+def _match_iota_eq(
+    cond: torch.fx.Node, reduce_dim: int
+) -> tuple[torch.fx.Node, Any] | None:
+    if cond.op != "call_function" or cond.target is not aten.eq.Tensor:
+        return None
+    lhs, rhs = cond.args
+    if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+        return None
+
+    lhs_iota_len = _find_iota_length(lhs, reduce_dim)
+    rhs_iota_len = _find_iota_length(rhs, reduce_dim)
+    if lhs_iota_len is not None and rhs_iota_len is None:
+        target, vocab_size = rhs, lhs_iota_len
+    elif rhs_iota_len is not None and lhs_iota_len is None:
+        target, vocab_size = lhs, rhs_iota_len
+    else:
+        return None
+
+    while (
+        target.op == "call_function"
+        and target.target in (aten.expand.default, aten.expand_as.default)
+        and isinstance(target.args[0], torch.fx.Node)
+    ):
+        target = target.args[0]
+    return target, vocab_size
+
+
+def _broadcasts_over_reduction_dim(
+    node: torch.fx.Node, input_ndim: int, reduce_dim: int
+) -> bool:
+    shape = _node_tensor_shape(node)
+    if shape is None:
+        return False
+
+    dim = len(shape) - input_ndim + reduce_dim
+    if dim < 0:
+        return True
+    if dim >= len(shape):
+        return False
+    return statically_known_true(sym_eq(shape[dim], 1))
+
+
+def _match_ce_backward_one_hot_value(
+    node: torch.fx.Node,
+    input_ndim: int,
+    reduce_dim: int,
+) -> tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node | None, Any] | None:
+    if node.op == "call_function" and node.target is aten.where.self:
+        cond, value, zero = node.args
+        if (
+            isinstance(cond, torch.fx.Node)
+            and isinstance(value, torch.fx.Node)
+            and _is_zero_arg(zero)
+            and _broadcasts_over_reduction_dim(value, input_ndim, reduce_dim)
+        ):
+            return cond, value, None, zero
+        return None
+
+    if node.op != "call_function" or node.target is not aten.mul.Tensor:
+        return None
+
+    for one_hot_index, value_index in ((0, 1), (1, 0)):
+        one_hot = node.args[one_hot_index]
+        value = node.args[value_index]
+        if (
+            not isinstance(one_hot, torch.fx.Node)
+            or not isinstance(value, torch.fx.Node)
+            or one_hot.op != "call_function"
+            or one_hot.target is not aten.where.self
+        ):
+            continue
+
+        cond, coeff, zero = one_hot.args
+        if (
+            isinstance(cond, torch.fx.Node)
+            and _is_scalar_constant_node(coeff)
+            and _is_zero_arg(zero)
+            and _broadcasts_over_reduction_dim(value, input_ndim, reduce_dim)
+        ):
+            return cond, value, coeff, zero
+
+    return None
+
+
+def fold_ce_backward_one_hot_row_sum(graph: torch.fx.Graph) -> None:
+    """
+    Fold CE-backward-style row-scalar reductions:
+
+        sum(where(iota(vocab) == target, -scale, 0), vocab_dim)
+
+    The dense one-hot value may still be used elsewhere in the graph; this pass
+    only replaces the redundant row reduction.  A target range check preserves
+    the original zero result for visible out-of-range targets.
+    """
+    changed = False
+
+    for node in list(graph.nodes):
+        sum_match = _match_single_dim_sum(node)
+        if sum_match is None:
+            continue
+        sum_input, input_shape, reduce_dim, keepdim = sum_match
+
+        one_hot_value, convert_dtypes = _strip_sum_input_conversions(sum_input)
+        one_hot_shape = _node_tensor_shape(one_hot_value)
+        if one_hot_shape is None or not _shapes_match(input_shape, one_hot_shape):
+            continue
+
+        match = _match_ce_backward_one_hot_value(
+            one_hot_value, len(one_hot_shape), reduce_dim
+        )
+        if match is None:
+            continue
+
+        cond, value, coeff, zero = match
+        iota_match = _match_iota_eq(cond, reduce_dim)
+        if iota_match is None:
+            continue
+
+        target, vocab_size = iota_match
+        target_val = target.meta.get("val")
+        if not isinstance(target_val, torch.Tensor) or not is_integer_dtype(
+            target_val.dtype
+        ):
+            continue
+        if not _broadcasts_over_reduction_dim(target, len(one_hot_shape), reduce_dim):
+            continue
+
+        target_shape = _node_tensor_shape(target)
+        output_shape = _node_tensor_shape(node)
+        if (
+            target_shape is None
+            or output_shape is None
+            or len(target_shape) != len(one_hot_shape)
+            or not statically_known_true(sym_eq(target_shape[reduce_dim], 1))
+        ):
+            continue
+        expected_shape = (
+            target_shape
+            if keepdim
+            else (*target_shape[:reduce_dim], *target_shape[reduce_dim + 1 :])
+        )
+        if not _shapes_match(output_shape, expected_shape):
+            continue
+
+        with graph.inserting_before(node):
+            ge_zero = graph.call_function(aten.ge.Scalar, (target, 0))
+            lt_vocab = graph.call_function(aten.lt.Scalar, (target, vocab_size))
+            valid = graph.call_function(aten.logical_and.default, (ge_zero, lt_vocab))
+
+            selected = value
+            if coeff is not None:
+                selected = graph.call_function(aten.mul.Tensor, (selected, coeff))
+
+            replacement = graph.call_function(aten.where.self, (valid, selected, zero))
+            for dtype in reversed(convert_dtypes):
+                replacement = graph.call_function(
+                    prims.convert_element_type.default, (replacement, dtype)
+                )
+            if not keepdim:
+                replacement = graph.call_function(
+                    aten.squeeze.dim, (replacement, reduce_dim)
+                )
+
+        replacement.meta.update(node.meta)
+        node.replace_all_uses_with(replacement)
+        counters["inductor"]["ce_backward_one_hot_row_sum"] += 1
+        changed = True
+
+    if changed:
+        graph.eliminate_dead_code()
 
 
 ################################################################################

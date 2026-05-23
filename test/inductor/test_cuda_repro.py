@@ -170,6 +170,78 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_ce_backward_one_hot_row_sum_fold(self):
+        vocab = 8
+
+        def ce_backward_like(target, logits, row_a, row_b, scale):
+            safe_target = torch.where(
+                target != -100,
+                target,
+                torch.zeros((), device=target.device, dtype=target.dtype),
+            )
+            iota = torch.arange(vocab, device=target.device).view(1, vocab)
+            one_hot = torch.where(
+                safe_target.expand(target.shape[0], vocab) == iota,
+                torch.tensor(-1.0, device=target.device),
+                torch.tensor(0.0, device=target.device),
+            )
+            valid_scale = torch.where(
+                target != -100,
+                scale,
+                torch.tensor(0.0, device=target.device),
+            )
+            dense_grad = one_hot * valid_scale
+            row_sum = dense_grad.sum(dim=1, keepdim=True)
+            probs = torch.exp(logits - row_a - row_b)
+            return dense_grad - probs * row_sum
+
+        def vocab_dependent_value(target, value):
+            iota = torch.arange(value.shape[1], device=target.device).view(
+                1, value.shape[1]
+            )
+            return torch.where(
+                target.expand_as(value) == iota,
+                value,
+                torch.tensor(0.0, device=target.device),
+            ).sum(dim=1, keepdim=True)
+
+        target = torch.tensor(
+            [[0], [3], [-100], [-1], [vocab], [5]],
+            device=device_type,
+            dtype=torch.int64,
+        )
+        logits = torch.randn(target.shape[0], vocab, device=device_type)
+        row_a = torch.randn(target.shape[0], 1, device=device_type)
+        row_b = torch.randn(target.shape[0], 1, device=device_type)
+        scale = torch.randn(target.shape[0], 1, device=device_type)
+
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(ce_backward_like, backend="inductor", fullgraph=True),
+            target,
+            logits,
+            row_a,
+            row_b,
+            scale,
+        )
+        expected = ce_backward_like(target, logits, row_a, row_b, scale)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["ce_backward_one_hot_row_sum"], 1)
+        FileCheck().check_not("rnumel").run(code)
+
+        value = torch.randn(target.shape[0], vocab, device=device_type)
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(vocab_dependent_value, backend="inductor", fullgraph=True),
+            target,
+            value,
+        )
+        expected = vocab_dependent_value(target, value)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["ce_backward_one_hot_row_sum"], 0)
+        FileCheck().check("rnumel").run(code)
+
     def test_view_replay_padding_issue_163328(self):
         class ReproModule(nn.Module):
             def __init__(self):
