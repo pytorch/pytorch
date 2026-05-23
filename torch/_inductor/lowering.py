@@ -8682,8 +8682,13 @@ def prepare_softmax_online(x, dim):
 
     rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
 
-    if V.graph.sizevars.statically_known_geq(
-        rnumel, config.unroll_reductions_threshold
+    use_non_online_large_inner = _should_use_large_non_online_softmax(x, dim, kwargs)
+
+    if (
+        V.graph.sizevars.statically_known_geq(
+            rnumel, config.unroll_reductions_threshold
+        )
+        and not use_non_online_large_inner
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, **kwargs
@@ -8694,6 +8699,49 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+def _should_use_large_non_online_softmax(x, dim, kwargs):
+    """
+    Use the regular max/sum lowering for large non-persistent inner softmax
+    prepares.  The online combine saves one full input pass, but on huge rows it
+    can become instruction-bound; this keeps the first automatic guard narrow.
+    """
+    if not config.large_non_online_softmax:
+        return False
+
+    device = x.get_device()
+    if device is None or device.type != "cuda":
+        return False
+
+    size = x.get_size()
+    if canonicalize_dim(len(size), dim) != len(size) - 1:
+        return False
+
+    if len(kwargs["reduction_ranges"]) != 1:
+        return False
+
+    xnumel = V.graph.sizevars.simplify(sympy_product(kwargs["ranges"]))
+    rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
+    persistent_threshold = 1024 * (16 if config.triton.multi_kernel else 1)
+    min_rnumel = max(
+        config.large_non_online_softmax_min_rnumel,
+        persistent_threshold + 1,
+    )
+    if not V.graph.sizevars.statically_known_geq(
+        xnumel, config.large_non_online_softmax_min_xnumel
+    ):
+        return False
+    if not V.graph.sizevars.statically_known_geq(rnumel, min_rnumel):
+        return False
+
+    max_input_numel = config.large_non_online_softmax_max_input_numel
+    if max_input_numel > 0 and not V.graph.sizevars.statically_known_leq(
+        xnumel * rnumel, max_input_numel
+    ):
+        return False
+
+    return True
 
 
 def _is_sm100_or_later():
