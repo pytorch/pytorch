@@ -1723,6 +1723,17 @@ class Reduction(Loops):
 
         split = _maybe_increase_split(split)
 
+        # Suppress split when there is enough x-parallelism to fill the GPU.
+        # This keeps the reduction unsplit so downstream broadcast pointwise
+        # ops (e.g. batch norm epilogue) can fuse into the reduction kernel.
+        if split > 1 and is_gpu(device.type):
+            _numel_hint = V.graph.sizevars.optimization_hint(
+                sympy_product(ranges), fallback=1
+            )
+            _num_sm = DeviceProperties.create(device).multi_processor_count
+            if _numel_hint >= 2 * _num_sm:
+                split = 1
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
@@ -2391,6 +2402,8 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
 
 
 class WelfordReduction(MultiOutputReduction):
+    """Multi-output Welford reduction for mean and variance."""
+
     @classmethod
     def create(  # type: ignore[override]
         cls,
@@ -2482,6 +2495,40 @@ class WelfordReduction(MultiOutputReduction):
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
+
+        # Suppress Welford split to enable epilogue fusion via the two-pass
+        # approach (fits_in_main_body). This allows downstream broadcast
+        # pointwise ops (e.g. batch norm's (x - mean) * rsqrt(var + eps))
+        # to fuse into the reduction kernel.
+        #
+        # The two-pass kernel reads input twice (once for Welford reduction,
+        # once for the normalized epilogue) but avoids materializing
+        # intermediate mean/var to global memory and eliminates separate
+        # kernel launches for the pointwise epilogue.
+        #
+        # Suppress when EITHER:
+        #   1. numel >= 2*num_sm: enough x-elements to fully saturate the GPU
+        #      even with one block per x-element.
+        #   2. numel >= num_sm AND rnumel <= 8192: at least one block per SM
+        #      with bounded reduction size. When rnumel fits in a persistent
+        #      tile (or small loop), the two-pass overhead is low and
+        #      eliminating the separate epilogue kernel saves launch overhead.
+        #      The rnumel bound of 8192 prevents regression on large
+        #      reductions where the per-block loop becomes too expensive
+        #      given moderate GPU occupancy.
+        if split > 1 and is_gpu(device.type):
+            numel_hint = V.graph.sizevars.optimization_hint(
+                sympy_product(ranges), fallback=1
+            )
+            rnumel_hint = V.graph.sizevars.optimization_hint(
+                reduction_numel, fallback=1
+            )
+            num_sm = DeviceProperties.create(device).multi_processor_count
+            if numel_hint >= 2 * num_sm:
+                split = 1
+            elif numel_hint >= num_sm and rnumel_hint <= 8192:
+                split = 1
+
         if split > 1:
             # triton doesn't support reduce to single element well, so break it up
             return cls.create_multilayer(

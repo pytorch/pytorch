@@ -12756,7 +12756,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def override(x):
             return x.sum(dim=0)
 
-        x_small = torch.randn(4096, 512, device=GPU_TYPE)
+        # Use numel=8 (second dim) so it stays below 2*num_sm on all GPUs,
+        # ensuring the outer reduction split factor is sensitive to the
+        # reduction_numel hint override.
+        x_small = torch.randn(4096, 8, device=GPU_TYPE)
         torch._dynamo.decorators.mark_dynamic(x_small, 0)
         code1 = run_and_get_triton_code(no_override, x_small)
 
@@ -12789,7 +12792,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return 1
             return 2
 
-        x_small = torch.randn(4096, 512, device=GPU_TYPE)
+        # Use numel=8 (second dim) so it stays below 2*num_sm on all GPUs,
+        # ensuring the outer reduction split factor is sensitive to the
+        # reduction_numel hint override.
+        x_small = torch.randn(4096, 8, device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x_small, 0)
         code1 = run_and_get_triton_code(no_override, x_small)
 
@@ -18720,13 +18726,13 @@ if RUN_GPU:
             # warmup
             _, (wrapper,) = run_and_get_code(f, in1, in2, a, b, scale_a, scale_b)
 
-            # Previously indcutor decide reduction hint for a reduction kernel without considering
-            # the pointwise nodes. That will cause the third reduction kernel in this wrapper to be a
-            # persistent inner reduction and cause bad perf.
+            # Previously inductor decided reduction hint for a reduction kernel without considering
+            # the pointwise nodes. That would cause a persistent inner reduction and bad perf.
             #
-            # We fix that by making the third reduction a non-persistent reduction
-            # and improve the perf by 4.14x (451us -> 109us)
-            self.assertEqual(3, wrapper.count("def triton_red_"))
+            # We fix that by making reductions non-persistent and suppressing
+            # unnecessary splits (the outer amax no longer splits because
+            # numel >= 2*num_sm provides enough parallelism).
+            self.assertIn(wrapper.count("def triton_red_"), (2, 3))
             self.assertEqual(0, wrapper.count("def triton_per_"))
 
             if DO_PERF_TEST:
@@ -18809,7 +18815,14 @@ if RUN_GPU:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-            self.assertTrue("in_out_ptr" in code[1])
+            # On GPUs with fewer SMs (e.g. A10G with 80 SMs), the outer
+            # reduction for the weight gradient (numel=hidden_size) is not
+            # split because hidden_size >= 2*num_sm provides enough
+            # parallelism. Without the split, the intermediate buffer that
+            # would be donated does not exist.
+            num_sm = torch.cuda.get_device_properties(self.device).multi_processor_count
+            if hidden_size < 2 * num_sm:
+                self.assertTrue("in_out_ptr" in code[1])
 
         @torch._functorch.config.patch("donated_buffer", True)
         @torch._inductor.config.patch("force_shape_pad", True)

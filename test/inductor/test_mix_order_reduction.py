@@ -223,14 +223,12 @@ class MixOrderReductionTest(TestBase):
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
-        # We don't do mix order reduction for split redutions
-        # with more than 2 layers
+        # With split suppression for numel >= 2*num_sm, the outer reduction
+        # no longer creates a 3-layer split (only 2-layer), so mix order
+        # reduction can now fuse the inner and outer reductions.
         self.assertEqual(
             metrics.codegen_mix_order_reduction,
-            1
-            if inductor_config.triton.cooperative_reductions
-            or inductor_config.triton.force_cooperative_reductions
-            else 0,
+            1,
         )
 
     def test_independent_split_size(self):
