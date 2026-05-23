@@ -506,7 +506,7 @@ struct exp2_functor {
       return T(coef, 0);
     }
     float real;
-    float imag = ::precise::sincos(static_cast<float>(x.y * M_LN2_F), real);
+    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
     using elem_t = decltype(x.x + x.x);
     return T(
         coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));
