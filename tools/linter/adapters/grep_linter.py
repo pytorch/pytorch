@@ -191,7 +191,9 @@ def lint_file(
         line_remainders = [
             lr
             for lr in line_remainders
-            if not line_allowlist_pattern.search(lr.split(":", 1)[1] if ":" in lr else lr)
+            if not line_allowlist_pattern.search(
+                lr.split(":", 1)[1] if ":" in lr else lr
+            )
         ]
         if not line_remainders:
             return
@@ -414,9 +416,7 @@ def main() -> None:
         sys.exit(0)
 
     line_allowlist_re = (
-        re.compile(args.line_allowlist_pattern)
-        if args.line_allowlist_pattern
-        else None
+        re.compile(args.line_allowlist_pattern) if args.line_allowlist_pattern else None
     )
 
     # Group lines by file to call lint_file once per file
