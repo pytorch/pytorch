@@ -6959,7 +6959,7 @@ class Scheduler:
             for sn in snodes:
                 sn.apply_new_loop_order(list(reorder_perm))
                 # Update group to match reduction's groups
-                device = sn.node.get_device_or_error()
+                device = sn.group[0]
                 group_fn = self.get_backend(device).group_fn
                 sn.group = (device, group_fn(sn._sizes))
         else:
