@@ -122,8 +122,9 @@ class SizeTests(torch._dynamo.test_case.TestCase):
         shape = torch.tensor([1, 4, 256])
 
         compile_options = (
-            {"backend": "eager", "fullgraph": True},
             {"fullgraph": True},
+            {"backend": "eager"},
+            {"backend": "eager", "fullgraph": True},
         )
 
         for fn in (method_reshape, torch_reshape):
