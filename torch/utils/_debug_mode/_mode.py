@@ -88,6 +88,24 @@ _ACTIVE_DEBUG_MODE_COUNT = 0
 
 _annotate_decorated = False
 
+_FUNCTIONAL_COLLECTIVE_NAMESPACES = {
+    "_c10d_functional",
+    "_c10d_functional_autograd",
+    "c10d_functional",
+}
+
+
+def _functional_collective_hash_policy(func, *, is_input_hash: bool) -> bool:
+    namespace = getattr(func, "namespace", None)
+    if namespace not in _FUNCTIONAL_COLLECTIVE_NAMESPACES:
+        return True
+
+    name_attr = getattr(func, "name", None)
+    name = str(name_attr()) if callable(name_attr) else ""
+    is_wait = name.endswith("::wait_tensor")
+    # Functional collective results may be async; only wait_tensor outputs are safe.
+    return is_wait and not is_input_hash
+
 
 def _ensure_annotate_decorated():
     """
@@ -762,14 +780,24 @@ class DebugMode(TorchDispatchMode):
                 f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
             )
 
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def _hash_leaf(x):
+            if isinstance(x, AsyncCollectiveTensor):
+                return None
+            if isinstance(x, torch.Tensor):
+                return fn(x)
+            return None
+
         def _tree_hash(obj):
-            return tree_map(
-                lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
-            )
+            return tree_map(_hash_leaf, obj)
 
         def _dispatch_pre_log_hook(func, types, args, kwargs, call):
             """Pre-hook to capture input hashes before operation executes"""
             if "empty" in str(func) or "profiler" in str(func):
+                return None
+
+            if not _functional_collective_hash_policy(func, is_input_hash=True):
                 return None
 
             if hash_inputs:
@@ -784,10 +812,13 @@ class DebugMode(TorchDispatchMode):
             if "empty" in str(func) or "profiler" in str(func):
                 return None
 
+            if not _functional_collective_hash_policy(func, is_input_hash=False):
+                return None
+
             out = {}
             out["hash"] = _tree_hash(result)
 
-            if tree_all(lambda x: x is None, out.values()):
+            if tree_all(lambda x: x is None, out):
                 return None
             return out
 
