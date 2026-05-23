@@ -541,7 +541,7 @@ class GemmEpilogueFusionTests(TestCase):
         torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
         FileCheck().check("@cute.jit").check("fastmath=True").check(
             "cute.math.exp"
-        ).check("cute.math.tanh").run("\n".join(codes))
+        ).check("cute.math.tanh").check_not("cute.math.erf").run("\n".join(codes))
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_epilogue_fast_math_silu_uses_tanh_identity(self):

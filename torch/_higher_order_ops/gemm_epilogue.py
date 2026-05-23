@@ -331,6 +331,7 @@ class QuackLocalNormInfo:
     source_node: torch.fx.Node
     group_size: int
     dim: int
+    extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -1086,6 +1087,18 @@ def _match_quack_local_m_reduce(
     )
 
 
+def _match_quack_reciprocal_node(node: Any) -> Any | None:
+    if not isinstance(node, torch.fx.Node) or node.op != "call_function":
+        return None
+    if node.target in (torch.ops.aten.reciprocal.default, torch.reciprocal):
+        return node.args[0]
+    if node.target in (torch.ops.aten.div.Tensor, torch.ops.aten.div.Scalar, operator.truediv):
+        lhs, rhs = node.args[:2]
+        if _is_quack_scalar_one(lhs):
+            return rhs
+    return None
+
+
 def _match_quack_local_norm(
     node: Any,
     mm_node: torch.fx.Node,
@@ -1100,9 +1113,23 @@ def _match_quack_local_norm(
     output_shape = _normalize_quack_shape(output_view.shape)
     if not isinstance(div_node, torch.fx.Node):
         return None
-    if not (div_node.op == "call_function" and div_node.target == torch.ops.aten.div.Tensor):
+    if div_node.op != "call_function":
         return None
-    lhs, rhs = div_node.args[:2]
+    extra_skip_nodes: set[torch.fx.Node] = set()
+    if div_node.target == torch.ops.aten.div.Tensor:
+        lhs, rhs = div_node.args[:2]
+    elif div_node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        lhs, rhs = div_node.args[:2]
+        reciprocal_source = _match_quack_reciprocal_node(rhs)
+        if reciprocal_source is None:
+            lhs, rhs = rhs, lhs
+            reciprocal_source = _match_quack_reciprocal_node(rhs)
+        if reciprocal_source is None:
+            return None
+        extra_skip_nodes.add(rhs)
+        rhs = reciprocal_source
+    else:
+        return None
     local_reduce = reduce_matcher(rhs, mm_node)
     if local_reduce is None or lhs is not local_reduce.view_node:
         return None
@@ -1125,6 +1152,7 @@ def _match_quack_local_norm(
         source_node=local_reduce.source_node,
         group_size=local_reduce.group_size,
         dim=dim,
+        extra_skip_nodes=frozenset(extra_skip_nodes),
     )
 
 
@@ -1291,6 +1319,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 local_norm.div_node,
                 local_norm.view_node,
                 local_norm.reduce_node,
+                *local_norm.extra_skip_nodes,
             )
         )
         local_reduce = QuackLocalReduceInfo(
@@ -1617,8 +1646,25 @@ def _propagate_quack_grouped_tensorssa_info(
     )
 
 
+def _is_quack_scalar_value(value: Any, expected: float, *, tolerance: float = 1e-12) -> bool:
+    return isinstance(value, (int, float)) and abs(float(value) - expected) <= tolerance
+
+
 def _is_quack_scalar_one(value: Any) -> bool:
-    return isinstance(value, (int, float)) and value == 1
+    return _is_quack_scalar_value(value, 1.0)
+
+
+def _match_quack_mul_scalar(node: Any, scalar: float) -> torch.fx.Node | None:
+    if not isinstance(node, torch.fx.Node) or node.op != "call_function":
+        return None
+    if node.target not in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        return None
+    lhs, rhs = node.args[:2]
+    if isinstance(lhs, torch.fx.Node) and _is_quack_scalar_value(rhs, scalar):
+        return lhs
+    if isinstance(rhs, torch.fx.Node) and _is_quack_scalar_value(lhs, scalar):
+        return rhs
+    return None
 
 
 def _match_quack_negated_node(value: Any, source: torch.fx.Node) -> bool:
@@ -1662,6 +1708,63 @@ def _match_quack_fast_silu_source(node: torch.fx.Node) -> torch.fx.Node | None:
     if _match_quack_negated_node(exp_node.args[0], source):
         return source
     return None
+
+
+def _match_quack_fast_gelu_source(node: torch.fx.Node) -> torch.fx.Node | None:
+    if node.op != "call_function" or node.target not in (
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.Scalar,
+        operator.mul,
+    ):
+        return None
+    lhs, rhs = node.args[:2]
+    for half_mul, erf_add in ((lhs, rhs), (rhs, lhs)):
+        source = _match_quack_mul_scalar(half_mul, 0.5)
+        if source is None or not isinstance(erf_add, torch.fx.Node):
+            continue
+        if erf_add.op != "call_function" or erf_add.target not in (
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.add.Scalar,
+            operator.add,
+        ):
+            continue
+        add_lhs, add_rhs = erf_add.args[:2]
+        erf_node = add_rhs if _is_quack_scalar_one(add_lhs) else add_lhs if _is_quack_scalar_one(add_rhs) else None
+        if not isinstance(erf_node, torch.fx.Node):
+            continue
+        if erf_node.op != "call_function" or erf_node.target not in (
+            torch.ops.aten.erf.default,
+            torch.erf,
+        ):
+            continue
+        erf_arg_source = _match_quack_mul_scalar(erf_node.args[0], 1 / math.sqrt(2.0))
+        if erf_arg_source is source:
+            return source
+    return None
+
+
+def _is_quack_fast_gelu_intermediate(node: torch.fx.Node) -> bool:
+    if node.op != "call_function":
+        return False
+    if node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
+        if any(
+            erf_user.op == "call_function"
+            and erf_user.target in (torch.ops.aten.erf.default, torch.erf)
+            and _is_quack_fast_gelu_intermediate(erf_user)
+            for erf_user in node.users
+        ):
+            return True
+        return any(_match_quack_fast_gelu_source(user) is not None for user in node.users)
+    if node.target in (torch.ops.aten.erf.default, torch.erf):
+        return any(
+            add_user.op == "call_function"
+            and add_user.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add)
+            and _is_quack_fast_gelu_intermediate(add_user)
+            for add_user in node.users
+        )
+    if node.target in (torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, operator.add):
+        return any(_match_quack_fast_gelu_source(user) is not None for user in node.users)
+    return False
 
 
 def _is_quack_fast_silu_intermediate(node: torch.fx.Node) -> bool:
@@ -1816,11 +1919,19 @@ def _compile_quack_pointwise_nodes(
                 if node.op == "call_function":
                     if fast_math and _is_quack_fast_silu_intermediate(node):
                         continue
+                    if fast_math and _is_quack_fast_gelu_intermediate(node):
+                        continue
                     if fast_math:
                         silu_source = _match_quack_fast_silu_source(node)
                         if silu_source is not None:
                             source = _quack_cute_arg(silu_source, env)
                             env[node] = _emit_quack_fast_silu(kernel, source)
+                            _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
+                            continue
+                        gelu_source = _match_quack_fast_gelu_source(node)
+                        if gelu_source is not None:
+                            source = _quack_cute_arg(gelu_source, env)
+                            env[node] = _emit_quack_fast_gelu(kernel, source)
                             _propagate_quack_grouped_tensorssa_info(node, grouped_tensors)
                             continue
                     if fast_math and node.target in (
