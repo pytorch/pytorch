@@ -54,8 +54,8 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
             )
             running_mean_ = running_mean.repeat(b) if running_mean is not None else None
             running_var_ = running_var.repeat(b) if running_var is not None else None
-            input_reshaped = input.contiguous().view(new_shape)
-            grad_output_reshaped = grad_output.contiguous().view(new_shape)
+            input_reshaped = input.reshape(new_shape)
+            grad_output_reshaped = grad_output.reshape(new_shape)
             mean = torch.mean(
                 input_reshaped, (0,) + tuple(range(2, input.dim())), False
             )
