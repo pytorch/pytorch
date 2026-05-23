@@ -1291,7 +1291,10 @@ class TestCheckLauncherCallArgs(TestCase):
     def test_error_message_includes_kernel_name(self):
         """The TypeError message should include the kernel name from inductor_meta."""
         args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
-        args["inductor_meta"] = {"kernel_name": "my_custom_kernel", "grid_type": "Grid1D"}
+        args["inductor_meta"] = {
+            "kernel_name": "my_custom_kernel",
+            "grid_type": "Grid1D",
+        }
         autotuner = CachingAutotuner(**args)
         launcher = self._make_launcher(n_positional=2)
         with self.assertRaises(TypeError) as cm:
