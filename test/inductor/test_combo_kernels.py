@@ -729,6 +729,31 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_gpu_and_triton
+    @parametrize("exclude", [True, False])
+    def test_combo_kernel_exclude_indirect_indexing(self, exclude):
+        def fn(a, b, c, idx1):
+            g = a[idx1]
+            p1, p2 = b * 2.0, c + 1.0
+            return g, p1, p2
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+        ]
+        expected = 2 if exclude else 1
+        out_eager = fn(*inps)
+        with torch._inductor.config.patch(
+            {"combo_kernels_exclude_indirect_indexing": exclude}
+        ):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
