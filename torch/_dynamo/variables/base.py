@@ -18,9 +18,10 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import inspect
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, TYPE_CHECKING
@@ -30,7 +31,12 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, format_source_range, istype
+from ..utils import (
+    cmp_name_to_op_mapping,
+    format_source_range,
+    istype,
+    raise_args_mismatch,
+)
 
 
 if TYPE_CHECKING:
@@ -678,7 +684,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_function(
         self,
         tx: Any,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(
@@ -747,6 +753,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="missing_mp_ass_subscript",
+            context=f"mp_ass_subscript_impl not defined for {self.python_type_name()}",
+            explanation=f"Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_ass_item_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="unsupported __setitem__ (sq_ass_item)",
+            context=f"sq_ass_item_impl {self} {key} {value}",
+            explanation=f"Dynamo does not know how to handle sq_ass_item on {self}",
+            hints=[],
+        )
+
     def sq_concat_impl(
         self,
         tx: InstructionTranslator,
@@ -785,8 +817,28 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 from .object_protocol import vt_getitem
 
                 return vt_getitem(tx, self, args[0])
-            from ..utils import raise_args_mismatch
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__setitem__":
+            if len(args) == 2 and not kwargs:
+                from .object_protocol import generic_setitem
 
+                return generic_setitem(tx, self, args[0], args[1])
+            raise_args_mismatch(
+                tx,
+                name,
+                "2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__delitem__":
+            if len(args) == 1 and not kwargs:
+                from .object_protocol import generic_delitem
+
+                return generic_delitem(tx, self, args[0])
             raise_args_mismatch(
                 tx,
                 name,
@@ -851,6 +903,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             if name == "__rmul__":
                 return slot_wrapper_mul(tx, self, args[0], reverse=True)
             return slot_wrapper_imul(tx, self, args[0])
+        elif name == "__lshift__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_lshift_impl(tx, args[0])
+        elif name == "__rlshift__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_lshift_impl(tx, args[0], reverse=True)
+        elif name == "__ilshift__":
+            return self.nb_inplace_lshift_impl(tx, args[0])
+        elif name == "__rshift__":
+            return self.nb_rshift_impl(tx, args[0])
+        elif name == "__rrshift__":
+            return self.nb_rshift_impl(tx, args[0], reverse=True)
+        elif name == "__irshift__":
+            return self.nb_inplace_rshift_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -912,6 +979,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     tx,
                     args=list(e.args),
                 )
+        elif name == "__subclasscheck__" and len(args) == 1 and not kwargs:
+            if (self_py := self.as_python_constant()) and (
+                derived_py := args[0].as_python_constant()
+            ):
+                if (
+                    inspect.getattr_static(self_py, "__subclasscheck__", None)
+                    is type.__subclasscheck__
+                ):
+                    return variables.ConstantVariable.create(
+                        issubclass(derived_py, self_py)
+                    )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
         # cannot trace into.  Constant-fold it for VTs backed by a real
         # Python object so that copy.deepcopy can trace through.
@@ -964,7 +1042,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Performance optimization to implement optree.tree_map faster than tracing it"""
@@ -997,7 +1075,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
@@ -1014,7 +1092,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tree_map_fn_copy = tree_map_fn.clone()
@@ -1036,7 +1114,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1075,7 +1153,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1090,7 +1168,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -1201,7 +1279,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-        return NO_SUCH_SUBOBJ
+
+        try:
+            return self.as_python_constant()
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
 
     def is_python_equal(self, other: object) -> bool:
         """
@@ -1286,6 +1368,48 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_lshift slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rlshift__`` instead of ``__lshift__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_lshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_rshift slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rrshift__`` instead of ``__rshift__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
     def nb_multiply_impl(
         self,
         tx: InstructionTranslator,
@@ -1352,7 +1476,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__ror__`` instead of ``__or__``).
         """
-        return self._nb_slot_not_implemented("nb_or_impl", other, reverse=reverse)
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_inplace_or_impl(
         self,
@@ -1360,7 +1484,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
-        return self._nb_slot_not_implemented("nb_inplace_or", other)
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_negative_impl(
         self,
@@ -1439,6 +1563,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
         return variables.ConstantVariable(NotImplemented)
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_absolute slot.
+
+        Called when type_implements_nb_absolute returns True for this type.
+        Subclasses override to provide the actual absolute value.
+        """
+        unimplemented(
+            gb_type="nb_absolute_impl not implemented",
+            context=f"{type(self).__name__} has nb_absolute slot but no nb_absolute_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_absolute C slot but "
+            "the corresponding VariableTracker doesn't implement nb_absolute_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def __init__(
         self,
