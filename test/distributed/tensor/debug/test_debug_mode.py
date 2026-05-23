@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import json
 import os
+import tempfile
 import unittest
 
 import torch
@@ -1127,6 +1129,168 @@ class TestDTensorDebugMode(TestCase):
 
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
+
+    def test_dump_tensor_hashes_to_file(self):
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            x = torch.arange(4.0)
+            y = x + 1
+            y.sum()
+
+        expected_entries = [
+            {
+                "index": 0,
+                "call_type": "torch op",
+                "call": "aten::arange",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 6.0,
+            },
+            {
+                "index": 1,
+                "call_type": "torch op",
+                "call": "aten::add.Tensor",
+                "call_depth": 1,
+                "hash_type": "input",
+                "arg_name": None,
+                "pytree_path": "[0][0]",
+                "hash": 6.0,
+            },
+            {
+                "index": 1,
+                "call_type": "torch op",
+                "call": "aten::add.Tensor",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 10.0,
+            },
+            {
+                "index": 2,
+                "call_type": "torch op",
+                "call": "aten::sum",
+                "call_depth": 1,
+                "hash_type": "input",
+                "arg_name": None,
+                "pytree_path": "[0][0]",
+                "hash": 10.0,
+            },
+            {
+                "index": 2,
+                "call_type": "torch op",
+                "call": "aten::sum",
+                "call_depth": 1,
+                "hash_type": "output",
+                "arg_name": None,
+                "pytree_path": "",
+                "hash": 10.0,
+            },
+        ]
+        self.assertEqual(debug_mode.tensor_hashes(), expected_entries)
+        self.assertEqual(
+            [
+                entry["hash_type"]
+                for entry in debug_mode.tensor_hashes(include_inputs=False)
+            ],
+            ["output", "output", "output"],
+        )
+
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
+            debug_mode.dump_tensor_hashes(f.name)
+            f.seek(0)
+            file_entries = [json.loads(line) for line in f if line.strip()]
+
+        self.assertEqual(file_entries, expected_entries)
+
+    def test_tensor_hashes_keep_tuple_hashes_as_leaves(self):
+        def tuple_hash(t):
+            return (float(t.sum().item()), int(t.numel()))
+
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=tuple_hash, hash_inputs=True),
+        ):
+            x = torch.arange(4.0)
+            y = x + 1
+            y.sum()
+            y.split(2)
+
+        entries = debug_mode.tensor_hashes()
+        add_entries = [
+            entry for entry in entries if entry["call"] == "aten::add.Tensor"
+        ]
+        self.assertEqual(
+            [
+                (entry["hash_type"], entry["pytree_path"], entry["hash"])
+                for entry in add_entries
+            ],
+            [
+                ("input", "[0][0]", (6.0, 4)),
+                ("output", "", (10.0, 4)),
+            ],
+        )
+
+        split_output_entries = [
+            entry
+            for entry in entries
+            if entry["call"] == "aten::split.Tensor" and entry["hash_type"] == "output"
+        ]
+        self.assertEqual(
+            [(entry["pytree_path"], entry["hash"]) for entry in split_output_entries],
+            [
+                ("[0]", (3.0, 2)),
+                ("[1]", (7.0, 2)),
+            ],
+        )
+
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
+            debug_mode.dump_tensor_hashes(f.name)
+            f.seek(0)
+            file_entries = [json.loads(line) for line in f if line.strip()]
+
+        file_add_entries = [
+            entry for entry in file_entries if entry["call"] == "aten::add.Tensor"
+        ]
+        self.assertEqual(
+            [
+                (entry["hash_type"], entry["pytree_path"], entry["hash"])
+                for entry in file_add_entries
+            ],
+            [
+                ("input", "[0][0]", [6.0, 4]),
+                ("output", "", [10.0, 4]),
+            ],
+        )
+
+    def test_dump_tensor_hashes_writes_strict_json_for_nonfinite_hashes(self):
+        def nonfinite_hash(t):
+            return (float("nan"), float("inf"), float("-inf"))
+
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=nonfinite_hash),
+        ):
+            torch.ones(1).sin()
+
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
+            debug_mode.dump_tensor_hashes(f.name)
+            f.seek(0)
+
+            def fail_on_nonfinite_constant(value):
+                raise AssertionError(f"non-finite JSON constant found: {value}")
+
+            file_entries = [
+                json.loads(line, parse_constant=fail_on_nonfinite_constant)
+                for line in f
+                if line.strip()
+            ]
+
+        self.assertEqual(
+            {tuple(entry["hash"]) for entry in file_entries},
+            {("NaN", "Infinity", "-Infinity")},
+        )
 
     def test_hash_empty_tensor(self):
         t = torch.tensor([])
