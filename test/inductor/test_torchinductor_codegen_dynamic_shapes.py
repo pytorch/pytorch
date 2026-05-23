@@ -160,6 +160,8 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice_scatter_dtype_consistency_dynamic_shapes": TestFailure(
         (
@@ -226,6 +228,12 @@ test_failures = {
     "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
+    "test_searchsorted_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
+    "test_bucketize_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -433,6 +441,8 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # The scalar (1,) case intentionally does not generate dynamic code.
+    "test_floordiv_int_min_neg_one_cpu_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
