@@ -162,7 +162,7 @@ class Dim:
         ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
 
     Named Dims also allow specification of relationships between dimensions, up
-    to univariate linear relations.  For example, the following indicates one
+    to univariate linear relations. For example, the following indicates one
     dimension is a multiple of another plus 4::
 
         s0 = Dim("s0")
@@ -194,7 +194,7 @@ class Dim:
         if type(other) is not int:
             raise NotImplementedError(
                 f"Attempted to add {other} to {self.__name__}, where an integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
+                "(Only linear operations with integer coefficients are supported.)"
             )
         return self._derive(lambda x: x + other)
 
@@ -206,27 +206,33 @@ class Dim:
         if type(other) is not int:
             raise NotImplementedError(
                 f"Attempted to subtract {other} from {self.__name__}, where an integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
+                "(Only linear operations with integer coefficients are supported.)"
             )
         return self._derive(lambda x: x - other)
 
     def __rsub__(self, other) -> "Dim":
-        raise NotImplementedError(
-            f"Attempted to negate {self.__name__}. "
-            "(Only increasing linear operations with integer coefficients are supported.)"
-        )
+        # e.g., 32 - dim
+        if type(other) is not int:
+            raise NotImplementedError(
+                f"Attempted to subtract {self.__name__} from {other}, where an integer was expected. "
+                "(Only linear operations with integer coefficients are supported.)"
+            )
+        return self._derive(lambda x: other - x)
 
     def __mul__(self, other) -> "Dim":
         # e.g., dim * 2
-        if type(other) is not int or other <= 0:
+        if type(other) is not int or other == 0:
             raise NotImplementedError(
-                f"Attempted to multiply {other} with {self.__name__}, where a positive integer was expected. "
-                "(Only increasing linear operations with integer coefficients are supported.)"
+                f"Attempted to multiply {other} with {self.__name__}, where a nonzero integer was expected. "
+                "(Only linear operations with integer coefficients are supported.)"
             )
         return self._derive(lambda x: x * other)
 
     def __rmul__(self, other) -> "Dim":
         return self * other
+
+    def __neg__(self) -> "Dim":
+        return self * -1
 
     def _derived_name(self, fn) -> str:
         from sympy import sympify
@@ -284,10 +290,9 @@ class _DerivedDim(Dim):
     """
     Class for derived :func:`Dim` types.
 
-    Currently we only support increasing linear expressions with integer coefficients.
+    Currently we only support linear expressions with integer coefficients.
     In other words, a derived Dim can always be written in the form Ax + B, where
-    x is a regular Dim (i.e., non-derived Dim), A and B are integers, and A is positive.
-    (In particular, the latter ensures that x < y => Ax + B < Ay + B.)
+    x is a regular Dim (i.e., non-derived Dim), A and B are integers, and A is nonzero.
     These restrictions on the form of derived Dims makes the metatheory simpler: e.g.,
     it simplifies computing ranges for derived Dims, solving for underlying regular Dims,
     deciding equalities between derived Dims, and so on.
@@ -301,45 +306,47 @@ class _DerivedDim(Dim):
         self.root = root
         self.fn = fn
 
-    @property
-    def min(self):  # type: ignore[override]
-        # assume that self.fn is an increasing function
-        # TODO(avik): use sympy value range analysis instead?
+    def _derived_range(self):
         from sympy import Integer
 
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.min is -int_oo:  # type: ignore[attr-defined]
-            return -int_oo  # fn not needed cuz increasing
+        def eval_endpoint(value):
+            if value is int_oo or value is -int_oo:
+                return self.fn(value)
+            return self.fn(Integer(value))
 
-        _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
+        endpoints = (
+            eval_endpoint(self.root.min),  # type: ignore[attr-defined]
+            eval_endpoint(self.root.max),  # type: ignore[attr-defined]
+        )
+        return min(endpoints), max(endpoints)
+
+    @property
+    def min(self):  # type: ignore[override]
+        _min_symint, _ = self._derived_range()
         root = self.root  # type: ignore[attr-defined]
         if _min_symint < 0:
             raise AssertionError(
                 f"Expected derived min value of {self.__name__} to be >= 0. "
-                f"Please specify an appropriate min value for {root.__name__} "
-                f"(currently {root.min})."
+                f"Please specify appropriate min/max values for {root.__name__} "
+                f"(currently min={root.min}, max={root.max})."
             )
         return int(_min_symint)
 
     @property
     def max(self):  # type: ignore[override]
-        # assume that self.fn is an increasing function
-        # TODO(avik): use sympy value range analysis instead?
-        from sympy import Integer
-
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.max is int_oo:  # type: ignore[attr-defined]
-            return int_oo  # fn not needed cuz increasing
-
-        _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
+        _, _max_symint = self._derived_range()
         root = self.root  # type: ignore[attr-defined]
+        if _max_symint is int_oo:
+            return int_oo
         if _max_symint > sys.maxsize - 1:
             raise AssertionError(
                 f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-                f"Please specify an appropriate max value for {root.__name__} "
-                f"(currently {root.max})."
+                f"Please specify appropriate min/max values for {root.__name__} "
+                f"(currently min={root.min}, max={root.max})."
             )
         return int(_max_symint)
 
