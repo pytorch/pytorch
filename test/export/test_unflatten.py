@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
+import inspect
 import unittest
 from re import escape
 from typing import Any, List, Optional
@@ -379,6 +380,48 @@ class TestUnflatten(TestCase):
         ep.graph.eliminate_dead_code()
         unflattened = unflatten(ep)
         self.compare_outputs(ep.module(), unflattened, (torch.randn(2), torch.randn(5)))
+
+    def test_unflatten_reexport_dynamic_shapes(self):
+        class AdapterBase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adapter = torch.nn.Linear(2, 2)
+                self.act = torch.nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.act(self.adapter(x))
+
+        class Main(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.base = AdapterBase()
+
+            def forward(self, x: torch.Tensor):
+                return self.base(x)
+
+        model = Main().eval()
+        x = torch.rand(2, 2)
+        ep = export(
+            model,
+            (x,),
+            dynamic_shapes=({0: torch.export.Dim("batch", min=1, max=1024)},),
+        )
+        unflattened = unflatten(ep)
+
+        self.assertEqual(str(inspect.signature(unflattened.forward)), "(x)")
+        static_reexport = export(unflattened, (x,))
+        torch.testing.assert_close(static_reexport.module()(x), model(x))
+
+        for dynamic_shapes in (
+            ({0: torch.export.Dim("batch_tuple", min=1, max=1024)},),
+            {"x": {0: torch.export.Dim("batch_dict", min=1, max=1024)}},
+        ):
+            reexported = export(
+                unflattened,
+                (x,),
+                dynamic_shapes=dynamic_shapes,
+            )
+            torch.testing.assert_close(reexported.module()(x), model(x))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):

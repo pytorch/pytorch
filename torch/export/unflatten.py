@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import abc
 import copy
+import inspect
 import logging
 import operator
 import re
+import types
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -592,6 +594,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
         _reorder_submodules(self, fqn_order)
         self.graph.lint()
         self.finalize()
+        self._configure_forward_signature()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -690,7 +693,40 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
 
         return flat_args
 
-    def forward(self, *args, **kwargs):
+    def _configure_forward_signature(self):
+        signature = self.module_call_graph[0].signature
+        if signature is None or signature.forward_arg_names is None:
+            return
+
+        self_arg_name = "__unflattened_self"
+        while self_arg_name in signature.forward_arg_names:
+            self_arg_name += "_"
+
+        try:
+            parameters = [
+                inspect.Parameter(
+                    self_arg_name, inspect.Parameter.POSITIONAL_OR_KEYWORD
+                ),
+                *[
+                    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for name in signature.forward_arg_names
+                ],
+            ]
+            forward_signature = inspect.Signature(parameters)
+        except ValueError:
+            log.debug(
+                "Unable to install an introspection signature for UnflattenedModule.forward",
+                exc_info=True,
+            )
+            return
+
+        def forward(self, *args, **kwargs):
+            return self._forward_impl(*args, **kwargs)
+
+        forward.__signature__ = forward_signature  # type: ignore[attr-defined]
+        self.forward = types.MethodType(forward, self)
+
+    def _forward_impl(self, *args, **kwargs):
         flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
@@ -710,6 +746,9 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def forward(self, *args, **kwargs):
+        return self._forward_impl(*args, **kwargs)
 
     def finalize(self):
         self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
