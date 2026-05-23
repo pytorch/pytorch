@@ -2763,6 +2763,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -4948,12 +4949,8 @@ def _create_constants(*args, dtype):
 @register_lowering(prims.rev.default)
 def rev(x, dims):
     # note - dims pre-canonicalized
-    sizes = x.get_size()
-
-    if len(sizes) == 0:
-        return clone(x)
-
     x_loader = x.make_loader()
+    sizes = x.get_size()
 
     def loader(idx):
         idx = list(idx)
