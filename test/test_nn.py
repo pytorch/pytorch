@@ -8546,7 +8546,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertFalse(torch.allclose(running_means[1], running_means[2]),
                          "Running stats should continue changing across passes")
 
-    @skipIfMPS  # MPS batch_norm doesn't support mixed dtypes, crashes with LLVM error
+    @skipIfMPS  # MPS doesn't enforce InstanceNorm mixed-dtype rejection; the test's assertRaisesRegex would not fire
     def test_instancenorm_mixed_dtype_backward(self, device):
         """test backward pass with mixed dtypes for InstanceNorm2d
 
