@@ -4242,7 +4242,13 @@ std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
     const Tensor& R,
     const Tensor& P,
     const std::string_view mode) {
-    return linalg_qr_jvp(dA, Q, R, mode);
+    // For a perturbation dA of A with factorization A P = Q R,
+    // the JVP satisfies dA P = dQ R + Q dR, assuming the pivot
+    // pattern is locally constant (dP = 0).
+
+    auto P_expanded = P.contiguous().toType(at::kLong).unsqueeze(-2).expand_as(dA);
+    auto dAP = dA.gather(-1, P_expanded);
+    return linalg_qr_jvp(dAP, Q, R, mode);
 }
 
 // Based on:
