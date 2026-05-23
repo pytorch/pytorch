@@ -934,6 +934,21 @@ class DynamicDictGetItemSource(ChainedSource):
             f"{self.index.reconstruct_pycode(codegen)})"
         )
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        key = self.index.get_value(globals, locals, cache)
+        if type(key) is not self.key_type:
+            raise KeyError(key)
+        value = dict.__getitem__(self.base.get_value(globals, locals, cache), key)
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         return f"dict.__getitem__({{0}}, {_esc_str(self.index.name)})"

@@ -1008,6 +1008,9 @@ def ___make_dynamic_dict_getitem_accessor({make_accessor_args}):
     def accessor(L):
         key = {source.index.name}
         if type(key) is not ___key_type:
+            # The guard tree has value guards for successful lookups. Returning
+            # this sentinel makes those guards fail without invoking user key
+            # __hash__ or __eq__ methods via dict.__getitem__.
             return ___invalid
         return dict.__getitem__({source.base.name}, key)
     return accessor
@@ -4900,19 +4903,28 @@ class CheckFunctionManager:
                 isinstance(source, DynamicDictGetItemSource)
                 for source in no_tensor_aliasing_sources
             ):
-                for i, name_i in enumerate(no_tensor_aliasing_names):
-                    for j in range(i + 1, len(no_tensor_aliasing_names)):
-                        source_i = no_tensor_aliasing_sources[i]
-                        source_j = no_tensor_aliasing_sources[j]
+                dynamic_indices = [
+                    i
+                    for i, source in enumerate(no_tensor_aliasing_sources)
+                    if isinstance(source, DynamicDictGetItemSource)
+                ]
+                static_indices = [
+                    i
+                    for i, source in enumerate(no_tensor_aliasing_sources)
+                    if not isinstance(source, DynamicDictGetItemSource)
+                ]
+                seen_dynamic_pairs: set[tuple[int, int]] = set()
+                for dynamic_i in dynamic_indices:
+                    for other_i in range(len(no_tensor_aliasing_names)):
+                        if dynamic_i == other_i:
+                            continue
+                        i, j = sorted((dynamic_i, other_i))
+                        if (i, j) in seen_dynamic_pairs:
+                            continue
+                        seen_dynamic_pairs.add((i, j))
+                        name_i = no_tensor_aliasing_names[i]
                         name_j = no_tensor_aliasing_names[j]
-                        has_dynamic_source = isinstance(
-                            source_i,
-                            DynamicDictGetItemSource,
-                        ) or isinstance(
-                            source_j,
-                            DynamicDictGetItemSource,
-                        )
-                        if has_dynamic_source and (
+                        if (
                             no_tensor_aliasing_tensor_ids[i]
                             == no_tensor_aliasing_tensor_ids[j]
                         ):
@@ -4924,6 +4936,9 @@ class CheckFunctionManager:
                                 None,
                             )
                             add_code_part(code_part, None, True)
+                            # If the dynamic lookup aliases another tensor at
+                            # trace time, preserve that aliasing relation instead
+                            # of installing a no-alias guard for this pair.
                             continue
                         install_no_tensor_aliasing_guard(
                             [
@@ -4934,6 +4949,17 @@ class CheckFunctionManager:
                             [f"check_no_aliasing({name_i}, {name_j})"],
                             None,
                         )
+                if len(static_indices) > 1:
+                    static_names = [no_tensor_aliasing_names[i] for i in static_indices]
+                    install_no_tensor_aliasing_guard(
+                        [
+                            builder.no_tensor_aliasing_guard_managers[i]
+                            for i in static_indices
+                        ],
+                        static_names,
+                        ["check_no_aliasing(" + ", ".join(static_names) + ")"],
+                        None,
+                    )
             else:
                 # Install tensor aliasing guard. TENSOR_MATCH guards are already
                 # installed for cpp guard manager.
