@@ -717,14 +717,21 @@ def deduce_output_dtype_by_name(
     return None
 
 
+def _is_runtime_triton_assert_target() -> bool:
+    return (
+        get_current_backend() == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+        and hasattr(V.kernel, "triton_tensor_ndim")
+    )
+
+
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
     if (
         config.test_configs.runtime_triton_dtype_assert
-        and backend == "triton"
-        and V.graph.get_current_device_or_throw().type != "cpu"
+        and _is_runtime_triton_assert_target()
     ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
@@ -749,12 +756,10 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
     assert shape is not None
     if (
         config.test_configs.runtime_triton_shape_assert
-        and backend == "triton"
-        and V.graph.get_current_device_or_throw().type != "cpu"
+        and _is_runtime_triton_assert_target()
     ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
@@ -2727,8 +2732,7 @@ class CSEProxy(DefaultHandler):
 
             if (
                 config.test_configs.runtime_triton_shape_assert
-                and backend == "triton"
-                and V.graph.get_current_device_or_throw().type != "cpu"
+                and _is_runtime_triton_assert_target()
             ):
                 shape_to_check = csevar.shape if csevar.shape is not None else var_shape
                 assert shape_to_check is not None
