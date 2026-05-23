@@ -1110,6 +1110,58 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @config.patch(fallback_random=True)
+    def test_rrelu_fallback_random(self):
+        rrelu = nn.RReLU().train()
+        x = torch.randn(1, 1, 100, 100)
+
+        def fn(x):
+            return rrelu(x)
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            expected = fn(x)
+            torch.manual_seed(0)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+    @config.patch(fallback_random=True)
+    def test_rrelu_with_noise_functional_fallback_random(self):
+        x = torch.randn(64, 64)
+
+        def fn(x):
+            noise = torch.empty_like(x)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, True
+            )
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(123)
+            expected = fn(x)
+            torch.manual_seed(123)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+        def fn_eval(x):
+            noise = torch.full_like(x, 7)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, False
+            )
+
+        compiled_eval = torch.compile(fn_eval, backend="inductor")
+
+        with torch.no_grad():
+            expected = fn_eval(x)
+            actual = compiled_eval(x)
+
+        self.assertEqual(actual, expected)
+
+    @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
             x1 = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
@@ -4952,6 +5004,30 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_cmp.grad, x_ref.grad)
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
+
+    def test_group_norm_torch_func_grad_dynamic(self):
+        avg_pool = nn.AvgPool2d(2)
+        layer_norm = nn.LayerNorm([5])
+        batch_norm = nn.BatchNorm2d(12).eval()
+        group_norm = nn.GroupNorm(12, 12).eval()
+
+        def fn(x):
+            x = avg_pool(x)
+            x = layer_norm(x)
+            x = batch_norm(x)
+            x = group_norm(x)
+            return x.abs().mean()
+
+        torch.manual_seed(0)
+        x = torch.randn([2, 12, 10, 10])
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        actual = compiled(x)
+
+        self.assertEqual(actual, expected)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
