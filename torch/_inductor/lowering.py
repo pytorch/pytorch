@@ -5339,6 +5339,18 @@ def _max_pool_with_offsets(
         ]
         return x_loader([*prefix, *ih])
 
+    # Keep the pooled value and window offset in one argmax-style state for
+    # small unrolled windows, so fused code can avoid a separate max chain.
+    paired = _small_unrolled_max_pool_with_offsets(
+        x,
+        dtype,
+        fn_inner,
+        new_size,
+        kernel_size,
+    )
+    if paired is not None:
+        return paired
+
     result = Reduction.create(
         reduction_type="max",
         input_node=x,
@@ -5366,6 +5378,61 @@ def _max_pool_with_offsets(
         # Only realize if reduction isn't unrolled
         offsets.realize()
 
+    return result, offsets
+
+
+def _small_unrolled_max_pool_with_offsets(
+    x,
+    dtype,
+    inner_fn,
+    ranges,
+    reduction_ranges,
+):
+    reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+    if (
+        not isinstance(reduction_numel, sympy.Integer)
+        or reduction_numel <= 0
+        or int(reduction_numel) >= config.unroll_reductions_threshold
+    ):
+        return None
+
+    reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
+    reduction_indices = tuple(
+        tuple(sympy.expand(i) for i in rindex)
+        for rindex in itertools.product(*[range(x) for x in reduction_ranges])
+    )
+    strides = [1] * len(reduction_ranges)
+    for i in range(len(reduction_ranges) - 2, -1, -1):
+        strides[i] = strides[i + 1] * reduction_ranges[i + 1]
+    combine_fn = ir.get_reduction_combine_fn("argmax", dtype)
+
+    def flatten_index(rindex):
+        return sum(i * stride for i, stride in zip(rindex, strides))
+
+    def unrolled(index):
+        first, *rest = reduction_indices
+        best_value = inner_fn(index, first)
+        best_offset = ops.index_expr(flatten_index(first), torch.int64)
+        for rindex in rest:
+            value = inner_fn(index, rindex)
+            offset = ops.index_expr(flatten_index(rindex), torch.int64)
+            best_value, best_offset = combine_fn(
+                (best_value, best_offset), (value, offset)
+            )
+        return best_value, best_offset
+
+    result = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=lambda index: unrolled(index)[0],
+        ranges=ranges,
+    )
+    offsets = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=lambda index: unrolled(index)[1],
+        ranges=ranges,
+    )
     return result, offsets
 
 
