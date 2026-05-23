@@ -2324,6 +2324,54 @@ class TestSDPA(NNTestCase):
         # Should not crash during export with unbacked symbolic mask batch dim
         torch.export.export(model, args=(x,))
 
+    def test_sdpa_export_repeat_interleave_unbacked_head_dim(self, device):
+        device_type = torch.device(device).type
+        if device_type not in ("cpu", "cuda"):
+            self.skipTest("Only CPU and CUDA SDPA dispatch are covered here")
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.num_heads = 2
+
+            def forward(self, query, key, value):
+                query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+                key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+                value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+
+                query_head_dim = torch.tensor(query.size(3), device=query.device)
+                key_head_dim = torch.tensor(key.size(3), device=key.device)
+                value_head_dim = torch.tensor(value.size(3), device=value.device)
+                key = key.repeat_interleave(query_head_dim // key_head_dim, dim=3)
+                value = value.repeat_interleave(
+                    query_head_dim // value_head_dim, dim=3
+                )
+
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=0.0, is_causal=False
+                )
+                return out.transpose(1, 2).flatten(2, 3).type_as(query)
+
+        dtype = torch.bfloat16 if device_type == "cuda" else torch.float32
+        model = Model().eval().to(device=device, dtype=dtype)
+        query = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        key = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        value = torch.randn(1, 3, 16, device=device, dtype=dtype)
+        seq_len = torch.export.Dim("seq_len", min=1, max=16)
+
+        ep = torch.export.export(
+            model,
+            args=(query, key, value),
+            dynamic_shapes=({1: seq_len}, {1: seq_len}, {1: seq_len}),
+            strict=False,
+        )
+
+        self.assertEqual(
+            ep.module()(query, key, value),
+            model(query, key, value),
+        )
+
+
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
 

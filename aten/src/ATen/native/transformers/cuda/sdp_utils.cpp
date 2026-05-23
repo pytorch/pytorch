@@ -192,9 +192,11 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  bool same_head_dim_size =
-      query_size_last == key_size_last && query_size_last == value_size_last;
-  if (!(same_head_dim_size && (query_size_last <= max_size))) {
+  const bool same_head_dim_size =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(value_size_last));
+  if (!(same_head_dim_size &&
+        TORCH_GUARD_OR_FALSE(query_size_last.sym_le(max_size)))) {
     if (debug) {
       TORCH_WARN(
           caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
@@ -213,8 +215,12 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
     bool is_half = (params.query.dtype() == at::kHalf) ||
       (params.query.dtype() == at::kBFloat16);
     const int64_t alignment = is_half ? 8 : 4;
-    if (!(query_size_last % alignment == 0 && query_size_last > 0 &&
-          value_size_last % alignment == 0 && value_size_last > 0)) {
+    const bool valid_alignment =
+        TORCH_GUARD_OR_FALSE((query_size_last % alignment).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) &&
+        TORCH_GUARD_OR_FALSE((value_size_last % alignment).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0));
+    if (!valid_alignment) {
       if (debug) {
         TORCH_WARN(
             "Mem efficient attention requires last dimension of inputs to be divisible by ",
@@ -241,10 +247,12 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  bool same_head_dim_size =
-      query_size_last == key_size_last && query_size_last == value_size_last;
-  if (!(same_head_dim_size && (query_size_last % 8 == 0) &&
-        (query_size_last <= max_size))) {
+  const bool same_head_dim_size =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(value_size_last));
+  if (!(same_head_dim_size &&
+        TORCH_GUARD_OR_FALSE((query_size_last % 8).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE(query_size_last.sym_le(max_size)))) {
     if (debug) {
       TORCH_WARN(
           "For NestedTensor inputs,",
@@ -270,6 +278,7 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
 #endif
 #endif
   const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
 #ifdef USE_ROCM
   bool is_half = (params.query.dtype() == at::kHalf) ||
@@ -278,9 +287,13 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
 #else
   const int64_t alignment = minimum_gemm_alignment(params);
 #endif
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
-        value_size_last % alignment == 0 && value_size_last > 0)) {
+  const bool valid_alignment =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE((query_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) &&
+      TORCH_GUARD_OR_FALSE((value_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0));
+  if (!valid_alignment) {
     if (debug) {
       TORCH_WARN(
           "Mem efficient attention requires last dimension of inputs to be divisible by ",
@@ -299,7 +312,8 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
   const auto max_size = c10::SymInt(aotriton_max_hdim());
-  if (!(query_size_last <= max_size && value_size_last <= max_size)) {
+  if (!(TORCH_GUARD_OR_FALSE(query_size_last.sym_le(max_size)) &&
+        TORCH_GUARD_OR_FALSE(value_size_last.sym_le(max_size)))) {
     if (debug) {
       TORCH_WARN(
           "Mem efficient attention on ROCM requires last dimension of inputs to less or equal than ",
@@ -600,7 +614,8 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   constexpr int64_t max_cudnn_dim_size = 65535;
   const auto b = params.query.sym_size(0);
   const auto h = params.query.sym_size(1);
-  if (b > max_cudnn_dim_size || h > max_cudnn_dim_size) {
+  if (!(TORCH_GUARD_OR_FALSE(b.sym_le(max_cudnn_dim_size)) &&
+        TORCH_GUARD_OR_FALSE(h.sym_le(max_cudnn_dim_size)))) {
     if (debug) {
       TORCH_WARN(
           "cuDNN SDPA does not support batch size or num_heads greater than ",
@@ -638,36 +653,43 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   // Special case allowed by cuDNN frontend to support DeepSeek dimensions
   if (cudnn_version >= 91100) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
+    if (dprops->major == 10 &&
+        TORCH_GUARD_OR_FALSE(d_qk.sym_eq(192)) &&
+        TORCH_GUARD_OR_FALSE(d_v.sym_eq(128))) {
       head_dim_limit = 192;
     }
   }
-  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
+  if (!(TORCH_GUARD_OR_FALSE(d_qk.sym_le(head_dim_limit)) &&
+        TORCH_GUARD_OR_FALSE(d_v.sym_le(head_dim_limit)))) {
     if (debug) {
       TORCH_WARN("head_dim should be no more than ", head_dim_limit);
     }
     return false;
   }
-  if (d_qk % 8 != 0 || d_v % 8 != 0) {
+  if (!(TORCH_GUARD_OR_FALSE((d_qk % 8).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE((d_v % 8).sym_eq(0)))) {
     if (debug) {
       TORCH_WARN("head_dim should be a multiple of 8");
     }
     return false;
   }
-  if (cudnn_version < 8906 && s_k % 64 != 0 ) {
+  if (cudnn_version < 8906 &&
+      !TORCH_GUARD_OR_FALSE((s_k % 64).sym_eq(0))) {
     if (debug) {
       TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
     return false;
   }
   if (cudnn_version < 90000) {
-    if (s_q < 64) {
+    if (!TORCH_GUARD_OR_FALSE(s_q.sym_ge(64))) {
       if (debug) {
         TORCH_WARN("s_q less than 64 is not supported before cudnn 9.0.0");
       }
       return false;
     }
-    if (params.dropout != 0.0 && (s_q % 64 != 0 || s_k % 64 != 0)) {
+    if (params.dropout != 0.0 &&
+        !(TORCH_GUARD_OR_FALSE((s_q % 64).sym_eq(0)) &&
+          TORCH_GUARD_OR_FALSE((s_k % 64).sym_eq(0)))) {
       if (debug) {
         TORCH_WARN(
             "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
@@ -675,13 +697,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_k == 1) {
+  if (!TORCH_GUARD_OR_FALSE(s_k.sym_ne(1))) {
     if (debug) {
       TORCH_WARN_ONCE("cudnn SDPA does not support key/value sequence length 1.");
     }
     return false;
   }
-  if (s_q == 1 && params.dropout != 0.0) {
+  if (params.dropout != 0.0 && !TORCH_GUARD_OR_FALSE(s_q.sym_ne(1))) {
     if (debug) {
       TORCH_WARN_ONCE("cudnn SDPA does not support query sequence length 1 with dropout.");
     }
