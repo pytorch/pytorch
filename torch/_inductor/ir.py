@@ -2303,9 +2303,10 @@ class WelfordReduction(MultiOutputReduction):
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
+
         if split > 1:
             # triton doesn't support reduce to single element well, so break it up
-            return cls.create_multilayer(
+            results = cls.create_multilayer(
                 device,
                 dtype,
                 inner_fns,
@@ -2315,6 +2316,27 @@ class WelfordReduction(MultiOutputReduction):
                 split,
                 reduction_hint,
             )
+
+            # Annotate the final-stage (combine) ComputedBuffers with the
+            # original unsplit domain info so the scheduler can cancel the
+            # split when epilogue fusion is profitable.
+            if config.triton.mix_order_reduction:
+                for t in results:
+                    buf = None
+                    # Navigate TensorBox -> StorageBox -> ComputedBuffer
+                    inner = getattr(t, 'data', None)
+                    if inner is not None:
+                        inner2 = getattr(inner, 'data', None)
+                        if isinstance(inner2, ComputedBuffer):
+                            buf = inner2
+                    if isinstance(buf, ComputedBuffer):
+                        buf._split_size = buf.data.reduction_ranges[0]
+                        buf._original_inner_fn = inner_fns[0]
+                        buf._original_ranges = ranges
+                        buf._original_reduction_ranges = reduction_ranges
+                        buf._original_reduction_type = "welford_reduce"
+
+            return results
 
         results = [
             TensorBox.create(
@@ -4830,6 +4852,7 @@ class ComputedBuffer(OperationBuffer):
     _original_inner_fn: Callable[..., Any] | None = None
     _original_ranges: Sequence[_IntLike] | None = None
     _original_reduction_ranges: Sequence[_IntLike] | None = None
+    _original_reduction_type: str | None = None
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
@@ -4841,17 +4864,37 @@ class ComputedBuffer(OperationBuffer):
         assert isinstance(self.data, Reduction), f"{type(self.data)}"
         old_data = self.data
         old_layout = self.layout
+        reduction_type = (
+            self._original_reduction_type
+            if self._original_reduction_type is not None
+            else old_data.reduction_type
+        )
         try:
-            new_data = Reduction(
-                device=old_data.device,
-                dtype=old_data.dtype,
-                inner_fn=self._original_inner_fn,
-                ranges=self._original_ranges,
-                reduction_ranges=self._original_reduction_ranges,
-                reduction_type=old_data.reduction_type,
-                src_dtype=old_data.src_dtype,
-                reduction_hint=old_data.reduction_hint,
-            )
+            if isinstance(old_data, MultiOutputReduction):
+                # For Welford/multi-output reductions, preserve the
+                # output_index selection so only one output is stored.
+                new_data = MultiOutputReduction(
+                    device=old_data.device,
+                    dst_dtype=old_data.dtype,
+                    inner_fns=self._original_inner_fn,
+                    ranges=self._original_ranges,
+                    reduction_ranges=self._original_reduction_ranges,
+                    reduction_type=reduction_type,
+                    src_dtype=old_data.src_dtype,
+                    reduction_hint=old_data.reduction_hint,
+                    output_index=old_data.output_index,
+                )
+            else:
+                new_data = Reduction(
+                    device=old_data.device,
+                    dtype=old_data.dtype,
+                    inner_fn=self._original_inner_fn,
+                    ranges=self._original_ranges,
+                    reduction_ranges=self._original_reduction_ranges,
+                    reduction_type=reduction_type,
+                    src_dtype=old_data.src_dtype,
+                    reduction_hint=old_data.reduction_hint,
+                )
             self.data = new_data
             # this layout does not matter since we skip tl.store
             # later

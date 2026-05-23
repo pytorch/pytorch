@@ -223,14 +223,12 @@ class MixOrderReductionTest(TestBase):
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
-        # We don't do mix order reduction for split redutions
-        # with more than 2 layers
+        # With unroll_reductions_threshold=1, the inner reduction (dim=-1,
+        # rnumel=2) is unrolled to a pointwise. The split outer reduction
+        # and unrolled pointwise can then be fused via mix order reduction.
         self.assertEqual(
             metrics.codegen_mix_order_reduction,
-            1
-            if inductor_config.triton.cooperative_reductions
-            or inductor_config.triton.force_cooperative_reductions
-            else 0,
+            1,
         )
 
     def test_independent_split_size(self):

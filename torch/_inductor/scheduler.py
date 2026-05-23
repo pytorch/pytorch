@@ -3216,6 +3216,8 @@ class Scheduler:
         self.stream_idx_to_user_obj_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
+        self._cancel_splits_for_epilogue_fusion()
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -3859,6 +3861,150 @@ class Scheduler:
             )
 
         self.nodes = new_nodes
+
+    def _cancel_splits_for_epilogue_fusion(self) -> None:
+        """
+        Cancel reduction splits when fusing with a downstream broadcast
+        pointwise consumer is profitable.
+
+        Pattern: split_reduction_stage2 -> pointwise_consumer where the
+        consumer's numel == original_reduction_numel * original_reduction_rnumel.
+        Canceling the split allows the pointwise to fuse into the reduction
+        via fits_in_main_body, eliminating an intermediate memory pass.
+        """
+        if not config.triton.mix_order_reduction:
+            return
+
+        canceled_nodes: list[SchedulerNode] = []
+        # Track which stage1 buffer names had their users invalidated
+        invalidated_stage1_bufs: OrderedSet[str] = OrderedSet()
+
+        for node in self.nodes:
+            if not isinstance(node, SchedulerNode):
+                continue
+            if not node.is_reduction():
+                continue
+            if not MixOrderReduction.is_split_reduction(node):
+                continue
+
+            assert isinstance(node.node, ir.ComputedBuffer)
+            assert node.node._original_ranges is not None
+            assert node.node._original_reduction_ranges is not None
+
+            original_numel = V.graph.sizevars.simplify(
+                sympy_product(node.node._original_ranges)
+            )
+            original_rnumel = V.graph.sizevars.simplify(
+                sympy_product(node.node._original_reduction_ranges)
+            )
+            original_total = V.graph.sizevars.simplify(
+                original_numel * original_rnumel
+            )
+
+            # Check downstream pointwise consumers
+            has_profitable_consumer = False
+            for buf in node.get_outputs():
+                for user in buf.users:
+                    if isinstance(user.node, OutputNode):
+                        continue
+                    user_node = user.node
+                    if user_node.is_reduction():
+                        continue
+                    # Get the consumer's numel
+                    user_group = getattr(user_node, "group", None)
+                    if user_group is None or len(user_group) < 2:
+                        continue
+                    user_sizes = user_group[1]
+                    if len(user_sizes) < 1:
+                        continue
+                    # For pointwise nodes, group is (device, (numel, 1)) or (device, (numel,))
+                    user_numel = user_sizes[0] if len(user_sizes) >= 1 else None
+                    if user_numel is None:
+                        continue
+                    user_numel = V.graph.sizevars.simplify(user_numel)
+                    if V.graph.sizevars.statically_known_equals(
+                        user_numel, original_total
+                    ):
+                        has_profitable_consumer = True
+                        break
+                if has_profitable_consumer:
+                    break
+
+            if not has_profitable_consumer:
+                continue
+
+            # Profitability guard: only cancel split when the fused kernel
+            # will have enough CTAs to fill the GPU. With small numel (fewer
+            # CTAs than SMs), the split version is faster because it remaps
+            # to thousands of CTAs with high utilization.
+            original_numel_hint = V.graph.sizevars.optimization_hint(
+                original_numel, fallback=0
+            )
+            if original_numel_hint > 0:
+                import torch
+
+                num_sm = torch.cuda.get_device_properties(0).multi_processor_count
+                if original_numel_hint < num_sm:
+                    fusion_log.debug(
+                        "cancel_split_for_epilogue_fusion: skipping %s — "
+                        "numel hint %d < num_sm %d, split is more profitable",
+                        node.get_name(),
+                        original_numel_hint,
+                        num_sm,
+                    )
+                    continue
+
+            # Record old reads (stage1 buffer deps) before canceling
+            old_read_names = OrderedSet(
+                dep.name
+                for dep in node.read_writes.reads
+                if not isinstance(dep, WeakDep)
+            )
+
+            # Cancel the split - this recomputes sizes/body/read_writes
+            # from the original unsplit reduction domain
+            node.cancel_reduction_split()
+            canceled_nodes.append(node)
+
+            # Find stage1 buffers that this node no longer reads
+            new_read_names = OrderedSet(
+                dep.name
+                for dep in node.read_writes.reads
+                if not isinstance(dep, WeakDep)
+            )
+            dropped_reads = old_read_names - new_read_names
+            invalidated_stage1_bufs |= dropped_reads
+
+            fusion_log.debug(
+                "cancel_split_for_epilogue_fusion: canceled split on %s "
+                "(original domain: numel=%s, rnumel=%s)",
+                node.get_name(),
+                original_numel,
+                original_rnumel,
+            )
+
+        if not canceled_nodes:
+            return
+
+        # Remove canceled nodes from the users lists of stage1 buffers
+        canceled_names = OrderedSet(n.get_name() for n in canceled_nodes)
+        for buf_name in invalidated_stage1_bufs:
+            if buf_name not in self.name_to_buf:
+                continue
+            buf = self.name_to_buf[buf_name]
+            buf.users = [
+                u
+                for u in buf.users
+                if u.node.get_name() not in canceled_names
+            ]
+
+        # Run dead node elimination to remove now-unused stage1 nodes
+        self.dead_node_elimination()
+
+        # Rebuild name_to_fused_node and recompute ancestors/distances
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.compute_ancestors()
+        self.compute_input_distances()
 
     def dead_node_elimination(self) -> None:
         """

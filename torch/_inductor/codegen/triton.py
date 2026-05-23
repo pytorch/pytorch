@@ -5836,6 +5836,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if self.cooperative_reduction:
             inductor_meta["persistent_reduction"] = self.persistent_reduction
+            device = V.graph.get_current_device_or_throw()
+            inductor_meta["multi_processor_count"] = (
+                DeviceProperties.create(device).multi_processor_count
+            )
 
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:

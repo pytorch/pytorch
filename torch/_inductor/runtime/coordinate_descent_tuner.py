@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
-from .hints import TRITON_MAX_BLOCK
-from .runtime_utils import red_text, triton_config_to_hashable
+from .hints import TRITON_MAX_BLOCK, TRITON_MAX_RSPLIT
+from .runtime_utils import last_power_of_2, red_text, triton_config_to_hashable
 
 
 if TYPE_CHECKING:
@@ -107,6 +107,10 @@ class CoordescTuner:
         return timing
 
     @property
+    def is_cooperative_reduction(self):
+        return self.inductor_meta.get("grid_type") == "CooperativeReductionGrid"
+
+    @property
     def tunable_fields(self):
         out = [
             "XBLOCK",
@@ -137,6 +141,9 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
+        if self.is_cooperative_reduction:
+            out.append("RSPLIT")
+
         out = self._combo_tunable_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
@@ -153,6 +160,8 @@ class CoordescTuner:
             return val > self.get_warpsmax()
         if name == "waves_per_eu":
             return val > 8
+        if name == "RSPLIT":
+            return val > TRITON_MAX_RSPLIT
 
         return False
 
@@ -225,6 +234,18 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+        if self.is_cooperative_reduction:
+            # Cooperative reductions require all CTAs to be co-resident
+            # for the x_grid_barrier. Total CTAs must not exceed the
+            # number of SMs (conservatively, last_power_of_2(num_sm)).
+            rsplit = config.kwargs.get("RSPLIT", 1)
+            xblock = config.kwargs.get("XBLOCK", 1)
+            xnumel = self.size_hints.get("x", 1) if self.size_hints else 1
+            num_sm = self.inductor_meta.get("multi_processor_count", 128)
+            target = last_power_of_2(num_sm)
+            total_ctas = rsplit * ((xnumel + xblock - 1) // xblock)
+            if total_ctas > target:
+                return False
         return True
 
     def check_all_tuning_directions(
