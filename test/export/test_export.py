@@ -410,6 +410,43 @@ graph():
 
         self.assertTrue(torch.allclose(res, res_export))
 
+    def test_no_grad_param_data_inplace_error(self):
+        class ClampedFeedForward(torch.nn.Module):
+            def __init__(self, input_size, hidden_size):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(input_size, hidden_size)
+
+            def clamp_weights(self):
+                with torch.no_grad():
+                    for param in self.fc1.parameters():
+                        clamped_param = torch.clamp(param.data, -1, 1)
+                        param.copy_(clamped_param)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                self.clamp_weights()
+                return x
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ff = ClampedFeedForward(128, 64)
+
+            def forward(self, x):
+                return self.ff(x)
+
+        expected_msg = (
+            "torch.export found an untraceable tensor constant in the exported "
+            "program. Potential source model attribute: ff.lifted_tensor_0. "
+            "This can happen when forward reads or mutates module state through "
+            "`.data`, which bypasses export's parameter/buffer mutation "
+            "tracking. Use the parameter or buffer tensor directly for "
+            "supported no_grad mutations, or move the state update outside the "
+            "exported forward."
+        )
+        with self.assertRaisesRegex(RuntimeError, escape(expected_msg)):
+            export(TestModel(), (torch.randn(32, 128),), strict=False)
+
     def test_export_slice_unbacked_dim1(self):
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
@@ -1643,21 +1680,25 @@ graph():
                 out = self.fc2(out)
                 return out
 
+        expected_msg = escape(
+            "torch.export found an untraceable tensor constant in the exported "
+            "program. Potential source model attribute: "
+            "cache_layer.lifted_tensor_0. This can happen when forward reads "
+            "or mutates module state through `.data`, which bypasses export's "
+            "parameter/buffer mutation tracking. Use the parameter or buffer "
+            "tensor directly for supported no_grad mutations, or move the "
+            "state update outside the exported forward."
+        )
+
         with self.assertRaisesRegex(
             RuntimeError,
-            "We found a fake tensor in the exported program constant's list. "
-            "This typically means our tracing system encountered an op that we can't trace through. "
-            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
-            "Please file an issue on github.",
+            expected_msg,
         ):
             _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
 
         with self.assertWarnsRegex(
             UserWarning,
-            "We found a fake tensor in the exported program constant's list. "
-            "This typically means our tracing system encountered an op that we can't trace through. "
-            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
-            "Please file an issue on github.",
+            expected_msg,
         ):
             # can't trigger all variant of export because later on it will crash
             # and it is good because we warned :).
