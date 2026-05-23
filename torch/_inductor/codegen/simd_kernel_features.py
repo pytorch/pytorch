@@ -15,7 +15,6 @@ from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
-from ..ir import ComputedBuffer
 from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
@@ -169,7 +168,7 @@ class SIMDKernelFeatures:
 
             if (
                 reduction_hint_val != ReductionHint.INNER
-                and self.has_compatible_online_softmax_epilogue()
+                and self.has_compatible_reduction_epilogue()
                 and (
                     tiling_scores is None
                     or self._tiling_scores_prefer_inner(tiling_scores)
@@ -207,14 +206,6 @@ class SIMDKernelFeatures:
                 read_counts[read_dep.name] += 1
 
         return dict(read_counts)  # Convert defaultdict to regular dict
-
-    @staticmethod
-    def _is_online_softmax_reduction(node: SchedulerNode) -> bool:
-        return (
-            node.is_reduction()
-            and isinstance(node.node, ComputedBuffer)
-            and node.node.get_reduction_type() == "online_softmax_reduce"
-        )
 
     @staticmethod
     def _deps_match(dep1: MemoryDep, dep2: MemoryDep) -> bool:
@@ -258,7 +249,22 @@ class SIMDKernelFeatures:
         return any(cls._deps_match(dep, read) for read in reduction_reads)
 
     @classmethod
-    def is_compatible_online_softmax_epilogue(
+    def _reduction_reads_for_recomputed_pointwise(
+        cls, reduction_nodes: Iterable[SchedulerNode]
+    ) -> list[MemoryDep]:
+        reduction_reads = [
+            dep
+            for node in reduction_nodes
+            if node.is_reduction()
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep)
+        ]
+        if not cls._has_coalesced_reduction_read(reduction_reads):
+            return []
+        return reduction_reads
+
+    @classmethod
+    def is_compatible_reduction_epilogue(
         cls,
         pointwise_nodes: Iterable[SchedulerNode],
         reduction_nodes: Iterable[SchedulerNode],
@@ -267,18 +273,11 @@ class SIMDKernelFeatures:
         if not pointwise_nodes:
             return False
 
-        reduction_reads = [
-            dep
-            for node in reduction_nodes
-            if cls._is_online_softmax_reduction(node)
-            for dep in node.read_writes.reads
-            if isinstance(dep, MemoryDep)
-        ]
-        if not reduction_reads or not cls._has_coalesced_reduction_read(
-            reduction_reads
-        ):
+        reduction_reads = cls._reduction_reads_for_recomputed_pointwise(reduction_nodes)
+        if not reduction_reads:
             return False
 
+        has_recomputed_read = False
         for node in pointwise_nodes:
             if node.is_reduction():
                 return False
@@ -287,9 +286,10 @@ class SIMDKernelFeatures:
                     dep = typing.cast(MemoryDep, dep)
                     if not cls._is_compatible_recomputed_read(dep, reduction_reads):
                         return False
+                    has_recomputed_read = True
             if any(cls._is_non_contiguous_dep(dep) for dep in node.read_writes.writes):
                 return False
-        return True
+        return has_recomputed_read
 
     def pointwise_nodes_in_reduction_kernel(self) -> list[SchedulerNode]:
         return [
@@ -299,27 +299,16 @@ class SIMDKernelFeatures:
             and n.group[1][0] == self.numel * self.reduction_numel
         ]
 
-    def has_compatible_online_softmax_epilogue(self) -> bool:
-        return self.is_compatible_online_softmax_epilogue(
+    def has_compatible_reduction_epilogue(self) -> bool:
+        return self.is_compatible_reduction_epilogue(
             self.pointwise_nodes_in_reduction_kernel(), self.reduction_nodes()
         )
 
     def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
         reduction_nodes = self.reduction_nodes()
         pointwise_nodes = self.pointwise_nodes_in_reduction_kernel()
-        ignore_recomputed_reads = self.is_compatible_online_softmax_epilogue(
-            pointwise_nodes, reduction_nodes
-        )
-        reduction_reads = (
-            [
-                dep
-                for node in reduction_nodes
-                if self._is_online_softmax_reduction(node)
-                for dep in node.read_writes.reads
-                if isinstance(dep, MemoryDep)
-            ]
-            if ignore_recomputed_reads
-            else []
+        reduction_reads = self._reduction_reads_for_recomputed_pointwise(
+            reduction_nodes
         )
         for node in pointwise_nodes:
             # An index can be an integer when loading a random seed.
@@ -329,7 +318,7 @@ class SIMDKernelFeatures:
                 or isinstance(dep.index, (sympy.Integer, int))
                 or dep.stride1_for_last_dim()
                 or (
-                    ignore_recomputed_reads
+                    reduction_reads
                     and dep in node.read_writes.reads
                     and self._is_compatible_recomputed_read(dep, reduction_reads)
                 )
