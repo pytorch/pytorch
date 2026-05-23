@@ -258,8 +258,6 @@ def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
             # Use materialize_symints intentionally; see its docstring for why.
             ft = n.args[0].meta["val"]
             stride_args = tuple(gm.graph.materialize_symints(ft.stride()))
-
-        with gm.graph.inserting_before(n):
             new_node = gm.graph.call_function(
                 prims.inductor_force_stride_order.default, (n.args[0], stride_args)
             )

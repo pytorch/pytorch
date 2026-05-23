@@ -258,6 +258,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         concrete_args = [N, torch.randn(32), torch.randn(32)]
         gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
 
+        compiled = compile_fx_inner(gm, concrete_args)
+        self.assertNotIsInstance(compiled, str)
+        compiled(list(concrete_args))
+
         symbolic_args = _get_compile_args(gm, concrete_args)
         compiled = compile_fx_inner(gm, symbolic_args)
         self.assertNotIsInstance(compiled, str)
