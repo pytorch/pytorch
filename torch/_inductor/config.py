@@ -1798,8 +1798,14 @@ class triton:
     # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
     # This helps avoid overhead for very small partitions where cudagraph
     # recording/replay cost outweighs the benefits.
-    # Set to 0 to disable this check.
+    # Set to 0 to disable this general check. Max-autotune can still apply
+    # max_autotune_cudagraph_min_partition_size below.
     cudagraph_min_partition_size = 0
+
+    # Minimum number of kernels required for a max-autotune cudagraph partition.
+    # This avoids paying static input copy overhead for tiny max-autotune graphs.
+    # Set to 0 to disable this max-autotune-specific default.
+    max_autotune_cudagraph_min_partition_size = 2
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
@@ -1843,6 +1849,11 @@ class triton:
     # reorder nodes to minimize the number of graph partitions while
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
+
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -2668,7 +2679,17 @@ class halide:
 
 
 # create a directory containing lots of debug information
+def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
+    if format_env_name in os.environ:
+        return os.environ[format_env_name]
+    if os.environ.get(legacy_svg_env_name, "0") == "1":
+        return "svg"
+    return os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
 class trace:
+    """Configuration for torch.compile debug trace artifacts."""
+
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
@@ -2700,11 +2721,39 @@ class trace:
     # Copy generated code to trace dir
     output_code = True
 
-    # SVG figure showing post-fusion graph
-    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+    # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
+    # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
+    # same dump for any graph_diagram_format.
+    graph_diagram = (
+        os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_POST_FUSION_GRAPH", "0") == "1"
+    )
 
-    # SVG figure showing fx with fusion
-    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+    # Output format for post-fusion graph_diagram dumps.  Defaults to svg when
+    # the legacy INDUCTOR_POST_FUSION_SVG flag is used; otherwise defaults to
+    # the shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_POST_FUSION_GRAPH_FORMAT",
+        "INDUCTOR_POST_FUSION_SVG",
+    )
+
+    # Diagram showing FX with fusion. INDUCTOR_ORIG_FX_SVG is the legacy
+    # spelling for SVG output; INDUCTOR_ORIG_FX_GRAPH enables the same dump for
+    # any orig_fx_graph_diagram_format.
+    draw_orig_fx_graph = (
+        os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_ORIG_FX_GRAPH", "0") == "1"
+    )
+
+    # Output format for original FX graph dumps.  Defaults to svg when the
+    # legacy INDUCTOR_ORIG_FX_SVG flag is used; otherwise defaults to the
+    # shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    orig_fx_graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_ORIG_FX_GRAPH_FORMAT",
+        "INDUCTOR_ORIG_FX_SVG",
+    )
 
     # We draw our fx graphs with the "record" shape attribute by default.
     # Sometimes, when the graph is very complex, we may hit dot errors like below:

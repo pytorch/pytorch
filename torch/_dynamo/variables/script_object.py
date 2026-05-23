@@ -22,7 +22,7 @@ import enum
 import functools
 import inspect
 import types
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -177,7 +177,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the
@@ -327,11 +327,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return f"{self.__class__.__name__}({value})"
 
     __repr__ = __str__
-
-    def richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."

@@ -529,13 +529,6 @@ class TracebackVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -543,7 +536,10 @@ class TracebackVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
+        if name == "__eq__":
+            # Two traceback variables are only equal if they are the same object
+            return VariableTracker.build(tx, self is args[0])
+        elif name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
 
@@ -615,13 +611,6 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
@@ -750,7 +739,7 @@ class DelayGraphBreakVariable(UnknownVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "" if self.source is None else self.source.name
@@ -785,7 +774,7 @@ class ComptimeVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..comptime import ComptimeContext
@@ -1088,7 +1077,7 @@ class AutogradFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "AutogradFunctionVariable":
         return AutogradFunctionVariable(self.fn_cls)
@@ -1199,7 +1188,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     @staticmethod
     def create(
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker] | None = None,
+        args: list[VariableTracker] | None = None,
         kwargs: dict[str, VariableTracker] | None = None,
     ) -> VariableTracker:
         needs_input_grad = None
@@ -1389,7 +1378,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.fn(*args, **kwargs)
@@ -1473,36 +1462,13 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import generic_richcompare
-
-        try:
-            resolved = self.obj.var_getattr(tx, self.name)
-        except NotImplementedError:
-            resolved = None
-        if resolved is None or isinstance(resolved, GetAttrVariable):
-            if self.obj.is_python_constant():
-                val = getattr(self.obj.as_python_constant(), self.name)
-                resolved = VariableTracker.build(tx, val)
-            else:
-                unimplemented(
-                    gb_type="Unresolved GetAttrVariable comparison",
-                    context=f"richcompare_impl {self} {op}",
-                    explanation=f"Cannot compare {self} because the attribute "
-                    f"could not be resolved to a concrete value.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-        return generic_richcompare(tx, resolved, other, op)
-
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def mp_subscript_impl(
         self,
@@ -1563,13 +1529,6 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
 
 class TypingVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -1592,18 +1551,6 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        if op in ("__eq__", "__ne__"):
-            if istype(other, TypingVariable):
-                result = self.value == other.value
-                if op == "__ne__":
-                    result = not result
-                return ConstantVariable.create(result)
-            return ConstantVariable.create(NotImplemented)
-        return ConstantVariable.create(NotImplemented)
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1611,6 +1558,10 @@ class TypingVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__eq__":
+            if len(args) == 1 and not kwargs:
+                result = istype(args[0], TypingVariable) and self.value == args[0].value
+                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
@@ -1774,7 +1725,7 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not config.trace_numpy:
@@ -1949,7 +1900,7 @@ class StringFormatVariable(VariableTracker):
     def create(
         cls,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if all(
@@ -1967,7 +1918,7 @@ class StringFormatVariable(VariableTracker):
     def __init__(
         self,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
         **kwargs: Any,
     ) -> None:
@@ -2063,7 +2014,7 @@ class DebuggingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if tx.export:
@@ -2130,7 +2081,7 @@ class IgnoredFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return variables.ConstantVariable.create(None)
@@ -2216,13 +2167,6 @@ class ConstantLikeVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def call_method(
         self,
@@ -2316,7 +2260,7 @@ class RandomClassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "RandomVariable":
         if len(args) > 1 or kwargs:
@@ -2526,7 +2470,7 @@ class WeakRefVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.referent_vt
@@ -2543,13 +2487,6 @@ class WeakRefVariable(VariableTracker):
         from .object_protocol import generic_hash_impl
 
         return generic_hash_impl(tx, self.referent_vt)
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):
