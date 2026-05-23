@@ -11575,6 +11575,30 @@ graph():
             ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs))
         )
 
+    def test_export_stateful_cache_tensor_scalar_slice_assignment(self):
+        class StatefulCache(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.zeros(1, 100, 8)
+
+            def forward(self, x, start):
+                self.buffer[:, start : start + 2, :] = x
+                return self.buffer
+
+        inputs = (torch.randn(1, 2, 8), torch.tensor(5))
+        ep = torch.export.export(StatefulCache().eval(), inputs)
+        FileCheck().check("torch.ops.aten.item.default").check(
+            "torch.ops.aten.slice.Tensor"
+        ).check("torch.ops.aten.copy_.default").run(ep.graph_module.code)
+
+        runtime_inputs = (torch.randn(1, 2, 8), torch.tensor(11))
+        self.assertEqual(
+            ep.module()(runtime_inputs[0].clone(), runtime_inputs[1].clone()),
+            StatefulCache().eval()(
+                runtime_inputs[0].clone(), runtime_inputs[1].clone()
+            ),
+        )
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
