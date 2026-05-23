@@ -46,6 +46,7 @@ register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
+register_log("native_dsl", "torch._native")
 register_log(
     "export",
     [
