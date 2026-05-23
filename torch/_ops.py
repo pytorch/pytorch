@@ -1207,6 +1207,18 @@ class OpOverloadPacket(Generic[_P, _T]):
         }
 
     def __getattr__(self, key: str) -> OpOverload[_P, _T]:
+        # Tracing/profiling hooks can inspect self before __init__ has set up
+        # these fields. Avoid recursive __getattr__ calls while reading them.
+        try:
+            qualified_op_name = object.__getattribute__(self, "_qualified_op_name")
+            op = object.__getattribute__(self, "_op")
+            cached_overload_names = object.__getattribute__(self, "_dir")
+        except AttributeError:
+            cls = object.__getattribute__(self, "__class__")
+            raise AttributeError(
+                f"'{cls.__name__}' object has no attribute '{key}'"
+            ) from None
+
         # ensure that query for dunder attributes that does not exist on
         # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
         # `_get_operation_overload` (which is an expensive operation).
@@ -1216,7 +1228,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # This is ok since we are guaranteed that an overload name for an aten op can't start with '__'
         try:
             if key.startswith("__"):
-                return getattr(self._op, key)
+                return getattr(op, key)
         except AttributeError:
             # for consistency because it seems weird to
             # throw an attribute error with a message containing
@@ -1224,23 +1236,21 @@ class OpOverloadPacket(Generic[_P, _T]):
             # query was performed on.
             raise AttributeError(
                 f"'{str(self)}' can't have an overload name beginning with '__' and the "
-                f"underlying op {str(self._op)} has no attribute {key} either."
+                f"underlying op {str(op)} has no attribute {key} either."
             ) from None
 
         try:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT
-            op_dk_tags = torch._C._get_operation_overload(
-                self._qualified_op_name, use_key
-            )
+            op_dk_tags = torch._C._get_operation_overload(qualified_op_name, use_key)
             if op_dk_tags is None:
                 raise AttributeError(
                     f"The underlying op of '{str(self)}' has no overload name '{key}'"
                 )
 
             op_, op_dk_, tags = op_dk_tags
-            schema = torch._C._get_schema(self._qualified_op_name, use_key)
+            schema = torch._C._get_schema(qualified_op_name, use_key)
             overload: OpOverload[_P, _T] = (
                 OpOverload(self, op_, op_dk_, schema, tags)
                 if not _has_script_object_arg(schema)
@@ -1248,7 +1258,7 @@ class OpOverloadPacket(Generic[_P, _T]):
             )
             # cache the overload object
             setattr(self, key, overload)
-            self._dir.append(key)
+            cached_overload_names.append(key)
             return overload
         except RuntimeError:
             raise AttributeError(
