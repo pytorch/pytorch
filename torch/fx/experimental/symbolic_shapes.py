@@ -4682,7 +4682,7 @@ class ShapeEnv:
         dynamic_dims = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
 
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
-        size = []
+        size: list[sympy.Expr] = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
                 hint_overrides.get(i, val),
@@ -4710,6 +4710,29 @@ class ShapeEnv:
             ):
                 self.size_like.add(sym)
             size.append(sym)
+
+        # Record tensor exclusion constraints for stable graph selection.
+        # The ndim check guards against stale excluded_sizes from graph
+        # breaks where the resumed tensor may have different dimensionality.
+        # Skip dims with hint overrides: the overridden hint in
+        # backed_var_to_val would mismatch the excluded value, causing the
+        # not-all check in produce_guards_verbose to emit a guard that
+        # immediately fails.
+        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
+        dim = len(tensor_size)
+        if (
+            excluded_sizes
+            and len(excluded_sizes) == dim
+            and any(v is not None for v in excluded_sizes)
+        ):
+            for i in range(dim):
+                ev = excluded_sizes[i]
+                if (
+                    ev is not None
+                    and isinstance(size[i], sympy.Symbol)
+                    and i not in (hint_overrides or {})
+                ):
+                    self._record_exclusion_constraint(size[i], ev)
         return size
 
     def create_symbolic_sizes_strides_storage_offset(
@@ -5011,27 +5034,6 @@ class ShapeEnv:
         size: list[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context, hint_overrides=hint_overrides
         )
-        # Record tensor exclusion constraints for stable graph selection.
-        # The ndim check guards against stale excluded_sizes from graph
-        # breaks where the resumed tensor may have different dimensionality.
-        # Skip dims with hint overrides: the overridden hint in
-        # backed_var_to_val would mismatch the excluded value, causing the
-        # not-all check in produce_guards_verbose to emit a guard that
-        # immediately fails.
-        excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
-        if (
-            excluded_sizes
-            and len(excluded_sizes) == dim
-            and any(v is not None for v in excluded_sizes)
-        ):
-            for i in range(dim):
-                ev = excluded_sizes[i]
-                if (
-                    ev is not None
-                    and isinstance(size[i], sympy.Symbol)
-                    and i not in (hint_overrides or {})
-                ):
-                    self._record_exclusion_constraint(size[i], ev)
         stride = self._compute_symbolic_stride(
             source,
             size,
@@ -8514,8 +8516,10 @@ class ShapeEnv:
         if not free_unbacked_symbols(expr):
             return
 
-        # Frozen ShapeEnvs must not accumulate new guards/runtime asserts, but
-        # explicit runtime assert nodes in an already-exported graph still carry
+        # This is the one intentional exception to treating a frozen ShapeEnv as
+        # side-effect-free: frozen means no new guards/runtime asserts are
+        # recorded, not that existing fact-propagation state is never refined.
+        # Explicit runtime assert nodes in an already-exported graph still carry
         # facts needed to propagate later unbacked SymInt uses.
         self._maybe_guard_rel(expr)
         expr = canonicalize_bool_expr(expr)
@@ -8564,6 +8568,9 @@ class ShapeEnv:
         _frozen: bool,
     ) -> bool:
         expr = orig_expr
+        # These guard-state parameters are part of the lru_cache key. They are
+        # captured by the public wrapper and match the live state on cache
+        # misses; _check_frozen reads the live state for diagnostics.
 
         # TODO: split conjunctions and evaluate them separately
         # Try to quickly evaluate trivially true/false comparisons
