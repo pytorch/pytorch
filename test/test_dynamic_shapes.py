@@ -1898,6 +1898,28 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIs(sz1 == sz2, True)
         self.assertIs(sz1 != sz2, False)
 
+    def test_singleton_int_guards_evaluate_static(self):
+        from torch._dynamo.source import EphemeralSource
+
+        shape_env = ShapeEnv()
+        nested_symbol = shape_env.create_symbol(
+            torch._C._get_nested_int(1, 1),
+            source=EphemeralSource("nested_int"),
+        )
+
+        self.assertEqual(
+            shape_env._maybe_evaluate_static(sympy.Eq(nested_symbol, 12)),
+            sympy.false,
+        )
+        self.assertEqual(
+            shape_env._maybe_evaluate_static(sympy.Ne(nested_symbol, 12)),
+            sympy.true,
+        )
+        self.assertEqual(
+            shape_env._maybe_evaluate_static(sympy.Ge(nested_symbol, 2)),
+            sympy.true,
+        )
+
     def test_stride_symnode(self):
         shape_env = ShapeEnv()
 
