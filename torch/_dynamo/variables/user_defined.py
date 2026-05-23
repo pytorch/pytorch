@@ -3283,9 +3283,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 type_attr, "__wrapped__", self, source=source
             )
         elif isinstance(type_attr, types.FunctionType):
-            while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
-                source = AttrSource(source, "_torchdynamo_inline") if source else None
+            if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
+                if can_use_mro_source:
+                    source = self.get_source_by_walking_mro(tx, name)
+                return variables.WrapperUserMethodVariable(
+                    type_attr, "_torchdynamo_inline", self, source=source
+                )
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
             if can_use_mro_source:

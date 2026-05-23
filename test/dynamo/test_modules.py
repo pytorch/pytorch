@@ -2262,6 +2262,29 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_compile_module_with_compiled_no_grad_method(self):
+        class Mod(torch.nn.Module):
+            @torch.compile(backend="eager", fullgraph=True)
+            @torch.no_grad()
+            def foo(self, x):
+                return x.sin() + 1
+
+            def forward(self, x):
+                y = x
+                for _ in range(1):
+                    y = self.foo(x)
+                return y
+
+        mod = Mod()
+        x = torch.randn(4, requires_grad=True)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+
+        ref = mod(x)
+        res = opt_mod(x)
+
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
+
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
             def __init__(self) -> None:
