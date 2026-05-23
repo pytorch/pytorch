@@ -203,6 +203,15 @@ class MemoryFormatMeta:
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
 
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
+
         if use_memory_format:
             return MemoryFormatMeta(
                 # pyrefly: ignore [unbound-name]

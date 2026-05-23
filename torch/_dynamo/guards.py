@@ -763,17 +763,19 @@ _CLOSURE_VARS: dict[str, object] | None = None
 
 def storage_id(tensor: torch.Tensor) -> int | None:
     try:
-        return tensor.untyped_storage()._cdata
+        storage = tensor.untyped_storage()
     except (AttributeError, RuntimeError, TypeError):
         return None
+    return storage._cdata
 
 
 def check_same_storage_groups(groups: list[list[torch.Tensor]]) -> bool:
     """
-    Check exact storage group topology.
+    Return True when each group shares one storage and groups are distinct.
 
-    Each group is expected to contain tensors sharing a storage, and distinct
-    groups are expected to have distinct storages.
+    The guard expression is emitted with one list per same-storage input group.
+    Every tensor in a group must share storage with the others in that group,
+    and no two groups may share storage with each other.
     """
     storage_ids: list[int] = []
     for group in groups:
