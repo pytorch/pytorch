@@ -946,9 +946,9 @@ max_pool3d = boolean_dispatch(
 @_jit_unused
 def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
     torch._check_value(
-        output_size[dim] > 0,
+        output_size[dim] >= 0,
         lambda: (
-            "max_unpooling: output_size must contain positive spatial "
+            "max_unpooling: output_size must contain non-negative spatial "
             f"dimensions, but got output_size[{dim}]={output_size[dim]}"
         ),
     )
@@ -990,9 +990,9 @@ def _unpool_output_size(
         ret = output_size
     if torch.jit.is_scripting():
         for d in range(len(kernel_size)):
-            if ret[d] <= 0:
+            if ret[d] < 0:
                 raise ValueError(
-                    "max_unpooling: output_size must contain positive spatial "
+                    "max_unpooling: output_size must contain non-negative spatial "
                     f"dimensions, but got output_size[{d}]={ret[d]}"
                 )
     else:

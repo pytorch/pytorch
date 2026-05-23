@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+import contextlib
 import itertools
 import math
 import operator
@@ -27,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
+    onlyMPS,
     onlyNativeDeviceTypes,
     TEST_WITH_ROCM,
 )
@@ -482,12 +484,14 @@ class TestPoolingNN(NNTestCase):
         x = torch.randn(1, 1, 2, 2)
         idx = torch.zeros(1, 1, 2, 2, dtype=torch.long)
 
-        with self.assertRaisesRegex(ValueError, "positive spatial dimensions"):
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
             F.max_unpool2d(x, idx, [1, 1], stride=5, padding=[3, 4])
-        with self.assertRaisesRegex(ValueError, "positive spatial dimensions"):
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
             nn.MaxUnpool2d([1, 1], stride=5, padding=[3, 4])(x, idx)
-        with self.assertRaisesRegex(ValueError, "positive spatial dimensions"):
-            F.max_unpool2d(x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[0, 1])
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
+            F.max_unpool2d(
+                x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[-1, 1]
+            )
 
         self.assertEqual(
             F.max_unpool2d(
@@ -495,22 +499,28 @@ class TestPoolingNN(NNTestCase):
             ).shape,
             (1, 1, 1, 1),
         )
+        self.assertEqual(
+            F.max_unpool2d(
+                x, idx, [1, 1], stride=5, padding=[3, 4], output_size=[0, 1]
+            ).shape,
+            (1, 1, 0, 1),
+        )
 
         x1d = torch.randn(1, 1, 2)
         idx1d = torch.zeros(1, 1, 2, dtype=torch.long)
-        with self.assertRaisesRegex(ValueError, "positive spatial dimensions"):
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
             F.max_unpool1d(x1d, idx1d, 1, stride=5, padding=4)
 
         x3d = torch.randn(1, 1, 2, 2, 2)
         idx3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long)
-        with self.assertRaisesRegex(ValueError, "positive spatial dimensions"):
+        with self.assertRaisesRegex(ValueError, "non-negative spatial dimensions"):
             F.max_unpool3d(x3d, idx3d, 1, stride=5, padding=4)
 
         def call_func(kernel_size, stride, x, idx, padding):
             return torch.nn.MaxUnpool2d(kernel_size, stride, padding)(x, idx)
 
         compiled_call_func = torch.compile(call_func, backend="eager", dynamic=True)
-        with self.assertRaisesRegex(RuntimeError, "positive spatial dimensions"):
+        with self.assertRaisesRegex(RuntimeError, "non-negative spatial dimensions"):
             compiled_call_func([1, 1], 5, x, idx, [3, 4])
 
     def test_max_unpool3d_input_check(self):
@@ -1065,7 +1075,6 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
-    @expectedFailureMPS  # Runtime Error not raised for mps
     @expectedFailureMeta  # Runtime Error not raised for meta
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
@@ -1077,8 +1086,25 @@ torch.cuda.synchronize()
                 output_size = (2,) * numel
                 module = module_cls(output_size)
                 input = torch.randn((4,) * (numel + 1), device=device).to(dtype)
-                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                # MPS 2D supports int adaptive pool; 3D falls through.
+                if device.startswith("mps") and numel == 2:
+                    cm = contextlib.nullcontext()
+                else:
+                    cm = self.assertRaisesRegex(
+                        RuntimeError, r"not( currently)? implemented"
+                    )
+                with cm:
                     module(input)
+
+    # Max: verify against unfold+amax. (Avg int is implementation-defined.)
+    @onlyMPS
+    @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
+    def test_adaptive_max_pool2d_int_input_mps(self, device, dtype):
+        torch.manual_seed(0)
+        inp = torch.randint(0, 16, (3, 4, 4), dtype=dtype, device=device)
+        out = nn.AdaptiveMaxPool2d((2, 2))(inp)
+        expected = inp.unfold(-2, 2, 2).unfold(-2, 2, 2).amax(dim=(-2, -1))
+        self.assertEqual(out, expected)
 
     @expectedFailureMPS  # TODO: fixme
     @onlyNativeDeviceTypes
@@ -2129,7 +2155,6 @@ torch.cuda.synchronize()
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
-    @expectedFailureMPS  # TODO: Fix me
     @onlyNativeDeviceTypes  # TODO: RuntimeError message different on XLA
     def test_pooling_zero_stride(self, device):
         for op in ("max", "avg"):
