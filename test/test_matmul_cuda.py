@@ -897,8 +897,10 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
-            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+        if torch.version.hip:
+            # Accuracy regression in hipblas/hipblaslt for certain shapes;
+            # still observed past ROCm 7.2.1 on MI200 (gfx90a).
+            msg = "accuracy regression in hipblas and hipblaslt for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
             if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
@@ -964,8 +966,10 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
-            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+        if torch.version.hip:
+            # Accuracy regression in hipblas/hipblaslt for certain shapes;
+            # still observed past ROCm 7.2.1 on MI200 (gfx90a).
+            msg = "accuracy regression in hipblas and hipblaslt for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
             if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
