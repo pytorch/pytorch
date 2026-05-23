@@ -73,6 +73,40 @@ class LoggingTest(TestCase):
             log_internal.LOG_TRACE_HANDLER = old_handler
             _init_logs()
 
+    def test_trace_handler_close_stream_can_skip_flush(self):
+        paths: list[Path] = []
+
+        def make_handler() -> tuple[log_internal.LazyTraceHandler, Path]:
+            fd, path = tempfile.mkstemp()
+            os.close(fd)
+            paths.append(Path(path))
+
+            handler = log_internal.LazyTraceHandler(None)
+            handler.stream = open(path, "w+")  # noqa: SIM115
+            handler._pid = os.getpid()
+            handler._pending_log_version = True
+            return handler, Path(path)
+
+        try:
+            handler, path = make_handler()
+            handler.stream.write("discarded parent buffer")
+            handler._close_stream(flush=False)
+
+            self.assertEqual(path.read_text(), "")
+            self.assertIsNone(handler.stream)
+            self.assertIsNone(handler._pid)
+            self.assertFalse(handler._pending_log_version)
+
+            handler, path = make_handler()
+            handler.stream.write("flushed parent buffer")
+            handler._close_stream()
+
+            self.assertEqual(path.read_text(), "flushed parent buffer")
+            self.assertIsNone(handler.stream)
+        finally:
+            for path in paths:
+                path.unlink(missing_ok=True)
+
     @unittest.skipIf(not hasattr(os, "fork"), "requires os.fork")
     def test_trace_handler_reopens_after_fork(self):
         old_env = os.environ.get("TORCH_TRACE")
