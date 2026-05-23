@@ -1056,6 +1056,10 @@ combo_kernel_max_num_nodes = 8
 combo_kernel_per_subkernel_blocks = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# When True, scheduler nodes whose reads or writes use indirect indexing
+# (an address computed from a previously loaded value, e.g. gather/scatter)
+# are kept out of combo kernels.
+combo_kernels_exclude_indirect_indexing = True
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase
