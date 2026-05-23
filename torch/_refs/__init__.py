@@ -3259,6 +3259,8 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
         raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
+    if a.ndim == 0:
+        return torch.clone(a)
     return prims.rev(a, dims)
 
 
@@ -3817,9 +3819,8 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    length = max(0, end - start)
-    y = y.narrow(dim=1, start=start, length=length)
-    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+    y = aten.slice.Tensor(y, 1, start, end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:

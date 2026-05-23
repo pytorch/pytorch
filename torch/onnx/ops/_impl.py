@@ -60,7 +60,17 @@ def _rotary_embedding_23_fake_impl(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
-    return x.clone()
+    if x.dim() == 4:
+        # Real impl permutes (0,2,1,3), computes via cat (allocates fresh
+        # contiguous), then permutes back, yielding strides equivalent to
+        # empty_permuted with (0,2,1,3) regardless of input strides.
+        return torch.empty_permuted(
+            x.shape, (0, 2, 1, 3), dtype=x.dtype, device=x.device
+        )
+    # 3D path: real impl ends in torch.reshape(contiguous_output, input_shape),
+    # which always yields contiguous strides. Force contiguous here so the
+    # fake stays aligned even when the caller passes a non-contiguous input.
+    return torch.empty(x.shape, dtype=x.dtype, device=x.device)
 
 
 @_onnx_op("RotaryEmbedding", 23, _rotary_embedding_23_fake_impl)
