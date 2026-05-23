@@ -33,7 +33,6 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
-    DataDependentOutputException,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -1558,6 +1557,14 @@ for t in threads:
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
+    def test_select_out_of_bounds(self):
+        with FakeTensorMode():
+            x = torch.randn(3, 4)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=10)
+            with self.assertRaisesRegex(IndexError, "index .* out of range"):
+                torch.select(x, dim=1, index=-10)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
@@ -2122,7 +2129,7 @@ class FakeTensorOperatorInvariants(TestCase):
                         log_probs_float, targets_cpu, [1, 2], [2, 0], 0
                     )
                 )
-                with self.assertRaises(DataDependentOutputException):
+                self.assertFalse(
                     torch.ops.aten._use_cudnn_ctc_loss.Tensor(
                         log_probs_float,
                         targets_cuda,
@@ -2130,6 +2137,7 @@ class FakeTensorOperatorInvariants(TestCase):
                         target_lengths,
                         0,
                     )
+                )
 
     def test_ctc_loss_tensor_fake_validates_static_inputs(self):
         with FakeTensorMode() as fake_mode:

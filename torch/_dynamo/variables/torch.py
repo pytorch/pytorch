@@ -31,8 +31,7 @@ import inspect
 import logging
 import math
 import re
-import warnings
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -75,6 +74,7 @@ from ..source import (
     SyntheticLocalSource,
 )
 from ..utils import (
+    _is_tensorify_enabled,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -217,6 +217,66 @@ if torch.distributed.is_available():
 # Convert to dict for O(1) access times
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
+
+# Ops that consume scalar values from 0-d tensors (via .item()) for computation
+# only, not for output shapes. When capture_scalar_outputs is enabled, these ops
+# create unbacked symbols that don't affect the outputs, causing
+# PendingUnbackedSymbolNotFound errors.
+#
+# We use an explicit allowlist rather than generically suppressing for any 0-d
+# tensor argument because an op could legitimately create unbacked symbols for
+# data-dependent output shapes. Suppressing those would silently drop binding
+# information.
+ops_consuming_unbacked_scalars: frozenset[Callable[..., Any]] = frozenset(
+    {
+        # ops with Scalar alpha/beta/value arguments
+        torch.add,
+        torch.sub,
+        torch.addmm,
+        torch.addmv,
+        torch.addr,
+        torch.addbmm,
+        torch.baddbmm,
+        torch.addcmul,
+        torch.addcdiv,
+        # foreach ops with scalar/alpha arguments
+        torch._foreach_add,
+        torch._foreach_add_,
+        torch._foreach_sub,
+        torch._foreach_sub_,
+        torch._foreach_mul,
+        torch._foreach_mul_,
+        torch._foreach_div,
+        torch._foreach_div_,
+        torch._foreach_clamp_max,
+        torch._foreach_clamp_max_,
+        torch._foreach_clamp_min,
+        torch._foreach_clamp_min_,
+        torch._foreach_maximum,
+        torch._foreach_maximum_,
+        torch._foreach_minimum,
+        torch._foreach_minimum_,
+        torch._foreach_pow,
+        torch._foreach_pow_,
+        torch._foreach_lerp,
+        torch._foreach_lerp_,
+        torch._foreach_addcmul,
+        torch._foreach_addcmul_,
+        torch._foreach_addcdiv,
+        torch._foreach_addcdiv_,
+    }
+)
+
+# Derived set of method names for TensorVariable.call_method. Includes inplace
+# variants (e.g., "add_") since those are only callable as tensor methods.
+# This is a set of strings (not function objects) because the call_method path
+# only has the method name, whereas call_function has the actual function object.
+methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
+    name
+    for fn in ops_consuming_unbacked_scalars
+    for name in (fn.__name__, fn.__name__ + "_")
+    if hasattr(torch.Tensor, name)
+)
 
 
 @functools.cache
@@ -597,7 +657,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -954,7 +1014,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
+                VariableTracker.build(tx, polyfills.accumulate_grad),
+                list(args),
+                kwargs,
             )
 
         @register(math.radians)
@@ -967,7 +1029,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.radians), args, kwargs
+                    VariableTracker.build(tx, polyfills.radians),
+                    list(args),
+                    kwargs,
                 )
 
         if hasattr(math, "fma"):  # Python 3.13+
@@ -1536,7 +1600,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor():
+            if fill_value.is_tensor() and not issubclass(
+                fill_value.python_type(), torch.nn.Parameter
+            ):
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
@@ -1559,7 +1625,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
-                    args,
+                    list(args),
                     kwargs,
                 )
             return None
@@ -1579,7 +1645,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_pow_scalar),
-                    args,
+                    list(args),
                     kwargs,
                 )
             return None
@@ -1593,7 +1659,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
-                args,
+                list(args),
                 kwargs,
             )
 
@@ -1762,116 +1828,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ],
                 )
             return None
-
-        @register(torch.ctc_loss, torch.nn.functional.ctc_loss)
-        def handle_ctc_loss(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker | None:
-            required_arg_names = (
-                "log_probs",
-                "targets",
-                "input_lengths",
-                "target_lengths",
-            )
-            arg_names = (
-                *required_arg_names,
-                "blank",
-                "reduction",
-                "zero_infinity",
-            )
-            defaults = {
-                "blank": ConstantVariable.create(0),
-                "reduction": ConstantVariable.create(
-                    1 if self.value is torch.ctc_loss else "mean"
-                ),
-                "zero_infinity": ConstantVariable.create(False),
-            }
-            if len(args) > len(arg_names):
-                return None
-
-            bound_args = dict(zip(arg_names, args))
-            for name, value in kwargs.items():
-                if name not in arg_names or name in bound_args:
-                    return None
-                bound_args[name] = value
-
-            if any(name not in bound_args for name in required_arg_names):
-                return None
-
-            for name, default in defaults.items():
-                bound_args.setdefault(name, default)
-
-            log_probs_arg = bound_args["log_probs"]
-            targets_arg = bound_args["targets"]
-            input_lengths_arg = bound_args["input_lengths"]
-            target_lengths_arg = bound_args["target_lengths"]
-
-            if (
-                not log_probs_arg.is_tensor()
-                or not targets_arg.is_tensor()
-                or not input_lengths_arg.is_tensor()
-                or not target_lengths_arg.is_tensor()
-            ):
-                return None
-
-            log_probs = log_probs_arg.as_proxy().node.meta.get("example_value")
-            if not isinstance(log_probs, torch.Tensor) or log_probs.dim() not in (2, 3):
-                return None
-
-            reduction = bound_args["reduction"]
-            if not reduction.is_python_constant():
-                return None
-            reduction_value = reduction.as_python_constant()
-            if self.value is torch.ctc_loss:
-                if isinstance(reduction_value, bool) or not isinstance(
-                    reduction_value, int
-                ):
-                    return None
-                reduction_enum = reduction_value
-            else:
-                if reduction_value == "none":
-                    reduction_enum = 0
-                elif reduction_value == "mean":
-                    reduction_enum = 1
-                elif reduction_value == "elementwise_mean":
-                    warnings.warn(
-                        "reduction='elementwise_mean' is deprecated. "
-                        "Please use reduction='mean' instead.",
-                        stacklevel=2,
-                    )
-                    reduction_enum = 1
-                elif reduction_value == "sum":
-                    reduction_enum = 2
-                else:
-                    return None
-
-            if reduction_enum not in (1, 2) and log_probs.dim() == 3:
-                example_value = log_probs.new_empty((log_probs.size(1),))
-            else:
-                example_value = log_probs.new_empty(())
-
-            aten_args = (
-                log_probs_arg,
-                targets_arg,
-                input_lengths_arg,
-                target_lengths_arg,
-                bound_args["blank"],
-                ConstantVariable.create(reduction_enum),
-                bound_args["zero_infinity"],
-            )
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.ops.aten.ctc_loss.Tensor,
-                    *proxy_args_kwargs(aten_args, {}),
-                ),
-                example_value=example_value,
-            )
 
         @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
         def handle_guarding_hint_or_throw(
@@ -2596,7 +2552,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         def exchange_device_helper(
             tx: "InstructionTranslator",
-            args: Sequence[VariableTracker],
+            args: list[VariableTracker],
             kwargs: dict[str, VariableTracker],
             fn: Callable[[int], int | None],
         ) -> VariableTracker:
@@ -2627,7 +2583,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            return exchange_device_helper(tx, args, kwargs, torch.cuda._exchange_device)
+            return exchange_device_helper(
+                tx, list(args), kwargs, torch.cuda._exchange_device
+            )
 
         @register(torch.cuda._maybe_exchange_device)
         def handle_maybe_exchange_device(
@@ -2637,7 +2595,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             return exchange_device_helper(
-                tx, args, kwargs, torch.cuda._maybe_exchange_device
+                tx, list(args), kwargs, torch.cuda._maybe_exchange_device
             )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
@@ -3025,7 +2983,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import SymNodeVariable
@@ -3103,11 +3061,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         all_ints_or_floats = all(
             isinstance(x, SymNodeVariable) or x.is_python_constant() for x in args
         )
+        # Intentional abstraction violation: when tensorify is enabled,
+        # skip this graph break. Scalar-only bin_ops on SymInt/SymFloat
+        # args are valid symbolic arithmetic that Dynamo can trace.
+        # The tensorify pass (in AOTAutograd) will convert SymFloat
+        # scalar ops to tensor ops downstream; SymInt ops flow through
+        # as symbolic expressions.
         if (
             getattr(self.value, "__module__", "") == "torch"
             and self.value.__name__ in bin_ops
             and any_symints_or_symfloats
             and all_ints_or_floats
+            and not _is_tensorify_enabled()
         ):
             msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
@@ -3170,38 +3135,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        # Ops that consume scalar values from tensors (via .item()) for computation only,
-        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
-        # create unbacked symbols that are not in the outputs, causing
-        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
-        # since they only affect tensor values, not shapes.
-        ops_consuming_unbacked_scalars = {
-            # foreach ops with scalar/alpha arguments
-            torch._foreach_add,
-            torch._foreach_add_,
-            torch._foreach_sub,
-            torch._foreach_sub_,
-            torch._foreach_mul,
-            torch._foreach_mul_,
-            torch._foreach_div,
-            torch._foreach_div_,
-            torch._foreach_clamp_max,
-            torch._foreach_clamp_max_,
-            torch._foreach_clamp_min,
-            torch._foreach_clamp_min_,
-            torch._foreach_maximum,
-            torch._foreach_maximum_,
-            torch._foreach_minimum,
-            torch._foreach_minimum_,
-            torch._foreach_pow,
-            torch._foreach_pow_,
-            torch._foreach_lerp,
-            torch._foreach_lerp_,
-            torch._foreach_addcmul,
-            torch._foreach_addcmul_,
-            torch._foreach_addcdiv,
-            torch._foreach_addcdiv_,
-        }
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
@@ -3329,7 +3262,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_nonstrict_traceable_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
         from torch._dynamo.utils import _make_inlined
@@ -3544,7 +3477,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _extract_nn_module_states(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> tuple[VariableTracker, VariableTracker]:
         """
@@ -3610,7 +3543,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_leaf_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
@@ -3708,7 +3641,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def _call_ntuple(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """inline behavior of torch.nn.modules.utils._ntuple"""

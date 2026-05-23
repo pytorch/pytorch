@@ -410,14 +410,10 @@ def _use_ctc_loss_backend_tensor(
     target_lengths: FakeTensorLike,
     blank: int,
 ) -> bool:
-    backend = "cudnn" if func is aten._use_cudnn_ctc_loss.Tensor else "miopen"
-    if not _use_ctc_loss_backend_static_checks(
-        log_probs, targets, blank, backend, require_cpu_targets=False
-    ):
-        return False
-    if input_lengths.dtype != torch.int32 or target_lengths.dtype != torch.int32:
-        return False
-    raise DataDependentOutputException(func)
+    # Tensor length values are unavailable under FakeTensor. Use the
+    # shape-equivalent generic CTC path for metadata; runtime public CTC
+    # dispatch still performs backend selection with real length values.
+    return False
 
 
 def _use_ctc_loss_backend_static_checks(
@@ -449,27 +445,13 @@ def _use_ctc_loss_backend_static_checks(
     )
 
 
-@register_op_impl(aten._ctc_loss.Tensor)
-def ctc_loss_tensor(
-    fake_mode: FakeTensorMode,
-    func: OpOverload,
+def _check_ctc_loss_tensor_args(
     log_probs: FakeTensorLike,
     targets: FakeTensorLike,
     input_lengths: FakeTensorLike,
     target_lengths: FakeTensorLike,
-    blank: int = 0,
-    zero_infinity: bool = False,
-) -> tuple[FakeTensorLike, FakeTensorLike]:
-    torch._check(
-        is_integer_dtype(input_lengths.dtype)
-        and not is_boolean_dtype(input_lengths.dtype),
-        lambda: "input_lengths must be integral",
-    )
-    torch._check(
-        is_integer_dtype(target_lengths.dtype)
-        and not is_boolean_dtype(target_lengths.dtype),
-        lambda: "target_lengths must be integral",
-    )
+    blank: int,
+) -> tuple[int, int]:
     torch._check(
         log_probs.dim() == 3,
         lambda: f"log_probs must be 3-D, got {log_probs.dim()}-D",
@@ -481,6 +463,16 @@ def ctc_loss_tensor(
     torch._check(
         targets.dtype in (torch.int32, torch.int64),
         lambda: f"targets must be int32 or int64, got {targets.dtype}",
+    )
+    torch._check(
+        is_integer_dtype(input_lengths.dtype)
+        and not is_boolean_dtype(input_lengths.dtype),
+        lambda: "input_lengths must be integral",
+    )
+    torch._check(
+        is_integer_dtype(target_lengths.dtype)
+        and not is_boolean_dtype(target_lengths.dtype),
+        lambda: "target_lengths must be integral",
     )
     torch._check(
         targets.dim() in (1, 2),
@@ -503,8 +495,27 @@ def ctc_loss_tensor(
             targets.size(0) == batch_size,
             lambda: "targets must have batch_size rows",
         )
+    return batch_size, log_probs.size(0)
 
-    max_input_length = log_probs.size(0)
+
+@register_op_impl(aten._ctc_loss.Tensor)
+def ctc_loss_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensorLike,
+    targets: FakeTensorLike,
+    input_lengths: FakeTensorLike,
+    target_lengths: FakeTensorLike,
+    blank: int = 0,
+    zero_infinity: bool = False,
+) -> tuple[FakeTensorLike, FakeTensorLike]:
+    batch_size, max_input_length = _check_ctc_loss_tensor_args(
+        log_probs,
+        targets,
+        input_lengths,
+        target_lengths,
+        blank,
+    )
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -512,6 +523,9 @@ def ctc_loss_tensor(
         raise DynamicOutputShapeException(func)
 
     log_alpha_width = fake_mode.shape_env.create_unbacked_symint()
+    fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(
+        log_alpha_width.node.expr
+    )
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
@@ -649,6 +663,13 @@ def meta_select(
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
@@ -1686,8 +1707,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(

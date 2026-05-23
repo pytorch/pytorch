@@ -134,15 +134,10 @@ def _ctc_loss_backend_tensor(
     blank: int,
     backend: str,
 ) -> bool:
-    if not _ctc_loss_backend_static_checks(
-        log_probs, targets, blank, backend, require_cpu_targets=False
-    ):
-        return False
-    if input_lengths.dtype != torch.int32 or target_lengths.dtype != torch.int32:
-        return False
-    raise RuntimeError(
-        f"aten._use_{backend}_ctc_loss.Tensor depends on tensor length values"
-    )
+    # Tensor length values are unavailable on Meta tensors. Use the
+    # shape-equivalent generic CTC path for metadata; runtime public CTC
+    # dispatch still performs backend selection with real length values.
+    return False
 
 
 @register_meta(aten._use_cudnn_ctc_loss.default)
