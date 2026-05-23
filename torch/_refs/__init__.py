@@ -4376,6 +4376,10 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: "index_select(): Expected dtype int32 or int64 for index",
+    )
     if index.ndim == 0:
         index = index.unsqueeze(0)
     if x.ndim == 0:
@@ -4383,8 +4387,23 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
-    idx = (slice(None),) * dim + (index,)
-    return x[idx].contiguous(memory_format=utils.suggest_memory_format(x))
+    index_size = index.numel()
+    index_shape = [1] * x.ndim
+    index_shape[dim] = index_size
+    output_shape = list(x.shape)
+    output_shape[dim] = index_size
+
+    if x.numel() == 0:
+        # Validate index bounds even when the final gather has no elements to read.
+        torch.ops.aten._assert_async.msg(
+            ((index >= 0) & (index < x.shape[dim])).all(),
+            "index out of bounds",
+        )
+
+    index = index.reshape(index_shape).expand(output_shape)
+    return torch.gather(x, dim, index).contiguous(
+        memory_format=utils.suggest_memory_format(x)
+    )
 
 
 @register_decomposition(aten.squeeze.dims)

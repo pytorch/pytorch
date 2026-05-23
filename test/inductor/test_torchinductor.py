@@ -32,6 +32,7 @@ import numpy as np
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
+import torch._refs as refs
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 from torch._C._dynamo.guards import assert_alignment, assert_size_stride
@@ -8478,6 +8479,103 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     torch.randn(8, 8, 8),
                     torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
                 ),
+            )
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_index_select_negative_index(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU bounds check regression")
+
+        def assert_compiled_index_error(call):
+            try:
+                call()
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                self.fail(f"Unexpected BackendCompilerFailed: {e}")
+            except RuntimeError as e:
+                self.assertRegex(str(e), "index out of bounds")
+            else:
+                self.fail("Expected compiled index_select to raise")
+
+        def fn(a, b):
+            return torch.index_select(a, 0, b)
+
+        def fn_dim1(a, b):
+            return torch.index_select(a, 1, b)
+
+        def fn_with_constant_index(a):
+            index = torch.tensor([-1], dtype=torch.int64, device=a.device)
+            return torch.index_select(a, 0, index)
+
+        a = torch.arange(15, device=self.device).reshape(5, 3)
+        valid_index = torch.tensor([0, 2, 4], device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(a, valid_index), fn(a, valid_index))
+
+        negative_index = torch.tensor([0, -1, 4], device=self.device)
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            fn(a, negative_index)
+        assert_compiled_index_error(lambda: compiled_fn(a, negative_index))
+
+        compiled_fn_with_constant_index = torch.compile(
+            fn_with_constant_index, backend="inductor", dynamic=True
+        )
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            fn_with_constant_index(a)
+        assert_compiled_index_error(lambda: compiled_fn_with_constant_index(a))
+
+        empty_a = torch.randn(0, 3, device=self.device)
+        valid_empty_index = torch.tensor([0], device=self.device)
+        compiled_fn_dim1 = torch.compile(fn_dim1, backend="inductor", fullgraph=True)
+        self.assertEqual(
+            compiled_fn_dim1(empty_a, valid_empty_index),
+            fn_dim1(empty_a, valid_empty_index),
+        )
+
+        empty_a_requires_grad = torch.randn(
+            0, 3, device=self.device, requires_grad=True
+        )
+        refs_result = refs.index_select(empty_a_requires_grad, 1, valid_empty_index)
+        self.assertTrue(refs_result.requires_grad)
+        refs_result.sum().backward()
+        self.assertEqual(
+            empty_a_requires_grad.grad, torch.empty_like(empty_a_requires_grad)
+        )
+
+        empty_3d = torch.randn(0, 3, 4, device=self.device)
+        empty_3d_expected = fn_dim1(empty_3d, valid_empty_index)
+        empty_3d_compiled = compiled_fn_dim1(empty_3d, valid_empty_index)
+        self.assertEqual(empty_3d_compiled, empty_3d_expected)
+        self.assertEqual(empty_3d_compiled.stride(), empty_3d_expected.stride())
+        self.assertEqual(
+            refs.index_select(empty_3d, 1, valid_empty_index).stride(),
+            empty_3d_expected.stride(),
+        )
+
+        with torch.autograd.forward_ad.dual_level():
+            primal = torch.randn(0, 3, device=self.device)
+            tangent = torch.randn(0, 3, device=self.device)
+            dual = torch.autograd.forward_ad.make_dual(primal, tangent)
+            _, tangent_out = torch.autograd.forward_ad.unpack_dual(
+                refs.index_select(dual, 1, valid_empty_index)
+            )
+            self.assertIsNotNone(tangent_out)
+            self.assertEqual(
+                tangent_out, refs.index_select(tangent, 1, valid_empty_index)
+            )
+
+        for invalid_empty_index in (
+            torch.tensor([-1], device=self.device),
+            torch.tensor([3], device=self.device),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "out of DATA bounds"):
+                fn_dim1(empty_a, invalid_empty_index)
+            assert_compiled_index_error(
+                lambda invalid_empty_index=invalid_empty_index: compiled_fn_dim1(
+                    empty_a, invalid_empty_index
+                )
             )
 
     @xfail_if_mps_unimplemented
