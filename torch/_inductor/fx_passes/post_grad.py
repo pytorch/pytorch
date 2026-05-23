@@ -1098,6 +1098,7 @@ def _match_ce_backward_one_hot_value(
         cond, coeff, zero = one_hot.args
         if (
             isinstance(cond, torch.fx.Node)
+            and isinstance(coeff, torch.fx.Node)
             and _is_scalar_constant_node(coeff)
             and _is_zero_arg(zero)
             and _broadcasts_over_reduction_dim(value, input_ndim, reduce_dim)
