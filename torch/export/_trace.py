@@ -224,6 +224,17 @@ def _is_bogus_const_name(name: str):
     return splitted_names[-1].startswith("lifted_tensor")
 
 
+def _untraceable_lifted_tensor_constant_msg(const_name: str) -> str:
+    return (
+        f"torch.export found an untraceable tensor constant in the exported "
+        f"program. Potential source model attribute: {const_name}. This can "
+        f"happen when forward reads or mutates module state through `.data`, "
+        f"which bypasses export's parameter/buffer mutation tracking. Use the "
+        f"parameter or buffer tensor directly for supported no_grad mutations, "
+        f"or move the state update outside the exported forward."
+    )
+
+
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     """
     In-place modify input graph module by replacing the export tracepoint with a new node
@@ -2315,13 +2326,7 @@ def _export_for_training(
             if isinstance(
                 val, torch._subclasses.fake_tensor.FakeTensor
             ) and _is_bogus_const_name(const):
-                error_msg = (
-                    f"We found a fake tensor in the exported program constant's list. "
-                    f"This typically means our tracing system encountered an op that "
-                    f"we can't trace through. For the potential source, you can refer to "
-                    f"following model attribute: {const}. "
-                    f"Please file an issue on github. "
-                )
+                error_msg = _untraceable_lifted_tensor_constant_msg(const)
                 if torch._export.config.error_on_lifted_constant_tensors:
                     raise RuntimeError(error_msg)
                 else:
