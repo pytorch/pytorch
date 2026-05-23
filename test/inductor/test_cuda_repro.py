@@ -634,6 +634,9 @@ class CudaReproTests(TestCase):
 
         # fwd, backward
         for code in codes:
+            code = "\n".join(
+                line for line in code.splitlines() if "tl.static_assert" not in line
+            )
             f = FileCheck()
             # in eager, there are two down casts
             for _ in range(2):
