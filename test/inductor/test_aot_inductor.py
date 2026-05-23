@@ -8914,8 +8914,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
-    "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend
     "test__int_mm": fail_mps(),
     # MPS doesn't support float64
