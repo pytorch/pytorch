@@ -28,8 +28,6 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
@@ -97,7 +95,9 @@ class ConstantVariable(VariableTracker):
             return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
-            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            slice_args_vars: list[VariableTracker] = [
+                ConstantVariable.create(arg) for arg in slice_args
+            ]
             return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
@@ -362,7 +362,7 @@ class ConstantVariable(VariableTracker):
         tx: InstructionTranslator,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.value is None:
@@ -469,6 +469,44 @@ class ConstantVariable(VariableTracker):
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
+
+    def nb_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_lshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5489 (long_lshift)
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v << w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_rshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5526 (long_rshift)
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v >> w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_or_impl(
         self,
