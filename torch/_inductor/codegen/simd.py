@@ -3918,6 +3918,26 @@ class SIMDScheduling(BaseScheduling):
         }
 
     @staticmethod
+    def _has_cat_origin(node_schedule: list[NodeScheduleEntry]) -> bool:
+        for schedule_entry in NodeScheduleMarker.only_nodes(node_schedule):
+            for node in schedule_entry.get_nodes():
+                if not isinstance(node, scheduler.SchedulerNode):
+                    continue
+
+                for origin in node.node.get_origins():
+                    if getattr(origin, "op", None) != "call_function":
+                        continue
+
+                    if getattr(origin, "target", None) == torch.ops.aten.cat.default:
+                        return True
+
+                    original_aten = getattr(origin, "meta", {}).get("original_aten")
+                    if original_aten == torch.ops.aten.cat.default:
+                        return True
+
+        return False
+
+    @staticmethod
     def _read_score(
         read_expr: sympy.Expr,
         var_ranges: dict[sympy.Symbol, sympy.Expr],
@@ -4112,18 +4132,29 @@ class SIMDScheduling(BaseScheduling):
         if norm_read_writes.reduce_vars:
             return {}
 
+        # Pointwise cat lowers to predicated, mutually exclusive regions. The
+        # dataflow score below does not model branch exclusivity, so cat-origin
+        # regions must not introduce a broadcast-only tiling score.
+        if cls._has_cat_origin(node_schedule):
+            return {}
+
         iter_vars = list(norm_read_writes.index_vars)
         if len(iter_vars) <= 1:
             return {}
 
         sizevars = V.graph.sizevars
+        min_pointwise_hint = 16384
         pointwise_hint = sizevars.optimization_hint(pointwise_numel, fallback=0)
-        if pointwise_hint < 16384:
+        if pointwise_hint < min_pointwise_hint:
             return {}
 
+        # Low-precision broadcast sources need more total work before the
+        # special-function savings reliably amortize the extra 2D tiling shape.
+        min_low_precision_pointwise_hint = 4_000_000
         broadcast_reads_by_key: dict[tuple[str, sympy.Expr], sympy.Expr] = {}
         trailing_vars_by_split: dict[sympy.Expr, OrderedSet[sympy.Symbol]] = {}
         reuse_factor_by_split: dict[sympy.Expr, int] = {}
+        max_read_itemsize_by_split: dict[sympy.Expr, int] = {}
         ranges = norm_read_writes.var_ranges
 
         for read_expr, buf_names in norm_read_writes.reads.items():
@@ -4159,6 +4190,16 @@ class SIMDScheduling(BaseScheduling):
             split_var = iter_vars[split_idx]
             trailing_vars_by_split[split_var] = OrderedSet(iter_vars[split_idx + 1 :])
             reuse_factor_by_split[split_var] = reuse_factor
+            read_itemsizes = [
+                buf.dtype.itemsize
+                for buf_name in buf_names
+                if (buf := V.graph.try_get_buffer(buf_name)) is not None
+            ]
+            if read_itemsizes:
+                max_read_itemsize_by_split[split_var] = max(
+                    max_read_itemsize_by_split.get(split_var, 0),
+                    *read_itemsizes,
+                )
             for buf_name in buf_names:
                 broadcast_reads_by_key[(buf_name, read_expr)] = split_var
 
@@ -4180,6 +4221,11 @@ class SIMDScheduling(BaseScheduling):
                 continue
             reuse_factor = reuse_factor_by_split[var]
             saved_elems = pointwise_hint * (reuse_factor - 1) // reuse_factor
+            if (
+                max_read_itemsize_by_split.get(var, 0) <= 2
+                and pointwise_hint < min_low_precision_pointwise_hint
+            ):
+                continue
             scores[var] = op_score * saved_elems
 
         return scores

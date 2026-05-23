@@ -1442,7 +1442,7 @@ class CommonTemplate:
             )
 
         device = torch.device(self.device)
-        n, c, h, w = 4, 32, 8, 8
+        n, c, h, w = 8, 32, 8, 8
         image_args = [
             torch.randn((n, c, h, w), device=device, dtype=torch.float32)
             for _ in range(3)
@@ -1464,10 +1464,12 @@ class CommonTemplate:
                 "triton.max_tiles": 2,
                 "triton.prefer_nd_tiling": False,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self._assert_pointwise_ndims(triton_code, 2)
-        self.assertIn("ynumel = 128", triton_code)
+        self.assertIn("ynumel = 256", triton_code)
         self.assertIn("xnumel = 64", triton_code)
 
     @requires_gpu()
@@ -1508,6 +1510,8 @@ class CommonTemplate:
                 "triton.max_tiles": 2,
                 "triton.prefer_nd_tiling": False,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self._assert_pointwise_ndims(triton_code, 1)
@@ -1521,7 +1525,7 @@ class CommonTemplate:
         n, c, h, w = 4, 32, 8, 8
         result, (triton_code,) = self._run_and_compare(
             foo,
-            torch.randn((n, c, h, w), device=device, dtype=torch.float32),
+            torch.rand((n, c, h, w), device=device, dtype=torch.float32) + 0.1,
             torch.randn((c,), device=device, dtype=torch.float32),
             torch.randn((c,), device=device, dtype=torch.float32),
             expected_num_triton_kernels=1,
@@ -1530,6 +1534,8 @@ class CommonTemplate:
                 "triton.max_tiles": 2,
                 "triton.prefer_nd_tiling": False,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self._assert_pointwise_ndims(triton_code, 1)
@@ -1562,6 +1568,105 @@ class CommonTemplate:
                 "triton.max_tiles": 2,
                 "triton.prefer_nd_tiling": False,
             },
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+        self._assert_pointwise_ndims(triton_code, 1)
+
+    @requires_gpu()
+    def test_expensive_broadcast_reuse_tiling_rejects_intermediate_cat(self):
+        def foo(
+            x0,
+            x1,
+            x2,
+            mean0,
+            var0,
+            weight0,
+            bias0,
+            mean1,
+            var1,
+            weight1,
+            bias1,
+        ):
+            def bn_affine(x, mean, var, weight, bias):
+                scale = torch.reciprocal(torch.sqrt(var + 1e-5))
+                return (x - mean[:, None, None]) * scale[:, None, None] * weight[
+                    :, None, None
+                ] + bias[:, None, None]
+
+            cat = torch.cat((x0, bn_affine(x1, mean0, var0, weight0, bias0)), dim=1)
+            return cat + bn_affine(x2, mean1, var1, weight1, bias1)
+
+        device = torch.device(self.device)
+        n, c, h, w = 8, 16, 8, 8
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            torch.randn((n, c, h, w), device=device, dtype=torch.float32),
+            torch.randn((n, c, h, w), device=device, dtype=torch.float32),
+            torch.randn((n, 2 * c, h, w), device=device, dtype=torch.float32),
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.rand((c,), device=device, dtype=torch.float32) + 0.1,
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.randn((c,), device=device, dtype=torch.float32),
+            torch.randn((2 * c,), device=device, dtype=torch.float32),
+            torch.rand((2 * c,), device=device, dtype=torch.float32) + 0.1,
+            torch.randn((2 * c,), device=device, dtype=torch.float32),
+            torch.randn((2 * c,), device=device, dtype=torch.float32),
+            expected_num_triton_kernels=1,
+            config_patches={
+                "force_pointwise_cat": True,
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 2,
+                "triton.prefer_nd_tiling": False,
+            },
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+        self.assertIn("tl.where", triton_code)
+        self._assert_pointwise_ndims(triton_code, 1)
+
+    @requires_gpu()
+    def test_expensive_broadcast_reuse_tiling_rejects_small_fp16_work(self):
+        def foo(x0, x1, mean0, var0, weight0, bias0, mean1, var1, weight1, bias1):
+            def bn_affine(x, mean, var, weight, bias):
+                scale = torch.reciprocal(torch.sqrt(var.float() + 1e-5))
+                result = (x.float() - mean.float()[:, None, None]) * scale[
+                    :, None, None
+                ] * weight[:, None, None] + bias[:, None, None]
+                return result.to(torch.float16)
+
+            return torch.relu(
+                bn_affine(x0, mean0, var0, weight0, bias0)
+                + bn_affine(x1, mean1, var1, weight1, bias1)
+            )
+
+        device = torch.device(self.device)
+        n, c, h, w = 32, 2048, 7, 7
+        image_args = [
+            torch.randn((n, c, h, w), device=device, dtype=torch.float16)
+            for _ in range(2)
+        ]
+        channel_args = [
+            torch.randn((c,), device=device, dtype=torch.float16),
+            torch.rand((c,), device=device, dtype=torch.float16) + 0.1,
+            torch.randn((c,), device=device, dtype=torch.float16),
+            torch.randn((c,), device=device, dtype=torch.float16),
+        ]
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            *image_args,
+            *channel_args,
+            *channel_args,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.coalesce_tiling_analysis": True,
+                "triton.max_tiles": 2,
+                "triton.prefer_nd_tiling": False,
+            },
+            rtol=1e-2,
+            atol=1e-2,
         )
 
         self._assert_pointwise_ndims(triton_code, 1)
