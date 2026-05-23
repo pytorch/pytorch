@@ -3881,6 +3881,90 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+_EXCEPTION_MATCH_OPNAMES = {
+    "CHECK_EXC_MATCH",
+    "CHECK_EG_MATCH",
+    "JUMP_IF_NOT_EXC_MATCH",
+}
+
+
+def _target_starts_user_exception_handler(
+    tx: InstructionTranslatorBase,
+    target: Instruction,
+) -> bool:
+    start_idx = tx.indexof[target]
+    end_idx = min(start_idx + 32, len(tx.instructions) - 1)
+    if target.exn_tab_entry is not None:
+        end_idx = tx.indexof[target.exn_tab_entry.end]
+
+    idx = start_idx
+    if tx.instructions[idx].opname == "PUSH_EXC_INFO":
+        idx += 1
+
+    while idx <= end_idx and tx.instructions[idx].opname in {
+        "CACHE",
+        "EXTENDED_ARG",
+        "NOP",
+        "RESUME",
+    }:
+        idx += 1
+
+    if idx > end_idx:
+        return False
+
+    first_opname = tx.instructions[idx].opname
+    if first_opname == "WITH_EXCEPT_START":
+        return False
+
+    if first_opname == "POP_TOP":
+        return True
+
+    for inst in tx.instructions[idx : end_idx + 1]:
+        if inst.opname in _EXCEPTION_MATCH_OPNAMES:
+            return True
+        if inst.opname in {"END_FINALLY", "RERAISE", "RETURN_CONST", "RETURN_VALUE"}:
+            return False
+
+    return False
+
+
+def _has_user_exception_handler(tx: InstructionTranslatorBase) -> bool:
+    if sys.version_info >= (3, 11):
+        entry = tx.current_instruction.exn_tab_entry
+        return entry is not None and _target_starts_user_exception_handler(
+            tx, entry.target
+        )
+
+    for block in reversed(tx.block_stack):
+        if block.with_context is not None:
+            continue
+        target = block.target
+        if target is None:
+            continue
+        target = cast("Instruction", target)
+        return _target_starts_user_exception_handler(tx, target)
+    return False
+
+
+def _raise_observed_fake_exception_if_handleable(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    cause: BaseException,
+    fake_mode: Any,
+) -> None:
+    if not _has_user_exception_handler(tx):
+        return
+
+    if not isinstance(cause, Exception):
+        return
+
+    from .exc import raise_observed_exception
+
+    msg = get_concrete_sizes_from_symints(str(cause), fake_mode)
+    tx.output.remove_node(node)
+    raise_observed_exception(type(cause), tx, args=[msg])
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4079,6 +4163,7 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+        _raise_observed_fake_exception_if_handleable(node, tx, cause, fake_mode)
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
