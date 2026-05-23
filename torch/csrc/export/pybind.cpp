@@ -18,6 +18,8 @@ void initExportBindings(PyObject* module) {
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
         // Query the current Python schema version as target.
+        // Function-local static initialization keeps the Python import off the
+        // load fast path after the first successful call.
         // TODO: expose schema_version in generated_serialization_types.h and
         // access it here directly.
         static int target_version = []() {
@@ -33,6 +35,8 @@ void initExportBindings(PyObject* module) {
           parsed = nlohmann::json::parse(serialized);
         }
 
+        // upgrade() reads the Python-controlled upgrader registry, whose
+        // registration APIs are serialized by the GIL.
         auto upgraded = upgrade(parsed, target_version);
 
         ExportedProgram result;

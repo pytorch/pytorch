@@ -3,10 +3,11 @@ import io
 import json
 import logging
 import os
+import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, IO, Protocol, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 
 import torch
@@ -25,6 +26,7 @@ from torch._export.serde.serialize import (
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._library.opaque_object import is_opaque_value
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
@@ -47,6 +49,7 @@ from torch.export.pt2_archive.constants import (
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
+    OPAQUE_OBJ_FILENAME_PREFIX,
     SAMPLE_INPUTS_FILENAME_FORMAT,
     TENSOR_CONSTANT_FILENAME_PREFIX,
     WEIGHT_FILENAME_PREFIX,
@@ -65,6 +68,24 @@ AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+class _PayloadConfigLike(Protocol):
+    config: dict[str, Any]
+
+
+def _get_cpp_schema_deserializer() -> Any | None:
+    cpp_export = getattr(torch._C, "_export", None)
+    if cpp_export is None:
+        return None
+    if (
+        getattr(cpp_export, "deserialize_exported_program", None) is None
+        or getattr(cpp_export, "deserialize_payload_config", None) is None
+        or not hasattr(getattr(cpp_export, "CppExportedProgram", None), "graph_module")
+        or not hasattr(getattr(cpp_export, "CppPayloadConfig", None), "config")
+    ):
+        return None
+    return cpp_export
 
 
 def is_pt2_package(serialized_model: bytes | str) -> bool:
@@ -485,7 +506,7 @@ def _package_constants(
 
     pickled_constants: list[tuple[str, torch.Tensor]] = []
     raw_constants: dict[str, tuple[torch.Tensor, TensorProperties]] = {}
-    custom_objects: list[tuple[str, torch._C.ScriptObject]] = []
+    custom_objects: list[tuple[str, Any]] = []
 
     # Categorize constants
     for constant_fqn, constant in exported_program.constants.items():
@@ -495,7 +516,7 @@ def _package_constants(
             else:
                 raw_constants[constant_fqn] = (constant, TensorProperties(constant))
 
-        elif isinstance(constant, torch._C.ScriptObject):
+        elif isinstance(constant, torch._C.ScriptObject) or is_opaque_value(constant):
             custom_objects.append((constant_fqn, constant))
 
         else:
@@ -506,6 +527,9 @@ def _package_constants(
     )
     custom_obj_idx = archive_writer.count_prefix(
         os.path.join(CONSTANTS_DIR, CUSTOM_OBJ_FILENAME_PREFIX)
+    )
+    opaque_obj_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, OPAQUE_OBJ_FILENAME_PREFIX)
     )
 
     # Save constants in pickle format
@@ -530,12 +554,21 @@ def _package_constants(
         tensor_idx,
     )
 
-    # Handle custom objects
+    # ScriptObjects use the torchbind-aware pickler (zip-archive format,
+    # readable from C++ at load time). Opaque values use standard Python
+    # pickle. Distinct filename prefixes act as the format discriminator
+    # for the reader.
     for constant_fqn, constant in custom_objects:
-        path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+        if isinstance(constant, torch._C.ScriptObject):
+            path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+            obj_bytes = torch._C._pickle_save(constant)
+            custom_obj_idx += 1
+        else:
+            path_name = f"{OPAQUE_OBJ_FILENAME_PREFIX}{opaque_obj_idx}"
+            obj_bytes = pickle.dumps(constant, protocol=pickle_protocol)
+            opaque_obj_idx += 1
         archive_path = os.path.join(CONSTANTS_DIR, path_name)
-        custom_obj_bytes = torch._C._pickle_save(constant)
-        archive_writer.write_bytes(archive_path, custom_obj_bytes)
+        archive_writer.write_bytes(archive_path, obj_bytes)
 
         constants_config[constant_fqn] = schema.PayloadMeta(
             path_name=path_name,
@@ -543,7 +576,6 @@ def _package_constants(
             use_pickle=True,
             tensor_meta=None,
         )
-        custom_obj_idx += 1
 
     return schema.PayloadConfig(config=constants_config)
 
@@ -804,7 +836,7 @@ def _create_flat_tensor_from_bytes(
 
 def _build_file_map(
     archive_reader: PT2ArchiveReader,
-    config: schema.PayloadConfig,
+    config: _PayloadConfigLike,
     base_dir: str,
 ) -> dict[str, torch.Tensor]:
     """
@@ -833,13 +865,36 @@ def _build_file_map(
 def _load_payload_config(
     archive_reader: PT2ArchiveReader,
     config_file: str,
-) -> schema.PayloadConfig:
+) -> _PayloadConfigLike:
     """
     Load and parse a payload config from the archive.
     """
-    return torch._C._export.deserialize_payload_config(  # type: ignore[attr-defined]
-        archive_reader.read_string(config_file)
-    )
+    serialized_config = archive_reader.read_string(config_file)
+    cpp_export = _get_cpp_schema_deserializer()
+    if cpp_export is not None:
+        return cast(
+            _PayloadConfigLike, cpp_export.deserialize_payload_config(serialized_config)
+        )
+
+    # Keep source checkouts with an older/custom torch._C usable; the generated
+    # C++ binding remains the normal fast path.
+    from torch._export.serde.serialize import _dict_to_dataclass
+
+    return _dict_to_dataclass(schema.PayloadConfig, json.loads(serialized_config))
+
+
+def _deserialize_exported_program(exported_program_bytes: bytes) -> Any:
+    cpp_export = _get_cpp_schema_deserializer()
+    if cpp_export is not None:
+        return cpp_export.deserialize_exported_program(
+            exported_program_bytes.decode("utf-8")
+        )
+
+    # Keep source checkouts with an older/custom torch._C usable; the generated
+    # C++ binding remains the normal fast path.
+    from torch._export.serde.serialize import _bytes_to_dataclass
+
+    return _bytes_to_dataclass(schema.ExportedProgram, exported_program_bytes)
 
 
 def _load_state_dict(
@@ -954,6 +1009,12 @@ def _load_constants(
                 )
                 constants[constant_fqn] = torch._C._pickle_load_obj(constant_bytes)
 
+            elif path_name.startswith(OPAQUE_OBJ_FILENAME_PREFIX):
+                constant_bytes = archive_reader.read_bytes(
+                    os.path.join(CONSTANTS_DIR, path_name)
+                )
+                constants[constant_fqn] = pickle.loads(constant_bytes)
+
             else:
                 raise RuntimeError(f"Unsupported constant type: {path_name}")
 
@@ -981,14 +1042,14 @@ def _load_exported_programs(
         serialized_sample_inputs = archive_reader.read_bytes(sample_inputs_file)
 
         exported_program_bytes = archive_reader.read_bytes(file)
-        serialized_exported_program = torch._C._export.deserialize_exported_program(  # type: ignore[attr-defined]
-            exported_program_bytes.decode("utf-8")
+        serialized_exported_program = _deserialize_exported_program(
+            exported_program_bytes
         )
         state_dict = _load_state_dict(archive_reader, model_name)
         constants = _load_constants(archive_reader, model_name)
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
-            serialized_exported_program,  # type: ignore[arg-type]
+            serialized_exported_program,
             state_dict,
             constants,
             serialized_sample_inputs,
