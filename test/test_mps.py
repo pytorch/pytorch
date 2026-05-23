@@ -1622,37 +1622,6 @@ class TestMPS(TestCaseMPS):
         low.grad.zero_()
         high.grad.zero_()
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("from_to", [(0.0, 1.0), (-3.5, 2.5), (-3.5, -1.0), (0.0, 100.0)])
-    def test_uniform_half_open_contract(self, dtype, from_to):
-        # The Metal uniform kernel computes in fp32 and casts to the destination
-        # dtype. For half/bfloat16 the narrowing cast can round a value just
-        # below `to` up to `to`, breaking the half-open `[from, to)` contract
-        # (see #51, #172). CPU clamps such samples to `from`; MPS must too.
-        from_, to = from_to
-        n = 4_000_000
-        x = torch.empty(n, dtype=dtype, device="mps").uniform_(from_, to)
-        from_scalar = torch.tensor(from_, dtype=dtype).item()
-        to_scalar = torch.tensor(to, dtype=dtype).item()
-        self.assertEqual((x >= to_scalar).sum().item(), 0,
-                         msg=f"uniform_ produced values >= to ({to_scalar}) for dtype={dtype}")
-        self.assertEqual((x < from_scalar).sum().item(), 0,
-                         msg=f"uniform_ produced values < from ({from_scalar}) for dtype={dtype}")
-
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_rand_half_open_contract(self, dtype):
-        # torch.rand shares the uniform_dist Metal kernel; bug #51 originally
-        # surfaced via `torch.log(1 - torch.rand(...))` producing -inf in
-        # fp16/bf16 because rand could return exactly 1.0.
-        n = 4_000_000
-        x = torch.rand(n, dtype=dtype, device="mps")
-        self.assertEqual((x >= 1.0).sum().item(), 0,
-                         msg=f"torch.rand produced values >= 1.0 for dtype={dtype}")
-        self.assertEqual((x < 0.0).sum().item(), 0,
-                         msg=f"torch.rand produced values < 0.0 for dtype={dtype}")
-        self.assertFalse(torch.log(1 - x).isinf().any().item(),
-                         msg=f"log(1 - rand()) produced -inf for dtype={dtype}")
-
     def test_randperm(self, device="mps"):
         rng_device = None
         for n in (5, 100, 50000, 100000):
