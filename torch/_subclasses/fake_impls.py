@@ -491,6 +491,13 @@ def meta_select(
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
+
     new_size = list(self.size())
     new_stride = list(self.stride())
 
@@ -1010,6 +1017,7 @@ def repeat_interleave_tensor(
 cuda_tensoriterator_binary_pointwise_ops = ordered_set(
     aten.add.Tensor,
     aten.atan2.default,
+    aten.copysign.Tensor,
     aten.div.Tensor,
     aten.eq.Tensor,
     aten.fmax.default,
@@ -1054,6 +1062,9 @@ def _compute_cuda_elementwise_output_strides(
         return None
 
 
+# This callable registration runs after direct op_implementations_dict entries.
+# That keeps explicit fake implementations authoritative if any of these ops
+# grow special handling later.
 @register_op_impl(cuda_tensoriterator_binary_pointwise_ops.__contains__)
 def binary_tensor_pointwise(
     fake_mode: FakeTensorMode,
@@ -1621,8 +1632,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(

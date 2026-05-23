@@ -1767,6 +1767,7 @@ class TestMeta(TestCase):
                 (
                     torch.ops.aten.pow.Tensor_Tensor,
                     torch.ops.aten.atan2.default,
+                    torch.ops.aten.copysign.Tensor,
                     torch.ops.aten.remainder.Tensor,
                     torch.ops.aten.fmod.Tensor,
                     torch.ops.aten.hypot.default,
@@ -2109,6 +2110,23 @@ class TestMetaKernelRegistrations(TestCase):
         )
         expected = torch.tensor([[1, 0], [2, 4], [3, 5]])
         self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_pad_sequence_decomp_mixed_dtype_padding_value(self):
+        from torch._decomp import decompositions
+
+        for first_sequence in (
+            torch.tensor([0, 0.4]),
+            torch.tensor([0, 0.4 + 0j]),
+        ):
+            sequences = [first_sequence, torch.tensor([0], dtype=torch.int32)]
+            result = decompositions.pad_sequence(
+                sequences, batch_first=False, padding_value=-0.7
+            )
+            expected = torch.ops.aten.pad_sequence.default(
+                sequences, False, -0.7, "right"
+            )
+            self.assertEqual(result, expected)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
