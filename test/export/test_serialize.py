@@ -36,11 +36,13 @@ import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
+from torch._dynamo.source import ConstantSource
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.schema import ArgumentKind
 from torch._export.serde.serialize import (
     _dict_to_dataclass,
+    _reconstruct_fake_tensor,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -49,6 +51,7 @@ from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     GraphModuleSerializer,
     serialize,
+    serialize_torch_artifact,
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
@@ -56,7 +59,13 @@ from torch._library.opaque_object import get_opaque_type_name, register_opaque_t
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    is_concrete_int,
+    ShapeEnv,
+    StatelessSymbolicContext,
+    ValueRanges,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -1358,6 +1367,48 @@ class TestDeserialize(TestCase):
             _check_graph(pre_dispatch=False)
         else:
             _check_graph(pre_dispatch=False)
+
+    def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.randn(2, 3),),
+            dynamic_shapes={"x": {0: Dim("batch")}},
+        )
+        serialized = ExportedProgramSerializer().serialize(ep)
+
+        real_constant = torch.empty(2, 3)
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            fake_constant = fake_mode.from_tensor(
+                real_constant,
+                source=ConstantSource("fake_constant"),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                    constraint_sizes=[None, None],
+                ),
+            )
+
+        self.assertFalse(is_concrete_int(fake_constant.shape[0]))
+        serialized.constants = serialize_torch_artifact(
+            {"fake_constant": fake_constant}
+        )
+
+        with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
+            loaded_ep = ExportedProgramDeserializer().deserialize(
+                serialized.exported_program,
+                serialized.state_dict,
+                serialized.constants,
+                serialized.example_inputs,
+            )
+
+        loaded_constant = loaded_ep.constants["fake_constant"]
+        self.assertIsInstance(loaded_constant, FakeTensor)
+        self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
+        self.assertEqual(loaded_constant.shape[1], 3)
 
     def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
