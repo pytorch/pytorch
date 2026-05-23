@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch._C import LiteScriptModule, ScriptModule
 
 def _load_mobile_module_from_file(filename: str): ...
