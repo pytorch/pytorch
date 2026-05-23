@@ -523,6 +523,11 @@ class TensorVariable(VariableTracker):
     def method_attr_grad(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
+        if (
+            isinstance(self.mutation_type, AttributeMutationNew)
+            and not self.has_grad_fn
+        ):
+            return ConstantVariable.create(None)
         # None tells var_getattr to use default .grad handling
         return None
 
