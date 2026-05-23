@@ -55,6 +55,7 @@ from torch.export._trace import (
     _export_to_torch_ir,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
+from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
 from torch.export.graph_signature import (
     ExportGraphSignature,
     InputKind,
@@ -4827,6 +4828,88 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ep.module()(torch.randn(4), torch.randn(6))
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
+
+    def test_derived_dim_decreasing(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 16)
+
+            def forward(self, x, y):
+                return self.linear(torch.cat([x, y], dim=1))
+
+        foo = Foo()
+        x, y = torch.randn(1, 10), torch.randn(1, 22)
+        x_dim = torch.export.Dim("x_dim", min=2, max=30)
+        y_dim = 32 - x_dim
+
+        self.assertEqual(y_dim.min, 2)
+        self.assertEqual(y_dim.max, 30)
+
+        ep = export(
+            foo,
+            (x, y),
+            dynamic_shapes={"x": {1: x_dim}, "y": {1: y_dim}},
+        )
+        self.assertEqual(
+            ep.module()(torch.randn(1, 12), torch.randn(1, 20)).shape,
+            torch.Size([1, 16]),
+        )
+
+    def test_decreasing_derived_dim_suggested_fixes(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 16)
+
+            def forward(self, x, y):
+                return self.linear(torch.cat([x, y], dim=1))
+
+        foo = Foo()
+        x, y = torch.randn(1, 10), torch.randn(1, 22)
+        x_dim = torch.export.Dim("x_dim", min=1, max=31)
+        y_dim = torch.export.Dim("y_dim", min=1, max=31)
+        dynamic_shapes = {"x": {1: x_dim}, "y": {1: y_dim}}
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "y_dim = 32 - x_dim",
+        ) as cm:
+            export(foo, (x, y), dynamic_shapes=dynamic_shapes)
+
+        new_shapes = refine_dynamic_shapes_from_suggested_fixes(
+            cm.exception.msg, dynamic_shapes
+        )
+        self.assertEqual(new_shapes["x"][1].max, 30)
+        self.assertEqual(new_shapes["y"][1].root, new_shapes["x"][1])
+        self.assertEqual(new_shapes["y"][1].fn(10), 22)
+        export(foo, (x, y), dynamic_shapes=new_shapes)
+
+    def test_decreasing_derived_dim_suggested_root_range(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] <= 16:
+                    return x.sum() + y.sum()
+                return x.sum() - y.sum()
+
+        foo = Foo()
+        x, y = torch.randn(10), torch.randn(22)
+        y_dim = torch.export.Dim("y_dim", min=2, max=30)
+        dynamic_shapes = {"x": (32 - y_dim,), "y": (y_dim,)}
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "y_dim = Dim\\('y_dim', min=16, max=30\\)",
+        ) as cm:
+            export(foo, (x, y), dynamic_shapes=dynamic_shapes)
+
+        new_shapes = refine_dynamic_shapes_from_suggested_fixes(
+            cm.exception.msg, dynamic_shapes
+        )
+        self.assertEqual(new_shapes["y"][0].min, 16)
+        self.assertEqual(new_shapes["y"][0].max, 30)
+        self.assertEqual(new_shapes["x"][0].fn(22), 10)
+        export(foo, (x, y), dynamic_shapes=new_shapes)
 
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
@@ -16675,6 +16758,22 @@ def forward(self, x):
         )
         self.assertEqual(dx.root, dz)
         self.assertEqual(dy.root, dz)
+
+        dm = Dim("dm", min=2, max=30)
+        dn = 32 - dm
+        decreasing_inputs = (torch.randn(10), torch.randn(22))
+        decreasing_dynamic_shapes = {"x": (dm,), "y": (dn,)}
+        self.assertExpectedInline(
+            _dump_dynamic_shapes(decreasing_dynamic_shapes, decreasing_inputs),
+            """DynamicShapesSpec(dynamic_shapes=(['dm'], ['32 - dm']), dims={'dm': RootDim(min=2, max=30, derived=['32 - dm'])})""",
+        )
+        (loaded_dm,), (loaded_dn,) = _load_dynamic_shapes(
+            _dump_dynamic_shapes(decreasing_dynamic_shapes, decreasing_inputs)
+        )
+        self.assertEqual(loaded_dn.root, loaded_dm)
+        self.assertEqual(loaded_dn.fn(10), 22)
+        self.assertEqual(loaded_dn.min, 2)
+        self.assertEqual(loaded_dn.max, 30)
 
     def test_dynamic_shapes_serdes_various(self):
         # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
