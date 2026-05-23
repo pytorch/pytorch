@@ -2005,11 +2005,29 @@ class MetaConverter(Generic[_TensorT]):
                     s = t.storage
                     if s is None:
                         raise AssertionError("t.storage must not be None")
+                    # The freshly allocated tensor storage can only stand in
+                    # for the source storage when it covers the whole storage.
+                    # Parameters made from views are not autograd views, but
+                    # can still share a larger storage with later parameters.
+                    if r.is_nested:
+                        storage_is_representative = True
+                    else:
+                        r_storage_size = r.untyped_storage().size()
+                        from torch.fx.experimental.symbolic_shapes import (
+                            statically_known_true,
+                        )
+
+                        storage_is_representative = statically_known_true(
+                            s.size == 0
+                        ) or statically_known_true(r_storage_size == s.size)
                     if s.id not in self.storage_memo and (
-                        r.is_nested
-                        or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                        storage_is_representative
+                        and (
+                            r.is_nested
+                            or (
+                                r.stride() == strides
+                                and r.storage_offset() == storage_offset
+                            )
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
