@@ -818,8 +818,6 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
-    # --- combo_kernels_seed_autotune_cap tests ------------------------------
-
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
         {
