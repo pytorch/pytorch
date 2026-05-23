@@ -109,6 +109,29 @@ class ViewTests(torch._dynamo.test_case.TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_torch_reshape_with_torch_size_from_tensor(self):
+        def test_fn(x, shape_tensor):
+            return torch.reshape(x, torch.Size(shape_tensor))
+
+        x = torch.randn(24)
+        shape_tensor = torch.tensor([2, 3, -1])
+
+        expected = test_fn(x, shape_tensor)
+
+        compiled_fn = torch.compile(test_fn, backend="eager")
+        result = compiled_fn(x, shape_tensor)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_torch_size_from_float_tensor_raises_type_error(self):
+        def test_fn():
+            return torch.Size(torch.ones(3))
+
+        with self.assertRaisesRegex(
+            TypeError, r"torch\.Size\(\) takes an iterable of 'int'"
+        ):
+            torch.compile(test_fn, backend="eager")()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

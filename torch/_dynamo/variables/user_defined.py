@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import math
 import random
 import sys
 import threading
@@ -1337,7 +1338,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            items = []
+            for i, item in enumerate(tup.items):  # type: ignore[missing-attribute]
+                if item.is_tensor():
+                    if item.dtype is not None and (
+                        item.dtype.is_floating_point or item.dtype.is_complex
+                    ):
+                        raise_type_error(
+                            tx,
+                            f"torch.Size() takes an iterable of 'int' (item {i} is 'Tensor')",
+                        )
+                    if item.valid_size() and all(
+                        isinstance(dim, int) for dim in item.size
+                    ):
+                        if math.prod(item.size) != 1:
+                            raise_type_error(
+                                tx,
+                                f"torch.Size() takes an iterable of 'int' (item {i} is 'Tensor')",
+                            )
+                    item = item.call_method(tx, "__index__", [], {})
+                items.append(item)
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
