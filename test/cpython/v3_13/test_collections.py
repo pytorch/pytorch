@@ -47,6 +47,9 @@ from collections.abc import Set, MutableSet
 from collections.abc import Mapping, MutableMapping, KeysView, ItemsView, ValuesView
 from collections.abc import Sequence, MutableSequence
 from collections.abc import ByteString, Buffer
+from torch.testing._internal.common_utils import (
+    skipIfTorchDynamo,
+)
 
 
 class TestUserObjects(__TestCase):
@@ -603,6 +606,7 @@ class TestNamedTuple(__TestCase):
             self.assertEqual(p, q)
             self.assertEqual(p._fields, q._fields)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/179778")
     def test_name_conflicts(self):
         # Some names like "self", "cls", "tuple", "itemgetter", and "property"
         # failed when used as field names.  Test to make sure these now work.
