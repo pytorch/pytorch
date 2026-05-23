@@ -66,7 +66,7 @@ from torch._inductor.utils import (
     triton_version_uses_attrs_dict,
 )
 from torch._inductor.virtualized import V
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import check_significant_strides, is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.library import _scoped_library
 from torch.nn import functional as F
@@ -436,6 +436,59 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def _assert_same_significant_strides(self: TestCase, actual, expected):
+    actual_flat = pytree.tree_leaves(actual)
+    expected_flat = pytree.tree_leaves(expected)
+    if len(actual_flat) != len(expected_flat):
+        raise AssertionError(
+            f"Tree leaf count mismatch: {len(actual_flat)} != {len(expected_flat)}"
+        )
+
+    for i, (actual_val, expected_val) in enumerate(zip(actual_flat, expected_flat)):
+        if not (
+            isinstance(actual_val, torch.Tensor)
+            and isinstance(expected_val, torch.Tensor)
+            and actual_val.layout == torch.strided
+            and expected_val.layout == torch.strided
+        ):
+            continue
+
+        same_strides, dim = check_significant_strides(
+            actual_val, expected_val, only_cuda=False
+        )
+        if not same_strides:
+            raise AssertionError(
+                f"Significant strides mismatch at leaf {i}, dim {dim}: "
+                f"{actual_val.stride()} != {expected_val.stride()} "
+                f"for shape {actual_val.shape}"
+            )
+
+
+def _assert_equal_with_significant_stride_check(
+    self: TestCase,
+    assert_equal_fn,
+    actual,
+    expected,
+    *,
+    atol,
+    rtol,
+    equal_nan,
+    exact_dtype,
+    exact_stride,
+):
+    assert_equal_fn(
+        actual,
+        expected,
+        atol=atol,
+        rtol=rtol,
+        equal_nan=equal_nan,
+        exact_dtype=exact_dtype,
+        exact_stride=False,
+    )
+    if exact_stride:
+        _assert_same_significant_strides(self, actual, expected)
+
+
 def check_model(
     self: TestCase,
     model,
@@ -617,7 +670,9 @@ def check_model(
             assert_equal_fn = self.assertEqual
 
         check_exact_stride = exact_stride and not has_zero_dim(correct)
-        assert_equal_fn(
+        _assert_equal_with_significant_stride_check(
+            self,
+            assert_equal_fn,
             actual,
             correct,
             atol=atol,
@@ -636,8 +691,10 @@ def check_model(
             equal_nan=True,
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
-            exact_stride=exact_stride,
+            exact_stride=False,
         )
+        if exact_stride:
+            _assert_same_significant_strides(self, ref_inputs, example_inputs)
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
@@ -649,8 +706,8 @@ def check_model(
                     raise AssertionError(
                         f"Expected size {correct_val.size()}, got {actual_val.size()}"
                     )
-                strides_equal, _ = torch._prims_common.check_significant_strides(
-                    correct_val, actual_val
+                strides_equal, _ = check_significant_strides(
+                    correct_val, actual_val, only_cuda=False
                 )
                 if not strides_equal:
                     raise AssertionError(
@@ -666,13 +723,6 @@ def check_model(
                         raise AssertionError(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
-                check_exact_stride = exact_stride and not has_zero_dim(correct_val)
-                if check_exact_stride:
-                    if correct_val.stride() != actual_val.stride():
-                        raise AssertionError(
-                            f"Expected stride {correct_val.stride()}, got {actual_val.stride()}"
-                        )
-
     if check_gradient:
         actual = output_process_fn_grad(actual)
         correct = output_process_fn_grad(correct)
@@ -720,7 +770,9 @@ def check_model(
 
             for actual_g, expect_g in zip(actual_grad, expect_grad):
                 check_exact_stride = exact_stride and not has_zero_dim(expect_g)
-                self.assertEqual(
+                _assert_equal_with_significant_stride_check(
+                    self,
+                    self.assertEqual,
                     actual_g,
                     expect_g,
                     atol=grad_atol or atol,
@@ -2997,6 +3049,30 @@ class CommonTemplate:
 
         a = torch.rand(())
         self.common(fn, (a,))
+
+    def test_flip_zero_dim(self):
+        def fn(x):
+            return (
+                x.flip(0),
+                x.flip([0]),
+                x.flip(-1),
+                x.flip([-1]),
+                torch.flip(x, [0]),
+                torch.flip(x, [-1]),
+                x.flip([]),
+            )
+
+        self.common(fn, (torch.rand(()),))
+
+    def test_flip_zero_dim_backward(self):
+        def fn(x):
+            return x.flip(0)
+
+        self.common(
+            fn,
+            (torch.randn((), requires_grad=True),),
+            check_gradient=True,
+        )
 
     def test_cumprod_backward(self):
         if self.device == "mps":
@@ -7970,6 +8046,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             c_fn(x)
 
+    @torch._dynamo.config.patch(recompile_limit=32)
+    def test_convolution_errors_with_uint_input_float_weight(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU only")
+
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                input_shape = [1, 8] + [16] * dim
+                x = torch.ones(input_shape, device=self.device, dtype=dtype)
+                weight = torch.ones(
+                    8, 1, *([4] * dim), device=self.device, dtype=torch.float32
+                )
+                op = getattr(F, f"conv{dim}d")
+                c_op = torch.compile(op)
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r".*(Input type.*weight type|expected scalar type|"
+                    r"not implemented|aoti_torch_).*",
+                ):
+                    c_op(x, weight, stride=4, padding=2, groups=8)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -9896,38 +9994,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
-
-    def test_index_ops_on_expanded_tensor(self):
-        def make_input(src):
-            return torch.zeros(1, src.size(1), device=src.device).expand(
-                src.size(0) + 1, -1
-            )
-
-        def check(fn):
-            idx = torch.tensor([0, 1, 0], device=self.device)
-            src = torch.ones(3, 8, device=self.device)
-            self.common(fn, (idx, src), check_lowp=False)
-
-        check(lambda idx, src: make_input(src).index_add(0, idx, src))
-        check(lambda idx, src: make_input(src).index_copy(0, idx[:2], src[:2]))
-        check(lambda idx, src: make_input(src).index_fill(0, idx[:2], 1.0))
-        check(lambda idx, src: make_input(src).index_put((idx,), src, accumulate=True))
-        check(
-            lambda idx, src: make_input(src).index_put(
-                (idx[:2],), src[:2], accumulate=False
-            )
-        )
-
-    def test_index_ops_on_expanded_tensor_dim1(self):
-        def fn(idx, src):
-            x = torch.zeros(src.size(0), 1, device=src.device).expand(
-                -1, src.size(1) + 5
-            )
-            return x.index_add(1, idx, src)
-
-        idx = torch.tensor([0, 2, 0], device=self.device)
-        src = torch.ones(4, 3, device=self.device)
-        self.common(fn, (idx, src), check_lowp=False)
 
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
@@ -12354,6 +12420,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_y = torch.compile(forward, fullgraph=True)(x)
 
         self.assertEqual(y, compiled_y)
+
+    def test_unfold_backward_overlapping_windows(self):
+        def forward(grad, input_sizes):
+            return torch.ops.aten.unfold_backward(
+                grad,
+                input_sizes=input_sizes,
+                dim=1,
+                size=8,
+                step=4,
+            )
+
+        cases = []
+        if self.device != "mps":
+            # Regression test for https://github.com/pytorch/pytorch/issues/171370.
+            # MPS eager does not support unfold_backward_long.
+            cases.append((torch.int64, (1, 64, 32), [1, 64, 32]))
+        # Canonical grad shape produced by x.unfold(1, 8, 4).
+        cases.append((torch.float32, (1, 15, 32, 8), [1, 64, 32]))
+        compiled_forward = torch.compile(forward, backend="inductor")
+        for dtype, grad_shape, input_sizes in cases:
+            if dtype == torch.int64:
+                grad = torch.randint(
+                    -32, 32, grad_shape, dtype=dtype, device=self.device
+                )
+            else:
+                grad = torch.randn(grad_shape, dtype=dtype, device=self.device)
+
+            expected = forward(grad, input_sizes)
+            actual = compiled_forward(grad, input_sizes)
+            self.assertEqual(actual, expected)
 
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
@@ -18088,7 +18184,7 @@ if RUN_GPU:
                     "\n".join(lines),
                     """\
     tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
                 )
@@ -18099,6 +18195,66 @@ if RUN_GPU:
         tmp0 = tl.load(in_ptr0 + (x1 + 512*x0 + 262144*r0_2), r0_mask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
+
+        @config.patch(
+            {
+                "triton.persistent_reductions": True,
+                "triton.multi_kernel": False,
+                "triton.use_block_ptr": False,
+            }
+        )
+        def test_evict_first_for_persistent_reduction_last_use(self):
+            def get_args():
+                shape = (128, 512, 64)
+                return (
+                    rand_strided(shape, (32768, 1, 512), device=GPU_TYPE),
+                    rand_strided(shape, (32768, 1, 512), device=GPU_TYPE),
+                    rand_strided(shape, (64, 0, 1), device=GPU_TYPE),
+                    rand_strided(shape, (64, 0, 1), device=GPU_TYPE),
+                )
+
+            @torch.compile
+            def f(a0, a1, a2, a3):
+                act0 = (a0 * (a1.relu() - a2) * a3).sum(dim=-1)
+                act1 = a0.sum(dim=-1)
+                return act0, act1
+
+            code = run_and_get_triton_code(f, *get_args())
+            self.assertIn("@triton_heuristics.persistent_reduction", code)
+            self.assertEqual(code.count("eviction_policy='evict_first'"), 2)
+            self.assertEqual(code.count("eviction_policy='evict_last'"), 2)
+
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(lines), 4)
+            self.assertEqual(
+                sum("eviction_policy='evict_first'" in line for line in lines[:2]),
+                2,
+            )
+            self.assertEqual(
+                sum("eviction_policy='evict_last'" in line for line in lines[2:]),
+                2,
+            )
+
+        @config.patch(
+            {
+                "triton.persistent_reductions": True,
+                "triton.multi_kernel": False,
+                "triton.use_block_ptr": False,
+            }
+        )
+        def test_evict_last_for_reused_persistent_reduction_load(self):
+            @torch.compile
+            def f(x):
+                return (x[:, :-1] * x[:, 1:]).sum(dim=-1)
+
+            x = torch.randn(256, 129, device=GPU_TYPE)
+            code = run_and_get_triton_code(f, x)
+            self.assertIn("@triton_heuristics.persistent_reduction", code)
+
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("eviction_policy='evict_last'", lines[0])
+            self.assertIn("eviction_policy='evict_first'", lines[1])
 
         @config.patch("triton.skip_l1_cache", True)
         def test_skip_l1_cache(self):
@@ -18178,7 +18334,7 @@ if RUN_GPU:
                     "\n".join(lines),
                     """\
     tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero', eviction_policy='evict_first')
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
                 )
@@ -19359,6 +19515,36 @@ if RUN_GPU:
 
 
 if RUN_CPU:
+
+    class CheckModelStrideSemanticsTest(TestCase):
+        def test_check_model_exact_stride_ignores_insignificant_strides(self):
+            def fn(x, y):
+                return torch.einsum("aij,ajk->aik", x, y)
+
+            x = torch.arange(6, dtype=torch.int64).reshape(1, 2, 3)
+            y = torch.arange(12, dtype=torch.int64).reshape(1, 3, 4)
+
+            check_model(
+                self,
+                fn,
+                (x, y),
+                exact_stride=True,
+                reference_in_float=False,
+            )
+
+        def test_significant_stride_check_rejects_meaningful_stride_mismatch(self):
+            _assert_same_significant_strides(
+                self,
+                torch.empty_strided((1, 2, 4), (4, 4, 1)),
+                torch.empty_strided((1, 2, 4), (8, 4, 1)),
+            )
+
+            with self.assertRaisesRegex(AssertionError, "Significant strides mismatch"):
+                _assert_same_significant_strides(
+                    self,
+                    torch.empty_strided((2, 2, 4), (4, 4, 1)),
+                    torch.empty_strided((2, 2, 4), (8, 4, 1)),
+                )
 
     class TestFull(TestCase):
         def test_full_dtype(self):
