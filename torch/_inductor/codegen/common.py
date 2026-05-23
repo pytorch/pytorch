@@ -1256,6 +1256,17 @@ def _addcmul_no_fma(self_value: str, value_times_tensor1: str, tensor2: str) -> 
     )
 
 
+def _addcmul_aten_cppvec(
+    self_value: str, value_times_tensor1: str, tensor2: str
+) -> str:
+    if (
+        getattr(V.kernel, "tail_size", None) is not None
+        or _pytorch_cpu_vec_intrinsics_contract_addcmul()
+    ):
+        return f"fmadd({value_times_tensor1}, {tensor2}, {self_value})"
+    return _addcmul_no_fma(self_value, value_times_tensor1, tensor2)
+
+
 # NB: if you add a new special function, don't forget to update
 # torch._inductor.ops_handler too
 pointwise_overrides_data: dict[str, OverridesData] = dict(
@@ -1318,11 +1329,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         cpp=lambda self_value, value_times_tensor1, tensor2: (
             f"std::fma({value_times_tensor1}, {tensor2}, {self_value})"
         ),
-        cppvec=lambda self_value, value_times_tensor1, tensor2: (
-            f"fmadd({value_times_tensor1}, {tensor2}, {self_value})"
-            if _pytorch_cpu_vec_intrinsics_contract_addcmul()
-            else _addcmul_no_fma(self_value, value_times_tensor1, tensor2)
-        ),
+        cppvec=_addcmul_aten_cppvec,
         name="addcmul_aten",
     ),
     # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
