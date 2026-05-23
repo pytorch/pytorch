@@ -10,6 +10,8 @@ from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -536,6 +538,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
         GPU_TYPE,
         test_failures,
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesCodegenGPUTests,
+        "test_randint_distribution_dynamic_shapes_cuda",
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda = skipIfRocmArch(
+            MI350_ARCH
+        )(DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda)
 
 
 if __name__ == "__main__":
