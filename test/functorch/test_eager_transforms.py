@@ -5443,6 +5443,32 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(result, expected)
 
     @onlyCPU
+    def test_cpu_flash_sdpa_backward_higher_order(self, device):
+        torch.manual_seed(0)
+        query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        key = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        value = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
+        out, logsumexp = (
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(
+                query, key, value
+            )
+        )
+        grad_out = torch.randn_like(out, requires_grad=True)
+
+        with enable_python_dispatcher():
+            grads = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out, query, key, value, out, logsumexp, 0.0, False
+            )
+
+        self.assertTrue(all(grad.requires_grad for grad in grads))
+        gradgrad = torch.autograd.grad(
+            sum(grad.square().sum() for grad in grads),
+            (grad_out, query, key, value),
+            allow_unused=True,
+        )
+        self.assertTrue(all(grad is not None for grad in gradgrad))
+
+    @onlyCPU
     def test_cpu_flash_sdpa_autograd_aux_output_contract(self, device):
         query = torch.randn(2, 3, 4, 5, device=device, requires_grad=True)
         detached_query = query.detach()

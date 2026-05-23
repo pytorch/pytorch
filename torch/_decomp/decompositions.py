@@ -1140,18 +1140,103 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
 def unfold_backward(
     grad: Tensor, input_size: list[int], dimension: int, size: int, step: int
 ) -> Tensor:
+    torch._check_value(step > 0, lambda: f"step is {step} but must be > 0")
     if len(input_size) == 0:
         return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
-    idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
-    idx = idx.unfold(0, size, step).flatten()
-    grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
-    # nb. At the moment this generates two kernels in triton
-    # It could potentially be fused into one call to scatter_reduce,
-    # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    index = (None,) * dim + (idx,)
-    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
+
+    def _vectorized_index_put() -> Tensor:
+        idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
+        idx = idx.unfold(0, size, step).flatten()
+        source = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+        index = (None,) * dim + (idx,)
+        return aten._unsafe_index_put(
+            grad_input, index, source, accumulate=True
+        ).contiguous()
+
+    if step >= size:
+        return _vectorized_index_put()
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def _is_canonical_grad_shape() -> bool:
+        if grad.dim() != len(input_size) + 1:
+            return False
+        if not statically_known_true(grad.size(-1) == size):
+            return False
+
+        n_folds = (input_size[dim] - size) // step + 1
+        if not statically_known_true(grad.size(dim) == n_folds):
+            return False
+
+        return all(
+            source_dim == dim
+            or statically_known_true(grad.size(source_dim) == dim_size)
+            for source_dim, dim_size in enumerate(input_size)
+        )
+
+    if _is_canonical_grad_shape():
+        return _vectorized_index_put()
+
+    def _sym_min_if_needed(a, b):
+        if statically_known_true(a <= b):
+            return a
+        if statically_known_true(b <= a):
+            return b
+        return torch.sym_min(a, b)
+
+    def _sym_max_if_needed(a, b):
+        if statically_known_true(a >= b):
+            return a
+        if statically_known_true(b >= a):
+            return b
+        return torch.sym_max(a, b)
+
+    def _reshape_source(source: Tensor, target_shape: list[int]) -> Tensor:
+        ndim = len(target_shape)
+        source_ndim = source.dim()
+        if source_ndim > ndim:
+            return source.expand(target_shape)
+
+        dim_offset = ndim - source_ndim
+        view_shape = [1] * ndim
+        for source_dim in range(source_ndim):
+            target_dim = dim if source_dim == dim else source_dim + dim_offset
+            if target_dim < 0 or target_dim >= ndim:
+                return source.expand(target_shape)
+            if statically_known_true(view_shape[target_dim] == 1):
+                view_shape[target_dim] = source.shape[source_dim]
+            else:
+                # Multiple grad dimensions may align to the unfolded input
+                # dimension after select(); only singleton collisions can
+                # still be reshaped and broadcast to the target shape.
+                torch._check(
+                    source.shape[source_dim] == 1,
+                    lambda: "unfold_backward grad shape is not broadcastable "
+                    "to input_size",
+                )
+
+        return source.reshape(view_shape).expand(target_shape)
+
+    input_dim_size = input_size[dim]
+    grad_dim_size = grad.size(dim)
+    # Descending offsets make each grad_input element accumulate overlapping
+    # windows in increasing fold-index order, matching native numerics.
+    for offset in reversed(range(size)):
+        max_valid_len = _sym_max_if_needed(
+            (input_dim_size - offset + step - 1) // step, 0
+        )
+        valid_len = _sym_min_if_needed(grad_dim_size, max_valid_len)
+        idx = torch.arange(valid_len, device=grad.device, dtype=torch.int32)
+        idx = idx * step + offset
+        source = grad.select(-1, offset).narrow(dim, 0, valid_len)
+        source_shape = list(input_size)
+        source_shape[dim] = valid_len
+        source = _reshape_source(source, source_shape)
+        grad_input = aten.index_add(grad_input, dim, idx, source)
+
+    return grad_input.contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -5553,16 +5638,13 @@ def scaled_dot_product_flash_attention_for_cpu(
     return output, attn
 
 
-def _scaled_dot_product_flash_attention_for_cpu_logsumexp(
+def _scaled_dot_product_flash_attention_for_cpu_scores(
     query: Tensor,
     key: Tensor,
     is_causal: bool,
     attn_mask: Tensor | None,
     scale: float | None,
 ) -> Tensor:
-    if query.size(1) != key.size(1):
-        key = key.repeat_interleave(query.size(1) // key.size(1), dim=1)
-
     computation_dtype = utils.get_computation_dtype(query.dtype)
     query_acc = query.to(computation_dtype)
     key_acc = key.to(computation_dtype)
@@ -5589,10 +5671,7 @@ def _scaled_dot_product_flash_attention_for_cpu_logsumexp(
         else:
             scores = scores + attn_mask
 
-    masked_rows = torch.all(scores == float("-inf"), dim=-1)
-    logsumexp = torch.logsumexp(scores, dim=-1)
-    logsumexp = torch.where(masked_rows, torch.zeros_like(logsumexp), logsumexp)
-    return logsumexp.transpose(1, 2).contiguous().transpose(1, 2).detach()
+    return scores
 
 
 def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
@@ -5615,67 +5694,132 @@ def _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(
     )
 
 
-def _needs_scaled_dot_product_flash_attention_for_cpu_autograd(
+def _requires_grad(*args, **kwargs) -> bool:
+    flat_args, _ = pytree.tree_flatten((args, kwargs))
+    return any(isinstance(arg, Tensor) and arg.requires_grad for arg in flat_args)
+
+
+def _cpu_flash_attention_backward_layout(grad: Tensor) -> Tensor:
+    return grad.transpose(1, 2).contiguous().transpose(1, 2)
+
+
+def _collapse_grouped_query_attention_grad(
+    grad: Tensor, num_key_value_heads: int
+) -> Tensor:
+    if grad.size(1) == num_key_value_heads:
+        return grad
+    return grad.unflatten(
+        1, (num_key_value_heads, grad.size(1) // num_key_value_heads)
+    ).sum(2)
+
+
+def _scaled_dot_product_flash_attention_for_cpu_backward_math(
+    grad_out: Tensor,
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    dropout_p: float,
+    is_causal: bool,
     attn_mask: Tensor | None,
-) -> bool:
-    if not torch.is_grad_enabled():
-        return False
+    scale: float | None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        dropout_p == 0.0,
+        lambda: "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0",
+    )
+    _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
+
+    num_key_value_heads = key.size(1)
+    if query.size(1) != key.size(1):
+        key = key.repeat_interleave(query.size(1) // key.size(1), dim=1)
+        value = value.repeat_interleave(query.size(1) // value.size(1), dim=1)
+
+    computation_dtype = utils.get_computation_dtype(query.dtype)
+    query_acc = query.to(computation_dtype)
+    key_acc = key.to(computation_dtype)
+    value_acc = value.to(computation_dtype)
+    grad_out_acc = grad_out.to(computation_dtype)
+
+    scores = _scaled_dot_product_flash_attention_for_cpu_scores(
+        query_acc,
+        key_acc,
+        is_causal,
+        attn_mask,
+        scale,
+    )
+    masked_rows = torch.all(scores == float("-inf"), dim=-1, keepdim=True)
+    safe_scores = torch.where(masked_rows, torch.zeros_like(scores), scores)
+    attn = torch.softmax(safe_scores, dim=-1)
+    attn = torch.where(masked_rows, torch.zeros_like(attn), attn)
+
+    grad_value = torch.matmul(attn.transpose(-2, -1), grad_out_acc)
+    grad_attn = torch.matmul(grad_out_acc, value_acc.transpose(-2, -1))
+    grad_scores = attn * (grad_attn - torch.sum(grad_attn * attn, dim=-1, keepdim=True))
+    scale_factor = scale if scale is not None else query.size(-1) ** -0.5
+    grad_query = torch.matmul(grad_scores, key_acc) * scale_factor
+    grad_key = torch.matmul(grad_scores.transpose(-2, -1), query_acc) * scale_factor
+
+    grad_key = _collapse_grouped_query_attention_grad(grad_key, num_key_value_heads)
+    grad_value = _collapse_grouped_query_attention_grad(grad_value, num_key_value_heads)
     return (
-        query.requires_grad
-        or key.requires_grad
-        or value.requires_grad
-        or (attn_mask is not None and attn_mask.requires_grad)
+        _cpu_flash_attention_backward_layout(grad_query).to(query.dtype),
+        _cpu_flash_attention_backward_layout(grad_key).to(key.dtype),
+        _cpu_flash_attention_backward_layout(grad_value).to(value.dtype),
     )
 
 
-# Keep this separate from the export decomposition above: direct callers can
-# observe the second output, so the Autograd impl must return logsumexp.
-@aten._scaled_dot_product_flash_attention_for_cpu.default.py_impl(DispatchKey.Autograd)
-def scaled_dot_product_flash_attention_for_cpu_autograd(
+@aten._scaled_dot_product_flash_attention_for_cpu_backward.default.py_impl(
+    DispatchKey.Autograd
+)
+def scaled_dot_product_flash_attention_for_cpu_backward_autograd(
+    grad_out: Tensor,
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     *,
     attn_mask: Tensor | None = None,
     scale: float | None = None,
-) -> tuple[Tensor, Tensor]:
-    if not _needs_scaled_dot_product_flash_attention_for_cpu_autograd(
-        query, key, value, attn_mask
-    ):
+) -> tuple[Tensor, Tensor, Tensor]:
+    def native_backward() -> tuple[Tensor, Tensor, Tensor]:
         with torch._C._AutoDispatchBelowAutograd():
-            return aten._scaled_dot_product_flash_attention_for_cpu.default(
+            return aten._scaled_dot_product_flash_attention_for_cpu_backward.default(
+                grad_out,
                 query,
                 key,
                 value,
+                out,
+                logsumexp,
                 dropout_p,
                 is_causal,
                 attn_mask=attn_mask,
                 scale=scale,
             )
 
-    _check_scaled_dot_product_flash_attention_for_cpu_attn_mask(query, attn_mask)
-    output, _ = scaled_dot_product_flash_attention_for_cpu(
+    if not torch.is_grad_enabled() or not _requires_grad(
+        grad_out, query, key, value, out, logsumexp, attn_mask
+    ):
+        return native_backward()
+
+    native_grads = native_backward()
+    math_grads = _scaled_dot_product_flash_attention_for_cpu_backward_math(
+        grad_out,
         query,
         key,
         value,
         dropout_p,
         is_causal,
-        attn_mask=attn_mask,
-        scale=scale,
-    )
-    logsumexp = _scaled_dot_product_flash_attention_for_cpu_logsumexp(
-        query,
-        key,
-        is_causal,
         attn_mask,
         scale,
     )
-    return output, logsumexp
+    return (
+        native_grads[0] + (math_grads[0] - math_grads[0].detach()),
+        native_grads[1] + (math_grads[1] - math_grads[1].detach()),
+        native_grads[2] + (math_grads[2] - math_grads[2].detach()),
+    )
 
 
 def register_inplace(aten_op, outplace_op):
