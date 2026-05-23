@@ -193,6 +193,20 @@ class CudaReproTests(TestCase):
                 mask, value, torch.tensor(0.0, device=target.device)
             ).sum(dim=[1], keepdim=True)
 
+        def target_depends_on_vocab_dim(target, value):
+            iota = torch.arange(value.shape[1], device=target.device)
+            mask = target == iota
+            return torch.where(
+                mask, value, torch.tensor(0.0, device=target.device)
+            ).sum(dim=[1], keepdim=True)
+
+        def explicit_sum_dtype(target, value):
+            iota = torch.arange(value.shape[1], device=target.device)
+            mask = target == iota
+            return torch.where(
+                mask, value, torch.tensor(0.0, device=target.device)
+            ).sum(dim=[1], keepdim=True, dtype=torch.float32)
+
         target = torch.tensor(
             [[0], [3], [-100], [-1], [vocab], [5]],
             device=device_type,
@@ -200,6 +214,10 @@ class CudaReproTests(TestCase):
         )
         scale = torch.randn(target.shape, device=device_type)
         value = torch.randn(target.shape[0], vocab, device=device_type)
+        large_target = torch.randint(
+            0, vocab, (9000, 1), device=device_type, dtype=torch.int64
+        )
+        large_value = torch.randn(large_target.shape[0], vocab, device=device_type)
 
         counters.clear()
         actual, (code,) = run_and_get_code(
@@ -216,6 +234,37 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual, vocab_dependent_value(target, value))
         self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 1)
         FileCheck().check_not("rnumel").run(code)
+
+        target_2d = torch.randint(
+            0, vocab, value.shape, device=device_type, dtype=torch.int64
+        )
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(target_depends_on_vocab_dim, fullgraph=True),
+            target_2d,
+            value,
+        )
+        self.assertEqual(actual, target_depends_on_vocab_dim(target_2d, value))
+        self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 0)
+        FileCheck().check("rnumel").run(code)
+
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(explicit_sum_dtype, fullgraph=True), target, value
+        )
+        self.assertEqual(actual, explicit_sum_dtype(target, value))
+        self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 0)
+        FileCheck().check("rnumel").run(code)
+
+        counters.clear()
+        actual, (code,) = run_and_get_code(
+            torch.compile(vocab_dependent_value, fullgraph=True),
+            large_target,
+            large_value,
+        )
+        self.assertEqual(actual, vocab_dependent_value(large_target, large_value))
+        self.assertEqual(counters["inductor"]["sparse_one_hot_sum"], 0)
+        FileCheck().check("rnumel").run(code)
 
     def test_view_replay_padding_issue_163328(self):
         class ReproModule(nn.Module):

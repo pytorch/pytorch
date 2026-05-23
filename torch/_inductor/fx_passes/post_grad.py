@@ -80,6 +80,7 @@ PatternMatcherPass = functools.partial(
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+_SPARSE_ONE_HOT_MAX_OUTER_NUMEL = 8192
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -1035,6 +1036,31 @@ def _match_iota_eq(
     return None
 
 
+def _broadcasts_over_reduction_dim(
+    node: torch.fx.Node, input_ndim: int, reduce_dim: int
+) -> bool:
+    shape = _node_tensor_shape(node)
+    if shape is None:
+        return False
+
+    dim = len(shape) - input_ndim + reduce_dim
+    if dim < 0:
+        return True
+    if dim >= len(shape):
+        return False
+    return statically_known_true(sym_eq(shape[dim], 1))
+
+
+def _has_profitable_sparse_one_hot_outer_numel(
+    input_shape: torch.Size, reduce_dim: int
+) -> bool:
+    outer_numel: Any = 1
+    for dim, size in enumerate(input_shape):
+        if dim != reduce_dim:
+            outer_numel *= size
+    return statically_known_true(outer_numel <= _SPARSE_ONE_HOT_MAX_OUTER_NUMEL)
+
+
 def _match_sparse_one_hot_value(
     node: torch.fx.Node,
 ) -> tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node | None, Any] | None:
@@ -1113,6 +1139,8 @@ def fold_sparse_one_hot_sum(graph: torch.fx.Graph) -> None:
         input_shape = _node_tensor_shape(sum_input)
         if input_shape is None:
             continue
+        if not _has_profitable_sparse_one_hot_outer_numel(input_shape, reduce_dim):
+            continue
 
         match = _match_sparse_one_hot_value(sum_input)
         if match is None:
@@ -1128,6 +1156,8 @@ def fold_sparse_one_hot_sum(graph: torch.fx.Graph) -> None:
         if not isinstance(target_val, torch.Tensor) or not is_integer_dtype(
             target_val.dtype
         ):
+            continue
+        if not _broadcasts_over_reduction_dim(target, len(input_shape), reduce_dim):
             continue
 
         depends_on_reduction_dim = _value_depends_on_reduction_dim(
