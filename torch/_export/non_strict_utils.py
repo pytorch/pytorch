@@ -27,6 +27,7 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._opaque_base import OpaqueBase
+from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -1081,48 +1082,72 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
-        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+        if func.__name__ in ("__getitem__", "__setitem__") and isinstance(
+            args[0], torch.Tensor
+        ):
+
+            def is_tensor_scalar_slice_bound(item):
+                return (
+                    isinstance(item, torch.Tensor)
+                    and item.ndim == 0
+                    and is_integer_dtype(item.dtype)
+                )
+
+            def has_traceable_index(item):
+                if isinstance(item, torch.SymInt):
+                    return True
+                if isinstance(item, slice):
+                    return any(
+                        isinstance(s, torch.SymInt) or is_tensor_scalar_slice_bound(s)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                return False
+
+            def convert_index_arg(item):
+                if is_tensor_scalar_slice_bound(item):
+                    return torch.ops.aten.item.default(item)
+                return item
 
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
                 if item is None:
-                    return dim + 1, (torch.unsqueeze, [dim])
+                    return dim + 1, (torch.unsqueeze, [dim], False)
                 if isinstance(item, (int, torch.SymInt)):
-                    return dim, (torch.select, [dim, item])
+                    return dim, (torch.select, [dim, item], False)
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
-                    step = item.step or 1
-                    if item.start is None and item.stop is None and step == 1:
+                    step = item.step if item.step is not None else 1
+                    if (
+                        item.start is None
+                        and item.stop is None
+                        and isinstance(step, int)
+                        and step == 1
+                    ):
                         # no-op
-                        return dim + 1, (lambda t: t, [])
+                        return dim + 1, (lambda t: t, [], False)
                     return dim + 1, (
                         torch.ops.aten.slice,
                         [dim, item.start, item.stop, step],
+                        True,
                     )
                 # Otherwise do nothing.
 
             items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-            has_symint = False
+            has_traceable_index_value = False
             index_ellipsis = None
             t = args[0]
             n_none_slices = t.ndim + 1
             for i, item in enumerate(items):
-                if isinstance(item, torch.SymInt) or (
-                    isinstance(item, slice)
-                    and any(
-                        isinstance(s, torch.SymInt)
-                        for s in (item.start, item.stop, item.step)
-                    )
-                ):
-                    has_symint = True
+                if has_traceable_index(item):
+                    has_traceable_index_value = True
                 if item is Ellipsis:
                     index_ellipsis = i
                 if item is not None:
                     n_none_slices -= 1
 
-            # only rewrite when there are symints
-            if has_symint:
+            # only rewrite when there are traceable dynamic index values
+            if has_traceable_index_value:
                 if index_ellipsis is not None:
                     none_slices = [slice(None)] * n_none_slices
                     items[index_ellipsis : index_ellipsis + 1] = none_slices
@@ -1140,8 +1165,13 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     # Run sequence.
                     # pyrefly: ignore [bad-index, index-error]
                     t = args[0]
-                    for _method, _args in sequence:
+                    for _method, _args, _convert_slice_bounds in sequence:
+                        if _convert_slice_bounds:
+                            _args = [convert_index_arg(a) for a in _args]
                         t = _method(t, *_args)
+                    if func.__name__ == "__setitem__":
+                        t.copy_(args[2])
+                        return None
                     return t
 
                 return run, [], {}
