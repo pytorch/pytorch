@@ -1273,9 +1273,9 @@ class TestConverter(TestCase):
 
             def __exit__(
                 self,
-                exc_type,
-                exc_value,
-                traceback,
+                exc_type: Any,  # noqa: PYI036
+                exc_value: Any,  # noqa: PYI036
+                traceback: Any,  # noqa: PYI036
             ) -> None:
                 self.count -= 1
                 return

@@ -875,7 +875,12 @@ class record_function(_ContextDecorator):
         )
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(
+        self,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
+    ) -> None:
         if not self.run_callbacks_on_exit:
             return
 

@@ -274,7 +274,12 @@ class strict_fusion:
     def __enter__(self):
         pass
 
-    def __exit__(self, type, value, tb) -> None:
+    def __exit__(
+        self,
+        type: Any,  # noqa: PYI036
+        value: Any,  # noqa: PYI036
+        tb: Any,  # noqa: PYI036
+    ) -> None:
         pass
 
 
