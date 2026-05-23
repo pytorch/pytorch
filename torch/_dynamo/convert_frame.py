@@ -2167,8 +2167,8 @@ def _compile(
 
             if torch._dynamo.config.run_gc_after_compile:
                 with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
-                    log.info("run_gc_after_compile: running gc")
-                    gc.collect(1)
+                    log.info("run_gc_after_compile: running full gc")
+                    gc.collect()
 
             output = None
             if tracer_output:
