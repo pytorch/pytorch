@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyOn,
 )
 from torch.testing._internal.common_nn import freeze_rng_state, NNTestCase
 from torch.testing._internal.common_utils import (
@@ -162,7 +161,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
     @dtypes(torch.bfloat16)
-    @onlyOn(["cpu", "cuda"])
+    @onlyAccelerator
     def test_Dropout_bfloat16(self, device, dtype):
         input = torch.empty(1000, dtype=dtype)
         self._test_dropout(nn.Dropout, device, input)
