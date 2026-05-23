@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-# mypy: disable-error-code="type-arg"
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum

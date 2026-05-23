@@ -1,5 +1,4 @@
 # ${generated_comment}
-# mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
 from enum import Enum

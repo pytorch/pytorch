@@ -1,5 +1,4 @@
 # ${generated_comment}
-# mypy: allow-untyped-defs
 
 from typing import Final, NoReturn
 from typing_extensions import Self

@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-# mypy: disable-error-code="type-arg"
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, NamedTuple, overload, TypeAlias, TypeVar
 from typing_extensions import Never, Self
