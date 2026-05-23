@@ -395,6 +395,19 @@ CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
 
 void CUDAGraph::begin_capture_to_if_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
+  begin_capture_to_conditional_node(
+      scalar_cuda_pred_tensor, /*cudaGraphCondTypeIf=*/0);
+}
+
+void CUDAGraph::begin_capture_to_while_node(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+  begin_capture_to_conditional_node(
+      scalar_cuda_pred_tensor, /*cudaGraphCondTypeWhile=*/1);
+}
+
+void CUDAGraph::begin_capture_to_conditional_node(
+    const at::Tensor& scalar_cuda_pred_tensor,
+    int conditional_node_type) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   TORCH_CHECK(
       !has_graph_exec_,
@@ -443,7 +456,8 @@ void CUDAGraph::begin_capture_to_if_node(
   cudaGraphNodeParams params{};
   params.type = cudaGraphNodeTypeConditional;
   params.conditional.handle = handle;
-  params.conditional.type = cudaGraphCondTypeIf;
+  params.conditional.type =
+      static_cast<cudaGraphConditionalNodeType>(conditional_node_type);
   params.conditional.size = 1;
 
   cudaGraphNode_t cond_node{};
@@ -464,7 +478,7 @@ void CUDAGraph::begin_capture_to_if_node(
       num_dependencies,
       &params));
 #endif
-  cudaGraph_t if_node_child_graph = params.conditional.phGraph_out[0];
+  cudaGraph_t conditional_node_child_graph = params.conditional.phGraph_out[0];
 
 #if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
@@ -476,6 +490,7 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   CUDAStream child_stream = getStreamFromPool();
   conditional_graph_capture_ids_.push(0);
+  conditional_node_handles_.push(handle);
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
@@ -487,7 +502,12 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   });
 
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
-      child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
+      child_stream,
+      conditional_node_child_graph,
+      nullptr,
+      nullptr,
+      0,
+      capture_mode_));
   c10::cuda::CUDACachingAllocator::markCaptureBegin(capture_dev_);
 
   auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
@@ -511,11 +531,29 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 #endif
 }
 
+void CUDAGraph::set_current_conditional_node_condition(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  TORCH_INTERNAL_ASSERT(
+      !conditional_node_handles_.empty(),
+      "Missing handle for conditional node.");
+  set_conditional_handle(
+      conditional_node_handles_.top(), scalar_cuda_pred_tensor);
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  AT_ERROR(
+      __func__,
+      " CUDA Graphs conditional nodes are not supported for cuda version < 12.4");
+#endif
+}
+
 void CUDAGraph::end_capture_to_conditional_node() {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   TORCH_INTERNAL_ASSERT(
       !conditional_graph_capture_ids_.empty(),
       "Missing capture ID for conditional node.");
+  TORCH_INTERNAL_ASSERT(
+      !conditional_node_handles_.empty(),
+      "Missing handle for conditional node.");
 
   CaptureId_t child_capture_id = conditional_graph_capture_ids_.top();
   bool rng_or_generators_changed = false;
@@ -540,6 +578,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
   c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
+  conditional_node_handles_.pop();
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
