@@ -7784,8 +7784,13 @@ class CommonTemplate:
         self.assertEqual(out, fn(q, k, v), atol=2e-4, rtol=1e-2)
 
         source_code = "\n".join(source_codes)
-        self.assertIn("aten._scaled_dot_product_flash_attention", source_code)
-        self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
+        self.assertIn(
+            "torch.ops.aten._scaled_dot_product_flash_attention.default", source_code
+        )
+        self.assertNotIn(
+            "torch.ops.aten._scaled_dot_product_efficient_attention.default",
+            source_code,
+        )
 
     @requires_gpu()
     @unittest.skipIf(
@@ -7822,8 +7827,13 @@ class CommonTemplate:
         self.assertEqual(out, expected, atol=2e-4, rtol=1e-2)
 
         source_code = "\n".join(source_codes)
-        self.assertIn("aten._scaled_dot_product_efficient_attention", source_code)
-        self.assertNotIn("aten._scaled_dot_product_flash_attention", source_code)
+        self.assertIn(
+            "torch.ops.aten._scaled_dot_product_efficient_attention.default",
+            source_code,
+        )
+        self.assertNotIn(
+            "torch.ops.aten._scaled_dot_product_flash_attention.default", source_code
+        )
 
     def test_remove_noop_copy(self):
         def fn(x, y):

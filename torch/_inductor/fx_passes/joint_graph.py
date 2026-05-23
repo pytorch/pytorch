@@ -20,12 +20,14 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
     statically_known_true,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
+    _transfer_meta,
     Arg,
     CallFunction,
     CallFunctionVarArgs,
@@ -577,14 +579,11 @@ def replace_zero_bias_sdpa_with_flash(match: Match, *args, **kwargs) -> None:
         args=(query, key, value, dropout_p, is_causal, False),
         kwargs={} if scale is None else {"scale": scale},
     )
-    for key_name in (
-        "stack_trace",
-        "source_fn_stack",
-        "nn_module_stack",
-        "torch_fn",
-    ):
-        if key_name in node.meta:
-            flash_node.meta[key_name] = node.meta[key_name]
+    _transfer_meta(flash_node.meta, node, pass_name="replace_zero_bias_sdpa_with_flash")
+    # Efficient attention returns 4 tuple entries while flash attention returns
+    # 9, so the old output metadata is not valid for the replacement node.
+    flash_node.meta.pop("val", None)
+    flash_node.meta.pop("tensor_meta", None)
 
     node.replace_all_uses_with(flash_node)
     match.erase_nodes()
@@ -691,6 +690,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     continue
 
                 full_shapes = shapes
+                full_meta_val = None
                 as_strided_args = None
                 if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
                     strides = replace_symints(fake_tensor.stride())
@@ -715,11 +715,16 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     full_storage_len = replace_symint(required_storage_len)
                     if full_storage_len is not None:
                         full_shapes = [full_storage_len]
+                        full_meta_shape = (required_storage_len,)
                     elif not (
                         value in (0, 1)
                         and guard_or_true(required_storage_len <= dense_numel)
                     ):
                         continue
+                    else:
+                        full_meta_shape = fake_tensor.shape
+
+                    full_meta_val = fake_tensor.new_empty(full_meta_shape)
 
                     as_strided_args = (shapes, strides, storage_offset)
 
@@ -736,6 +741,11 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 )
 
                 if as_strided_args is not None:
+                    assert full_meta_val is not None
+                    new_node.meta["val"] = full_meta_val
+                    new_node.meta["tensor_meta"] = _extract_tensor_metadata(
+                        full_meta_val
+                    )
                     with graph.inserting_after(new_node):
                         new_node = graph.call_function(
                             aten.as_strided.default,
