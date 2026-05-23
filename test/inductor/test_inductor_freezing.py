@@ -515,6 +515,7 @@ class OptimizeForInferenceTemplate(TestCase):
             counters.clear()
 
             with config.patch("freezing_traced_inference", freezing_traced_inference):
+
                 @torch.compile()
                 def foo(mod, x):
                     with torch.no_grad():
