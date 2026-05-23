@@ -5755,6 +5755,26 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_cond_traced_unsupported_constant_outputs_cudagraphs(self):
+        def true_fn():
+            return float("nan")
+
+        def false_fn():
+            return float("nan")
+
+        predicate = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            ValueError,
+            "constant branch outputs must be ints or None",
+        ):
+            with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                torch.ops.higher_order.cond(predicate, true_fn, false_fn, [])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_unequal_constant_outputs_cudagraphs(self):
         def true_fn():
             return 1
@@ -10625,6 +10645,110 @@ class TestHopSchema(TestCase):
             str(schema),
             """while_loop(Any cond_fn, Any body_fn, Tensor(a2!) carried_input0, Tensor(a3!) carried_input1, Tensor(a4!) carried_input2, Tensor(a5!) additional_input0) -> (Tensor, Tensor, Tensor)""",
         )
+
+    def test_map_gen_schema_tensor_inputs(self):
+        def body_fn(x):
+            return x.sin()
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            body_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0) -> ((Tensor))""",
+        )
+
+    def test_map_gen_schema_with_additional_inputs(self):
+        def body_fn(x, scale):
+            return x * scale
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            body_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0, Tensor additional_input0) -> ((Tensor))""",
+        )
+
+    def test_map_gen_schema_multiple_inputs(self):
+        def body_fn(x1, x2):
+            return x1 + x2, x1 * x2
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            body_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
+        )
+
+    def test_map_gen_schema_with_xs_mutation(self):
+        def body_fn(x):
+            x.add_(1)
+            return x * 2
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            body_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor(a1!) xs0) -> ((Tensor))""",
+        )
+
+    def test_map_gen_schema_with_multiple_xs_mutation(self):
+        def body_fn(x1, x2):
+            x1.add_(1)
+            x2.sub_(1)
+            return x1 + x2, x1 * x2
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            body_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor(a1!) xs0, Tensor(a2!) xs1) -> (Tensor, Tensor)""",
+        )
+
+    def test_map_gen_schema_pos_args_mutation_raises(self):
+        def body_fn(x, buf):
+            buf.add_(x)
+            return x * 2
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For map, f cannot mutate pos_args inputs",
+        ):
+            torch.ops.higher_order.map_impl.gen_schema(
+                body_fn,
+                (torch.randn(5, 3, 4),),
+                (torch.randn(3, 4),),
+            )
+
+    def test_map_gen_schema_xs_and_pos_args_mutation_raises(self):
+        def body_fn(x1, x2, buf):
+            x1.add_(1)
+            buf.sub_(x2)
+            return x1 + x2, x1 * x2
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For map, f cannot mutate pos_args inputs",
+        ):
+            torch.ops.higher_order.map_impl.gen_schema(
+                body_fn,
+                (torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
+                (torch.randn(3, 4),),
+            )
 
 
 class DynamicCondModel(torch.nn.Module):

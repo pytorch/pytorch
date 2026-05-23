@@ -10,6 +10,7 @@ from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._inductor.custom_graph_pass import CustomGraphPass
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -392,8 +393,8 @@ class CondTests(TestCase):
                 return torch.cond(p, lambda y: 1, lambda y: 2, (x,))
 
         with self.assertRaisesRegex(
-            Exception,
-            "differing constant outputs",
+            InductorError,
+            "NotImplementedError:.*differing constant outputs",
         ):
             torch.compile(Model(), backend="inductor", fullgraph=True)(
                 torch.tensor(True), torch.ones(4)

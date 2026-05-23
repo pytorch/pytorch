@@ -145,6 +145,14 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                             "non-tensor constants. "
                             f"Got {if_out} and {else_out}."
                         )
+                    elif not isinstance(if_out, (int, type(None))) or not isinstance(
+                        else_out, (int, type(None))
+                    ):
+                        raise ValueError(
+                            "For cudagraph captured torch.cond(), non-tensor "
+                            "constant branch outputs must be ints or None. "
+                            f"Got {if_out} and {else_out}."
+                        )
                     elif if_out != else_out:
                         raise ValueError(
                             "For cudagraph captured torch.cond(), the returned "
