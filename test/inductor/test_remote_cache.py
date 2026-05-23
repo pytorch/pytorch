@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
+import os
+import tempfile
 from dataclasses import dataclass
 
 from torch._inductor.remote_cache import (
+    create_cache,
     RemoteCache,
     RemoteCacheBackend,
     RemoteCachePassthroughSerde,
@@ -68,6 +71,21 @@ class TestRemoteCache(TestCase):
         with self.assertRaises(AssertionError):
             c.get("test")
         self.assertEqual(c.sample.fail_reason, "testget")
+
+    def test_create_local_autotune_cache(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "cache", "entry.best_config")
+            c = create_cache("local-autotune", local_cache_cls="LocalAutotuneCache")
+            if c is None:
+                self.fail("Expected local autotune cache")
+
+            expected = {"value": 1}
+            c.put(key, expected)
+
+            self.assertTrue(os.path.exists(key))
+            self.assertEqual(c.get(key), expected)
 
 
 if __name__ == "__main__":

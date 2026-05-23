@@ -101,6 +101,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             (self.data, self.requires_grad, hooks, state),
         )
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 
@@ -208,7 +209,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.nn.Parameter`.
 
@@ -273,18 +274,19 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
         t._is_buffer = True
         return t
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.Tensor`.
 

@@ -648,10 +648,8 @@ def index_vars_squeeze(
 
     var_ranges, add_var = var_builder(prefix)
     args: list[Sequence[sympy.Expr]] = []
-    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
-        new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
     return args, var_ranges
 
@@ -888,3 +886,16 @@ def extract_free_symbols(
     ):
         fn(*args)
     return handler.symbols
+
+
+class SymbolUsageCollectorOpsHandler(DefaultHandler):
+    usages: OrderedSet[str]
+
+    def __init__(self, symbol: sympy.Symbol) -> None:
+        self.symbol = symbol
+        self.usages = OrderedSet()
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        used_here = self.symbol in args or self.symbol in kwargs.values()
+        if used_here:
+            self.usages.add(name)

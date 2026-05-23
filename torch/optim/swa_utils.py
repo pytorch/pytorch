@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
 
+from __future__ import annotations
+
 import itertools
 import math
 import warnings
-from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, cast, Literal, Union
+from typing import Any, cast, Literal, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -15,7 +16,11 @@ from torch.nn import Module
 from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 
-from .optimizer import Optimizer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from .optimizer import Optimizer
 
 
 __all__ = [
@@ -31,7 +36,7 @@ __all__ = [
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 
-PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
+PARAM_LIST = tuple[Tensor, ...] | list[Tensor]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
@@ -266,7 +271,7 @@ class AveragedModel(Module):
         multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
         | None = None,
         use_buffers=False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -473,7 +478,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr

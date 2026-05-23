@@ -7,7 +7,6 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import sympy
 
@@ -98,7 +97,7 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
-        compile_kwargs: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}
@@ -325,6 +324,35 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
 
+    def test_reinterpret_view_floordiv_offset_dynamic(self):
+        """
+        Test that ReinterpretView with a FloorDiv offset emits valid FX IR
+        with SymInt metadata when dynamic shapes are enabled.
+        """
+
+        def foo(x):
+            n = x.shape[0]
+            return x.narrow(0, n // 2, n // 2).contiguous() + 1
+
+        args = [torch.randn(16, 4, device=self.device)]
+        (gm,) = self._compile_and_check(
+            foo, args, compile_kwargs={"dynamic": True}, metadata_only=True
+        )
+
+        as_strided_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.as_strided
+        )
+        for node in as_strided_nodes:
+            offset = node.args[3] if len(node.args) > 3 else None
+            if offset is not None and isinstance(offset, torch.fx.Node):
+                val = offset.meta.get("val")
+                if val is not None:
+                    self.assertNotIsInstance(
+                        val,
+                        torch.SymFloat,
+                        "ReinterpretView offset should be SymInt, not SymFloat",
+                    )
+
     def test_reshape_fallback(self):
         """
         Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
@@ -395,7 +423,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
@@ -1044,7 +1072,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",  # noqa: B950
+    return [buf1, buf2]""",
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):

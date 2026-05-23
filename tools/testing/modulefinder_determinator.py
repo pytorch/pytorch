@@ -117,7 +117,7 @@ def test_impact_of_file(filename: str) -> str:
         CI - CI configuration files
     """
     parts = filename.split(os.sep)
-    if parts[0] in [".jenkins", ".circleci", ".ci"]:
+    if parts[0] in [".jenkins", ".ci"]:
         return "CI"
     if parts[0] in ["docs", "scripts", "CODEOWNERS", "README.md"]:
         return "NONE"

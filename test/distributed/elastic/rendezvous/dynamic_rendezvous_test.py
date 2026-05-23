@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from base64 import b64encode
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import cast, Optional
+from typing import cast
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
@@ -176,7 +176,7 @@ class RendezvousStateTest(TestCase):
 
 
 class FakeRendezvousBackend(RendezvousBackend):
-    _state: Optional[bytes]
+    _state: bytes | None
     _token: int
 
     def __init__(self) -> None:
@@ -187,15 +187,15 @@ class FakeRendezvousBackend(RendezvousBackend):
     def name(self) -> str:
         return "fake_backend"
 
-    def get_state(self) -> Optional[tuple[bytes, Token]]:
+    def get_state(self) -> tuple[bytes, Token] | None:
         if self._token == 0:
             return None
 
         return self._state, self._token  # type: ignore[return-value]
 
     def set_state(
-        self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[tuple[bytes, Token, bool]]:
+        self, state: bytes, token: Token | None = None
+    ) -> tuple[bytes, Token, bool] | None:
         if token is None:
             token = 0
 
@@ -223,6 +223,7 @@ class FakeRendezvousBackend(RendezvousBackend):
 
 class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._backend = FakeRendezvousBackend()
 
         mock_get_state = MagicMock(wraps=self._backend.get_state)
@@ -513,7 +514,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
 class FakeRendezvousStateHolder(_RendezvousStateHolder):
     _state: _RendezvousState
-    _dirty: Optional[bool]
+    _dirty: bool | None
 
     def __init__(self) -> None:
         self._state = _RendezvousState()
@@ -527,7 +528,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
     def state(self, value) -> None:
         self._state = value
 
-    def sync(self) -> Optional[bool]:
+    def sync(self) -> bool | None:
         self._dirty, dirty = None, self._dirty
 
         return dirty
@@ -538,6 +539,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
 
 class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._state_holder = FakeRendezvousStateHolder()
@@ -582,7 +584,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         )
 
     def _create_op_executor(
-        self, settings: Optional[RendezvousSettings] = None
+        self, settings: RendezvousSettings | None = None
     ) -> _DistributedRendezvousOpExecutor:
         self._state_holder.state = self._state
 
@@ -1151,14 +1153,15 @@ class DummyStore(Store):
 
 class DynamicRendezvousHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._min_nodes = 1
         self._max_nodes = 1
 
-        self._join_timeout: Optional[timedelta] = None
-        self._close_timeout: Optional[timedelta] = None
-        self._heartbeat_timeout: Optional[timedelta] = None
+        self._join_timeout: timedelta | None = None
+        self._close_timeout: timedelta | None = None
+        self._heartbeat_timeout: timedelta | None = None
 
         self._keep_alive_interval = timedelta(seconds=30)
 
@@ -1248,6 +1251,39 @@ class DynamicRendezvousHandlerTest(TestCase):
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
             self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
+
+    def test_share_store_creates_tcp_store_when_rank_changes_to_zero(self):
+        self._max_nodes = 2
+        other_node = _NodeDesc("aaa_node", 1, 1)
+        self._state.participants[other_node] = 0
+        self._state.last_heartbeats[other_node] = datetime.now(timezone.utc)
+
+        handler = self._create_handler()
+
+        shared_store_info = RendezvousStoreInfo(TEST_ADDR, TEST_PORT)
+        with patch.object(RendezvousStoreInfo, "build", return_value=shared_store_info):
+            rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.rank, 1)
+        self.assertIsNone(handler._shared_tcp_store_server)
+
+        del self._state.participants[other_node]
+        del self._state.last_heartbeats[other_node]
+        self._min_nodes = 1
+        self._max_nodes = 1
+        handler._settings = RendezvousSettings(
+            run_id="dummy_run_id",
+            min_nodes=1,
+            max_nodes=1,
+            timeout=RendezvousTimeout(),
+            keep_alive_interval=self._keep_alive_interval,
+            keep_alive_max_attempt=3,
+        )
+
+        rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.rank, 0)
+        self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:
@@ -1500,12 +1536,13 @@ class DummyRendezvousBackend(RendezvousBackend):
 
 class DynamicRendezvousHandlerFromBackendTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._run_id = "dummy_run_id"
         self._store = DummyStore()
         self._backend = DummyRendezvousBackend()
         self._min_nodes = 3
         self._max_nodes = 6
-        self._timeout: Optional[RendezvousTimeout] = RendezvousTimeout()
+        self._timeout: RendezvousTimeout | None = RendezvousTimeout()
 
     def _create_handler(self) -> DynamicRendezvousHandler:
         return DynamicRendezvousHandler.from_backend(
@@ -1568,6 +1605,7 @@ class DynamicRendezvousHandlerFromBackendTest(TestCase):
 
 class CreateHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = DummyStore()
 
         self._backend = DummyRendezvousBackend()
@@ -1677,6 +1715,7 @@ class _CapturingThread(threading.Thread):
 
 class IntegrationTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = HashStore()
         self._handlers = []
         self._backend = _InMemoryRendezvousBackend()
@@ -1829,7 +1868,7 @@ class IntegrationTest(TestCase):
             def set(self, key, value):
                 pass
 
-        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store = CustomPrefixStore()
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"

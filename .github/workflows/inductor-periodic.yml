@@ -18,6 +18,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-default-label-prefix:
@@ -59,6 +60,9 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
           { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
@@ -87,7 +91,7 @@ jobs:
     name: rocm-periodic-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-rocm-py3_10
+      build-environment: linux-jammy-rocm-py3.10-mi355
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
@@ -120,9 +124,6 @@ jobs:
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-test:
-    permissions:
-      id-token: write
-      contents: read
     name: rocm-periodic-dynamo-benchmarks-test
     uses: ./.github/workflows/_rocm-test.yml
     needs: rocm-periodic-dynamo-benchmarks-build

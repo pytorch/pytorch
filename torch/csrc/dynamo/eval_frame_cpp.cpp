@@ -1,3 +1,4 @@
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
@@ -96,9 +97,7 @@ py::object get_null_stack_value() {
 py::list _get_frame_value_stack_with_depth(
     const py::handle& frame_obj,
     int depth) {
-  if (!PyFrame_Check(frame_obj.ptr())) {
-    throw py::type_error("expected a frame object!");
-  }
+  TORCH_CHECK_TYPE(PyFrame_Check(frame_obj.ptr()), "expected a frame object!");
 
   py::list result;
   if (depth <= 0) {
@@ -211,6 +210,49 @@ py::list _get_frame_value_stack_with_depth(
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
 
+// Cache the random module to avoid calling py::module_::import("random") at
+// arbitrary points during execution. torch.package overrides the import
+// machinery, and importing "random" inside a package archive context would fail
+// if random isn't in the extern list.
+// Stored as raw PyObject* (leaked ref) to avoid destructor running after Python
+// finalizes, same pattern as bytecode_debugger_callback_obj above.
+static PyObject* random_module = nullptr;
+static py::handle get_random_module() {
+  if (random_module == nullptr) {
+    random_module = py::module_::import("random").release().ptr();
+  }
+  return py::handle(random_module);
+}
+
+// Use RAII to save/restore global state across the dynamo callback
+class PreserveGlobalState {
+  py::object random_state;
+
+ public:
+  PreserveGlobalState() {
+    this->random_state = get_random_module().attr("getstate")();
+  }
+  PreserveGlobalState(const PreserveGlobalState&) = delete;
+  PreserveGlobalState(PreserveGlobalState&&) = delete;
+  PreserveGlobalState& operator=(const PreserveGlobalState&) = delete;
+  PreserveGlobalState& operator=(PreserveGlobalState&&) = delete;
+  ~PreserveGlobalState() {
+    try {
+      get_random_module().attr("setstate")(this->random_state);
+    } catch (py::error_already_set& e) {
+      try {
+        e.restore();
+      } catch (...) {
+        // Intentionally return to silence empty catch linter.
+        // We can't propagate exceptions since we are in a destructor.
+        return;
+      }
+    } catch (...) {
+      return;
+    }
+  }
+};
+
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static py::object dynamo_call_callback(
@@ -251,9 +293,9 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  if (limit < 1 && limit != -1) {
-    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
-  }
+  TORCH_CHECK_VALUE(
+      limit >= 1 || limit == -1,
+      "recursion limit must be >= 1, or -1 to reset");
   c_recursion_limit = limit;
 }
 
@@ -295,18 +337,6 @@ struct CRecursionLimitRAII {
 };
 
 #endif
-
-EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
-
-EvalFrameOverride get_eval_frame_override() {
-  return eval_frame_override;
-}
-
-EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
-  EvalFrameOverride prev = eval_frame_override;
-  eval_frame_override = override;
-  return prev;
-}
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -353,7 +383,20 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
+  }
+
+  // When _skip_one_hop_torch_function has set the skip_next flag, bypass
+  // Dynamo entirely so the frame runs in eager.  Dynamo has its own
+  // symbolic handling for _skip_one_hop_torch_function when it encounters
+  // it during tracing, but when the C function calls back into Python,
+  // we must not intercept that frame: guard evaluation and compiler
+  // setup code accesses attributes on subclass tensors, which
+  // inadvertently triggers C-level has_torch_function calls that consume
+  // the skip_next flag before tracing can observe it.
+  if (at::impl::PythonTorchFunctionTLS::peek_skip_next()) {
+    DEBUG_TRACE("skip_next %s", get_frame_name(frame));
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -387,28 +430,28 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    // If we're attempting to run dynamo-generated code and eval frame override
-    // is set to SKIP, then we should set the callback to None to skip.
-    // If the override is set to ERROR, then we call
-    // torch._dynamo.convert_frame.get_fail_callback, which patches
-    // convert_frame.compile_frame with a function that errors unconditionally.
-    // This means Dynamo will error if it attempts to trace into the frame
-    // (Python-level skips pre-trace are permissible).
-    if (!recursive_callback.is_none() &&
-        !recursive_callback.is(py::bool_(false))) {
-      if (eval_frame_override == EvalFrameOverride::SKIP) {
-        recursive_callback = py::none();
-      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
-        if (!convert_frame_get_fail_callback) {
-          convert_frame_get_fail_callback =
-              py::module_::import("torch._dynamo.convert_frame")
-                  .attr("get_fail_callback");
-          auto atexit = py::module_::import("atexit");
-          atexit.attr("register")(py::cpp_function(
-              []() { convert_frame_get_fail_callback = std::nullopt; }));
+    if (fullgraph_compiled_frame_count >= 0) {
+      fullgraph_compiled_frame_count++;
+      // Under fullgraph, disable or error Dynamo for sub-frames of compiled
+      // code. If fullgraph_error_on_nested_compile is set, wrap the callback
+      // with get_fail_callback so compilation attempts error. Otherwise, set
+      // callback to None to skip sub-frames entirely.
+      if (!recursive_callback.is_none() &&
+          !recursive_callback.is(py::bool_(false))) {
+        if (fullgraph_error_on_nested_compile) {
+          if (!convert_frame_get_fail_callback) {
+            convert_frame_get_fail_callback =
+                py::module_::import("torch._dynamo.convert_frame")
+                    .attr("get_fail_callback");
+            auto atexit = py::module_::import("atexit");
+            atexit.attr("register")(py::cpp_function(
+                []() { convert_frame_get_fail_callback = std::nullopt; }));
+          }
+          recursive_callback =
+              convert_frame_get_fail_callback.value()(recursive_callback);
+        } else {
+          recursive_callback = py::none();
         }
-        recursive_callback =
-            convert_frame_get_fail_callback.value()(recursive_callback);
       }
     }
     eval_frame_callback_set(recursive_callback.ptr());
@@ -462,12 +505,18 @@ PyObject* dynamo__custom_eval_frame(
     extra = init_and_set_extra_state(F_CODE(frame));
   }
 
-  // Get recursive action
-  FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
+  // Resolve strategy per isolate_recompiles scope. For non-isolated
+  // frames (id < 0) this returns extra->strategy; for isolated regions
+  // it returns the region's own strategy if set, otherwise inherits
+  // global SKIP (deliberate "do not trace" marks must apply across
+  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
+  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  FrameExecStrategy strategy =
+      extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
+
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
-  // Skip this frame
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
@@ -494,6 +543,7 @@ PyObject* dynamo__custom_eval_frame(
       extra,
       locals.get(),
       backend,
+      isolate_recompiles_id,
       &maybe_cached_code,
       &trace_annotation,
       is_skip_guard_eval_unsafe);
@@ -513,21 +563,23 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
-  // NB: We only do guard collectives when there are any compiled code entries
-  // at all; these reduces overtriggering and we don't need to do guard
-  // collectives the very first time we've seen a frame
-  // TODO: We could also check if we had just created extra for the first
-  // time?  Not too sure the best condition for extra->cache_entry_list
-  if (guard_complete_hook != nullptr && !extra->cache_entry_list.empty()) {
+  // NB: We only do guard collectives when there are compiled code entries
+  // for the current region (or the default region); this reduces
+  // overtriggering and we don't need to do guard collectives the very first
+  // time we've seen a frame in this region.
+  bool has_relevant_entries =
+      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+      extra->cache_entry_map.count(-1) > 0;
+  if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(maybe_cached_code != Py_None);
+    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
     if (!py::cast<bool>(res)) {
       maybe_cached_code = Py_None; // NB: non-owning
     }
   }
 
-  if (maybe_cached_code != Py_None) {
+  if (!Py_IsNone(maybe_cached_code)) {
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
@@ -553,7 +605,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
-  CacheEntry* cache_entry = extract_cache_entry(extra);
+  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
   FrameExecStrategy new_strategy;
@@ -567,6 +619,7 @@ PyObject* dynamo__custom_eval_frame(
       fail();
       return eval_result;
     }
+    PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
@@ -602,10 +655,11 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_exec_strategy(extra, new_strategy);
+    extra_state_set_region_exec_strategy(
+        extra, isolate_recompiles_id, new_strategy);
   }
 
-  if (guarded_code != Py_None) {
+  if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
     // NB: We could use extract_cache_entry to get the cache_entry, but

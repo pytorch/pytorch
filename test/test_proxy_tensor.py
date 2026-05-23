@@ -1,7 +1,7 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
 import torch
 import torch._dynamo
 import unittest
@@ -23,7 +23,13 @@ from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import (
+    DecompositionInterpreter,
+    get_isolated_graphmodule,
+    make_fx,
+    ProxyTorchDispatchMode,
+    PythonKeyTracer,
+)
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -362,6 +368,25 @@ def forward(self, x_1):
     return copy_
     """)
 
+    def test_proxy_tensor_mode_tracks_nested_decomp_tables(self):
+        sin_table = {torch.ops.aten.sin.default: lambda x: x}
+        cos_table = {torch.ops.aten.cos.default: lambda x: x}
+        tan_table = {torch.ops.aten.tan.default: lambda x: x}
+
+        mode = ProxyTorchDispatchMode(
+            PythonKeyTracer(),
+            tracing_mode="real",
+            decomposition_table=sin_table,
+        )
+
+        self.assertIs(mode.decomposition_table, sin_table)
+        with mode.enable_decompositions(cos_table):
+            self.assertIs(mode.decomposition_table, cos_table)
+            with mode.enable_decompositions(tan_table):
+                self.assertIs(mode.decomposition_table, tan_table)
+            self.assertIs(mode.decomposition_table, cos_table)
+        self.assertIs(mode.decomposition_table, sin_table)
+
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
             return torch.ops.aten.norm.Scalar(x, 2.0)
@@ -656,7 +681,7 @@ def forward(self, x_1):
 
                 self.layer_norm = torch.nn.LayerNorm(input_dim)
 
-            def forward(mod_self, x):  # noqa: B902
+            def forward(mod_self, x):
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
                 y = mod_self.layer_norm(x)
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
@@ -797,6 +822,7 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_T244632748(self):
         class TestModule(torch.nn.Module):
@@ -1017,40 +1043,39 @@ class TestSymbolicTracing(TestCase):
 
 
     def test_debug_interpreter(self):
-        import torch.library
-        from torch.library import Library
+        from torch.library import _scoped_library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("foo(Tensor self) -> Tensor")
+        with _scoped_library("foo", "DEF") as foo:
+            foo.define("foo(Tensor self) -> Tensor")
 
-        # Operator where meta and cpu disagree on strides
-        @torch.library.impl(foo, "foo", "CPU")
-        def foo_cpu(x):
-            return x.clone().T
+            # Operator where meta and cpu disagree on strides
+            @torch.library.impl(foo, "foo", "CPU")
+            def foo_cpu(x):
+                return x.clone().T
 
-        @torch.library.impl(foo, "foo", "Meta")
-        def foo_meta(x):
-            return x.clone()
+            @torch.library.impl(foo, "foo", "Meta")
+            def foo_meta(x):
+                return x.clone()
 
-        def f(x):
-            return torch.ops.foo.foo.default(x)
+            def f(x):
+                return torch.ops.foo.foo.default(x)
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
-        from torch._functorch.compilers import DebugInterpreter
+            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+            from torch._functorch.compilers import DebugInterpreter
 
-        interp = DebugInterpreter(gm)
+            interp = DebugInterpreter(gm)
 
-        # input mismatch is caught (indicates guard problem)
-        self.assertRaisesRegex(
-            AssertionError, r"3 != 1",
-            lambda: interp.run(torch.randn(3, 3).T),
-        )
+            # input mismatch is caught (indicates guard problem)
+            self.assertRaisesRegex(
+                AssertionError, r"3 != 1",
+                lambda: interp.run(torch.randn(3, 3).T),
+            )
 
-        # Catch the incorrect meta
-        self.assertRaisesRegex(
-            AssertionError, r"\(3, 1\) != \(1, 3\)",
-            lambda: interp.run(torch.randn(3, 3))
-        )
+            # Catch the incorrect meta
+            self.assertRaisesRegex(
+                AssertionError, r"\(3, 1\) != \(1, 3\)",
+                lambda: interp.run(torch.randn(3, 3))
+            )
 
     def test_int_input(self):
         def f(x, y):
@@ -1212,7 +1237,7 @@ def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
-    return cumsum"""  # noqa: B950
+    return cumsum"""
         )
 
 
@@ -1229,7 +1254,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
     index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
-    return index_select"""  # noqa: B950
+    return index_select"""
         )
 
     def test_arange_unbacked_output_size(self):
@@ -1242,7 +1267,7 @@ def forward(self, x_1, y_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return arange"""  # noqa: B950
+    return arange"""
         )
 
     def test_adv_index_batch(self):
@@ -1347,7 +1372,7 @@ def forward(self, a_1):
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return empty"""  # noqa: B950
+    return empty"""
         )
 
 
@@ -1366,7 +1391,7 @@ def forward(self, x_1):
     scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
     copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
-    return x_1"""  # noqa: B950
+    return x_1"""
         )
 
     def test_dynamic_pointwise_scalar(self):
@@ -1417,12 +1442,12 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul_9 = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_9, 3]);  view_2 = mul_9 = None
+    mul_11 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_11, 3]);  view_2 = mul_11 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
-    return None""")  # noqa: B950
+    return None""")
 
     def test_unbacked_slice(self):
         def f(x, m):
@@ -1501,7 +1526,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
-    return add""")  # noqa: B950
+    return add""")
 
     def test_reshape_divisibility_unbacked(self):
         def f(x):
@@ -1545,7 +1570,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = zeros = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")  # noqa: B950
+    return add""")
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
@@ -1569,7 +1594,7 @@ def forward(self, x_1, y_1):
         gm.recompile()
         r = str(gm.code).strip()
         # self.assertExpectedInline(
-        #     r, """"""  # noqa: B950
+        #     r, """"""
         # )
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
@@ -1624,7 +1649,7 @@ def forward(self, lengths_1, values_1):
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
     getitem_2 = split_with_sizes[2];  split_with_sizes = None
-    return (getitem, getitem_1, getitem_2)""")  # noqa: B950
+    return (getitem, getitem_1, getitem_2)""")
 
     def test_invalidate_nonzero(self):
         ok = False
@@ -1792,7 +1817,7 @@ def forward(self, a_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return zeros""")  # noqa: B950
+    return zeros""")
 
     def test_expand(self):
         def f(a):
@@ -1870,12 +1895,12 @@ def forward(self, x_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=False)),  # noqa: B950
-            """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""  # noqa: B950
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=False)),
+            """["L['a'].size()[0] == 2*L['b'].size()[0]", "L['a'].stride()[0] == 1", "L['a'].storage_offset() == 0", "L['b'].stride()[0] == 1", "L['b'].storage_offset() == 0", "2 <= L['b'].size()[0]"]"""
         )
         self.assertExpectedInline(
-            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=True)),  # noqa: B950
-            """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""  # noqa: B950
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=True)),
+            """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""
         )
 
     def test_guard_upperbound_range_refinement(self):
@@ -2029,8 +2054,6 @@ make_fx_failures = {
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('corrcoef'),
-    xfail('quantile'),
-    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -2061,13 +2084,11 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
+    xfail('nn.functional.linear_cross_entropy', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??

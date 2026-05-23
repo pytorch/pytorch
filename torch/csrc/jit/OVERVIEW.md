@@ -776,10 +776,9 @@ using Operation = std::function<void(Stack*)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
 void example_add(Stack* stack) {
-    Tensor a, b;
     // stack before: ? ? ? a b <- back
-    pop(stack, a, b); // Templated helper function
-                      // that pops a, b and converts them to Tensor
+    auto [a, b] = pop<Tensor, Tensor>(stack); // Templated helper function
+                                              // that pops and converts to Tensor
     push(stack, a + b);
     // stack after:
     // ? ? ? c <- back

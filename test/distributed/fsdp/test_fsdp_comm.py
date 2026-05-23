@@ -2,7 +2,6 @@
 import sys
 from contextlib import nullcontext
 from enum import auto, Enum
-from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -105,7 +104,7 @@ class TestCommunication(FSDPTestContinuous):
     def _get_ref_num_all_gathers(
         self,
         num_fsdp: int,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
         is_first_iter: bool,
         is_last_iter_no_sync: bool,
     ) -> int:
@@ -125,7 +124,7 @@ class TestCommunication(FSDPTestContinuous):
     def _get_ref_num_all_gathers_in_pass(
         self,
         num_fsdp: int,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
         pass_type: PassType,
         is_first_iter: bool,
         is_last_iter_no_sync: bool,
@@ -211,7 +210,7 @@ class TestCommunication(FSDPTestContinuous):
         device,
         nested_model: bool,
         use_no_sync: bool,
-        sharding_strategy: Optional[ShardingStrategy],
+        sharding_strategy: ShardingStrategy | None,
     ):
         """
         Tests FSDP's communication cost in terms of calls to collective

@@ -14,7 +14,7 @@ This module contains utilities for writing microbenchmark tests.
 
 # Here are the reserved keywords in the benchmark suite
 _reserved_keywords = {"probs", "total_samples", "tags"}
-_supported_devices = {"cpu", "cuda"}
+_supported_devices = {"cpu", "cuda", "mps"}
 
 
 def shape_to_string(shape):

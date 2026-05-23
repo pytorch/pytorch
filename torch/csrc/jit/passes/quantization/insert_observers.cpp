@@ -1520,7 +1520,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        // a vector recoding whether each output is observed or not
+        // a vector recording whether each output is observed or not
         std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {

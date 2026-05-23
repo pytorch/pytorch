@@ -56,7 +56,7 @@ static PyObject* THCPStream_pynew(
 
   if (stream_ptr) {
     TORCH_CHECK(
-        priority == 0, "Priority was explicitly set for a external stream")
+        priority == 0, "Priority was explicitly set for an external stream")
   }
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
@@ -82,7 +82,7 @@ static PyObject* THCPStream_pynew(
 
 static void THCPStream_dealloc(THCPStream* self) {
   self->cuda_stream.~CUDAStream();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
 static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
@@ -181,7 +181,7 @@ PyTypeObject THCPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPStreamType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THCPStream_methods, /* tp_methods */

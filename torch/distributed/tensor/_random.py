@@ -11,6 +11,7 @@ from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.types import IntLikeType
 
 
 logger = getLogger(__name__)
@@ -205,8 +206,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
             )
 
-        rng_state = self._get_device_state()
         if run_state_sync:
+            rng_state = self._get_device_state()
             # synchronize RNG state using rank 0's current one
             torch.distributed.broadcast(rng_state, 0)
             my_rng_state = self._get_device_state()
@@ -215,7 +216,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                     "DTensor is synchronizing RNG states of every rank with the state from rank 0. "
                     "This behavior is deprecated. "
                     "Please call `torch.manual_seed()` on every rank that participates in SPMD DTensor Operations with "
-                    "the same seed. If using Pipeline Parallelism, each pipeling state would use a different seed, "
+                    "the same seed. If using Pipeline Parallelism, each pipeline state would use a different seed, "
                     "but all ranks belonging to one pipeline stage would use the same seed."
                 )
             self._set_device_state(rng_state)
@@ -337,35 +338,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             The last value to calculate before obtaining the starting offset is the shard linear index.
             The starting offset for each rank will be its shard_linear_index * local_tensor_numel.
         """
-        mesh = spec.mesh
-        mesh_coordinate = mesh.get_coordinate()
-        if mesh_coordinate is None:
-            raise AssertionError
-
-        # Compute shard index and total number of shards on each tensor dim
-        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
-            mesh_coordinate, spec
-        )
-
-        # compute shard linear index
-        shard_linear_idx = self._calc_shard_linear_idx(
-            shard_idx_by_dim, total_num_shards_by_dim
-        )
-
-        # compute starting offset using the first shard's size
-        local_size_on_rank_0 = _calc_first_shard_size(spec)
-
-        from torch.distributed.tensor._ops.utils import prod
-
-        local_size = prod(local_size_on_rank_0)
-
-        # get current RNG offset
-        current_offset = state.offset
-
-        # pytorch: offset must be multiple of 4
-        # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
-        offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        state.offset = current_offset + offset_incr
+        start_offset_incr, _ = self._compute_rng_offsets(spec)
+        state.offset = state.offset + start_offset_incr
 
     def _set_post_op_offset(
         self, state: _PhiloxState, spec: DTensorSpec, old_offset: torch.Tensor
@@ -383,19 +357,41 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         Returns:
             None
         """
-        dtensor_shape = spec.shape
+        _, end_offset_incr = self._compute_rng_offsets(spec)
+        state.offset = old_offset + end_offset_incr
 
+    def _compute_rng_offsets(self, spec: DTensorSpec) -> tuple[int, int]:
+        """Compute the RNG offset increments for a distributed random op.
+
+        These values are derived from mesh topology, placements, and tensor shape,
+        and are static for a given compiled graph. They can be burned into the graph
+        as integer constants rather than keeping the DTensorSpec around at runtime.
+
+        Returns:
+            (start_offset_incr, end_offset_incr) — both aligned to multiples of 4.
+        """
         from torch.distributed.tensor._ops.utils import prod
 
-        numel = prod(dtensor_shape)
+        mesh = spec.mesh
+        mesh_coordinate = [mesh._sym_get_coordinate(i) for i in range(mesh.ndim)]
+
+        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+            mesh_coordinate, spec
+        )
+        shard_linear_idx = self._calc_shard_linear_idx(
+            shard_idx_by_dim, total_num_shards_by_dim
+        )
+        local_size = prod(_calc_first_shard_size(spec))
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
-        numel = (numel + 3) // 4 * 4
-        state.offset = old_offset + numel
+        start_offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
+        end_offset_incr = (prod(spec.shape) + 3) // 4 * 4
+
+        return start_offset_incr, end_offset_incr
 
     def _calc_shard_linear_idx(
-        self, shard_coord: list[int], shard_size: list[int]
-    ) -> int:
+        self, shard_coord: Sequence[IntLikeType], shard_size: Sequence[IntLikeType]
+    ) -> IntLikeType:
         return _calc_shard_linear_idx(shard_coord, shard_size)
 
 
@@ -414,8 +410,8 @@ def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
 
 
 def _calc_shard_info(
-    mesh_coordinate: Sequence[int], spec: DTensorSpec
-) -> tuple[list[int], list[int]]:
+    mesh_coordinate: Sequence[IntLikeType], spec: DTensorSpec
+) -> tuple[list[IntLikeType], list[IntLikeType]]:
     mesh = spec.mesh
     # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
     # case. Replace the custom logic with dim_map once we support it.
@@ -435,14 +431,14 @@ def _calc_shard_info(
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    if mesh_coordinate is None:
-        raise AssertionError
     mesh_size = mesh.shape
     shard_idx_by_dim = []
-    total_num_shards_by_dim = []  # total number of shards on each tensor dim
+    total_num_shards_by_dim: list[
+        IntLikeType
+    ] = []  # total number of shards on each tensor dim
     for mesh_dim in dim_map:
-        shard_idx = 0
-        total_num_shards = 1
+        shard_idx: IntLikeType = 0
+        total_num_shards: IntLikeType = 1
         # the tensor dim is sharded on more than 1 mesh dim
         if isinstance(mesh_dim, list):
             rank_coord = [mesh_coordinate[d] for d in mesh_dim]
@@ -457,10 +453,12 @@ def _calc_shard_info(
     return shard_idx_by_dim, total_num_shards_by_dim
 
 
-def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int:
+def _calc_shard_linear_idx(
+    shard_coord: Sequence[IntLikeType], shard_size: Sequence[IntLikeType]
+) -> IntLikeType:
     # compute shard linear index
-    shard_linear_idx = 0
-    shard_coord_stride = 1
+    shard_linear_idx: IntLikeType = 0
+    shard_coord_stride: IntLikeType = 1
     for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
         shard_linear_idx += idx * shard_coord_stride
         shard_coord_stride *= size

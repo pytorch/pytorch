@@ -1,4 +1,6 @@
 """Intermediate layer between `Timer` and `valgrind`."""
+from __future__ import annotations
+
 import collections
 import enum
 import dataclasses
@@ -12,14 +14,16 @@ import sys
 import textwrap
 from typing import (
     cast, Any, NamedTuple,
-    Union, TYPE_CHECKING)
-from collections.abc import Callable
-from collections.abc import Iterator
+    TYPE_CHECKING)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
-from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 import operator
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -63,7 +67,7 @@ class FunctionCounts:
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
+    def __getitem__(self, item: Any) -> FunctionCount | FunctionCounts:
         data: FunctionCount | tuple[FunctionCount, ...] = self._data[item]
         return (
             FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
@@ -95,22 +99,22 @@ class FunctionCounts:
 
     def __add__(
         self,
-        other: "FunctionCounts",
-    ) -> "FunctionCounts":
+        other: FunctionCounts,
+    ) -> FunctionCounts:
         return self._merge(other, lambda c: c)
 
     def __sub__(
         self,
-        other: "FunctionCounts",
-    ) -> "FunctionCounts":
+        other: FunctionCounts,
+    ) -> FunctionCounts:
         return self._merge(other, operator.neg)
 
-    def __mul__(self, other: int | float) -> "FunctionCounts":
+    def __mul__(self, other: int | float) -> FunctionCounts:
         return self._from_dict({
             fn: int(c * other) for c, fn in self._data
         }, self.inclusive)
 
-    def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
+    def transform(self, map_fn: Callable[[str], str]) -> FunctionCounts:
         """Apply `map_fn` to all of the function names.
 
         This can be used to regularize function names (e.g. stripping irrelevant
@@ -123,14 +127,14 @@ class FunctionCounts:
 
         return self._from_dict(counts, self.inclusive)
 
-    def filter(self, filter_fn: Callable[[str], bool]) -> "FunctionCounts":
+    def filter(self, filter_fn: Callable[[str], bool]) -> FunctionCounts:
         """Keep only the elements where `filter_fn` applied to function name returns True."""
         return FunctionCounts(tuple(i for i in self if filter_fn(i.function)), self.inclusive)
 
     def sum(self) -> int:
         return sum(c for c, _ in self)
 
-    def denoise(self) -> "FunctionCounts":
+    def denoise(self) -> FunctionCounts:
         """Remove known noisy instructions.
 
         Several instructions in the CPython interpreter are rather noisy. These
@@ -142,9 +146,9 @@ class FunctionCounts:
 
     def _merge(
         self,
-        second: "FunctionCounts",
+        second: FunctionCounts,
         merge_fn: Callable[[int], int]
-    ) -> "FunctionCounts":
+    ) -> FunctionCounts:
         if self.inclusive != second.inclusive:
             raise AssertionError("Cannot merge inclusive and exclusive counts.")
         counts: collections.defaultdict[str, int] = collections.defaultdict(int)
@@ -157,7 +161,7 @@ class FunctionCounts:
         return self._from_dict(counts, self.inclusive)
 
     @staticmethod
-    def _from_dict(counts: dict[str, int], inclusive: bool) -> "FunctionCounts":
+    def _from_dict(counts: dict[str, int], inclusive: bool) -> FunctionCounts:
         flat_counts = (FunctionCount(c, fn) for fn, c in counts.items() if c)
         return FunctionCounts(tuple(sorted(flat_counts, reverse=True)), inclusive)
 
@@ -222,7 +226,7 @@ class CallgrindStats:
     # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
     def delta(
         self,
-        other: "CallgrindStats",
+        other: CallgrindStats,
         inclusive: bool = False,
     ) -> FunctionCounts:
         """Diff two sets of counts.
@@ -237,7 +241,7 @@ class CallgrindStats:
         """
         return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
 
-    def as_standardized(self) -> "CallgrindStats":
+    def as_standardized(self) -> CallgrindStats:
         """Strip library names and some prefixes from function strings.
 
         When comparing two different sets of instruction counts, on stumbling

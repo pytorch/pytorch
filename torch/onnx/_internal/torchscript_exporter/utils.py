@@ -344,13 +344,8 @@ def export(
                 `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
                 this instructs the runtime to use PyTorch's implementation of these ops.
 
-                .. warning::
-
-                    Models exported this way are probably runnable only by Caffe2.
-
-                    This may be useful if the numeric differences in implementations of operators are
-                    causing large differences in behavior between PyTorch and Caffe2 (which is more
-                    common on untrained models).
+                Note: Caffe2 support has been removed as of PyTorch 2.9. This export type
+                    is primarily intended for debugging ATen operator execution.
 
             * ``OperatorExportTypes.ONNX_ATEN_FALLBACK``: Try to export each ATen op
                 (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
@@ -379,7 +374,7 @@ def export(
 
                 .. warning::
 
-                    Models exported this way are probably runnable only by Caffe2.
+                    Note: Caffe2 support has been removed as of PyTorch 2.9.
 
         opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
@@ -1704,7 +1699,7 @@ def _should_aten_fallback(
 
 
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    # Returns `overload_name` attribute to ATen ops
     schema = n.schema()
     if not schema.startswith("aten::"):
         return ""
@@ -1806,7 +1801,7 @@ def _run_symbolic_function(
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            # Emit ATen op when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()

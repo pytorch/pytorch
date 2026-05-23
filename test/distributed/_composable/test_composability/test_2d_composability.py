@@ -4,7 +4,6 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -195,7 +194,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
@@ -524,14 +523,14 @@ class Test2dFSDP1ParallelIntegration(DTensorContinuousTestBase):
 
     @skip_if_lt_x_gpu(4)
     def test_2d_ddp_integration_functionality(self) -> None:
-        model, twod_model, dp_pg = self.init_model(self.device_type())
+        model, twod_model, dp_pg = self.init_model(self.device_type)
         optim = torch.optim.Adam(model.parameters(), lr=3e-5)
         twod_optim = torch.optim.Adam(twod_model.parameters(), lr=3e-5)
 
         # Create Input
         input_seed = dist.get_rank(dp_pg)
         torch.manual_seed(input_seed + 1)
-        input = torch.rand(4, 10, device=self.device_type())
+        input = torch.rand(4, 10, device=self.device_type)
 
         output = model(input)
         twod_output = twod_model(input)
@@ -546,7 +545,7 @@ class Test2dFSDP1ParallelIntegration(DTensorContinuousTestBase):
         self._check_module(model, twod_model)
 
         torch.manual_seed(input_seed + 1004)
-        input = torch.rand(16, 10, device=self.device_type())
+        input = torch.rand(16, 10, device=self.device_type)
 
         output = model(input)
         twod_output = twod_model(input)
@@ -578,7 +577,7 @@ class TestNew2dParallelTraining(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_state_enable_extension(self):
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         model = FSDP(
             SimpleModel().to(device_type),
@@ -599,7 +598,7 @@ class TestNew2dParallelTraining(DTensorContinuousTestBase):
 
         torch.manual_seed(0)
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -681,7 +680,7 @@ class TestNew2dParallelStateDict(DTensorContinuousTestBase):
         Test whether _fsdp_extension from FSDPstate has been set correctly.
         """
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -719,7 +718,7 @@ class TestNew2dParallelStateDict(DTensorContinuousTestBase):
         # Create a model and sharded it with 2D FSDP + TP
         torch.manual_seed(0)
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -768,7 +767,7 @@ class TestNew2dParallelStateDict(DTensorContinuousTestBase):
 
         torch.manual_seed(0)
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -833,7 +832,7 @@ class TestNew2dParallelStateDict(DTensorContinuousTestBase):
         # Create a model and sharded it with 2D FSDP + TP
         torch.manual_seed(0)
         mesh_2d = init_device_mesh(
-            self.device_type(), (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         parallelize_plan = {
             "net1": ColwiseParallel(),

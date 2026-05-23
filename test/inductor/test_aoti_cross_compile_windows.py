@@ -1,15 +1,18 @@
 # Owner(s): ["module: inductor"]
 import os
 import platform
+import shutil
 import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._inductor.config
 from torch._environment import is_fbcode
+from torch._inductor.cpp_builder import _ensure_mingw_cudart_import_lib
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
@@ -21,8 +24,8 @@ class ModelTestConfig:
     name: str
     model_class: type
     example_inputs: tuple[torch.Tensor, ...]
-    dynamic_shapes: Optional[dict[str, Any]] = None
-    inductor_configs: Optional[dict[str, Any]] = None
+    dynamic_shapes: dict[str, Any] | None = None
+    inductor_configs: dict[str, Any] | None = None
     rtol: float = 1e-4
     atol: float = 1e-4
 
@@ -34,8 +37,8 @@ class WindowsCrossCompilationTestFramework:
     Provides reusable logic for creating compile and load test methods.
     """
 
-    _base_path: Optional[Path] = None
-    _win_torch_libs_path: Optional[str] = None
+    _base_path: Path | None = None
+    _win_torch_libs_path: str | None = None
 
     @classmethod
     def base_path(cls) -> Path:
@@ -45,12 +48,12 @@ class WindowsCrossCompilationTestFramework:
         return cls._base_path
 
     @classmethod
-    def set_base_path(cls, path: Optional[Path | str] = None) -> None:
+    def set_base_path(cls, path: Path | str | None = None) -> None:
         """Set the base path for package files."""
         cls._base_path = Path(path) if path else None
 
     @classmethod
-    def set_win_torch_libs_path(cls, path: Optional[str] = None) -> None:
+    def set_win_torch_libs_path(cls, path: str | None = None) -> None:
         """Set the path for Windows torch libs."""
         cls._win_torch_libs_path = path
 
@@ -316,6 +319,137 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
             rtol=1e-3,
             atol=1e-3,
         )
+
+
+class TestEnsureMingwCudartImportLib(TestCase):
+    """Unit tests for _ensure_mingw_cudart_import_lib."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp_dir = tempfile.mkdtemp(prefix="test_mingw_cudart_")
+        self.cuda_home = os.path.join(self.tmp_dir, "cuda")
+        self.lib_dir = os.path.join(self.tmp_dir, "lib")
+        os.makedirs(os.path.join(self.cuda_home, "bin", "x64"), exist_ok=True)
+        os.makedirs(self.lib_dir, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+        super().tearDown()
+
+    def _create_fake_dll(self, version: str = "130") -> str:
+        dll_path = os.path.join(self.cuda_home, "bin", "x64", f"cudart64_{version}.dll")
+        Path(dll_path).touch()
+        return dll_path
+
+    def _create_fake_cudart_lib(self) -> str:
+        lib_path = os.path.join(self.lib_dir, "cudart.lib")
+        Path(lib_path).touch()
+        return lib_path
+
+    def test_noop_when_no_windows_cuda_home(self):
+        """Should skip gracefully when WINDOWS_CUDA_HOME is not set."""
+        env = os.environ.copy()
+        env.pop("WINDOWS_CUDA_HOME", None)
+        with patch.dict(os.environ, env, clear=True):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+        self.assertEqual(result, [])
+        self.assertFalse(os.path.exists(os.path.join(self.lib_dir, "libcudart.a")))
+
+    def test_noop_when_libcudart_a_already_exists(self):
+        """Should skip generation if libcudart.a already exists."""
+        existing = os.path.join(self.lib_dir, "libcudart.a")
+        Path(existing).touch()
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+        self.assertEqual(result, [])
+        self.assertTrue(os.path.exists(existing))
+
+    @patch("torch._inductor.cpp_builder._create_msvc_gs_stubs_lib", return_value=None)
+    def test_gs_stubs_fallback_when_no_dll_found(self, mock_stubs):
+        """Should attempt GS stubs fallback when no cudart64_*.dll is found."""
+        self._create_fake_cudart_lib()
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            _ensure_mingw_cudart_import_lib([self.lib_dir])
+        mock_stubs.assert_called_once_with(self.lib_dir)
+
+    @patch(
+        "torch._inductor.cpp_builder._create_msvc_gs_stubs_lib",
+        return_value="msvc_gs_stubs",
+    )
+    def test_gs_stubs_returned_when_no_dll(self, mock_stubs):
+        """Should return the stubs library name when DLL is unavailable."""
+        self._create_fake_cudart_lib()
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+        self.assertEqual(result, ["msvc_gs_stubs"])
+
+    def test_noop_when_no_writable_dir_with_cudart_lib(self):
+        """Should skip gracefully when no writable directory contains cudart.lib."""
+        self._create_fake_dll()
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+        self.assertEqual(result, [])
+        self.assertFalse(os.path.exists(os.path.join(self.lib_dir, "libcudart.a")))
+
+    @patch("subprocess.run")
+    def test_successful_generation(self, mock_run: MagicMock):
+        """Should call gendef and dlltool when all conditions are met."""
+        dll_path = self._create_fake_dll()
+        self._create_fake_cudart_lib()
+
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_run.call_count, 2)
+
+        # Verify gendef call
+        gendef_call = mock_run.call_args_list[0]
+        gendef_cmd = gendef_call[0][0]
+        self.assertEqual(gendef_cmd[0], "gendef")
+        self.assertEqual(gendef_cmd[1], "-")
+        self.assertEqual(gendef_cmd[2], dll_path)
+
+        # Verify dlltool call
+        dlltool_call = mock_run.call_args_list[1]
+        dlltool_cmd = dlltool_call[0][0]
+        self.assertEqual(dlltool_cmd[0], "x86_64-w64-mingw32-dlltool")
+        self.assertIn("-d", dlltool_cmd)
+        self.assertIn("-l", dlltool_cmd)
+        self.assertIn("-D", dlltool_cmd)
+        self.assertIn("cudart64_130.dll", dlltool_cmd)
+
+    @patch(
+        "torch._inductor.cpp_builder._create_msvc_gs_stubs_lib",
+        return_value="msvc_gs_stubs",
+    )
+    @patch("subprocess.run", side_effect=FileNotFoundError("gendef not found"))
+    def test_gs_stubs_fallback_on_gendef_not_found(self, mock_run, mock_stubs):
+        """Should fall back to GS stubs when gendef is not installed."""
+        self._create_fake_dll()
+        self._create_fake_cudart_lib()
+
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            result = _ensure_mingw_cudart_import_lib([self.lib_dir])
+
+        self.assertEqual(result, ["msvc_gs_stubs"])
+        mock_stubs.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_bin_x64_fallback_to_bin(self, mock_run: MagicMock):
+        """Should fall back to bin/ when bin/x64/ does not exist."""
+        shutil.rmtree(os.path.join(self.cuda_home, "bin", "x64"))
+        bin_dir = os.path.join(self.cuda_home, "bin")
+        dll_path = os.path.join(bin_dir, "cudart64_130.dll")
+        Path(dll_path).touch()
+        self._create_fake_cudart_lib()
+
+        with patch.dict(os.environ, {"WINDOWS_CUDA_HOME": self.cuda_home}):
+            _ensure_mingw_cudart_import_lib([self.lib_dir])
+
+        self.assertEqual(mock_run.call_count, 2)
+        gendef_cmd = mock_run.call_args_list[0][0][0]
+        self.assertIn(dll_path, gendef_cmd)
 
 
 if __name__ == "__main__":
