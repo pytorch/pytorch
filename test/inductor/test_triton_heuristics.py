@@ -134,12 +134,8 @@ class TestTritonHeuristics(TestCase):
                 for cfg in configs
             )
 
-        self.assertTrue(
-            has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp64"}, 16))
-        )
-        self.assertFalse(
-            has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp32"}, 0))
-        )
+        self.assertTrue(has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp64"}, 16)))
+        self.assertFalse(has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp32"}, 0)))
         self.assertFalse(
             has_fp64_heavy_candidate(get_configs({"in_ptr0": "*fp64"}, 15))
         )

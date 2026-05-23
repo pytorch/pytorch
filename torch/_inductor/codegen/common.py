@@ -2031,6 +2031,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         dtype: torch.dtype | None = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
+        """Return a cached CSE variable for expr, emitting an assignment when needed."""
         if isinstance(expr, OpsValue):
             expr = expr.value
 
