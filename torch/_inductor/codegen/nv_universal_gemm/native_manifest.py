@@ -12,6 +12,10 @@ from typing import Any
 NVGEMM_NATIVE_C_ABI_VERSION = 1
 
 
+class NVGemmNativeCppWrapperError(RuntimeError):
+    pass
+
+
 @dataclasses.dataclass(frozen=True)
 class NVGemmTensorArgSpec:
     name: str
@@ -72,6 +76,8 @@ class NVGemmCHeaderMetadata:
     module_struct_name: str | None
     module_load_hook: str | None
     module_unload_hook: str | None
+    module_load_return_type: str | None
+    module_unload_return_type: str | None
     wrapper_name: str | None
     wrapper_return_type: str | None
     wrapper_params: tuple[NVGemmCHeaderParam, ...]
@@ -259,6 +265,8 @@ def nvgemm_runtime_link_flags() -> tuple[str, ...]:
 
 def _parse_c_declaration(declaration: str) -> tuple[str, str, int | None]:
     declaration = declaration.strip().rstrip(";")
+    if not declaration:
+        raise RuntimeError("Could not parse empty C declaration")
     array_size = None
     array_match = re.search(r"\[(\d+)\]$", declaration)
     if array_match is not None:
@@ -283,6 +291,18 @@ def _parse_c_field(line: str) -> NVGemmCHeaderField | None:
     return NVGemmCHeaderField(name=name, c_type=c_type, array_size=array_size)
 
 
+def _parse_c_fields(body: str) -> tuple[NVGemmCHeaderField, ...]:
+    fields = []
+    for declaration in body.split(";"):
+        declaration = declaration.strip()
+        if not declaration:
+            continue
+        field = _parse_c_field(f"{declaration};")
+        if field is not None:
+            fields.append(field)
+    return tuple(fields)
+
+
 def parse_nvgemm_header_metadata(
     header_path: str | Path,
     symbol_prefix: str,
@@ -292,6 +312,11 @@ def parse_nvgemm_header_metadata(
     if not path.is_file():
         return None
 
+    def fail(message: str) -> None:
+        raise NVGemmNativeCppWrapperError(
+            f"Malformed NVGEMM native cpp_wrapper header {path}: {message}"
+        )
+
     text = path.read_text()
     structs: dict[str, tuple[NVGemmCHeaderField, ...]] = {}
     for match in re.finditer(
@@ -300,16 +325,12 @@ def parse_nvgemm_header_metadata(
         text,
         re.DOTALL,
     ):
-        fields = tuple(
-            field
-            for line in match.group("body").splitlines()
-            if (field := _parse_c_field(line)) is not None
-        )
+        fields = _parse_c_fields(match.group("body"))
         structs[match.group("name")] = fields
 
     wrapper_name = f"cute_dsl_{symbol_prefix}_wrapper"
     wrapper_match = re.search(
-        rf"static\s+inline\s+(?P<ret>\w+)\s+"
+        rf"static\s+inline\s+(?P<ret>[A-Za-z_][\w\s\*]*?)\s+"
         rf"(?P<name>{re.escape(wrapper_name)})\((?P<params>.*?)\)\s*\{{",
         text,
         re.DOTALL,
@@ -317,9 +338,11 @@ def parse_nvgemm_header_metadata(
     wrapper_return_type = None
     wrapper_params: tuple[NVGemmCHeaderParam, ...] = ()
     if wrapper_match is not None:
-        wrapper_return_type = wrapper_match.group("ret")
+        wrapper_return_type = wrapper_match.group("ret").strip()
         params = []
         for param_decl in wrapper_match.group("params").split(","):
+            if param_decl.strip() == "void":
+                continue
             c_type, name, _ = _parse_c_declaration(param_decl)
             tensor_struct_name = None
             kind = "scalar"
@@ -340,6 +363,8 @@ def parse_nvgemm_header_metadata(
                 )
             )
         wrapper_params = tuple(params)
+    else:
+        fail(f"could not find wrapper function {wrapper_name}")
 
     def wrapper_arg_for_struct(struct_name: str) -> str | None:
         for param in wrapper_params:
@@ -357,14 +382,51 @@ def parse_nvgemm_header_metadata(
         if "_Tensor_" in struct_name
     )
 
+    if f"{symbol_prefix}_Kernel_Module_t" not in structs:
+        fail(f"could not find module struct {symbol_prefix}_Kernel_Module_t")
+    if not any(param.kind == "module" for param in wrapper_params):
+        fail(f"wrapper function {wrapper_name} has no module parameter")
+    if not any(param.kind == "stream" for param in wrapper_params):
+        fail(f"wrapper function {wrapper_name} has no cudaStream_t parameter")
+    if not tensor_descriptors:
+        fail("could not find tensor descriptor structs")
+    for descriptor in tensor_descriptors:
+        if descriptor.wrapper_arg_name is None:
+            fail(
+                f"tensor descriptor {descriptor.struct_name} is not used by "
+                f"wrapper function {wrapper_name}"
+            )
+        if not any(field.name == "data" for field in descriptor.fields):
+            fail(f"tensor descriptor {descriptor.struct_name} has no data field")
+
+    def function_return_type(function_name: str) -> str | None:
+        match = re.search(
+            rf"static\s+inline\s+(?P<ret>[A-Za-z_][\w\s\*]*?)\s+"
+            rf"{re.escape(function_name)}\s*\(",
+            text,
+            re.DOTALL,
+        )
+        return match.group("ret").strip() if match is not None else None
+
+    module_load_hook = f"{symbol_prefix}_Kernel_Module_Load"
+    module_unload_hook = f"{symbol_prefix}_Kernel_Module_Unload"
+    module_load_return_type = function_return_type(module_load_hook)
+    module_unload_return_type = function_return_type(module_unload_hook)
+    if module_load_return_type is None:
+        fail(f"could not find module load hook {module_load_hook}")
+    if module_unload_return_type is None:
+        fail(f"could not find module unload hook {module_unload_hook}")
+
     return NVGemmCHeaderMetadata(
         module_struct_name=(
             f"{symbol_prefix}_Kernel_Module_t"
             if f"{symbol_prefix}_Kernel_Module_t" in structs
             else None
         ),
-        module_load_hook=f"{symbol_prefix}_Kernel_Module_Load",
-        module_unload_hook=f"{symbol_prefix}_Kernel_Module_Unload",
+        module_load_hook=module_load_hook,
+        module_unload_hook=module_unload_hook,
+        module_load_return_type=module_load_return_type,
+        module_unload_return_type=module_unload_return_type,
         wrapper_name=wrapper_match.group("name") if wrapper_match is not None else None,
         wrapper_return_type=wrapper_return_type,
         wrapper_params=wrapper_params,

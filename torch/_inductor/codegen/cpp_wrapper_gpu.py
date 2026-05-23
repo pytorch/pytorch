@@ -849,6 +849,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self._lazy_kernel_names: list[str] = []
         self._nvgemm_native_headers: OrderedSet[str] = OrderedSet()
         self._nvgemm_native_states: OrderedSet[str] = OrderedSet()
+        self._nvgemm_native_runtime_link_flags: OrderedSet[str] = OrderedSet()
 
     @staticmethod
     def create(
@@ -1015,6 +1016,11 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.prefix.splice(triton_prefix)
         self.prefix.writeline("\n")
         self.prefix.splice(old_prefix)
+
+    def _generate_end_jit(self, result):
+        for link_flag in self._nvgemm_native_runtime_link_flags:
+            self._cpp_wrapper_link_flags.add(link_flag)
+        return super()._generate_end_jit(result)
 
     def generate_tma_descriptor(self, desc):
         self.write_tma_descriptor_helpers_once()
@@ -1277,12 +1283,14 @@ static inline void ensure_triton_kernel_compiles_started() {{
         )
 
         if self._is_nvgemm_native_call(inductor_meta):
+            device_idx = "0" if device.index is None else str(device.index)
             return self._generate_nvgemm_native_call(
                 kernel_name,
                 call_args,
                 arg_types,
                 inductor_meta,
                 stream,
+                device_idx,
             )
 
         if triton:
@@ -1374,6 +1382,10 @@ static inline void ensure_triton_kernel_compiles_started() {{
         if native_artifact is None and cls._extern_get(inductor_meta, "header_path"):
             native_artifact = inductor_meta
         backend = cls._extern_get(inductor_meta, "backend")
+        if backend == "nvgemm" and native_artifact is None:
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper metadata is missing native_artifact"
+            )
         if backend != "nvgemm" and native_artifact is None:
             return None
         return native_artifact
@@ -1396,24 +1408,51 @@ static inline void ensure_triton_kernel_compiles_started() {{
             return tuple(value)
         return (value,)
 
+    @staticmethod
+    def _nvgemm_c_return_kind(c_type: Any, context: str) -> str:
+        normalized = " ".join(str(c_type).replace("*", " *").split())
+        if normalized == "void":
+            return "void"
+        if normalized in {"int", "int32_t", "cudaError_t"}:
+            return "status"
+        raise RuntimeError(
+            "NVGEMM native cpp_wrapper does not support generated "
+            f"{context} return type {normalized!r}"
+        )
+
     def _register_nvgemm_native_artifact(
         self,
         kernel_name: str,
         native_artifact: Any,
     ) -> tuple[str, str]:
+        header_metadata = self._extern_get(native_artifact, "header_metadata", {}) or {}
         symbol_prefix = self._extern_get(
             native_artifact,
             "symbol_prefix",
             self._extern_get(native_artifact, "prefix", kernel_name),
         )
+        object_path = self._extern_get(native_artifact, "object_path")
+        if object_path is not None:
+            self._cpp_wrapper_link_flags.add(str(object_path))
         for link_flag in self._as_tuple(
             self._extern_get(native_artifact, "link_flags", ())
         ):
-            self._cpp_wrapper_link_flags.add(str(link_flag))
+            link_flag_str = str(link_flag)
+            if object_path is not None and link_flag_str == str(object_path):
+                continue
+            self._nvgemm_native_runtime_link_flags.add(link_flag_str)
 
         header_path = self._extern_get(native_artifact, "header_path")
         if header_path is None:
             header_path = self._extern_get(native_artifact, "header")
+        if header_path is None:
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper artifact is missing header_path"
+            )
+        if object_path is None:
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper artifact is missing object_path"
+            )
         if header_path is not None:
             self._register_nvgemm_native_header(str(header_path))
         for header in self._as_tuple(self._extern_get(native_artifact, "headers", ())):
@@ -1428,41 +1467,105 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.include_extra_header("cstdint")
         self.include_extra_header("stdexcept")
         self.include_extra_header("mutex")
+        self.include_extra_header("map")
+        self.include_extra_header("memory")
+        self.include_extra_header("utility")
 
         module_type = self._extern_get(
             native_artifact,
             "module_type",
-            f"{symbol_prefix}_Kernel_Module_t",
+            self._extern_get(
+                header_metadata,
+                "module_struct_name",
+                f"{symbol_prefix}_Kernel_Module_t",
+            ),
         )
         module_load_name = self._extern_get(
             native_artifact,
             "module_load_name",
-            f"{symbol_prefix}_Kernel_Module_Load",
+            self._extern_get(
+                header_metadata,
+                "module_load_hook",
+                f"{symbol_prefix}_Kernel_Module_Load",
+            ),
         )
         module_unload_name = self._extern_get(
             native_artifact,
             "module_unload_name",
-            f"{symbol_prefix}_Kernel_Module_Unload",
+            self._extern_get(
+                header_metadata,
+                "module_unload_hook",
+                f"{symbol_prefix}_Kernel_Module_Unload",
+            ),
+        )
+        module_load_return_type = (
+            self._extern_get(
+                header_metadata,
+                "module_load_return_type",
+                "void",
+            )
+            or "void"
+        )
+        module_unload_return_type = (
+            self._extern_get(
+                header_metadata,
+                "module_unload_return_type",
+                "void",
+            )
+            or "void"
+        )
+        module_load_return_kind = self._nvgemm_c_return_kind(
+            module_load_return_type, f"module load hook {module_load_name}"
+        )
+        module_unload_return_kind = self._nvgemm_c_return_kind(
+            module_unload_return_type, f"module unload hook {module_unload_name}"
+        )
+        module_load_call = f"{module_load_name}(module.get());"
+        if module_load_return_kind == "status":
+            module_load_error = cpp_string_literal(
+                f"NVGEMM native cpp_wrapper module load {module_load_name} failed"
+            )
+            module_load_call = (
+                f"auto load_status = {module_load_name}(module.get());\n"
+                "        if (load_status != 0) {\n"
+                f"            throw std::runtime_error({module_load_error});\n"
+                "        }"
+            )
+        module_unload_call = f"{module_unload_name}(entry.second.get());"
+        if module_unload_return_kind == "status":
+            module_unload_call = f"(void){module_unload_name}(entry.second.get());"
+        device_guard_type = maybe_hipify_code_wrapper(
+            self.device_codegen.cpp_device_guard()
         )
         self.prefix.splice(
             f"""
 struct {state_name}_t {{
-    {module_type} module{{}};
-    bool loaded = false;
-    std::once_flag init_once;
+    std::mutex mutex;
+    std::map<int32_t, std::unique_ptr<{module_type}>> modules;
 
-    void ensure_loaded() {{
-        std::call_once(init_once, [this]() {{
-            {module_load_name}(&module);
-            loaded = true;
-        }});
+    {module_type}* ensure_loaded(int32_t device_idx) {{
+        std::lock_guard<std::mutex> lock(mutex);
+        auto existing = modules.find(device_idx);
+        if (existing != modules.end()) {{
+            return existing->second.get();
+        }}
+        auto module = std::make_unique<{module_type}>();
+        {device_guard_type} device_guard(device_idx);
+        {module_load_call}
+        auto* result = module.get();
+        modules.emplace(device_idx, std::move(module));
+        return result;
     }}
 
     ~{state_name}_t() {{
-        if (loaded) {{
-            {module_unload_name}(&module);
-            loaded = false;
+        for (auto& entry : modules) {{
+            try {{
+                {device_guard_type} device_guard(entry.first);
+                {module_unload_call}
+            }} catch (...) {{
+            }}
         }}
+        modules.clear();
     }}
 }};
 
@@ -1471,11 +1574,14 @@ static {state_name}_t {state_name};
         )
         return state_name, str(symbol_prefix)
 
-    def _nvgemm_tensor_arg_data_expr(self, arg: Any, arg_type: Any) -> str:
+    def _nvgemm_tensor_arg_data_expr(
+        self, arg: Any, arg_type: Any, data_c_type: str | None
+    ) -> str:
+        void_type = "const void*" if data_c_type and "const" in data_c_type else "void*"
         if isinstance(arg_type, torch_dtype):
-            return f"reinterpret_cast<void*>({arg}.data_ptr())"
+            return f"reinterpret_cast<{void_type}>({arg}.data_ptr())"
         if isinstance(arg_type, str) and arg_type.endswith("*") and arg != "nullptr":
-            return f"reinterpret_cast<void*>({arg}.data_ptr())"
+            return f"reinterpret_cast<{void_type}>({arg}.data_ptr())"
         raise NotImplementedError(
             f"Unsupported NVGEMM tensor descriptor argument {arg!r} "
             f"with type {arg_type!r}"
@@ -1496,7 +1602,9 @@ static {state_name}_t {state_name};
 
         data_expr = self._extern_get(tensor_spec, "data_expr")
         if data_expr is None:
-            data_expr = self._nvgemm_tensor_arg_data_expr(arg, arg_type)
+            data_expr = self._nvgemm_tensor_arg_data_expr(
+                arg, arg_type, self._extern_get(tensor_spec, "data_c_type")
+            )
         self.writeline(f"{c_struct_name} {desc_name}{{}};")
         self.writeline(f"{desc_name}.data = {data_expr};")
 
@@ -1540,13 +1648,30 @@ static {state_name}_t {state_name};
         descriptors = self._as_tuple(
             self._extern_get(header_metadata, "tensor_descriptors", ())
         )
+        wrapper_params = self._as_tuple(
+            self._extern_get(header_metadata, "wrapper_params", ())
+        )
         if len(descriptors) > len(tensor_args):
-            raise KeyError(
-                "NVGEMM header metadata has more tensor descriptors than manifest tensor_args"
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper header metadata has more tensor "
+                "descriptors than manifest tensor_args"
             )
 
         result: list[dict[str, Any]] = []
-        for idx, descriptor in enumerate(descriptors):
+        descriptor_by_struct = {
+            self._extern_get(descriptor, "struct_name"): descriptor
+            for descriptor in descriptors
+        }
+        ordered_descriptors = [
+            descriptor_by_struct[self._extern_get(param, "tensor_struct_name")]
+            for param in wrapper_params
+            if self._extern_get(param, "kind") == "tensor_descriptor"
+            and self._extern_get(param, "tensor_struct_name") in descriptor_by_struct
+        ]
+        if not ordered_descriptors:
+            ordered_descriptors = list(descriptors)
+
+        for idx, descriptor in enumerate(ordered_descriptors):
             tensor_arg = tensor_args[idx]
             fields = self._as_tuple(self._extern_get(descriptor, "fields", ()))
 
@@ -1557,6 +1682,12 @@ static {state_name}_t {state_name};
                         return int(array_size or 0)
                 return 0
 
+            def field_c_type(name: str) -> str | None:
+                for field in fields:
+                    if self._extern_get(field, "name") == name:
+                        return self._extern_get(field, "c_type")
+                return None
+
             dynamic_shape_count = field_array_size("dynamic_shapes")
             dynamic_stride_count = field_array_size("dynamic_strides")
             result.append(
@@ -1565,6 +1696,10 @@ static {state_name}_t {state_name};
                     "name": self._extern_get(tensor_arg, "name"),
                     "role": self._extern_get(tensor_arg, "role"),
                     "c_struct_name": self._extern_get(descriptor, "struct_name"),
+                    "wrapper_arg_name": self._extern_get(
+                        descriptor, "wrapper_arg_name"
+                    ),
+                    "data_c_type": field_c_type("data"),
                     "dynamic_shape_dims": tuple(range(dynamic_shape_count)),
                     "dynamic_stride_dims": tuple(range(dynamic_stride_count)),
                 }
@@ -1578,16 +1713,21 @@ static {state_name}_t {state_name};
         arg_types: list[Any] | None,
         inductor_meta: dict[str, Any] | None,
         stream: str,
+        device_idx: str,
     ) -> None:
         if V.graph.aot_mode:
             raise NotImplementedError(
                 "NVGEMM native_artifact is only wired for JIT cpp_wrapper"
             )
-        assert arg_types is not None
+        if arg_types is None:
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper call requires generated argument types"
+            )
         native_artifact = self._get_nvgemm_native_artifact(inductor_meta)
         if native_artifact is None:
-            raise AssertionError("missing NVGEMM native_artifact")
+            raise RuntimeError("NVGEMM native cpp_wrapper call is missing artifact")
         manifest = self._extern_get(inductor_meta, "manifest", {}) or {}
+        header_metadata = self._extern_get(native_artifact, "header_metadata", {}) or {}
 
         state_name, symbol_prefix = self._register_nvgemm_native_artifact(
             kernel_name,
@@ -1604,12 +1744,24 @@ static {state_name}_t {state_name};
                 manifest, native_artifact
             )
         if not tensor_specs:
-            raise KeyError("NVGEMM native_artifact requires tensor_args")
+            raise RuntimeError(
+                "NVGEMM native cpp_wrapper artifact requires tensor descriptor metadata"
+            )
 
-        desc_args = []
-        self.writeline(f"{state_name}.ensure_loaded();")
+        desc_args: list[str] = []
+        desc_args_by_wrapper_name: dict[str, str] = {}
+        desc_args_by_struct_name: dict[str, str] = {}
+        module_name = f"{state_name}_module_{next(self.arg_var_id)}"
+        self.writeline(
+            f"auto* {module_name} = {state_name}.ensure_loaded({device_idx});"
+        )
         for idx, tensor_spec in enumerate(tensor_specs):
             arg_index = int(self._extern_get(tensor_spec, "arg_index", idx))
+            if arg_index >= len(call_args) or arg_index >= len(arg_types):
+                raise RuntimeError(
+                    "NVGEMM native cpp_wrapper tensor descriptor arg_index "
+                    f"{arg_index} is out of range"
+                )
             desc_name = f"{state_name}_desc_{next(self.arg_var_id)}"
             self._emit_nvgemm_tensor_descriptor(
                 desc_name,
@@ -1617,21 +1769,70 @@ static {state_name}_t {state_name};
                 call_args[arg_index],
                 arg_types[arg_index],
             )
-            desc_args.append(f"&{desc_name}")
+            desc_arg = f"&{desc_name}"
+            desc_args.append(desc_arg)
+            wrapper_arg_name = self._extern_get(tensor_spec, "wrapper_arg_name")
+            if wrapper_arg_name is not None:
+                desc_args_by_wrapper_name[str(wrapper_arg_name)] = desc_arg
+            c_struct_name = self._extern_get(tensor_spec, "c_struct_name")
+            if c_struct_name is not None:
+                desc_args_by_struct_name[str(c_struct_name)] = desc_arg
 
-        call_args_str = ", ".join(
-            [f"&{state_name}.module", *desc_args]
-            + (
+        wrapper_params = self._as_tuple(
+            self._extern_get(header_metadata, "wrapper_params", ())
+        )
+        native_call_args: list[str] = []
+        if wrapper_params:
+            for param in wrapper_params:
+                kind = self._extern_get(param, "kind")
+                if kind == "module":
+                    native_call_args.append(module_name)
+                elif kind == "tensor_descriptor":
+                    param_name = str(self._extern_get(param, "name"))
+                    tensor_struct_name = self._extern_get(param, "tensor_struct_name")
+                    desc_arg = desc_args_by_wrapper_name.get(param_name)
+                    if desc_arg is None and tensor_struct_name is not None:
+                        desc_arg = desc_args_by_struct_name.get(str(tensor_struct_name))
+                    if desc_arg is None:
+                        raise RuntimeError(
+                            "NVGEMM native cpp_wrapper could not bind tensor "
+                            f"descriptor parameter {param_name}"
+                        )
+                    native_call_args.append(desc_arg)
+                elif kind == "stream":
+                    native_call_args.append(stream)
+                else:
+                    raise RuntimeError(
+                        "NVGEMM native cpp_wrapper does not support generated "
+                        f"wrapper parameter kind {kind!r}"
+                    )
+        else:
+            native_call_args = [module_name, *desc_args] + (
                 [stream]
                 if self._extern_get(native_artifact, "stream_arg", True)
                 else []
             )
+        call_args_str = ", ".join(native_call_args)
+        wrapper_return_type = (
+            self._extern_get(
+                header_metadata,
+                "wrapper_return_type",
+                "int32_t",
+            )
+            or "int32_t"
         )
+        wrapper_return_kind = self._nvgemm_c_return_kind(
+            wrapper_return_type, f"wrapper {wrapper_name}"
+        )
+        if wrapper_return_kind == "void":
+            self.writeline(f"{wrapper_name}({call_args_str});")
+            return
+
         status_name = f"{state_name}_status_{next(self.arg_var_id)}"
-        self.writeline(f"int32_t {status_name} = {wrapper_name}({call_args_str});")
+        self.writeline(f"auto {status_name} = {wrapper_name}({call_args_str});")
         self.writeline(
             f"if ({status_name} != 0) {{ throw std::runtime_error("
-            f"{cpp_string_literal('NVGEMM native_artifact call failed')}); }}"
+            f"{cpp_string_literal(f'NVGEMM native cpp_wrapper call {wrapper_name} failed')}); }}"
         )
 
     def prepare_triton_wrapper_args(

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,6 +90,17 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
+def _nvgemm_symbol_prefixes_from_code(code):
+    return sorted(set(re.findall(r"\b(nvgemm_\w+)_Kernel_Module_Load\b", code)))
+
+
+def _nvgemm_headers_by_symbol_from_code(code):
+    return {
+        symbol: Path(header)
+        for header, symbol in re.findall(r'#include "([^"]*/(nvgemm_\w+)\.h)"', code)
+    }
+
+
 # TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
@@ -126,6 +138,170 @@ class TestNVUniversalGemm(TestCase):
         self.assertIn("dynamic_shapes", code)
         self.assertIn("dynamic_strides", code)
         torch.testing.assert_close(result, expected)
+
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_multi_kernel_cpp_wrapper_native_artifacts_are_isolated(
+        self, autotune_at_compile_time
+    ):
+        """Test that distinct NVGEMM kernels in one wrapper keep native state isolated."""
+        dtype = torch.bfloat16
+
+        def two_matmuls(a0, b0, a1, b1):
+            return a0 @ b0, a1 @ b1
+
+        a0 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        b0 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        a1 = torch.randn(256, 512, device="cuda", dtype=dtype)
+        b1 = torch.randn(512, 1024, device="cuda", dtype=dtype)
+        expected = two_matmuls(a0, b0, a1, b1)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                cpp_wrapper=True,
+                **{"triton.autotune_at_compile_time": autotune_at_compile_time},
+            )
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(two_matmuls),
+                a0,
+                b0,
+                a1,
+                b1,
+            )
+
+        symbols = _nvgemm_symbol_prefixes_from_code(code)
+        self.assertGreaterEqual(len(symbols), 2)
+
+        headers_by_symbol = _nvgemm_headers_by_symbol_from_code(code)
+        self.assertEqual(set(headers_by_symbol), set(symbols))
+        for symbol in symbols:
+            header = headers_by_symbol[symbol]
+            self.assertTrue(header.is_file(), header)
+            self.assertTrue(header.with_suffix(".o").is_file(), header)
+            self.assertIn(f"struct nvgemm_native_state_{symbol}_t", code)
+            self.assertIn(f"static nvgemm_native_state_{symbol}_t", code)
+            self.assertIn(f"{symbol}_Kernel_Module_t", code)
+            self.assertIn(f"{symbol}_Kernel_Module_Load", code)
+            self.assertIn(f"{symbol}_Kernel_Module_Unload", code)
+            self.assertIn(f"cute_dsl_{symbol}_wrapper", code)
+
+        for actual, exp in zip(result, expected):
+            torch.testing.assert_close(actual, exp)
+
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_same_kernel_cpp_wrapper_native_artifact_is_reused(
+        self, autotune_at_compile_time
+    ):
+        """Test that repeated same-shape NVGEMM calls share one native artifact."""
+        dtype = torch.bfloat16
+
+        def two_same_shape_matmuls(a0, b0, a1, b1):
+            return a0 @ b0, a1 @ b1
+
+        a0 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        b0 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        a1 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        b1 = torch.randn(512, 512, device="cuda", dtype=dtype)
+        expected = two_same_shape_matmuls(a0, b0, a1, b1)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                cpp_wrapper=True,
+                **{"triton.autotune_at_compile_time": autotune_at_compile_time},
+            )
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(two_same_shape_matmuls),
+                a0,
+                b0,
+                a1,
+                b1,
+            )
+
+        symbols = _nvgemm_symbol_prefixes_from_code(code)
+        self.assertEqual(len(symbols), 1)
+        symbol = symbols[0]
+        self.assertEqual(code.count(f"nvgemm_native_state_{symbol}.ensure_loaded("), 2)
+        self.assertEqual(code.count(f"cute_dsl_{symbol}_wrapper("), 2)
+
+        for actual, exp in zip(result, expected):
+            torch.testing.assert_close(actual, exp)
+
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_mixed_nvgemm_and_triton_cpp_wrapper(self, autotune_at_compile_time):
+        """Test that NVGEMM native artifacts coexist with Triton kernels."""
+        dtype = torch.bfloat16
+
+        def mixed(a, b, x):
+            return a @ b, torch.sin(x)
+
+        a = torch.randn(512, 512, device="cuda", dtype=dtype)
+        b = torch.randn(512, 512, device="cuda", dtype=dtype)
+        x = torch.randn(1024, device="cuda", dtype=torch.float32)
+        expected = mixed(a, b, x)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                cpp_wrapper=True,
+                **{"triton.autotune_at_compile_time": autotune_at_compile_time},
+            )
+        ):
+            result, (code,) = run_and_get_code(torch.compile(mixed), a, b, x)
+
+        self.assertIn("_Kernel_Module_Load", code)
+        self.assertIn("cute_dsl_", code)
+        self.assertIn("launchKernel", code)
+        for actual, exp in zip(result, expected):
+            torch.testing.assert_close(actual, exp)
+
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_warmed_cudagraph_capture_cpp_wrapper(self, autotune_at_compile_time):
+        """Test steady-state CUDA graph capture after NVGEMM native modules are loaded."""
+        dtype = torch.bfloat16
+
+        def matmul(a, b):
+            return a @ b
+
+        a = torch.randn(512, 512, device="cuda", dtype=dtype)
+        b = torch.randn(512, 512, device="cuda", dtype=dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                cpp_wrapper=True,
+                **{"triton.autotune_at_compile_time": autotune_at_compile_time},
+            )
+        ):
+            compiled_fn = torch.compile(matmul)
+            warm, (code,) = run_and_get_code(compiled_fn, a, b)
+            self.assertGreaterEqual(len(_nvgemm_symbol_prefixes_from_code(code)), 1)
+            torch.testing.assert_close(warm, expected)
+
+            # Cold capture is intentionally not asserted here. The first call may
+            # compile, autotune, and load native modules; only the warmed launch
+            # path is expected to be CUDA graph capturable.
+            side_stream = torch.cuda.Stream()
+            side_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side_stream):
+                warm = compiled_fn(a, b)
+            torch.cuda.current_stream().wait_stream(side_stream)
+            torch.testing.assert_close(warm, expected)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = compiled_fn(a, b)
+            graph.replay()
+            torch.cuda.synchronize()
+
+        torch.testing.assert_close(captured, expected)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
@@ -563,6 +739,14 @@ typedef struct {{
   int32_t initialized;
 }} {symbol_prefix}_Kernel_Module_t;
 
+static inline void {symbol_prefix}_Kernel_Module_Load(
+    {symbol_prefix}_Kernel_Module_t* module) {{
+}}
+
+static inline void {symbol_prefix}_Kernel_Module_Unload(
+    {symbol_prefix}_Kernel_Module_t* module) {{
+}}
+
 static inline int32_t cute_dsl_{symbol_prefix}_wrapper(
     {symbol_prefix}_Kernel_Module_t* module,
     {symbol_prefix}_Tensor_A* a,
@@ -591,7 +775,10 @@ static inline int32_t cute_dsl_{symbol_prefix}_wrapper(
         self.assertEqual(
             metadata.module_unload_hook, f"{symbol_prefix}_Kernel_Module_Unload"
         )
+        self.assertEqual(metadata.module_load_return_type, "void")
+        self.assertEqual(metadata.module_unload_return_type, "void")
         self.assertEqual(metadata.wrapper_name, f"cute_dsl_{symbol_prefix}_wrapper")
+        self.assertEqual(metadata.wrapper_return_type, "int32_t")
         self.assertEqual(
             [param.kind for param in metadata.wrapper_params],
             [
