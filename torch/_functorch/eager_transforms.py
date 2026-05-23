@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, NamedTuple, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -354,9 +354,16 @@ def _disable_inference_mode() -> Generator[None, None, None]:
         yield
 
 
+class _AutocastState(NamedTuple):
+    """Captures a single active autocast scope (device type + dtype)."""
+
+    device_type: str
+    dtype: torch.dtype
+
+
 @contextlib.contextmanager
 def _restore_autocast_state(
-    autocast_states: list[dict[str, Any]],
+    autocast_states: list[_AutocastState],
 ) -> Generator[None, None, None]:
     """Context manager that re-enables autocast for any device types that were
     active when the state was captured.
@@ -375,8 +382,8 @@ def _restore_autocast_state(
         for state in autocast_states:
             stack.enter_context(
                 torch.amp.autocast(
-                    device_type=state["device_type"],
-                    dtype=state["dtype"],
+                    device_type=state.device_type,
+                    dtype=state.dtype,
                 )
             )
         yield
@@ -431,6 +438,7 @@ def _vjp_with_argnums(
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
+    #
     # NOTE [autocast state capture for vjp / vmap+grad]
     # Capture the active autocast state (enabled device types + dtypes) at the
     # point where the VJP is set up (i.e. during the forward pass).  The
@@ -438,15 +446,15 @@ def _vjp_with_argnums(
     # batched-autograd interpreter that does NOT inherit thread-local C++ state
     # such as the autocast dtype.  We therefore restore those states explicitly
     # inside the wrapper (see issue #184890).
-    autocast_states: list[dict[str, Any]] = []
+    autocast_states: list[_AutocastState] = []
     if not torch.compiler.is_compiling():
         for device_type in torch._C._autocast_supported_devices():
             if torch.is_autocast_enabled(device_type):
                 autocast_states.append(
-                    {
-                        "device_type": device_type,
-                        "dtype": torch.get_autocast_dtype(device_type),
-                    }
+                    _AutocastState(
+                        device_type=device_type,
+                        dtype=torch.get_autocast_dtype(device_type),
+                    )
                 )
 
     with grad_increment_nesting() as level:
