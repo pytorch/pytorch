@@ -1337,7 +1337,51 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            if not isinstance(tup, variables.TupleVariable):
+                raise AssertionError(f"Expected TupleVariable, got {type(tup)}")
+
+            def tensor_index(item: variables.TensorVariable) -> VariableTracker:
+                if item.dtype is not None and (
+                    not item.dtype.is_floating_point and not item.dtype.is_complex
+                ):
+                    item_proxy = tx.output.create_proxy(
+                        "call_method", "item", *proxy_args_kwargs([item], {})
+                    )
+                    # torch.Size calls __index__ on tensor elements implicitly;
+                    # do not make users opt into capture_scalar_outputs for it.
+                    fake_mode = tx.fake_mode
+                    if fake_mode is None:
+                        raise AssertionError("fake_mode must be set")
+                    prior = fake_mode.allow_scalar_outputs
+                    fake_mode.allow_scalar_outputs = True
+                    try:
+                        item_var = wrap_fx_proxy(tx, item_proxy)
+                    finally:
+                        fake_mode.allow_scalar_outputs = prior
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            torch.sym_int,
+                            (item_var.as_proxy(),),
+                            {},
+                        ),
+                    )
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        "only integer tensors of a single element can be converted to an index"
+                    ],
+                )
+
+            items = [
+                tensor_index(item)
+                if isinstance(item, variables.TensorVariable)
+                else item
+                for item in tup.items
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
