@@ -4,7 +4,7 @@ from __future__ import annotations
 import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Iterable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -332,7 +332,7 @@ class Sequential(Module):
         return self
 
 
-class ModuleList(Module):
+class ModuleList(Module, Iterable[Module]):
     r"""Holds submodules in a list.
 
     :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
