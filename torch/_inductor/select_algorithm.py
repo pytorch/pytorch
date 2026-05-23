@@ -1658,6 +1658,7 @@ class TritonTemplateKernel(TritonKernel):
         dense_indexing=False,
         copy_shape=None,
         override_mask=None,
+        expr_dtype: torch.dtype | None = None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
@@ -1673,6 +1674,7 @@ class TritonTemplateKernel(TritonKernel):
             # the mask might be broadcast to the output shape
             copy_shape=self.template_out_shape,
             override_mask=self.template_mask,
+            expr_dtype=expr_dtype,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
