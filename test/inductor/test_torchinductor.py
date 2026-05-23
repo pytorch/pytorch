@@ -3050,6 +3050,30 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_flip_zero_dim(self):
+        def fn(x):
+            return (
+                x.flip(0),
+                x.flip([0]),
+                x.flip(-1),
+                x.flip([-1]),
+                torch.flip(x, [0]),
+                torch.flip(x, [-1]),
+                x.flip([]),
+            )
+
+        self.common(fn, (torch.rand(()),))
+
+    def test_flip_zero_dim_backward(self):
+        def fn(x):
+            return x.flip(0)
+
+        self.common(
+            fn,
+            (torch.randn((), requires_grad=True),),
+            check_gradient=True,
+        )
+
     def test_cumprod_backward(self):
         if self.device == "mps":
             raise unittest.SkipTest(
@@ -12396,6 +12420,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_y = torch.compile(forward, fullgraph=True)(x)
 
         self.assertEqual(y, compiled_y)
+
+    def test_unfold_backward_overlapping_windows(self):
+        def forward(grad, input_sizes):
+            return torch.ops.aten.unfold_backward(
+                grad,
+                input_sizes=input_sizes,
+                dim=1,
+                size=8,
+                step=4,
+            )
+
+        cases = []
+        if self.device != "mps":
+            # Regression test for https://github.com/pytorch/pytorch/issues/171370.
+            # MPS eager does not support unfold_backward_long.
+            cases.append((torch.int64, (1, 64, 32), [1, 64, 32]))
+        # Canonical grad shape produced by x.unfold(1, 8, 4).
+        cases.append((torch.float32, (1, 15, 32, 8), [1, 64, 32]))
+        compiled_forward = torch.compile(forward, backend="inductor")
+        for dtype, grad_shape, input_sizes in cases:
+            if dtype == torch.int64:
+                grad = torch.randint(
+                    -32, 32, grad_shape, dtype=dtype, device=self.device
+                )
+            else:
+                grad = torch.randn(grad_shape, dtype=dtype, device=self.device)
+
+            expected = forward(grad, input_sizes)
+            actual = compiled_forward(grad, input_sizes)
+            self.assertEqual(actual, expected)
 
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):

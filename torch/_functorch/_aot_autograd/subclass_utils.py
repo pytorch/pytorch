@@ -488,48 +488,54 @@ def unwrap_tensor_subclasses_with_indices_to_original(
 def remap_unwrapped_subclass_arg_indices(
     wrapped_args: list[Any], static_input_indices: list[int]
 ) -> list[int]:
-    def count_unwrapped_args(arg: Any, *, include_plain_tensor_symints: bool) -> int:
+    def static_arg_slots(arg: Any, *, include_plain_tensor_symints: bool) -> list[bool]:
+        # Forwarded SymInts occupy flattened arg positions, but static input indices
+        # describe tensor/opaque slots whose value should not be copied.
         if not is_traceable_wrapper_subclass(arg):
             if include_plain_tensor_symints and isinstance(arg, Tensor):
-                return (
-                    1
-                    + len(enumerate_filter_symints(arg.size()))
-                    + len(enumerate_filter_symints(arg.stride()))
+                num_symints = len(enumerate_filter_symints(arg.size())) + len(
+                    enumerate_filter_symints(arg.stride())
                 )
-            return 1
+                return [True] + [False] * num_symints
+            return [True]
 
-        count = 0
+        slots = []
         attrs, _ = arg.__tensor_flatten__()
         for attr in attrs:
             inner_value = getattr(arg, attr)
             match inner_value:
                 case OpaqueBase():
-                    count += 1
+                    slots.append(True)
                 case Tensor():
-                    count += count_unwrapped_args(
-                        inner_value, include_plain_tensor_symints=True
+                    slots.extend(
+                        static_arg_slots(inner_value, include_plain_tensor_symints=True)
                     )
                 case _:
                     raise AssertionError(
                         f"expected Tensor or OpaqueBase, got {type(inner_value)}"
                     )
 
-        return (
-            count
-            + len(enumerate_filter_symints(arg.size()))
-            + len(enumerate_filter_symints(arg.stride()))
+        slots.extend(
+            [False]
+            * (
+                len(enumerate_filter_symints(arg.size()))
+                + len(enumerate_filter_symints(arg.stride()))
+            )
         )
+        return slots
 
     static_input_indices_set = set(static_input_indices)
     new_ind = 0
     remapped_static_indices = []
     for i, arg in enumerate(wrapped_args):
-        num_indices = 1
-        if is_traceable_wrapper_subclass(arg):
-            num_indices = count_unwrapped_args(arg, include_plain_tensor_symints=False)
+        slots = (
+            static_arg_slots(arg, include_plain_tensor_symints=False)
+            if is_traceable_wrapper_subclass(arg)
+            else [True]
+        )
 
-        for _ in range(num_indices):
-            if i in static_input_indices_set:
+        for is_static_arg_slot in slots:
+            if i in static_input_indices_set and is_static_arg_slot:
                 remapped_static_indices.append(new_ind)
 
             new_ind += 1
