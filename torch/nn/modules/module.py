@@ -966,9 +966,7 @@ class Module:
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors
-                or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
             param_grad = param.grad
@@ -1233,9 +1231,24 @@ class Module:
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: torch.empty_like(t, device=device), recurse=recurse
-        )
+
+        def empty_like(t):
+            return torch.empty_like(t, device=device)
+
+        fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        if fake_mode is None:
+            return self._apply(empty_like, recurse=recurse)
+
+        # Import lazily to avoid importing fake tensor machinery from torch.nn
+        # module import paths that do not otherwise use FakeTensorMode.
+        from torch._subclasses.fake_tensor import fake_tensor_tls
+
+        old_allow_non_fake_inputs = fake_tensor_tls.allow_non_fake_inputs_override
+        fake_tensor_tls.allow_non_fake_inputs_override = True
+        try:
+            return self._apply(empty_like, recurse=recurse)
+        finally:
+            fake_tensor_tls.allow_non_fake_inputs_override = old_allow_non_fake_inputs
 
     @overload
     def to(

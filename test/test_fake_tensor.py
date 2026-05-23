@@ -2120,6 +2120,67 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device, gpu_device)
 
+    def test_move_fake_module_under_fake(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
+                self.param = torch.nn.Parameter(torch.rand(2, 2))
+
+        gpu_device = torch.device(GPU_TYPE, 0)
+
+        with FakeTensorMode():
+            m = Module()
+            m.to(device=gpu_device)
+
+        for p in m.parameters():
+            self.assertTrue(isinstance(p, FakeTensor))
+            self.assertEqual(p.device, gpu_device)
+        for b in m.buffers():
+            self.assertTrue(isinstance(b, FakeTensor))
+            self.assertEqual(b.device, gpu_device)
+
+    def test_convert_fake_module_without_swap_tensors(self):
+        with FakeTensorMode():
+            m = torch.nn.Linear(2, 2)
+            m.to(dtype=torch.float64)
+
+        for p in m.parameters():
+            self.assertTrue(isinstance(p, FakeTensor))
+            self.assertEqual(p.dtype, torch.float64)
+
+    def test_to_empty_fakeifies_meta_module(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.buffer = torch.nn.Buffer(torch.empty(2, 2))
+                self.param = torch.nn.Parameter(torch.empty(2, 2))
+
+        real = torch.empty(2)
+        with torch.device("meta"):
+            m = Module()
+
+        with FakeTensorMode() as mode:
+            m.to_empty(device="cpu")
+
+            for p in m.parameters():
+                self.assertTrue(isinstance(p, FakeTensor))
+                self.assertIs(p.fake_mode, mode)
+                self.assertEqual(p.device, torch.device("cpu"))
+            for b in m.buffers():
+                self.assertTrue(isinstance(b, FakeTensor))
+                self.assertIs(b.fake_mode, mode)
+                self.assertEqual(b.device, torch.device("cpu"))
+
+            self.assertFalse(mode.allow_non_fake_inputs)
+            with self.assertRaisesRegex(AssertionError, "Please convert all Tensors"):
+                torch.empty_like(real)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_move_meta_tensor(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
