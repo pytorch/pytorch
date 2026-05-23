@@ -63,6 +63,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+_MKLDNN_LAYOUT = cast(torch.layout, torch.__dict__["_mkldnn"])
+
 
 # TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
 # Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
@@ -427,7 +429,9 @@ class FakeTensorConverter:
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
         def mk_fake_tensor(
-            make_meta_t: Callable[[], object], device: torch.device | str
+            make_meta_t: Callable[[], object],
+            device: torch.device | str,
+            layout: torch.layout | None = None,
         ) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
@@ -446,6 +450,7 @@ class FakeTensorConverter:
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=constant,
+                    layout=layout,
                 )
 
         out = self.meta_converter(
@@ -458,7 +463,6 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
-
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
         # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
@@ -735,6 +739,10 @@ class FakeTensor(Tensor):
     # separately.
     pytype: type[Tensor] | None
     dispatch_keys: torch.DispatchKeySet | None
+    # Logical layout reported by the real tensor. This is usually the same as
+    # the wrapped meta tensor's layout, except for layouts such as MKLDNN that
+    # cannot be represented by a meta tensor today.
+    _layout: torch.layout
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -759,6 +767,19 @@ class FakeTensor(Tensor):
     @fake_device.setter
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def layout(self) -> torch.layout:
+        return self._layout
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def is_mkldnn(self) -> bool:
+        return self.layout == _MKLDNN_LAYOUT
+
+    def _set_fake_layout(self, layout: torch.layout) -> None:
+        self._layout = layout
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -812,6 +833,7 @@ class FakeTensor(Tensor):
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        layout: torch.layout | None = None,
     ) -> Self:
         self = Tensor._make_subclass(
             cls,
@@ -847,6 +869,7 @@ class FakeTensor(Tensor):
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
+        self._layout = layout if layout is not None else elem.layout
         if isinstance(real_tensor, FakeTensor):
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
@@ -1884,6 +1907,9 @@ class FakeTensorMode(TorchDispatchMode):
 
         if is_sparse_compressed(output):
             raise _BypassDispatchCache("sparse compressed output")
+
+        if output.is_mkldnn:
+            raise _BypassDispatchCache("mkldnn output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
         # to extend the implementation to handle it.

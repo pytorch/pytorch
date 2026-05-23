@@ -54,6 +54,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -157,6 +158,7 @@ _OpOverloads: TypeAlias = torch._ops.OpOverload | torch._ops.HigherOrderOperator
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+_MKLDNN_LAYOUT = cast(torch.layout, torch.__dict__["_mkldnn"])
 
 """ [Note: Inductor IR]
 
@@ -391,6 +393,9 @@ def ir_node_to_tensor(
         t = torch.empty_strided(
             size=size, stride=stride, dtype=dtype, device=device
         ).zero_()
+    logical_layout = x.get_logical_layout()
+    if logical_layout is not None and isinstance(t, FakeTensor):
+        t._set_fake_layout(logical_layout)
     return t
 
 
@@ -811,6 +816,12 @@ class IRNode:
             return self.get_name() in V.graph.graph_inputs
         except NotImplementedError:
             return False
+
+    def get_logical_layout(self) -> torch.layout | None:
+        return None
+
+    def has_mkldnn_layout(self) -> bool:
+        return self.get_logical_layout() == _MKLDNN_LAYOUT
 
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return False
@@ -4851,6 +4862,15 @@ class Buffer(IRNode, CodegenSymbol):
     def get_is_pinned(self) -> bool:
         return self.get_layout().is_pinned
 
+    def get_logical_layout(self) -> torch.layout | None:
+        if (
+            self.name is not None
+            and self.name in V.graph.constants
+            and V.graph.constants[self.name].is_mkldnn
+        ):
+            return V.graph.constants[self.name].layout
+        return None
+
     def freeze_layout(self) -> None:
         if isinstance(self.layout, Layout) and not isinstance(
             self.layout, NonOwningLayout
@@ -4946,7 +4966,13 @@ class OperationBuffer(Buffer, Operation):
         Operation.__post_init__(self)
 
 
+@ir_dataclass(frozen=False)
 class InputBuffer(Buffer):
+    logical_layout: torch.layout | None = None
+
+    def get_logical_layout(self) -> torch.layout | None:
+        return self.logical_layout or super().get_logical_layout()
+
     def num_reads(self) -> int:
         return 1
 
@@ -7130,16 +7156,8 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x: IRNode) -> IRNode:
-        def is_mkldnn_tensor(x: IRNode) -> bool:
-            try:
-                name = x.get_name()
-            except (AttributeError, NotImplementedError):
-                return False
-
-            return name in V.graph.constants and V.graph.constants[name].is_mkldnn
-
         # TODO move this to the more proper places
-        if is_mkldnn_tensor(x):
+        if x.has_mkldnn_layout():
             return x
         else:
             return cls.require_exact_strides(
@@ -9627,6 +9645,9 @@ class MutableBox(IRNode):
 
     def is_input_buffer(self) -> bool:
         return self.data.is_input_buffer()
+
+    def get_logical_layout(self) -> torch.layout | None:
+        return self.data.get_logical_layout()
 
     def freeze_layout(self) -> None:
         return self.data.freeze_layout()

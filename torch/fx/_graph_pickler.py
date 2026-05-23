@@ -559,7 +559,9 @@ class _TensorPickleData:
             metadata = dataclasses.replace(metadata, base=new_base)
 
         def with_fake(
-            make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
+            make_meta_t: Callable[[], torch.Tensor],
+            device: torch.device | str,
+            layout: torch.layout | None = None,
         ) -> FakeTensor:
             with no_dispatch():
                 return FakeTensor(
@@ -567,6 +569,7 @@ class _TensorPickleData:
                     make_meta_t(),
                     # pyrefly: ignore [bad-argument-type]
                     device,
+                    layout=layout,
                 )
 
         return unpickle_state.meta_converter.meta_tensor(

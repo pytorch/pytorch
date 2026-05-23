@@ -603,12 +603,18 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 #   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
+        self,
+        arg: Callable[[], torch.Tensor],
+        /,
+        *,
+        device: torch.device | str,
+        layout: torch.layout | None = None,
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: torch.device | str
+    layout: torch.layout | None
 
 
 # A callback where the device may not be provided (is optional).
@@ -948,6 +954,7 @@ class MetaConverter(Generic[_TensorT]):
         cls,
         t: Callable[[], torch.Tensor],
         device: torch.device | str | None = None,
+        layout: torch.layout | None = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -1611,29 +1618,21 @@ class MetaConverter(Generic[_TensorT]):
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
-                        )
+                        ),
+                        layout=t.layout,
                     )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
-                            if t.size is None:
-                                raise AssertionError(
-                                    "t.size must not be None when copy_data is True"
-                                )
-                            if t.stride is None:
-                                raise AssertionError(
-                                    "t.stride must not be None when copy_data is True"
-                                )
                             if not _is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[bad-assignment]
-                            r.real_tensor = torch.empty_strided(
-                                t.size, t.stride, dtype=t.dtype, device=t.device
-                            )
                             if t.data is None:
                                 raise AssertionError(
                                     "t.data must not be None when copy_data is True"
                                 )
-                            _safe_copy(r.real_tensor, t.data)
+                            # MKLDNN tensors cannot be copied into dense strided
+                            # tensors, but propagate_real_tensors should keep the
+                            # real MKLDNN input available for real-kernel execution.
+                            r.real_tensor = _safe_clone(t.data)
                     if not safe_is_leaf(r):
                         raise AssertionError(
                             "the callback you passed in doesn't detach"

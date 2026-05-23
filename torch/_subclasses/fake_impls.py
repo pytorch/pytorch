@@ -138,6 +138,13 @@ _device_not_kwarg_ops = ordered_set(
 
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
+_mkldnn_to_dense_supported_dtypes = (
+    torch.float32,
+    torch.bfloat16,
+    torch.float16,
+    torch.uint8,
+    torch.int8,
+)
 
 
 def contains_tensor_types(type_: Any) -> bool:
@@ -252,6 +259,43 @@ def non_kwarg_is_pinned(
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp)
     return r
+
+
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if not self.is_mkldnn:
+        return NotImplemented
+
+    if self.dtype not in _mkldnn_to_dense_supported_dtypes:
+        raise RuntimeError(
+            "mkldnn_to_dense expects float, bfloat16, half, uint8, int8 tensor input"
+        )
+    out_dtype = dtype if dtype is not None else self.dtype
+    if out_dtype not in _mkldnn_to_dense_supported_dtypes:
+        raise RuntimeError(
+            "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor"
+        )
+    if self.dtype in (torch.uint8, torch.int8) and self.dtype != out_dtype:
+        raise RuntimeError(
+            "For int8, uint8 mkldnn_tensor input, we should not change the data type."
+        )
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = torch.empty_strided(
+            self.shape,
+            make_contiguous_strides_for(self.shape),
+            dtype=out_dtype,
+            device="meta",
+        )
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.device
+    )
 
 
 # Legacy profiler ops return Tensors but don't follow tensor constructor patterns
@@ -1878,9 +1922,10 @@ def fast_detach(
 ) -> FakeTensor:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    if include_real:
-        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
-    return FakeTensor(fake_mode, out, x.device)
+    real_tensor = x.real_tensor if include_real else None
+    return FakeTensor(
+        fake_mode, out, x.device, real_tensor=real_tensor, layout=x.layout
+    )
 
 
 @functools.cache

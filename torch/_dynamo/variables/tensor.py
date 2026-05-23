@@ -25,7 +25,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -99,6 +99,7 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+_MKLDNN_LAYOUT = cast(torch.layout, torch.__dict__["_mkldnn"])
 
 # Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
@@ -993,6 +994,24 @@ class TensorVariable(VariableTracker):
         )
 
         return result
+
+    def method_to_dense(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if self.layout != _MKLDNN_LAYOUT:
+            return None
+
+        from .builder import wrap_fx_proxy
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            torch.ops.aten._to_dense.default,
+            *proxy_args_kwargs([self, *args], kwargs),
+        )
+        return wrap_fx_proxy(tx, proxy)
 
     def method_size(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any

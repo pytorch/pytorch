@@ -1309,6 +1309,7 @@ class GraphLowering(torch.fx.Interpreter):
                 DonatedBuffer(
                     name=target,
                     layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    logical_layout=example.layout if example.is_mkldnn else None,
                 )
             )
         else:
@@ -1317,6 +1318,7 @@ class GraphLowering(torch.fx.Interpreter):
                 InputBuffer(
                     name=target,
                     layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    logical_layout=example.layout if example.is_mkldnn else None,
                 )
             )
 
