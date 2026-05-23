@@ -14,6 +14,7 @@ from torch._inductor.utils import (
     is_mkldnn_fp16_supported,
     run_and_get_code,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -428,6 +429,99 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
+    def test_conv_transpose_pointwise_regular_weight_shape(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3, 8, 3, 3))
+                self.bias = torch.nn.Parameter(torch.randn(8))
+
+            def forward(self, x):
+                y = torch.ops.mkldnn._convolution_transpose_pointwise.default(
+                    x,
+                    self.weight,
+                    self.bias,
+                    [1, 1],
+                    [1, 1],
+                    [2, 2],
+                    [1, 1],
+                    1,
+                    "none",
+                    [],
+                    "",
+                )
+                return torch.div(torch.clamp_max(torch.clamp_min(y + 3, 0), 6), 6)
+
+        torch.manual_seed(9150)
+        model = M().eval().to(device=device)
+        x = torch.randn(4, 3, 16, 16, device=device)
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.shape, torch.Size([4, 8, 32, 32]))
+        self.assertEqual(compiled_out.shape, eager_out.shape)
+        torch.testing.assert_close(compiled_out, eager_out)
+
+    @skipIfNoONEDNN
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
+    def test_conv_transpose_pointwise_fake_meta_shapes(self, device):
+        def check_case(groups, x_shape, weight_shape):
+            padding = [1, 1]
+            output_padding = [1, 1]
+            stride = [2, 2]
+            dilation = [1, 1]
+            x = torch.randn(*x_shape)
+            weight = torch.randn(*weight_shape)
+            bias = torch.randn(weight_shape[1] * groups)
+            expected_shape = torch.Size([x_shape[0], weight_shape[1] * groups, 32, 32])
+            expected_stride = (
+                expected_shape[1] * expected_shape[2] * expected_shape[3],
+                expected_shape[2] * expected_shape[3],
+                expected_shape[3],
+                1,
+            )
+            packed_weight = (
+                torch.ops.mkldnn._reorder_convolution_transpose_weight.default(
+                    weight,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    list(x_shape),
+                )
+            )
+
+            for weight_arg in (weight, packed_weight):
+                with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+                    out = torch.ops.mkldnn._convolution_transpose_pointwise.default(
+                        mode.from_tensor(x),
+                        mode.from_tensor(weight_arg),
+                        mode.from_tensor(bias),
+                        padding,
+                        output_padding,
+                        stride,
+                        dilation,
+                        groups,
+                        "none",
+                        [],
+                        "",
+                    )
+                self.assertEqual(out.shape, expected_shape)
+                self.assertEqual(out.stride(), expected_stride)
+
+        check_case(groups=1, x_shape=(4, 3, 16, 16), weight_shape=(3, 8, 3, 3))
+        check_case(groups=2, x_shape=(4, 4, 16, 16), weight_shape=(4, 3, 3, 3))
 
     def _test_conv_binary_base(self, dim=4):
         if dim != 4 and dim != 5:
