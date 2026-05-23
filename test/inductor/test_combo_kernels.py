@@ -758,6 +758,58 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
+    # --- combo_kernels_seed_autotune_cap tests ------------------------------
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_seed_autotune_cap_small_reduction_caps_to_one(self):
+        # Small reduction (rnumel=32 <= 64) -> cap=1 -> prepick succeeds,
+        # combo carries prepicked_seed_configs for the reduction subkernels.
+        def fn(a, b, c, d):
+            return a * 2, b + 1, c.sum(-1), d.sum(-1)
+
+        inps = [
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(128, 32, device=GPU_TYPE),
+            torch.randn(128, 32, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        FileCheck().check("prepicked_seed_configs").run(code[0])
+
+    @requires_gpu_and_triton
+    @parametrize("numel,expected_cap", [(2048, 1), (65536, 2)])
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_seed_autotune_cap_pointwise_bucket(self, numel, expected_cap):
+        # Pointwise bucketing: <=4096 -> cap=1 (prepicked); else cap=2.
+        def fn(a, b, c):
+            return a * 2, b + 1, c - 1
+
+        inps = [torch.randn(numel, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        if expected_cap == 1:
+            FileCheck().check("prepicked_seed_configs").run(code[0])
+        else:
+            FileCheck().check("'max_autotune_configs': 2").run(code[0])
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
