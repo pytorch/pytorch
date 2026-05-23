@@ -6,8 +6,16 @@
 import unittest
 
 import torch
+from torch._dynamo.source import LocalSource
 from torch._environment import is_fbcode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    RelaxedUnspecConstraint,
+    ShapeEnv,
+    StatefulSymbolicContext,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -215,6 +223,127 @@ class TestSparseProp(TestCase):
                     self.assertEqualMeta(meta, result)
                 else:
                     self.assertEqual(meta, None)
+
+    @parametrize("strict", (False, True))
+    def test_sparse_coo_dynamic_size_to_dense(self, strict):
+        net = ToDenseNet()
+        x = torch.tensor(
+            [
+                [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+                [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+            ]
+        ).to_sparse()
+        y = torch.tensor(
+            [
+                [[1.0, 0.0, 1.0], [2.0, 0.0, 1.0]],
+                [[0.0, 0.0, 1.0], [4.0, 1.0, 1.0]],
+                [[0.0, 0.0, 1.0], [2.0, 6.0, 1.0]],
+            ]
+        ).to_sparse()
+
+        prog = torch.export.export(
+            net,
+            (x,),
+            dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}},
+            strict=strict,
+        )
+
+        self.assertEqual(prog.module()(y), net(y))
+
+    def test_sparse_coo_fake_to_dense_dtype_error(self):
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[]),
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+
+        with mode:
+            fake_x = mode.from_tensor(x)
+            with self.assertRaisesRegex(
+                RuntimeError, "dtype argument is not supported by sparse_to_dense"
+            ):
+                fake_x.to_dense(dtype=torch.float64)
+
+    def test_sparse_coo_fake_symbolic_size_transfer(self):
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        symbolic_context = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+            constraint_sizes=[RelaxedUnspecConstraint(warn_only=False), None],
+        )
+        shape_env1 = ShapeEnv(tracked_fakes=[])
+        mode1 = FakeTensorMode(
+            shape_env=shape_env1,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        with mode1:
+            fake_x1 = mode1.from_tensor(
+                x,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+
+        self.assertIs(fake_x1.size(0).node.shape_env, shape_env1)
+
+        shape_env2 = ShapeEnv(tracked_fakes=[])
+        mode2 = FakeTensorMode(
+            shape_env=shape_env2,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        with mode2:
+            fake_x2 = mode2.from_tensor(
+                fake_x1,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+
+        self.assertIs(fake_x2.size(0).node.shape_env, shape_env2)
+
+    def test_sparse_coo_fake_records_excluded_size(self):
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        shape_env = ShapeEnv(tracked_fakes=[])
+        mode = FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        symbolic_context = StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+            constraint_sizes=[RelaxedUnspecConstraint(warn_only=False), None],
+            tensor_source=LocalSource("x"),
+            excluded_sizes=(2, None),
+        )
+
+        with mode:
+            fake_x = mode.from_tensor(
+                x,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+
+        self.assertEqual(
+            shape_env.exclusion_constraints, [(fake_x.size(0).node.expr, 2)]
+        )
+
+        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        x._dynamo_hint_overrides = {0: 3}
+        shape_env = ShapeEnv(tracked_fakes=[])
+        mode = FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+        with mode:
+            fake_x = mode.from_tensor(
+                x,
+                source=LocalSource("x"),
+                symbolic_context=symbolic_context,
+            )
+
+        self.assertEqual(shape_env.exclusion_constraints, [])
+        self.assertEqual(shape_env.var_to_hint_override[fake_x.size(0).node.expr], 3)
 
     def test_add(self):
         net = AddNet()
