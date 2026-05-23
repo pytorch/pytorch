@@ -14,6 +14,8 @@ from collections.abc import Sequence
 from typing import Literal
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -29,10 +31,15 @@ from torch._functorch._aot_autograd.autograd_cache import (
     AOTAutogradCachePickler,
     autograd_cache_key,
     BypassAOTAutogradCache,
+    check_cacheable,
     sanitize_gm_for_cache,
 )
-from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
-from torch._guards import TracingContext
+from torch._functorch._aot_autograd.schemas import (
+    AOTConfig,
+    CacheableAOTConfig,
+    InputAliasInfo,
+)
+from torch._guards import StorageOverlap, TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomGraphPass,
@@ -311,6 +318,73 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    def test_cache_hit_storage_overlap_guards_skip_unmutated_pairs(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                [torch.ones(2), torch.ones(2), torch.ones(2)],
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 2)
+        self.assertTrue(all(not guard.overlapping_sources for guard in overlap_guards))
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.non_overlapping_sources
+                )
+                for guard in overlap_guards
+            },
+            {("a", "b"), ("a", "c")},
+        )
+
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
         {
@@ -494,6 +568,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         # don't prevent compilation).
         self._clear_dynamo_and_codecache()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_numpy_round_cache_hit(self):
+        def fn(x):
+            return np.round(x)
+
+        inp = np.array([[1.2, 2.7], [-3.5, 4.5]], dtype=np.float32)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        np.testing.assert_array_equal(compiled_fn(inp), fn(inp))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+        np.testing.assert_array_equal(compiled_fn(inp), fn(inp))
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
@@ -3557,6 +3655,133 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
+
+    def test_numpy_wrapper_requires_torch_numpy_target(self):
+        def not_torch_numpy(x):
+            return x.sin()
+
+        wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(not_torch_numpy)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
+        torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
+
+        def not_torch_numpy(x):
+            return x
+
+        self.assertIsNone(
+            torch._dynamo.utils._torch_numpy_callable_cache_key(not_torch_numpy)
+        )
+        cache_info = (
+            torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
+        )
+        self.assertEqual(
+            cache_info.currsize,
+            0,
+        )
+
+    def test_numpy_wrapper_accepts_torch_numpy_alias_target(self):
+        import torch._numpy as tnp
+
+        for target in (tnp.abs, tnp.absolute):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            gm = torch.fx.GraphModule({}, graph)
+
+            check_cacheable(gm)
+            self.assertIsNotNone(torch._dynamo.utils.numpy_wrapper_cache_key(wrapper))
+
+    def test_numpy_wrapper_rejects_spoofed_torch_numpy_target(self):
+        def spoofed_round(x):
+            return x.sin()
+
+        spoofed_round.__module__ = "torch._numpy._funcs_impl"
+        spoofed_round.__qualname__ = "round"
+        spoofed_round.__name__ = "round"
+
+        wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(spoofed_round)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_rejects_subclass(self):
+        import torch._numpy as tnp
+
+        class CustomWrapper(torch._dynamo.utils.numpy_to_tensor_wrapper):
+            def __call__(self, x):
+                return x
+
+        wrapper = CustomWrapper(tnp.round)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_hash_distinguishes_safe_wrappers(self):
+        import torch._numpy as tnp
+
+        def make_gm(target):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            return torch.fx.GraphModule({}, graph)
+
+        round_gm = make_gm(tnp.round)
+        sin_gm = make_gm(tnp.sin)
+
+        check_cacheable(round_gm)
+        check_cacheable(sin_gm)
+
+        self.assertNotEqual(
+            AOTAutogradCachePickler(round_gm).get_hash(round_gm),
+            AOTAutogradCachePickler(sin_gm).get_hash(sin_gm),
+        )
+
+    def test_graph_module_hash_preserves_kernel_idx_strings(self):
+        def make_gm(message):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.call_function(torch._assert, (True, message))
+            graph.output(x)
+            return torch.fx.GraphModule({}, graph)
+
+        gm1 = make_gm("kernel_idx = 1")
+        gm2 = make_gm("kernel_idx = 2")
+
+        check_cacheable(gm1)
+        check_cacheable(gm2)
+
+        self.assertNotEqual(
+            AOTAutogradCachePickler(gm1).get_hash(gm1),
+            AOTAutogradCachePickler(gm2).get_hash(gm2),
+        )
 
     def test_sanitize_gm_for_cache(self):
         def fn(x):

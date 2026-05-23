@@ -312,7 +312,7 @@ def create_synthetic_base_metadata(
     )
 
 
-def _input_has_symbolic_metadata(fwd_input: Any) -> bool:
+def input_has_symbolic_metadata(fwd_input: Any) -> bool:
     return any(
         isinstance(x, torch.SymInt)
         for x in [
@@ -389,7 +389,7 @@ def compute_overlapping_inputs(
     # Check whether there are any symbolic values being used. This triggers the
     # fast-path for computing storage overlapping.
     symbolic = any(
-        _input_has_symbolic_metadata(fwd_inputs[i]) for i in aliased_input_indices
+        input_has_symbolic_metadata(fwd_inputs[i]) for i in aliased_input_indices
     )
 
     if check_many_aliases and torch._inductor.config.is_fbcode():

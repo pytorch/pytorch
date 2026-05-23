@@ -29,6 +29,8 @@ from torch._dynamo.utils import (
     chromium_event_log_active,
     CompileEventLogger,
     counters,
+    is_safe_numpy_wrapper,
+    numpy_wrapper_cache_key,
     warn_once,
 )
 from torch._functorch import config
@@ -78,6 +80,7 @@ from .aot_autograd_result import (
     GenericAOTAutogradResult,
     SerializedGraphModule,
 )
+from .input_output_analysis import input_has_symbolic_metadata
 from .runtime_wrappers import (
     CompilerWrapper,
     SerializableCompiledFunction,
@@ -205,6 +208,8 @@ def check_node_safe(node: Node) -> None:
 
     def is_cacheable_function(target: Callable[..., Any]) -> bool:
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            return True
+        if is_safe_numpy_wrapper(target):
             return True
         if is_public_torch_api(target):
             return True
@@ -390,13 +395,6 @@ def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
     )
 
 
-def _tensor_has_symbolic_metadata(tensor: torch.Tensor) -> bool:
-    return any(
-        isinstance(x, torch.SymInt)
-        for x in [*tensor.shape, *tensor.stride(), tensor.storage_offset()]
-    )
-
-
 def _collect_input_tensor_alias_info(
     example_inputs: Sequence[Any],
 ) -> tuple[list[int], tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
@@ -419,9 +417,9 @@ def _collect_input_tensor_alias_info(
     storage_overlapping_input_pairs: list[tuple[int, int]] = []
     for left_pos, left_tensor in enumerate(tensor_inputs):
         for right_pos, right_tensor in enumerate(tensor_inputs[:left_pos]):
-            symbolic = _tensor_has_symbolic_metadata(
+            symbolic = input_has_symbolic_metadata(
                 left_tensor
-            ) or _tensor_has_symbolic_metadata(right_tensor)
+            ) or input_has_symbolic_metadata(right_tensor)
             if compute_overlapping_tensors(
                 [right_tensor, left_tensor], symbolic=symbolic
             ):
@@ -649,12 +647,46 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         fall through to the default __reduce_ex__ which includes non-deterministic
         storage addresses. This method catches those cases using isinstance checks.
         """
+        if isinstance(obj, torch.fx.GraphModule):
+            return self._reduce_graph_module_for_cache_key(obj)
+        if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
+            return (_ident, (numpy_key,))
         # Handle tensor subclasses that aren't exactly torch.Tensor
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
         # Fall back to parent class reducer which handles unpicklable types
         return super().reducer_override(obj)
+
+    @staticmethod
+    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+        if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
+            return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
+
+        from torch.fx.graph_module import _format_import_statement
+        from torch.package import sys_importer
+
+        return _format_import_statement(name, obj, sys_importer)
+
+    def _reduce_graph_module_for_cache_key(
+        self, gm: torch.fx.GraphModule
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        recompile = getattr(gm, "_real_recompile", gm.recompile)
+        python_code = recompile()
+        # FxGraphCache strips user-defined Triton side-table indices from
+        # Inductor wrapper code. This reducer handles arbitrary AOT GraphModule
+        # code, so keep the generated code exact and let AOTAutogradCacheDetails
+        # carry Triton source/constant-arg metadata separately.
+        dict_without_graph = gm.__dict__.copy()
+        dict_without_graph.pop("_graph", None)
+
+        import_block = "\n".join(
+            sorted(
+                self._format_global_for_cache_key(name, obj)
+                for name, obj in python_code.globals.items()
+            )
+        )
+        return (_ident, ((dict_without_graph, import_block),))
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
@@ -1292,6 +1324,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         overlapping_input_pairs = set(storage_overlapping_input_pairs)
         for left_pos, left_input_position in enumerate(tensor_input_positions):
             for right_input_position in tensor_input_positions[left_pos + 1 :]:
+                if not (
+                    input_info[left_input_position].mutates_data
+                    or input_info[right_input_position].mutates_data
+                ):
+                    continue
                 input_pair = (left_input_position, right_input_position)
                 input_sources = [
                     source_by_input_position[left_input_position],
