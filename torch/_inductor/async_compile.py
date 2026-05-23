@@ -184,6 +184,7 @@ def shutdown_compile_workers() -> None:
 def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
+    AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
 
 

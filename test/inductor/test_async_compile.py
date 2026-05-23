@@ -6,6 +6,8 @@ import tempfile
 import textwrap
 import traceback
 import unittest
+import warnings
+from concurrent.futures import Future
 from unittest.mock import patch
 
 import torch
@@ -112,6 +114,19 @@ def _daemon_compile_worker(q, worker_start_method):
         shutdown_compile_workers()
 
 
+def _forked_daemon_compile_worker(q):
+    try:
+        with config.patch({"compile_threads": 2, "worker_start_method": "fork"}):
+            AsyncCompile.wait_pool_ready(timeout=1)
+            ready_future_cleared = AsyncCompile._ready_future is None
+            use_process_pool = AsyncCompile.use_process_pool()
+            q.put(("ok", (ready_future_cleared, use_process_pool)))
+    except BaseException:
+        q.put(("err", traceback.format_exc()))
+    finally:
+        shutdown_compile_workers()
+
+
 @instantiate_parametrized_tests
 class TestAsyncCompile(TestCase):
     def _run_daemon_compile_worker(self, worker_start_method):
@@ -160,6 +175,59 @@ class TestAsyncCompile(TestCase):
         )
         self.assertEqual(worker_start_method, "subprocess")
         self.assertTrue(use_process_pool)
+
+    @unittest.skipIf(
+        "fork" not in multiprocessing.get_all_start_methods(),
+        "requires fork multiprocessing start method",
+    )
+    def test_forked_daemon_process_clears_inherited_ready_future(self):
+        with config.patch({"compile_threads": 2, "worker_start_method": "fork"}):
+            shutdown_compile_workers()
+            AsyncCompile.warm_pool()
+            AsyncCompile._ready_future = Future()
+
+            try:
+                ctx = multiprocessing.get_context("fork")
+                q = ctx.Queue()
+                p = ctx.Process(target=_forked_daemon_compile_worker, args=(q,))
+                p.daemon = True
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r"os\.fork\(\) was called.*",
+                        category=RuntimeWarning,
+                    )
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=(
+                            r"This process .* is multi-threaded, use of fork\(\) "
+                            r"may lead to deadlocks in the child\."
+                        ),
+                        category=DeprecationWarning,
+                    )
+                    p.start()
+                p.join(10)
+
+                if p.is_alive():
+                    p.terminate()
+                    p.join()
+                    self.fail("forked daemon compile worker timed out")
+
+                try:
+                    kind, payload = q.get(timeout=1)
+                except queue.Empty:
+                    self.fail(
+                        "forked daemon compile worker exited without a result: "
+                        f"{p.exitcode}"
+                    )
+            finally:
+                shutdown_compile_workers()
+
+            self.assertEqual(p.exitcode, 0, payload)
+            self.assertEqual(kind, "ok", payload)
+            ready_future_cleared, use_process_pool = payload
+            self.assertTrue(ready_future_cleared)
+            self.assertFalse(use_process_pool)
 
     @requires_gpu()
     @requires_triton()
