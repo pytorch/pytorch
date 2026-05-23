@@ -1917,6 +1917,23 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         result = torch.compile(f)(x, w)
         self.assertIsInstance(result, torch.Tensor)
 
+    def test_inference_mode_decorator_getitem_view(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32)
+
+            @torch.inference_mode()
+            def forward(self, start_pos: int):
+                return self.range[start_pos : start_pos + 3]
+
+        mod = Repro()
+        expected = mod(1)
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)(1)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -10,6 +10,7 @@ It does so by:
 4. dispatching subclasses
 """
 
+import operator
 import typing
 import warnings
 from collections.abc import Callable, Generator
@@ -99,6 +100,71 @@ from .utils import (
     simple_wraps,
     without_output_descs,
 )
+
+
+@contextmanager
+def _disable_inference_mode_preserving_grad_mode() -> Generator[None, None, None]:
+    if not torch.is_inference_mode_enabled():
+        yield
+        return
+
+    prev_grad = torch.is_grad_enabled()
+    prev_fw_grad = torch._C._is_fwd_grad_enabled()
+    with torch.inference_mode(False):
+        torch._C._set_grad_enabled(prev_grad)
+        torch._C._set_fwd_grad_enabled(prev_fw_grad)
+        yield
+
+
+def _is_basic_tensor_index(index: object) -> bool:
+    if isinstance(index, tuple):
+        return all(_is_basic_tensor_index(i) for i in index)
+    if isinstance(index, bool):
+        return False
+    return (
+        index is None
+        or index is Ellipsis
+        or isinstance(index, (slice, int, torch.SymInt))
+    )
+
+
+_FUNCTIONALIZATION_INFERENCE_ERROR = "Cannot set version_counter for inference tensor"
+
+
+def _is_functionalization_inference_error(e: RuntimeError) -> bool:
+    return e.args == (_FUNCTIONALIZATION_INFERENCE_ERROR,)
+
+
+def _is_functional_getitem_view_candidate(
+    target: object, args: tuple[Any, ...]
+) -> bool:
+    return (
+        target is operator.getitem
+        and len(args) >= 2
+        and is_fun(args[0])
+        and _is_basic_tensor_index(args[1])
+    )
+
+
+# AOT replays Dynamo FX graphs under functionalization. If that graph has a
+# captured inference-mode context, basic getitem view replay can try to attach
+# version-counter state to inference tensors. Run replay normally first and
+# retry without inference mode only for that exact functionalization failure.
+class AOTDispatchPropagateUnbackedSymInts(PropagateUnbackedSymInts):
+    def call_function(
+        self, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        if torch.is_inference_mode_enabled() and _is_functional_getitem_view_candidate(
+            target, args
+        ):
+            try:
+                return super().call_function(target, args, kwargs)
+            except RuntimeError as e:
+                if not _is_functionalization_inference_error(e):
+                    raise
+            with _disable_inference_mode_preserving_grad_mode():
+                return super().call_function(target, args, kwargs)
+        return super().call_function(target, args, kwargs)
 
 
 # This function returns a new function that returns mutated inputs as outputs.
@@ -1531,7 +1597,7 @@ def create_functional_call(
                         if fake_mode is None:
                             raise AssertionError("fake_mode must not be None")
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = AOTDispatchPropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
