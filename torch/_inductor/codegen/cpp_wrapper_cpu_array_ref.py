@@ -282,6 +282,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         raw_args=None,
         triton_meta=None,
         inductor_meta=None,
+        triton_autotune_seed_infos=None,
         graph_name="",
         original_fxnode_name=None,
         current_stream_idx=None,
