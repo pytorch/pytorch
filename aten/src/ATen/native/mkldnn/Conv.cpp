@@ -680,6 +680,20 @@ std::vector<int64_t> _original_deconv_weight_size(
   return weight_IOHW_sizes;
 }
 
+bool _is_fake_deconv_weight_prepacked(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    int64_t groups) {
+  if (!weight_t.is_meta() || weight_t.dim() <= 2 || input_t.dim() <= 1) {
+    return false;
+  }
+
+  const auto input_channels = input_t.sizes()[1];
+  const auto regular_input_channels = weight_t.sizes()[0];
+  const auto packed_input_channels = weight_t.sizes()[1] * groups;
+  return input_channels != regular_input_channels &&
+      input_channels == packed_input_channels;
+}
 
 Tensor _mkldnn_convolution_transpose(
     const Tensor& input_t,
@@ -797,7 +811,12 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
 
-  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  const bool is_prepacked_weight =
+      weight_t.is_mkldnn() ||
+      _is_fake_deconv_weight_prepacked(input_t, weight_t, groups);
+  std::vector<int64_t> weight_IOHW_sizes =
+      is_prepacked_weight ? _original_deconv_weight_size(weight_t, groups)
+                          : weight_t.sizes().vec();
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
