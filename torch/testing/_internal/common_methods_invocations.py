@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
-    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
+    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, integral_types_and,
     empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
     highest_precision_complex,
     highest_precision_float,
