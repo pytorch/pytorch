@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from torch import _C, _ops, autograd, Tensor
+from torch._functorch.utils import enable_single_level_autograd_function
 from torch.utils import _pytree
 
 from . import utils
@@ -89,7 +90,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
     Generated = type(
         name,
-        (autograd.Function,),
+        (autograd.function._SingleLevelFunction,),
         {
             "forward": staticmethod(forward),
             "backward": staticmethod(backward),
@@ -118,7 +119,10 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
 
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
-            result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
+            with enable_single_level_autograd_function():
+                result = Generated.apply(  # type: ignore[attr-defined]
+                    *args, Metadata(keyset, keyword_only_args)
+                )
         else:
             result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
         return result
