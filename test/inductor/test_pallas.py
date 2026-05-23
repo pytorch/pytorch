@@ -63,6 +63,8 @@ def make_pallas(cls):
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
     ]
     cls_prefix = "Pallas"
     suffix = "_pallas"
