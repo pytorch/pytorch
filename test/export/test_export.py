@@ -55,6 +55,7 @@ from torch.export._trace import (
     _export_to_torch_ir,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
+from torch.export.exported_program import _split_decomp_table_to_cia_and_python_decomp
 from torch.export.graph_signature import (
     ExportGraphSignature,
     InputKind,
@@ -4614,6 +4615,94 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     getitem_2 = split_with_sizes[2];  split_with_sizes = None
     return (getitem, getitem_1, getitem_2)""",
         )
+
+    def test_run_decompositions_decomposes_cia_op_with_backend_kernel(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo_with_backend(Tensor x) -> Tensor")
+            lib.impl("foo_with_backend", lambda x: x.sin(), "CompositeImplicitAutograd")
+            lib.impl("foo_with_backend", lambda x: x.cos(), "CPU")
+
+            op = torch.ops.mylib.foo_with_backend.default
+
+            class Foo(torch.nn.Module):
+                def forward(self, x):
+                    return op(x)
+
+            ep = export(Foo(), (torch.randn(2, 3),))
+            ep = ep.run_decompositions({op: lambda x: x + 1})
+
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    return (add,)""",
+            )
+
+    def test_run_decompositions_keeps_cia_decomp_with_non_dense_backend_kernel(self):
+        op = torch.ops.aten.linear.default
+        self.assertFalse(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                op.name(), torch._C.DispatchKey.CPU
+            )
+        )
+        self.assertTrue(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                op.name(), torch._C.DispatchKey.NestedTensorCPU
+            )
+        )
+
+        cia_decomp_table, python_decomp_table = (
+            _split_decomp_table_to_cia_and_python_decomp(
+                {op: lambda x, weight, bias: x}
+            )
+        )
+
+        self.assertIn(op, cia_decomp_table)
+        self.assertIn(op, python_decomp_table)
+
+    def test_run_decompositions_keeps_cia_decomp_with_python_backend_kernel(self):
+        op = torch.ops.aten.broadcast_tensors.default
+        runtime_backend_keys = torch._C._dispatch_keyset_full_after(
+            torch._C.DispatchKey.BackendSelect
+        ).remove(torch._C.DispatchKey.PythonDispatcher)
+
+        self.assertFalse(
+            torch._C._dispatch_has_kernel_for_any_dispatch_key(
+                op.name(), runtime_backend_keys
+            )
+        )
+        self.assertTrue(op.has_kernel_for_any_dispatch_key(runtime_backend_keys))
+
+        cia_decomp_table, python_decomp_table = (
+            _split_decomp_table_to_cia_and_python_decomp({op: lambda tensors: tensors})
+        )
+
+        self.assertIn(op, cia_decomp_table)
+        self.assertIn(op, python_decomp_table)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_run_decompositions_decomposes_cia_op_with_cuda_kernel(self):
+        class Foo(torch.nn.Module):
+            def forward(self, a, b, c):
+                output, _ = torch.ops.aten._fused_rms_norm.default(a, b, c, 1e-5)
+                return torch.sinh(output)
+
+        def count_fused_rms_norm(ep):
+            return sum(
+                node.target == torch.ops.aten._fused_rms_norm.default
+                for node in ep.graph.nodes
+            )
+
+        normalized_shape = (3, 3, 3)
+        input_tensor = torch.randn(3, 3, 3, device="cuda", requires_grad=True)
+        weight_tensor = torch.randn(3, 3, 3, device="cuda", requires_grad=True)
+
+        ep = export(Foo(), (input_tensor, normalized_shape, weight_tensor))
+        self.assertEqual(count_fused_rms_norm(ep), 1)
+
+        ep = ep.run_decompositions(get_decompositions({torch.ops.aten._fused_rms_norm}))
+        self.assertEqual(count_fused_rms_norm(ep), 0)
 
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
