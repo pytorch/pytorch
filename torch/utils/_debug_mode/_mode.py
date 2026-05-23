@@ -36,6 +36,7 @@ import contextlib
 import functools
 import logging
 from collections.abc import Callable
+from difflib import SequenceMatcher
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -839,22 +840,32 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     def check_hash_mismatches(
-        logs1: list, logs2: list, compare_inputs: bool = False
+        logs1: list,
+        logs2: list,
+        compare_inputs: bool = False,
+        *,
+        fuzzy: bool = False,
     ) -> list[dict]:
         """
         Compares tensor hashes between two DebugMode runs, for checking run-to-run numerical divergence.
 
-        This first validates the two log sequences have identical structure (same operations, input shapes/dtypes, etc.),
-        then compares tensor hash values, and returns a list of call outputs where mismatches were found.
+        By default, this first validates the two log sequences have identical structure (same operations,
+        input shapes/dtypes, etc.), then compares tensor hash values, and returns a list of call outputs
+        where mismatches were found. With ``fuzzy=True``, the logs are aligned by call signature first,
+        so inserted/deleted calls are returned as machine-readable structural mismatches instead of
+        raising immediately.
         Expects input logs to have been run with log_tensor_hashes, and looks for hashes in .log["hash"] & .log["input_hash"]
         (or .post_hashes & .pre_hashes for triton kernels).
 
-        note: skips checking log pairs where hashes aren't present, but will raise if present in one & not the other.
+        note: skips checking log pairs where hashes aren't present, but will raise if present in one & not the other
+        unless ``fuzzy=True``.
 
         Args:
             logs1: logs from the first DebugMode run (from debug_mode.logs)
             logs2: logs from the second DebugMode run
             compare_inputs: If True, also compare input tensor hashes (default: only output checking)
+            fuzzy: If True, align logs fuzzily and return structural mismatches as dictionaries
+                with ``mismatch_type`` instead of raising for length/operator alignment differences.
 
         Returns:
             List of dictionaries describing hash mismatches. Each dict contains:
@@ -866,9 +877,12 @@ class DebugMode(TorchDispatchMode):
                 - hash2: Hash value from the second run
                 - rel_diff: Relative difference between hash values
                 - is_input_hash: True if this is an input hash, False for output hash
+                - mismatch_type: Only present in fuzzy mode. One of "hash", "missing_call",
+                  or "structure".
 
         Raises:
             ValueError: If logs have different lengths, call types, operator names, or call depths
+                and ``fuzzy=False``.
 
         Usage::
 
@@ -886,11 +900,73 @@ class DebugMode(TorchDispatchMode):
             for m in mismatches:
                 print(f"{m['call']}: hash diff {m['rel_diff']:.2e}")
         """
-        if len(logs1) != len(logs2):
-            raise ValueError(f"Log lengths don't match: {len(logs1)} vs {len(logs2)}")
-
         difference_info = []
-        for i, (log1, log2) in enumerate(zip(logs1, logs2)):
+
+        def call_type_for_report(log):
+            if isinstance(log, _OpCall):
+                return "torch op"
+            if isinstance(log, _TritonKernelCall):
+                return "triton kernel"
+            if isinstance(log, _RedistributeCall):
+                return "redistribute"
+            if isinstance(log, _OutputPlacementCall):
+                return "output placement"
+            if isinstance(log, _AnnotateCall):
+                return "annotation"
+            return type(log).__name__
+
+        def call_signature(log):
+            signature = (
+                type(log).__name__,
+                _get_call_name(log),
+                log.call_depth,
+            )
+            if isinstance(log, _OpCall):
+                signature += (log.args_str, log.kwargs_str)
+            elif isinstance(log, _TritonKernelCall):
+                signature += (log.kwargs_str,)
+            elif isinstance(log, _RedistributeCall):
+                signature += (repr(tuple(log)),)
+            elif isinstance(log, _OutputPlacementCall):
+                signature += (log.placements_str,)
+            return signature
+
+        def add_fuzzy_metadata(info, log1_index, log2_index):
+            if not fuzzy:
+                return info
+            return {
+                "mismatch_type": "hash",
+                "log1_index": log1_index,
+                "log2_index": log2_index,
+                **info,
+            }
+
+        def missing_call_info(log, only_in, log1_index, log2_index):
+            return {
+                "mismatch_type": "missing_call",
+                "only_in": only_in,
+                "log1_index": log1_index,
+                "log2_index": log2_index,
+                "call_type": call_type_for_report(log),
+                "call": _get_call_name(log),
+                "log": repr(log),
+            }
+
+        def structure_mismatch_info(log1, log2, log1_index, log2_index, reason):
+            return {
+                "mismatch_type": "structure",
+                "reason": reason,
+                "log1_index": log1_index,
+                "log2_index": log2_index,
+                "call_type1": call_type_for_report(log1),
+                "call_type2": call_type_for_report(log2),
+                "call1": _get_call_name(log1),
+                "call2": _get_call_name(log2),
+                "log1": repr(log1),
+                "log2": repr(log2),
+            }
+
+        def compare_log_pair(log1, log2, i, log1_index=None, log2_index=None):
             # check call type
             call1_type = type(log1).__name__
             call2_type = type(log2).__name__
@@ -937,18 +1013,22 @@ class DebugMode(TorchDispatchMode):
                     for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
-                                {
-                                    "call_type": "triton kernel",
-                                    "call": op_name,
-                                    "arg_name": key,
-                                    "pytree_path": None,
-                                    "hash1": hashes1[key],
-                                    "hash2": hashes2[key],
-                                    "rel_diff": _compute_rel_diff(
-                                        hashes1[key], hashes2[key]
-                                    ),
-                                    "is_input_hash": is_input,
-                                }
+                                add_fuzzy_metadata(
+                                    {
+                                        "call_type": "triton kernel",
+                                        "call": op_name,
+                                        "arg_name": key,
+                                        "pytree_path": None,
+                                        "hash1": hashes1[key],
+                                        "hash2": hashes2[key],
+                                        "rel_diff": _compute_rel_diff(
+                                            hashes1[key], hashes2[key]
+                                        ),
+                                        "is_input_hash": is_input,
+                                    },
+                                    log1_index,
+                                    log2_index,
+                                )
                             )
 
                 # check output hashes
@@ -991,16 +1071,20 @@ class DebugMode(TorchDispatchMode):
                     def _helper(keypath, hash1, hash2):
                         if hash1 != hash2:
                             difference_info.append(
-                                {
-                                    "call_type": "torch op",
-                                    "call": op_name,
-                                    "arg_name": None,
-                                    "pytree_path": keystr(keypath),
-                                    "hash1": hash1,
-                                    "hash2": hash2,
-                                    "rel_diff": _compute_rel_diff(hash1, hash2),
-                                    "is_input_hash": is_input,
-                                }
+                                add_fuzzy_metadata(
+                                    {
+                                        "call_type": "torch op",
+                                        "call": op_name,
+                                        "arg_name": None,
+                                        "pytree_path": keystr(keypath),
+                                        "hash1": hash1,
+                                        "hash2": hash2,
+                                        "rel_diff": _compute_rel_diff(hash1, hash2),
+                                        "is_input_hash": is_input,
+                                    },
+                                    log1_index,
+                                    log2_index,
+                                )
                             )
 
                     tree_map_with_path(_helper, hashes1, hashes2)
@@ -1037,6 +1121,77 @@ class DebugMode(TorchDispatchMode):
                             log2.log["input_hash"],
                             is_input=True,
                         )
+
+        if not fuzzy:
+            if len(logs1) != len(logs2):
+                raise ValueError(
+                    f"Log lengths don't match: {len(logs1)} vs {len(logs2)}"
+                )
+
+            for i, (log1, log2) in enumerate(zip(logs1, logs2)):
+                compare_log_pair(log1, log2, i)
+            return difference_info
+
+        matcher = SequenceMatcher(
+            a=[call_signature(log) for log in logs1],
+            b=[call_signature(log) for log in logs2],
+            autojunk=False,
+        )
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                for offset in range(i2 - i1):
+                    log1_index = i1 + offset
+                    log2_index = j1 + offset
+                    try:
+                        compare_log_pair(
+                            logs1[log1_index],
+                            logs2[log2_index],
+                            f"logs1[{log1_index}]/logs2[{log2_index}]",
+                            log1_index,
+                            log2_index,
+                        )
+                    except (AssertionError, ValueError) as exc:
+                        difference_info.append(
+                            structure_mismatch_info(
+                                logs1[log1_index],
+                                logs2[log2_index],
+                                log1_index,
+                                log2_index,
+                                str(exc),
+                            )
+                        )
+            elif tag == "delete":
+                for log1_index in range(i1, i2):
+                    difference_info.append(
+                        missing_call_info(logs1[log1_index], "logs1", log1_index, None)
+                    )
+            elif tag == "insert":
+                for log2_index in range(j1, j2):
+                    difference_info.append(
+                        missing_call_info(logs2[log2_index], "logs2", None, log2_index)
+                    )
+            else:
+                pair_count = min(i2 - i1, j2 - j1)
+                for offset in range(pair_count):
+                    log1_index = i1 + offset
+                    log2_index = j1 + offset
+                    difference_info.append(
+                        structure_mismatch_info(
+                            logs1[log1_index],
+                            logs2[log2_index],
+                            log1_index,
+                            log2_index,
+                            "calls_do_not_align",
+                        )
+                    )
+                for log1_index in range(i1 + pair_count, i2):
+                    difference_info.append(
+                        missing_call_info(logs1[log1_index], "logs1", log1_index, None)
+                    )
+                for log2_index in range(j1 + pair_count, j2):
+                    difference_info.append(
+                        missing_call_info(logs2[log2_index], "logs2", None, log2_index)
+                    )
 
         return difference_info
 
