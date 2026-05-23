@@ -934,10 +934,15 @@ class Module:
 
         from torch._subclasses.fake_tensor import FakeTensor
 
+        def has_fake_tensor(tensor, tensor_applied) -> bool:
+            return isinstance(tensor, FakeTensor) or isinstance(
+                tensor_applied, FakeTensor
+            )
+
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(
                 tensor, tensor_applied
-            ) and not isinstance(tensor_applied, FakeTensor):
+            ) and not has_fake_tensor(tensor, tensor_applied):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -964,11 +969,11 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            # subclasses may have multiple child tensors so we need to use swap_tensors
-            p_should_use_swap_tensors = (
-                should_use_swap_tensors
-                or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+            # Some subclasses need swap_tensors because they may have multiple
+            # child tensors. FakeTensorMode memoizes tensors with weakrefs, so
+            # fake tensors must use the overwrite path instead.
+            p_should_use_swap_tensors = not has_fake_tensor(param, param_applied) and (
+                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
             param_grad = param.grad
