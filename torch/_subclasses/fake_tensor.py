@@ -84,6 +84,16 @@ aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
+# Regular non-strict export uses this only to recover scalar values when Python
+# forces Tensor.__index__ during tracing. Keep it deterministic and side-effect free.
+_REAL_TENSOR_PROP_EXPORT_SAFE_BUILTINS = {
+    aten.div.Tensor,
+    aten.ceil.default,
+    aten.to.dtype,
+    aten._to_copy.default,
+    aten.sum.default,
+}
+
 RECURSION_COUNT = 0
 
 
@@ -1341,6 +1351,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs: bool = False,
         shape_env: ShapeEnv | None = None,
         static_shapes: bool | None = None,
+        propagate_real_tensors: bool | None = None,
         # TODO: This is a temporary measure, see
         # https://github.com/pytorch/pytorch/pull/126245#discussion_r1604185748
         # We're currently solely using this to impede population of
@@ -1360,6 +1371,13 @@ class FakeTensorMode(TorchDispatchMode):
         import torch._functorch.config
 
         self.propagate_real_tensors = (
+            torch._functorch.config.fake_tensor_propagate_real_tensors
+            if propagate_real_tensors is None
+            else propagate_real_tensors
+        )
+        # Draft export validates fake kernels against real execution. Some
+        # export paths only need real values for explicit specialization.
+        self.validate_real_tensors = (
             torch._functorch.config.fake_tensor_propagate_real_tensors
         )
         self.fake_tensor_converter = FakeTensorConverter(
@@ -2666,8 +2684,12 @@ class FakeTensorMode(TorchDispatchMode):
         nil = object()
 
         real_out = nil
+        can_propagate_real_tensors = self.validate_real_tensors or (
+            func in _REAL_TENSOR_PROP_EXPORT_SAFE_BUILTINS
+        )
         if (
             self.propagate_real_tensors
+            and can_propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
             and not any(
                 (
@@ -2765,23 +2787,24 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                    self._maybe_infer_fake_kernel_from_pytree_out(
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
-                else:
-                    # this can override the output only when the flag is True
-                    fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
+                if self.validate_real_tensors:
+                    if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                        self._maybe_infer_fake_kernel_from_pytree_out(
+                            func,
+                            (args, kwargs),
+                            (real_args, real_kwargs),
+                            fake_out,
+                            real_out,
+                        )
+                    else:
+                        # this can override the output only when the flag is True
+                        fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
+                            func,
+                            (args, kwargs),
+                            (real_args, real_kwargs),
+                            fake_out,
+                            real_out,
+                        )
 
                 # populate real_tensor_prop_unbacked_vals
                 if (
@@ -2868,6 +2891,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if (
             self.propagate_real_tensors
+            and self.validate_real_tensors
             and real_out is not nil
             and not library_utils.is_builtin(func)
             and self.shape_env is not None
@@ -2901,6 +2925,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # but there doesn't exist a profile for the existing inputs, and we are in
                 if (
                     self.propagate_real_tensors
+                    and self.validate_real_tensors
                     and real_out is not nil
                     and not library_utils.is_builtin(func)
                     and self.shape_env is not None
