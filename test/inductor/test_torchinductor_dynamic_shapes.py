@@ -158,6 +158,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
             )
         )
 
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
+            )
+        )
+
 
 class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
