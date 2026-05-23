@@ -1065,6 +1065,13 @@ combo_kernels_pointwise_only = False
 # (an address computed from a previously loaded value, e.g. gather/scatter)
 # are kept out of combo kernels.
 combo_kernels_exclude_indirect_indexing = True
+# When True, combo-kernel seed autotune is size-bucketed: small subkernels
+# (rnumel <= combo_kernels_seed_small_rnumel for reductions, total numel <=
+# combo_kernels_seed_small_pointwise_total for pointwise) cap to 1 config;
+# larger ones cap to 2. Trades a bit of peak runtime for faster compile.
+combo_kernels_seed_autotune_cap = True
+combo_kernels_seed_small_rnumel = 64
+combo_kernels_seed_small_pointwise_total = 4096
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase

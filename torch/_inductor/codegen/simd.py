@@ -514,6 +514,23 @@ class ComboKernelCodegenResult(NamedTuple):
     node_info_group: list[NodeInfo]
 
 
+def _combo_seed_max_configs(seed_kernel) -> int:
+    """Size-bucketed cap: 1 config for small subkernels, 2 for larger."""
+    if seed_kernel.inside_reduction:
+        rnumel = math.prod(
+            int(V.graph.sizevars.optimization_hint(tree.numel))
+            for tree in seed_kernel.range_trees
+            if tree.is_reduction
+        )
+        return 1 if rnumel <= config.combo_kernels_seed_small_rnumel else 2
+    total = math.prod(
+        int(V.graph.sizevars.optimization_hint(tree.numel))
+        for tree in seed_kernel.range_trees
+        if not tree.is_reduction
+    )
+    return 1 if total <= config.combo_kernels_seed_small_pointwise_total else 2
+
+
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.
@@ -3485,6 +3502,10 @@ class SIMDScheduling(BaseScheduling):
             config.patch(**config_patches),
             V.set_kernel_handler(kernel),
         ):
+            if config.combo_kernels_seed_autotune_cap:
+                kernel._combo_seed_max_autotune_configs = _combo_seed_max_configs(
+                    kernel
+                )
             self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
             src_code = kernel.codegen_kernel()
         return src_code, kernel
@@ -3551,9 +3572,7 @@ class SIMDScheduling(BaseScheduling):
                 return_configs=True,
             )
 
-        if len(configs) == 1:
-            return configs[0]
-        return None
+        return configs[0] if len(configs) == 1 else None
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError
