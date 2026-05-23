@@ -3924,7 +3924,11 @@ class SIMDScheduling(BaseScheduling):
                 if not isinstance(node, scheduler.SchedulerNode):
                     continue
 
-                for origin in node.node.get_origins():
+                ir_node = node.node
+                if ir_node is None:
+                    continue
+
+                for origin in ir_node.get_origins():
                     if getattr(origin, "op", None) != "call_function":
                         continue
 
