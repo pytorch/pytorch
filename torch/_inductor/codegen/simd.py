@@ -4118,7 +4118,7 @@ class SIMDScheduling(BaseScheduling):
 
         sizevars = V.graph.sizevars
         pointwise_hint = sizevars.optimization_hint(pointwise_numel, fallback=0)
-        if pointwise_hint <= 0:
+        if pointwise_hint < 16384:
             return {}
 
         broadcast_reads_by_key: dict[tuple[str, sympy.Expr], sympy.Expr] = {}
