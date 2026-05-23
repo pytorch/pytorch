@@ -361,6 +361,7 @@ class QuackAuxOutputInfo:
 class QuackMainOutputTransformInfo:
     kind: str
     group_size: int | None = None
+    concat_layout: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1186,9 +1187,54 @@ def _quack_output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
     return visit(value)
 
 
+def _match_quack_grouped_n_split(
+    node: Any, mm_node: torch.fx.Node
+) -> tuple[torch.fx.Node, int, tuple[str, ...]] | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if not (
+        node.op == "call_function"
+        and node.target == torch.ops.aten.split.Tensor
+        and len(node.args) >= 3
+        and isinstance(node.args[1], int)
+        and node.args[2] in (-1, 1)
+    ):
+        return None
+    source = node.args[0]
+    if source is not mm_node:
+        return None
+    mm_meta = mm_node.meta.get("val")
+    if mm_meta is None or len(mm_meta.shape) not in (2, 3):
+        return None
+    if mm_meta.shape[-1] != 2 * node.args[1]:
+        return None
+    return node, 2, ("B",)
+
+
+def _match_quack_grouped_n_getitem(
+    node: Any, mm_node: torch.fx.Node
+) -> tuple[torch.fx.Node, int, int, tuple[str, ...]] | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+    if not (
+        node.op == "call_function"
+        and node.target == operator.getitem
+        and len(node.args) >= 2
+        and isinstance(node.args[1], int)
+    ):
+        return None
+    split = _match_quack_grouped_n_split(node.args[0], mm_node)
+    if split is None:
+        return None
+    split_node, group_size, concat_layout = split
+    if not (0 <= node.args[1] < group_size):
+        return None
+    return split_node, node.args[1], group_size, concat_layout
+
+
 def _match_quack_grouped_n_select(
     node: Any, mm_node: torch.fx.Node
-) -> tuple[torch.fx.Node, int, int] | None:
+) -> tuple[torch.fx.Node, int, int, tuple[str, ...]] | None:
     if not isinstance(node, torch.fx.Node):
         return None
     if not (
@@ -1200,23 +1246,34 @@ def _match_quack_grouped_n_select(
         return None
     view = _match_quack_view_or_reshape(node.args[0])
     view_shape = _normalize_quack_shape(view.shape) if view is not None else None
-    if not (
+    if view is None or not _quack_output_uses_node(view.base, mm_node):
+        return None
+    if (
         node.args[1] == -1
         or (
             isinstance(view_shape, (list, tuple))
             and node.args[1] == len(view_shape) - 1
         )
     ):
-        return None
-    if view is None or not _quack_output_uses_node(view.base, mm_node):
-        return None
-    shape = _quack_grouped_n_fragment_shape(view_shape)
-    if not (
-        _is_quack_same_fragment_n_group_shape(shape)
-        and 0 <= node.args[2] < shape[-1]
+        shape = _quack_grouped_n_fragment_shape(view_shape)
+        if not (
+            _is_quack_same_fragment_n_group_shape(shape)
+            and 0 <= node.args[2] < shape[-1]
+        ):
+            return None
+        return view.node, node.args[2], shape[-1], ()
+    if (
+        isinstance(view_shape, (list, tuple))
+        and len(view_shape) == 3
+        and view_shape[1] == 2
+        and node.args[1] == 1
+        and 0 <= node.args[2] < 2
     ):
-        return None
-    return view.node, node.args[2], shape[-1]
+        # This is intentionally a bit brittle: the epilogue is telling us that
+        # B is laid out as concat [gate; up], so request QUACK's concat_layout
+        # and reinterpret the accumulator as the interleaved grouped-N form.
+        return view.node, node.args[2], 2, ("B",)
+    return None
 
 
 def _uses_quack_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
@@ -1254,23 +1311,31 @@ def _match_quack_grouped_n_contract_main(
 ) -> QuackMainOutputTransformInfo | None:
     select_view = None
     select_group = None
+    concat_layout: tuple[str, ...] = ()
     saw_select = False
     seen: set[torch.fx.Node] = set()
 
     def visit(value: Any) -> bool:
-        nonlocal saw_select, select_view, select_group
+        nonlocal saw_select, select_view, select_group, concat_layout
         if not isinstance(value, torch.fx.Node):
             return True
         if value in seen:
             return True
         seen.add(value)
         select = _match_quack_grouped_n_select(value, mm_node)
+        if select is None:
+            select = _match_quack_grouped_n_getitem(value, mm_node)
         if select is not None:
-            view_node, _index, group_size = select
+            view_node, _index, group_size, select_concat_layout = select
             if select_view is None:
                 select_view = view_node
                 select_group = group_size
-            elif select_view is not view_node or select_group != group_size:
+                concat_layout = select_concat_layout
+            elif (
+                not _quack_fx_equivalent(select_view, view_node)
+                or select_group != group_size
+                or concat_layout != select_concat_layout
+            ):
                 return False
             saw_select = True
             return True
@@ -1302,6 +1367,7 @@ def _match_quack_grouped_n_contract_main(
     return QuackMainOutputTransformInfo(
         kind="grouped_n_contract",
         group_size=select_group,
+        concat_layout=concat_layout,
     )
 
 
@@ -1484,6 +1550,10 @@ def _is_quack_same_fragment_n_group_shape(shape: Any) -> bool:
     return _is_quack_n_group_shape(shape) and 32 % shape[-1] == 0
 
 
+def _is_quack_concat_half_n_shape(shape: Any) -> bool:
+    return isinstance(shape, (list, tuple)) and len(shape) == 3 and shape[1] == 2
+
+
 def _lower_quack_view_or_reshape_node(
     node: torch.fx.Node,
     view_match: QuackViewMatch,
@@ -1494,14 +1564,17 @@ def _lower_quack_view_or_reshape_node(
     source = _quack_cute_arg(view_match.base, env)
     shape = _normalize_quack_shape(view_match.shape)
     group_shape = _quack_grouped_n_fragment_shape(shape)
-    if _is_quack_n_group_shape(group_shape):
-        if not _is_quack_same_fragment_n_group_shape(group_shape):
-            raise NotImplementedError(
-                "QUACK reductions feeding the main output currently require a "
-                "power-of-two group size that divides the same-fragment N width 32; "
-                "aux reductions can use other static groups"
-            )
-        group_size = group_shape[-1]
+    if _is_quack_n_group_shape(group_shape) or _is_quack_concat_half_n_shape(shape):
+        if _is_quack_concat_half_n_shape(shape):
+            group_size = 2
+        else:
+            if not _is_quack_same_fragment_n_group_shape(group_shape):
+                raise NotImplementedError(
+                    "QUACK reductions feeding the main output currently require a "
+                    "power-of-two group size that divides the same-fragment N width 32; "
+                    "aux reductions can use other static groups"
+                )
+            group_size = group_shape[-1]
         return _emit_quack_tensorssa_reshape(
             kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
         )
@@ -1521,31 +1594,42 @@ def _lower_quack_grouped_n_select_node(
     kernel: _QuackCuteDSLKernel,
     grouped_tensors: dict[torch.fx.Node, QuackGroupedTensorSSAInfo],
 ) -> Any | None:
-    if not (
+    index = None
+    if (
         node.op == "call_function"
         and node.target == torch.ops.aten.select.int
         and len(node.args) >= 3
         and isinstance(node.args[2], int)
     ):
-        return None
-    view_node = node.args[0]
-    view = _match_quack_view_or_reshape(view_node)
-    view_shape = _normalize_quack_shape(view.shape) if view is not None else None
-    if not (
-        node.args[1] == -1
-        or (
-            isinstance(view_shape, (list, tuple))
-            and node.args[1] == len(view_shape) - 1
+        view_node = node.args[0]
+        view = _match_quack_view_or_reshape(view_node)
+        view_shape = _normalize_quack_shape(view.shape) if view is not None else None
+        dim = node.args[1]
+        is_group_dim = dim == -1 or (
+            isinstance(view_shape, (list, tuple)) and dim == len(view_shape) - 1
         )
+        if _is_quack_concat_half_n_shape(view_shape) and dim == 1:
+            is_group_dim = True
+        if not is_group_dim:
+            return None
+        index = node.args[2]
+    elif (
+        node.op == "call_function"
+        and node.target == operator.getitem
+        and len(node.args) >= 2
+        and isinstance(node.args[1], int)
     ):
+        view_node = node.args[0]
+        index = node.args[1]
+    else:
         return None
     info = grouped_tensors.get(view_node)
-    if info is None or not (0 <= node.args[2] < info.group_size):
+    if info is None or not (0 <= index < info.group_size):
         return None
     source = _quack_cute_arg(view_node, env)
     return _emit_quack_tensorssa_expr(
         kernel,
-        f"{source}[((0, {node.args[2]}, None), None, None)]",
+        f"{source}[((0, {index}, None), None, None)]",
         like=source,
     )
 
@@ -1985,17 +2069,33 @@ def _compile_quack_pointwise_nodes(
                         node, view_match, env, kernel, mm_node
                     )
                     group_shape = _quack_grouped_n_fragment_shape(shape)
-                    if _is_quack_same_fragment_n_group_shape(group_shape):
+                    if _is_quack_same_fragment_n_group_shape(
+                        group_shape
+                    ) or _is_quack_concat_half_n_shape(shape):
+                        group_size = 2 if _is_quack_concat_half_n_shape(shape) else group_shape[-1]
                         base_info = grouped_tensors.get(view_match.base)
                         grouped_tensors[node] = QuackGroupedTensorSSAInfo(
-                            group_size=group_shape[-1],
-                            groups_per_fragment=32 // group_shape[-1],
+                            group_size=group_size,
+                            groups_per_fragment=32 // group_size,
                             nonnegative=(
                                 base_info.nonnegative
                                 if base_info is not None
                                 else _is_quack_nonnegative_expr(view_match.base)
                             ),
                         )
+                    continue
+                split = _match_quack_grouped_n_split(node, mm_node)
+                if split is not None:
+                    _split_node, group_size, _concat_layout = split
+                    source = _quack_cute_arg(mm_node, env)
+                    env[node] = _emit_quack_tensorssa_reshape(
+                        kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
+                    )
+                    grouped_tensors[node] = QuackGroupedTensorSSAInfo(
+                        group_size=group_size,
+                        groups_per_fragment=32 // group_size,
+                        nonnegative=_is_quack_nonnegative_expr(mm_node),
+                    )
                     continue
                 select_value = _lower_quack_grouped_n_select_node(
                     node, env, kernel, grouped_tensors
@@ -2224,6 +2324,7 @@ def _quack_cute_epilogue_code(
     QuackLocalReduceInfo | None,
     QuackAuxOutputInfo | None,
     QuackMainOutputTransformInfo | None,
+    tuple[str, ...],
 ]:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
         ModificationWrapperCuteDSL,
@@ -2303,6 +2404,7 @@ def _quack_cute_epilogue_code(
         local_reduce,
         aux_output,
         main_output_transform,
+        main_output_transform.concat_layout if main_output_transform is not None else (),
     )
 
 
@@ -2336,10 +2438,17 @@ def materialize_quack_epilogue(
     QuackLocalReduceInfo | None,
     QuackAuxOutputInfo | None,
     QuackMainOutputTransformInfo | None,
+    tuple[str, ...],
 ]:
-    lines, result, aux_placeholder_nodes, local_reduce, aux_output, main_output_transform = (
-        _quack_cute_epilogue_code(graph_module, fast_math=fast_math)
-    )
+    (
+        lines,
+        result,
+        aux_placeholder_nodes,
+        local_reduce,
+        aux_output,
+        main_output_transform,
+        concat_layout,
+    ) = _quack_cute_epilogue_code(graph_module, fast_math=fast_math)
     key = (
         "flex_gemm_quack_epilogue_"
         + hashlib.sha256(f"fast_math={fast_math}\n{graph_module.code}".encode()).hexdigest()[:16]
@@ -2353,6 +2462,7 @@ def materialize_quack_epilogue(
         local_reduce,
         aux_output,
         main_output_transform,
+        concat_layout,
     )
 
 

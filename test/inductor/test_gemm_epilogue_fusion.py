@@ -744,6 +744,50 @@ class GemmEpilogueFusionTests(TestCase):
         ).run("\n".join(codes))
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_epilogue_contiguous_gated_concat_layout(self):
+        try:
+            import quack  # noqa: F401
+        except ImportError:
+            self.skipTest("QuACK is not available")
+
+        m, n, k = 16, 16, 32
+
+        def view_select_fn(a, b):
+            return mm_epilogue(
+                a,
+                b,
+                lambda acc: F.silu(acc.view(m, 2, n).select(1, 0))
+                * acc.view(m, 2, n).select(1, 1),
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        def chunk_fn(a, b):
+            def ep(acc):
+                gate, up = acc.chunk(2, dim=-1)
+                return F.silu(gate) * up
+
+            return mm_epilogue(
+                a,
+                b,
+                ep,
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        b = torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
+
+        for fn in (view_select_fn, chunk_fn):
+            with self.subTest(fn=fn.__name__):
+                actual, codes = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                )
+
+                torch.testing.assert_close(actual, fn(a, b), atol=2e-1, rtol=2e-2)
+                FileCheck().check("main_output_transform='grouped_n_contract'").check(
+                    "concat_layout=('B',)"
+                ).check("@cute.jit").check("cute.math.tanh").run("\n".join(codes))
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_triton_epilogue_reads_mask_closure_tensor(self):
         def fn(a, b, mask):
             return mm_epilogue(

@@ -8617,12 +8617,18 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             local_reduce,
             aux_output,
             main_output_transform,
+            concat_layout,
         ) = materialize_quack_epilogue(subgraph.graph_module, fast_math=fast_math)
         gemm_op_info = GEMM_EPILOGUE_OPS[gemm_op]
         mat1, mat2 = (
             quack_args[gemm_op_info.mat1_index],
             quack_args[gemm_op_info.mat2_index],
         )
+        if "B" in concat_layout and mat2.get_stride()[-1] == 1:
+            raise NotImplementedError(
+                "QUACK concat-layout gated epilogues require B's output dimension to be non-contiguous, "
+                "as in linear weight.t(); row-major Kx2N B would need a different swizzle"
+            )
         if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
             m, n = mat1.get_size()[0], mat2.get_size()[2]
             size = [m, n]
@@ -8796,6 +8802,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             main_output_transform_group=main_output_transform.group_size
             if main_output_transform is not None
             else None,
+            concat_layout=concat_layout,
             mutated_inputs=mutated_inputs or None,
             tuned=tuned,
         )

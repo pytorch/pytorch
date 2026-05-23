@@ -45,6 +45,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
         main_output_transform = kwargs.pop("main_output_transform", None)
         tuned = kwargs.pop("tuned", True)
         main_output_transform_group = kwargs.pop("main_output_transform_group", None)
+        concat_layout = kwargs.pop("concat_layout", ())
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         return QuackGemmEpilogueTemplateCaller(
             name=f"quack_gemm_epilogue_{next(self.index_counter)}",
@@ -69,6 +70,7 @@ class QuackGemmEpilogueTemplate(KernelTemplate):
             local_reduce_source_from_epilogue=local_reduce_source_from_epilogue,
             main_output_transform=main_output_transform,
             main_output_transform_group=main_output_transform_group,
+            concat_layout=concat_layout,
             tuned=tuned,
             mutated_inputs=mutated_inputs,
         )
@@ -99,6 +101,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         local_reduce_source_from_epilogue: bool = False,
         main_output_transform: str | None = None,
         main_output_transform_group: int | None = None,
+        concat_layout: tuple[str, ...] = (),
         mutated_inputs: list[Buffer] | None = None,
         tuned: bool = True,
     ) -> None:
@@ -127,6 +130,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
         self.local_reduce_source_from_epilogue = local_reduce_source_from_epilogue
         self.main_output_transform = main_output_transform
         self.main_output_transform_group = main_output_transform_group
+        self.concat_layout = tuple(concat_layout)
         self.mutated_inputs = mutated_inputs
         self.tuned = tuned
 
@@ -157,6 +161,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
                 local_reduce_source_from_epilogue=self.local_reduce_source_from_epilogue,
                 main_output_transform=self.main_output_transform,
                 main_output_transform_group=self.main_output_transform_group,
+                concat_layout=self.concat_layout,
                 mutated_inputs=self.mutated_inputs,
                 tuned=self.tuned,
             )
@@ -175,7 +180,7 @@ class QuackGemmEpilogueTemplateCaller(ChoiceCaller):
             f"{self.local_reduce_group}\n{self.local_reduce_dim}\n{self.local_reduce_op}\n"
             f"{self.local_reduce_scale}\n{self.local_reduce_max_power}\n{self.local_reduce_feeds_main}\n"
             f"{self.local_reduce_source_from_epilogue}\n"
-            f"{self.main_output_transform}\n{self.main_output_transform_group}\n{self.tuned}\n"
+            f"{self.main_output_transform}\n{self.main_output_transform_group}\n{self.concat_layout}\n{self.tuned}\n"
             f"{self.epilogue_name}\n{self.epilogue_source}"
         )
 

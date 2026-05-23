@@ -85,6 +85,8 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
                 epilogue_kwargs += (
                     f", main_output_transform_group={qtb.main_output_transform_group!r}"
                 )
+        if getattr(qtb, "concat_layout", ()):
+            epilogue_kwargs += f", concat_layout={qtb.concat_layout!r}"
         local_reduce_kwargs = ""
         if qtb.aux_out_index is not None:
             local_reduce_kwargs += f", aux_out={input_args[qtb.aux_out_index]}"
