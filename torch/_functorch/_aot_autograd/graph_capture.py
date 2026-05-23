@@ -136,6 +136,7 @@ def _create_graph(
         )(*args)
 
         if args_descs is not None:
+            flat_args, _ = pytree.tree_flatten(args)
             flat_args_descs, _ = pytree.tree_flatten(args_descs)
             flat_out_descs, _ = pytree.tree_flatten(out_descs)
 
@@ -174,6 +175,9 @@ def _create_graph(
                                 f"fn_wrappers={fn_wrappers(inner_f)}, "
                                 f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
                             )
+                        arg = flat_args[i]
+                        if not isinstance(arg, torch.Tensor):
+                            n.meta["val"] = arg
                         n.meta["desc"] = flat_args_descs[i]
                         i += 1
                 elif n.op == "output":
