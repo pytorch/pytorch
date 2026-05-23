@@ -14,7 +14,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config
@@ -2084,7 +2084,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # allow_tf32 alignment heuristics based on reverse engineering
         # H100 CUDA 12.8 behavior
         size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             size_threshold
