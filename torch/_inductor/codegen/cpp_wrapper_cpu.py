@@ -2110,6 +2110,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             code.writeline(stmt)
 
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        for name, size, stride in asserts:
+            self._codegen_assert_size_stride(code, name, size, stride, op_name)
+
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (
             device.type + " not found in DEVICE_TO_ATEN"

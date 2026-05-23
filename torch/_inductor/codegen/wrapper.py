@@ -1233,6 +1233,22 @@ class AssertSizeStrideLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class GroupedAssertSizeStrideLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    asserts: list[tuple[str, str, str]]
+    op_name: str = "input"
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_size_stride_grouped(
+            code, self.asserts, self.op_name
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_size_stride
+
+
+@dataclasses.dataclass
 class AssertDivByZeroLine(WrapperLine):
     """Deferred AOTI runtime check that a sizevar divisor is non-zero.
 
@@ -1420,6 +1436,7 @@ class PythonWrapperCodegen(CodeGen):
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
@@ -1709,10 +1726,16 @@ class PythonWrapperCodegen(CodeGen):
     # sequential assert calls (~1 us each) on the critical path before the first
     # GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
+        grouped_asserts: list[tuple[str, str, str]] = []
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.write_assert_size_stride(name, size, stride, "input")
+                grouped_asserts.append((name, size, stride))
+        if len(grouped_asserts) == 1:
+            name, size, stride = grouped_asserts[0]
+            self.write_assert_size_stride(name, size, stride, "input")
+        elif len(grouped_asserts) > 1:
+            self.write_assert_size_stride_grouped(grouped_asserts, "input")
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
@@ -1753,6 +1776,22 @@ class PythonWrapperCodegen(CodeGen):
         """
         raise NotImplementedError(
             "AOTI div-by-zero check is only emitted by C++ wrappers"
+        )
+
+    def write_assert_size_stride_grouped(
+        self, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        """Queue a grouped assert_size_stride for emission during replay."""
+        self.writeline(GroupedAssertSizeStrideLine(self, asserts, op_name))
+
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        names = ", ".join(name for name, _, _ in asserts)
+        sizes = ", ".join(size for _, size, _ in asserts)
+        strides = ", ".join(stride for _, _, stride in asserts)
+        code.writeline(
+            f"assert_size_stride_grouped(({names}), ({sizes}), ({strides}), {op_name!r})"
         )
 
     def register_alignment_check_inputs(self) -> None:
