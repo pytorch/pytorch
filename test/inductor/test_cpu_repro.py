@@ -1110,6 +1110,58 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @config.patch(fallback_random=True)
+    def test_rrelu_fallback_random(self):
+        rrelu = nn.RReLU().train()
+        x = torch.randn(1, 1, 100, 100)
+
+        def fn(x):
+            return rrelu(x)
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            expected = fn(x)
+            torch.manual_seed(0)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+    @config.patch(fallback_random=True)
+    def test_rrelu_with_noise_functional_fallback_random(self):
+        x = torch.randn(64, 64)
+
+        def fn(x):
+            noise = torch.empty_like(x)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, True
+            )
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(123)
+            expected = fn(x)
+            torch.manual_seed(123)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+        def fn_eval(x):
+            noise = torch.full_like(x, 7)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, False
+            )
+
+        compiled_eval = torch.compile(fn_eval, backend="inductor")
+
+        with torch.no_grad():
+            expected = fn_eval(x)
+            actual = compiled_eval(x)
+
+        self.assertEqual(actual, expected)
+
+    @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
             x1 = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
@@ -3770,6 +3822,32 @@ class CPUReproTests(TestCase):
                     f"Expected generated_cpp_vec_kernel_count == 1, got {metrics.generated_cpp_vec_kernel_count}"
                 )
 
+    def test_argmax_argmin_transpose_logical_index_cpu(self):
+        def issue_fn(x):
+            x = x.clone()
+            x.sin_()
+            return x.t().argmax()
+
+        x = torch.tensor(
+            [
+                [-1.5256, -0.7502, -0.6540, -1.6095, -0.1002, -0.6092, -0.9798],
+                [-1.6091, -0.7121, 0.3037, -0.7773, -0.2515, -0.2223, 1.6871],
+                [0.2284, 0.4676, -0.6970, -1.1608, 0.6995, 0.1991, 0.8657],
+                [0.2444, -0.6629, 0.8073, 1.1017, -0.1759, -2.2456, -1.4465],
+                [0.0612, -0.6177, -0.7981, -0.1316, -0.7984, 0.3357, 0.2753],
+            ]
+        )
+        self.assertEqual(issue_fn(x).item(), 31)
+        self.common(issue_fn, (x,))
+
+        def argmin_argmax_fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        x = torch.arange(24, dtype=torch.float32).reshape(6, 4)
+        x[4, 0] = -100
+        x[1, 3] = 100
+        self.common(argmin_argmax_fn, (x,))
+
     @requires_vectorization
     def test_argmax_argmin_cpptile2d_2d_input(self):
         def fn(a, b):
@@ -4926,6 +5004,30 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_cmp.grad, x_ref.grad)
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
+
+    def test_group_norm_torch_func_grad_dynamic(self):
+        avg_pool = nn.AvgPool2d(2)
+        layer_norm = nn.LayerNorm([5])
+        batch_norm = nn.BatchNorm2d(12).eval()
+        group_norm = nn.GroupNorm(12, 12).eval()
+
+        def fn(x):
+            x = avg_pool(x)
+            x = layer_norm(x)
+            x = batch_norm(x)
+            x = group_norm(x)
+            return x.abs().mean()
+
+        torch.manual_seed(0)
+        x = torch.randn([2, 12, 10, 10])
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        actual = compiled(x)
+
+        self.assertEqual(actual, expected)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True

@@ -1298,6 +1298,51 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.SetVariable,
+            variables.TupleVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -1765,7 +1810,13 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: sorted(value) if isinstance(value, set) else value
+            key: (
+                sorted(value)
+                if isinstance(value, set)
+                else value.to_jsonable()
+                if hasattr(value, "to_jsonable")
+                else value
+            )
             for key, value in d.items()
             if key not in blocklist
         }
@@ -4067,7 +4118,10 @@ def _get_fake_value_impl(
                 lambda: unimplemented(
                     gb_type="Custom op Tensor subclass data pointer access",
                     context="",
-                    explanation=msg,
+                    explanation=(
+                        "A Tensor subclass argument reached a custom op while Dynamo "
+                        f"was running fake tensor propagation: {msg}"
+                    ),
                     hints=[
                         *graph_break_hints.CUSTOM_OP_FAKE_TENSOR_SUBCLASS_DATA_PTR,
                     ],
@@ -4601,6 +4655,81 @@ class numpy_operator_wrapper(Generic[_P, R]):
         )
         out = self.op(*args)
         return numpy_to_tensor(out)
+
+
+@functools.lru_cache(maxsize=1)
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any, str]]:
+    result: dict[int, tuple[Callable[..., Any], Any, str]] = {}
+    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
+        module = np_mod.__name__
+        for name, tnp_callable in tnp_mod.__dict__.items():
+            if not callable(tnp_callable):
+                continue
+
+            np_callable = getattr(np_mod, name, None)
+            if not callable(np_callable):
+                continue
+
+            result[id(tnp_callable)] = (
+                tnp_callable,
+                np_callable,
+                f"{module}.{name}",
+            )
+    return result
+
+
+@functools.lru_cache(maxsize=1024)
+def _torch_numpy_callable_cache_key_by_id(
+    obj_id: int,
+) -> tuple[Callable[..., Any], str] | None:
+    tnp_callable, np_callable, cache_key = _torch_numpy_callable_id_map()[obj_id]
+
+    module, _, name = cache_key.rpartition(".")
+    # Random functions depend on global RNG state, so they are not safe to
+    # identify only by their canonical NumPy path in an AOTAutograd cache key.
+    if module == "numpy.random" or module.startswith("numpy.random."):
+        return None
+
+    try:
+        if np_callable is not getattr(importlib.import_module(module), name):
+            return None
+    except (AttributeError, ImportError):
+        return None
+
+    return (tnp_callable, cache_key)
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    obj_id = id(obj)
+    # Arbitrary Python callables can be short-lived, so do not cache misses by
+    # id; a later object may reuse the same id.
+    if obj_id not in _torch_numpy_callable_id_map():
+        return None
+
+    entry = _torch_numpy_callable_cache_key_by_id(obj_id)
+    if entry is None:
+        return None
+
+    tnp_callable, cache_key = entry
+    if obj is not tnp_callable:
+        return None
+
+    return cache_key
+
+
+def is_safe_numpy_wrapper(obj: Any) -> bool:
+    return numpy_wrapper_cache_key(obj) is not None
+
+
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
+    if type(obj) is not numpy_to_tensor_wrapper:
+        return None
+
+    key = _torch_numpy_callable_cache_key(obj.f)
+    if key is None:
+        return None
+
+    return (type(obj).__qualname__, key)
 
 
 def defake(x: Any) -> Any:
@@ -5549,6 +5678,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo
