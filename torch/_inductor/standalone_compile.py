@@ -393,6 +393,11 @@ def _resolve_fake_mode(
 ) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
         if fake_mode is not None:
+            if fake_mode.shape_env is None:
+                raise ValueError(
+                    "standalone_compile requires `fake_mode` to have a ShapeEnv "
+                    'when `dynamic_shapes="from_example_inputs"`.'
+                )
             return fake_mode
         return FakeTensorMode(shape_env=ShapeEnv())
     elif fake_mode is not None:

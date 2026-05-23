@@ -440,8 +440,8 @@ def standalone_compile(
             the graph module and may mutate it, avoiding an internal deepcopy.
             Defaults to False for backwards compatibility.
         fake_mode: Optional FakeTensorMode to use when
-            dynamic_shapes="from_example_inputs". When omitted, standalone_compile
-            creates a fresh FakeTensorMode for that mode as before.
+            dynamic_shapes="from_example_inputs". The mode must have a ShapeEnv.
+            When omitted, a fresh FakeTensorMode is created as before.
 
     Returns:
         CompiledArtifact that can be saved to disk or invoked directly.
