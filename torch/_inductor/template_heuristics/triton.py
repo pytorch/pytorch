@@ -2403,7 +2403,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fnuz,
+            torch.float8_e4m3fn,
+        ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
@@ -2637,6 +2642,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(

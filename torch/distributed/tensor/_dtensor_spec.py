@@ -457,10 +457,13 @@ class DTensorSpec:
         Return a stable hash for AOT autograd caching.
         [See note: Tensor subclass stable hashing for AOT autograd cache]
         """
+        from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
+
         # Get hash key, but replace mesh with its stable hash
         key = self._hash_key()
         # First element is mesh, replace with its stable hash
-        stable_key = (self.mesh._stable_hash(),) + key[1:]
+        mesh = maybe_unwrap_fake_script_object(self.mesh)
+        stable_key = (mesh._stable_hash(),) + key[1:]
         return hashlib.blake2b(repr(stable_key).encode(), digest_size=16).hexdigest()
 
     def _check_equals(self, other: object, skip_shapes: bool = False) -> bool:
