@@ -413,6 +413,21 @@ META_ONLY_OPS = OrderedSet(
 )
 
 
+def _is_control_deps_ordering_only_use(
+    user: torch.fx.Node,
+    view: torch.fx.Node,
+) -> bool:
+    if not (
+        user.op == "call_function"
+        and isinstance(user.target, torch._ops.HigherOrderOperator)
+        and user.target._name == "control_deps"
+    ):
+        return False
+    additional_deps = pytree.tree_leaves(user.args[0])
+    pass_through = pytree.tree_leaves(user.args[2:])
+    return view in additional_deps and view not in pass_through
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -495,6 +510,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     user.target is torch.ops.aten.copy_.default
                     and mutated_arg is user.args[0]
                 ):
+                    continue
+                if _is_control_deps_ordering_only_use(user, view):
                     continue
                 return True
         return False

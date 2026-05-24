@@ -4,19 +4,21 @@ These ops encapsulate stream management internally, producing a clean 2-node
 IR pattern (offload/reload + wait_tensor) similar to c10d functional collectives.
 
 A single dedicated transfer stream handles all D2H/H2D copies.
-Completion events are keyed by output tensor data_ptr() and stored in a
-module-level registry, so ``ao.wait_tensor`` takes only the tensor itself
+Completion events are keyed by output tensor device and data_ptr(), then stored
+in a module-level registry, so ``ao.wait_tensor`` takes only the tensor itself
 (plus optional ``keepalive`` and ``last_use_of_storage`` args).
 
 Offload pattern:
     cpu_tensor = ao.offload(gpu_tensor)
-    cpu_tensor = ao.wait_tensor(cpu_tensor, keepalive=gpu_tensor)
-        keepalive frees the GPU tensor's storage after the D2H copy completes.
+    cpu_tensor = ao.wait_tensor(cpu_tensor, last_use_of_storage=gpu_tensor)
+        The explicit last_use_of_storage edge keeps the GPU storage live until
+        the sunk wait completes. This prevents compiler-planned buffer reuse
+        from overwriting storage still being read by the async D2H copy.
 
 Reload pattern:
     gpu_tensor = ao.reload(cpu_tensor, device)
     gpu_tensor = ao.wait_tensor(gpu_tensor, keepalive=cpu_tensor)
-        keepalive frees the CPU tensor's storage after the H2D copy completes.
+        keepalive keeps the CPU tensor live until the H2D copy completes.
 
 The optional ``last_use_of_storage`` arg creates a dependency on a tensor whose
 storage must outlive the async transfer but is not otherwise connected by a
@@ -29,35 +31,48 @@ from torch.fx import has_side_effect
 
 
 # --- Global transfer stream (one per device, lazily created) ---
-_transfer_streams: dict[torch.device, torch.Stream] = {}
+_transfer_streams: dict[torch.device, torch.cuda.Stream] = {}
 
 
-def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
+def _get_or_create_transfer_stream(device: torch.device) -> torch.cuda.Stream:
     if device not in _transfer_streams:
-        _transfer_streams[device] = torch.Stream(device=device)
+        _transfer_streams[device] = torch.cuda.Stream(device=device)
     return _transfer_streams[device]
 
 
-# --- Wait registry: maps data_ptr() -> (completion_event, device) ---
+# --- Wait registry: maps (device, data_ptr()) -> (completion_event, device) ---
 # Created by ao.offload / ao.reload, consumed (popped) by ao.wait_tensor.
-# Not thread-safe — graph execution is single-threaded Python.
-_wait_registry: dict[int, tuple[torch.Event, torch.device]] = {}
+# Not thread-safe: graph execution is single-threaded Python.
+_WaitKey = tuple[str, int, int]
+_wait_registry: dict[_WaitKey, tuple[torch.Event, torch.device]] = {}
+
+
+def _wait_key(tensor: torch.Tensor) -> _WaitKey:
+    device_index = -1 if tensor.device.index is None else tensor.device.index
+    return (tensor.device.type, device_index, tensor.data_ptr())
 
 
 def _register_wait(tensor: torch.Tensor, device: torch.device) -> torch.Event:
     """Create an event for an async transfer and register it for wait_tensor."""
+    key = _wait_key(tensor)
+    if key in _wait_registry:
+        raise RuntimeError(
+            f"ao.wait_tensor: pending transfer already registered for "
+            f"tensor key={key}. Every ao.offload/ao.reload result must be "
+            "waited exactly once before its storage is reused."
+        )
     event = torch.Event()
-    _wait_registry[tensor.data_ptr()] = (event, device)
+    _wait_registry[key] = (event, device)
     return event
 
 
 def _pop_wait(tensor: torch.Tensor) -> tuple[torch.Event, torch.device]:
-    key = tensor.data_ptr()
+    key = _wait_key(tensor)
     try:
         return _wait_registry.pop(key)
     except KeyError:
         raise RuntimeError(
-            f"ao.wait_tensor: no pending transfer for tensor with data_ptr={key}. "
+            f"ao.wait_tensor: no pending transfer for tensor key={key}. "
             "Every ao.wait_tensor must be paired with a preceding ao.offload or ao.reload."
         ) from None
 
@@ -66,23 +81,25 @@ def _clear_wait_registry() -> None:
     _wait_registry.clear()
 
 
-@custom_op("ao::offload", mutates_args=())
+# Treat the source as logically mutated: the async D2H copy is an outstanding
+# read of its storage, so later compiler-generated in-place writes must not
+# reuse that storage until the copy is sequenced.
+@custom_op("ao::offload", mutates_args={"tensor"})
 def offload(tensor: torch.Tensor) -> torch.Tensor:
     """Async offload a GPU tensor to CPU on the dedicated transfer stream.
 
-    Callers MUST pair this with an ``ao.wait_tensor`` that passes the source GPU
-    tensor as ``keepalive`` to extend its lifetime past the async D2H copy.
-    Do NOT use ``record_stream`` — it causes memory fragmentation and
-    unbounded memory growth.
-
-    Uses pinned-memory allocation + copy_ so the transfer is compatible
-    with CUDA graph capture.
+    Explicitly records the source GPU tensor on the transfer stream. This is
+    intentional: without keepalive, the compiler frees the GPU buffer right
+    after this op (the AC free point). record_stream prevents the allocator from
+    reusing the block while the D2H is still reading it on the transfer stream,
+    without stalling compute.
     """
     device = tensor.device
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
     transfer_stream.wait_stream(current_stream)
+    tensor.record_stream(transfer_stream)
 
     torch.accelerator.set_stream(transfer_stream)
     result = torch.empty_like(tensor, device="cpu", pin_memory=True)
@@ -103,23 +120,24 @@ def _(tensor: torch.Tensor) -> torch.Tensor:
 def reload(
     tensor: torch.Tensor,
     device: torch.device,
+    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Async reload a CPU tensor to GPU on the dedicated transfer stream.
 
-    The GPU tensor is allocated on the compute stream to avoid cross-stream
-    allocator ownership issues. The H2D copy runs on the transfer stream.
-    The completion event is keyed by the output tensor's data_ptr.
+    The GPU tensor is allocated on the compute stream, then populated on the
+    transfer stream. The compute stream waits on the recorded event before first
+    use.
     """
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    # Allocate on compute stream so the allocator tracks ownership correctly
     result = torch.empty_like(tensor, device=device)
-    completion_event = _register_wait(result, device)
-
+    result.record_stream(transfer_stream)
+    # The destination allocation is owned by the current stream. Make the copy
+    # stream wait for that stream before writing into the destination storage.
     transfer_stream.wait_stream(current_stream)
-
     torch.accelerator.set_stream(transfer_stream)
+    completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
     torch.accelerator.set_stream(current_stream)
@@ -131,6 +149,7 @@ def reload(
 def _(
     tensor: torch.Tensor,
     device: torch.device,
+    prefetch_dependency: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(tensor, device=device)
 
@@ -148,11 +167,9 @@ def _(
 #
 # ``keepalive`` is the source tensor of the async transfer. It creates a
 # graph dependency that extends the source tensor's lifetime until the
-# compute stream has waited on the transfer completion event. After the
-# wait, the op frees the source tensor's storage via ``resize_(0)`` since
-# it is no longer needed:
-#   - Offload (D2H): keepalive is the GPU tensor; freed after the D2H copy.
-#   - Reload (H2D): keepalive is the CPU tensor; freed after the H2D copy.
+# compute stream has waited on the transfer completion event:
+#   - Offload (D2H): keepalive is the GPU tensor.
+#   - Reload (H2D): keepalive is the CPU tensor.
 #
 # ``last_use_of_storage`` is an optional tensor whose storage is shared with
 # other live tensors (views/aliases). Passing it here tells the scheduler
@@ -178,10 +195,8 @@ def _ao_wait_tensor(
     current_stream = torch.accelerator.current_stream(device)
 
     current_stream.wait_event(completion_event)
-    if keepalive is not None:
-        storage = keepalive.untyped_storage()
-        if storage.size() > 0:
-            storage.resize_(0)
+    if tensor.device == device:
+        tensor.record_stream(current_stream)
     return tensor
 
 
@@ -194,6 +209,8 @@ def _ao_wait_tensor_fake(
     return tensor
 
 
+has_side_effect(torch.ops.ao.offload.default)
+has_side_effect(torch.ops.ao.reload.default)
 has_side_effect(torch.ops.ao.wait_tensor.default)
 
 

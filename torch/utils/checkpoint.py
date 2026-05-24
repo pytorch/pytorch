@@ -1241,6 +1241,52 @@ class _VersionWrapper:
         return self.val
 
 
+class _OffloadWrapper:
+    # Correctness-first eager fallback for CPU_OFFLOAD SAC policies.
+    def __init__(self, val) -> None:
+        self.val: torch.Tensor | Any = val
+        self.device: torch.device | None = None
+        self.version: int | None = None
+        self.ref: ReferenceType[torch.Tensor] | None = None
+        if not isinstance(val, torch.Tensor) or val.device.type == "cpu":
+            return
+
+        self.device = val.device
+        self.version = val._version
+        self.ref = weakref.ref(val)
+        if val.layout == torch.strided:
+            self.val = torch.empty_strided(
+                tuple(val.size()),
+                tuple(val.stride()),
+                dtype=val.dtype,
+                device="cpu",
+                pin_memory=val.device.type == "cuda",
+            )
+            self.val.copy_(val, non_blocking=val.device.type == "cuda")
+        else:
+            self.val = val.to("cpu")
+
+    def get_val(self, allow_cache_entry_mutation):
+        if (
+            self.version is not None
+            and not allow_cache_entry_mutation
+            and self.ref is not None
+        ):
+            original = self.ref()
+            if original is not None and original._version != self.version:
+                raise RuntimeError(
+                    "Tensor cached during selective activation checkpoint has been mutated"
+                )
+        if self.device is None:
+            return self.val
+        non_blocking = (
+            isinstance(self.val, torch.Tensor)
+            and self.val.device.type == "cpu"
+            and self.val.is_pinned()
+        )
+        return self.val.to(self.device, non_blocking=non_blocking)
+
+
 def _detach_helper(x):
     # We detach for two separate reasons:
     # - For view ops, we need to ensure that when the tensor is returned from
@@ -1401,8 +1447,23 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
+        if policy in (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.MUST_CPU_OFFLOAD,
+            CheckpointPolicy.PREFER_CPU_OFFLOAD,
+        ) or is_compiling:
+            wrapper = (
+                _VersionWrapper
+                if is_compiling
+                or policy
+                not in (
+                    CheckpointPolicy.MUST_CPU_OFFLOAD,
+                    CheckpointPolicy.PREFER_CPU_OFFLOAD,
+                )
+                else _OffloadWrapper
+            )
+            self.storage[key][idx] = tree_map(lambda x: wrapper(_detach_helper(x)), out)
         else:
             self.storage[key][idx] = _RECOMPUTE
         return out

@@ -7,7 +7,6 @@ applied to graphs produced by both AOT Autograd partitioners and make_fx-based t
 
 import logging
 import operator
-from dataclasses import dataclass
 
 import torch
 import torch.fx as fx
@@ -16,12 +15,16 @@ from torch._functorch._activation_offloading.offload_ops import (  # noqa: F401 
     reload,
     wait_tensor,
 )
-from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
+from torch._inductor.fx_passes.control_dependencies import (
+    add_order_only_dependency,
+    apply_order_only_dependencies,
+)
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.utils._ordered_set import OrderedSet
+from torch.utils.checkpoint import CheckpointPolicy
 
 from .. import config
-from ..partitioners import _size_of, get_default_op_list, OpTypes
+from ..partitioners import get_default_op_list, OpTypes
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -31,53 +34,35 @@ log: logging.Logger = logging.getLogger(__name__)
 # NOTE: right now we are using these prefixes as identifiers for offload/reload
 CPU_OFFLOAD_PREFIX = "cpu_offload_"
 GPU_RELOAD_PREFIX = "gpu_reload_"
+FORWARD_OFFLOAD_WAIT_DISTANCE = 4
+
+
+_LIFETIME_TRANSPARENT_TARGETS = (
+    torch.ops.aten._unsafe_view.default,
+    torch.ops.aten.unbind.int,
+    torch.ops.aten.split.Tensor,
+    torch.ops.aten.split_with_sizes.default,
+    operator.getitem,
+)
 
 
 def _find_all_effective_users(node: fx.Node, op_types: OpTypes) -> OrderedSet[fx.Node]:
-    """Find all effective users of a node, where view ops extend the lifetime
-    of the original node. If a user is a view op, recursively find users of
-    the view."""
+    """Find all effective users of a node, where view-like ops extend the lifetime
+    of the original node. Views and multi-output split-like ops (unbind/split) are
+    transparent: we recurse through them so the "last user" we pick is always a
+    real consumer that produces a single Tensor, never a list-producing node."""
     effective_users: OrderedSet[fx.Node] = OrderedSet()
     for user in node.users:
         if user.op == "output":
             continue
-        effective_users.add(user)
-        if op_types.is_view(user):
+        is_transparent = (
+            op_types.is_view(user) or user.target in _LIFETIME_TRANSPARENT_TARGETS
+        )
+        if not is_transparent:
+            effective_users.add(user)
+        else:
             effective_users.update(_find_all_effective_users(user, op_types))
     return effective_users
-
-
-@dataclass
-class ReloadNodeInfo:
-    """
-    Information about backward reload related nodes for each reload operation.
-
-    Pattern: ao.reload → ao.wait_tensor
-
-    - Reload group (ao.reload): Performs the actual asynchronous data transfer.
-      Can be moved earlier in the graph to overlap with computation.
-    - Wait node (ao.wait_tensor): Synchronization point that blocks until the data
-      transfer completes. Must remain at the point where the data is first needed.
-    """
-
-    reload_group_nodes: list[fx.Node]
-    wait_event_node: fx.Node
-    transfer_size_bytes: int
-    transfer_time_ms: float
-
-
-@dataclass
-class ReloadQueueEntry:
-    """
-    Entry in the reload queue for prefetch scheduling.
-
-    Attributes:
-        pattern: The reload pattern information
-        remaining_time_ms: Remaining overlap time needed in milliseconds
-    """
-
-    pattern: ReloadNodeInfo
-    remaining_time_ms: float
 
 
 def offload_activation_fw(graph: fx.Graph) -> None:
@@ -188,6 +173,10 @@ def reload_activation_bw(graph: fx.Graph) -> None:
 def offload_activation_fw_async(graph: fx.Graph) -> None:
     """Insert async CPU offload operations in the forward pass graph.
 
+    Places the offload (D2H copy) after the last effective consumer of the
+    activation so the transfer overlaps with subsequent compute. The wait_tensor
+    is later sunk to the end of the graph by activation_offload_sink_wait_async.
+
     Uses ao.offload + ao.wait_tensor ops which encapsulate stream management
     internally, producing a clean 2-node IR per offloaded tensor.
     """
@@ -216,7 +205,17 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
         else:
             last_user: fx.Node = node
 
-        with graph.inserting_after(last_user):
+        # Push the offload one hop further: past the downstream ops of the
+        # last consumer. If the very next op (e.g., down-proj mm) allocates a
+        # large output, the allocator may otherwise need to wait on the D2H
+        # stream before reusing memory. Pushing past that op lets the D2H
+        # overlap with later compute (attention, next layer).
+        if downstream := _find_all_effective_users(last_user, op_types):
+            insert_after = max(downstream, key=lambda n: node_to_index[n])
+        else:
+            insert_after = last_user
+
+        with graph.inserting_after(insert_after):
             offload_node: fx.Node = graph.call_function(
                 torch.ops.ao.offload.default,
                 args=(node,),
@@ -226,13 +225,14 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
             offload_node.meta["tensor_meta"] = extract_tensor_metadata(
                 offload_node.meta["val"]
             )
-        # The keepalive=node arg extends the GPU tensor's lifetime in the
-        # graph so the allocator doesn't reclaim it before the async D2H
-        # copy completes.
+        # Keep the source storage live until the sunk wait runs. record_stream
+        # protects allocator reuse, but Inductor can also reuse planned buffers
+        # within the compiled graph; this edge prevents an async D2H from
+        # reading a buffer after later forward compute has overwritten it.
         with graph.inserting_after(offload_node):
             wait_node: fx.Node = graph.call_function(
                 torch.ops.ao.wait_tensor.default,
-                args=(offload_node, node),
+                args=(offload_node, None, node),
                 name=CPU_OFFLOAD_PREFIX + str(node.name),
             )
             wait_node.meta["val"] = offload_node.meta["val"]
@@ -300,7 +300,7 @@ def can_offload(
     fwd_outputs: OrderedSet[fx.Node],
     model_outputs: OrderedSet[fx.Node],
     static_lifetime_input_nodes: OrderedSet[fx.Node],
-) -> bool:
+) -> tuple[bool, str | None]:
     """
     Determine if a node can be offloaded to CPU.
 
@@ -342,30 +342,38 @@ def can_offload(
     op_types: OpTypes = get_default_op_list()
 
     if node not in fwd_outputs:
-        log.debug("\tSkipped! Can only offload nodes in fwd_module_outputs.")
-        return False
+        reason = "can only offload nodes in forward module outputs"
+        log.debug("\tSkipped! %s", reason)
+        return False, reason
     if node in model_outputs:
-        log.debug("\tSkipped! Cannot offload model outputs.")
-        return False
+        reason = "cannot offload model outputs"
+        log.debug("\tSkipped! %s", reason)
+        return False, reason
     if node in static_lifetime_input_nodes:
-        log.debug("\tSkipped! Cannot offload static input nodes.")
-        return False
-    if op_types.is_view(node):
-        log.debug("\tSkipped! Cannot offload views.")
-        return False
+        reason = "cannot offload static input nodes"
+        log.debug("\tSkipped! %s", reason)
+        return False, reason
+    if op_types.is_view(node) and not node.meta.get(
+        "allow_activation_offload_view", False
+    ):
+        reason = "cannot offload views"
+        log.debug("\tSkipped! %s", reason)
+        return False, reason
     if node.target == operator.getitem:
-        log.debug("\tSkipped! Cannot offload getitems.")
-        return False
+        reason = "cannot offload getitems"
+        log.debug("\tSkipped! %s", reason)
+        return False, reason
     if hasattr(node, "meta") and "val" in node.meta:
         if (
             isinstance(val := node.meta["val"], torch.Tensor)
             and not val.is_contiguous()
         ):
-            log.debug("\tSkipped! Cannot offload non-contiguous tensors.")
-            return False
+            reason = "cannot offload non-contiguous tensors"
+            log.debug("\tSkipped! %s", reason)
+            return False, reason
 
     log.debug("\tGood!")
-    return True
+    return True, None
 
 
 def choose_offload_sets(
@@ -395,12 +403,20 @@ def choose_offload_sets(
 
     should_perform_offloading = False
     for node in fwd_module.graph.nodes:
-        if node.meta.get("should_offload", False) and can_offload(
+        if not node.meta.get("should_offload", False):
+            continue
+        offloadable, reason = can_offload(
             node, fwd_outputs, model_outputs, static_lifetime_input_nodes
-        ):
+        )
+        if offloadable:
             node.meta["saved_for_offloading"] = True
             node.meta["original_device"] = node.meta["val"].device
             should_perform_offloading = True
+        elif node.meta.get("recompute") == CheckpointPolicy.MUST_CPU_OFFLOAD:
+            raise RuntimeError(
+                f"CheckpointPolicy.MUST_CPU_OFFLOAD cannot be honored for "
+                f"{node.name}: {reason}."
+            )
 
     return should_perform_offloading
 
@@ -481,16 +497,35 @@ def offload_chosen_sets_async(
     reload_activation_bw_async(bwd_module.graph)
 
 
+def find_last_compute_node(graph: fx.Graph) -> fx.Node | None:
+    """Walk backward through graph nodes to find the last compute node producing a Tensor."""
+    for node in reversed(graph.nodes):
+        if node.op in ("placeholder", "output"):
+            continue
+        if node.op == "call_function" and node.target in (
+            torch.ops.ao.offload.default,
+            torch.ops.ao.reload.default,
+            torch.ops.ao.wait_tensor.default,
+        ):
+            continue
+        val = node.meta.get("val")
+        if val is not None:
+            if isinstance(val, torch.Tensor):
+                return node
+            if isinstance(val, (list, tuple)) and any(
+                isinstance(x, torch.Tensor) for x in val
+            ):
+                return node
+    return None
+
+
 def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
-    """Sink ao.wait_tensor operations for offload completion to the end of the graph.
+    """Pipeline ao.wait_tensor operations for offload completion.
 
-    This allows computation to overlap with offload operations.
-
-    NOTE: Sinking waits to the end delays GPU memory release of the source
-    tensor (kept alive via the wait's keepalive arg) until the end of the
-    compiled graph. For per-layer compile this is fine (one layer's worth of
-    memory), but for full-model compile this means offloaded GPU tensors are
-    not freed until the entire forward pass completes.
+    Each wait is moved after a few later offloads have been submitted, giving
+    the D2H copy overlap while keeping the source storage live only until its
+    transfer completion is observed. The final waits fall back to the last
+    forward compute node.
     """
     graph: fx.Graph = fwd_module.graph
     output_node: fx.Node = graph.find_nodes(op="output")[0]
@@ -505,22 +540,50 @@ def activation_offload_sink_wait_async(fwd_module: fx.GraphModule) -> None:
         and node.args[0].target == torch.ops.ao.offload.default
     ]
 
-    # prepend moves the node from its current position (no manual removal needed)
-    for wait_node in wait_nodes_to_sink:
-        output_node.prepend(wait_node)
+    last_compute = find_last_compute_node(graph)
+    node_to_idx = {node: idx for idx, node in enumerate(graph.nodes)}
+
+    for i, wait_node in enumerate(wait_nodes_to_sink):
+        offload_node = wait_node.args[0]
+        if not isinstance(offload_node, fx.Node):
+            raise RuntimeError(
+                f"Expected ao.wait_tensor input to be an FX node, got {offload_node!r}"
+            )
+        target_idx = i + FORWARD_OFFLOAD_WAIT_DISTANCE
+        if target_idx < len(wait_nodes_to_sink):
+            anchor_offload_node = wait_nodes_to_sink[target_idx].args[0]
+            if not isinstance(anchor_offload_node, fx.Node):
+                raise RuntimeError(
+                    "Expected pipelined ao.wait_tensor input to be an FX node, "
+                    f"got {anchor_offload_node!r}"
+                )
+            wait_anchor = anchor_offload_node
+        else:
+            wait_anchor = last_compute
+        if wait_anchor is None or node_to_idx[wait_anchor] < node_to_idx[offload_node]:
+            wait_anchor = offload_node
+
+        if wait_anchor is not None:
+            add_order_only_dependency(wait_node, wait_anchor)
+            wait_anchor.append(wait_node)
+        else:
+            output_node.prepend(wait_node)
+
+    apply_order_only_dependencies(graph)
 
 
 def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
     """
-    Prefetch backward reload operations by moving ao.reload nodes earlier
-    in the graph to overlap data transfer with computation, while keeping
-    ao.wait_tensor at its original position.
+    Prefetch backward reload operations using a fixed one-step pipeline.
+    Each reload is submitted after the previous offloaded activation reaches
+    its wait point, which staggers H2D copies through backward compute.
     """
     graph: fx.Graph = bwd_module.graph
     nodes_list: list[fx.Node] = list(graph.nodes)
+    node_to_idx = {node: idx for idx, node in enumerate(nodes_list)}
 
     # Identify reload + wait pairs
-    reload_patterns: dict[fx.Node, ReloadNodeInfo] = {}
+    pairs: list[tuple[fx.Node, fx.Node]] = []
     for node in graph.nodes:
         if not (
             node.op == "call_function" and node.target == torch.ops.ao.reload.default
@@ -532,245 +595,149 @@ def activation_reload_prefetch_async(bwd_module: fx.GraphModule) -> None:
         )
         if wait_node is None:
             continue
-        transfer_size_bytes: int = _calculate_transfer_size(node)
-        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
-        reload_patterns[node] = ReloadNodeInfo(
-            reload_group_nodes=[node],
-            wait_event_node=wait_node,
-            transfer_size_bytes=transfer_size_bytes,
-            transfer_time_ms=transfer_time_ms,
-        )
+        pairs.append((node, wait_node))
 
-    reorder_for_prefetch(nodes_list, reload_patterns)
+    if not pairs:
+        return
 
+    # Sort pairs chronologically based on their wait_node's index in the graph
+    pairs.sort(key=lambda p: node_to_idx[p[1]])
 
-def _calculate_transfer_size(device_put_node: fx.Node) -> int:
-    """Calculate the size in bytes of data being transferred."""
+    # Always prefetch one layer ahead. Larger windows submit H2Ds too early and
+    # do not match the intended staggered reload pipeline.
+    W = 1
 
-    # ao.offload(tensor) -> tensor at args[0]
-    # ao.reload(tensor, device) -> tensor at args[0]
-    if device_put_node.target in (
-        torch.ops.ao.offload.default,
-        torch.ops.ao.reload.default,
-    ):
-        return _size_of(device_put_node.args[0])  # pyrefly: ignore [bad-argument-type]
-    raise ValueError(f"Unexpected transfer op: {device_put_node.target}")
+    # Place the reload nodes
+    placeholders = [n for n in graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return
+    start_node = placeholders[-1]
 
-
-def _estimate_transfer_time_in_ms(transfer_size_bytes: int) -> float:
-    """Estimate transfer time in milliseconds based on size and bandwidth.
-
-    Uses config.activation_offload_cpu_gpu_bw (GB/s) which should be set by
-    the user to match their hardware.
-    """
-    return (
-        transfer_size_bytes / (1024**3) * 1_000 / config.activation_offload_cpu_gpu_bw
-    )
-
-
-def identify_reload_patterns(
-    graph: fx.Graph, nodes_list: list[fx.Node], node_to_idx: dict[fx.Node, int]
-) -> dict[fx.Node, ReloadNodeInfo]:
-    """
-    Identify backward reload patterns in the graph.
-
-    Pattern: fork → wait_stream → device_put → record_event → join → wait_event
-
-    This uses position-based matching since these nodes are inserted together in
-    add_backward_reload_stream_ops() in a specific order. Since stream operations
-    do not have data dependencies between them, they are unsuitable for subgroup
-    pattern matching type of checks.
-
-    Returns a dict mapping device_put node to ReloadNodeInfo containing:
-    - reload_group_nodes: fork → wait_stream → device_put → record_event → join
-    - wait_event_node: the wait_event node
-    - transfer_size_bytes: size of data being transferred
-    - transfer_time_ms: estimated transfer time in milliseconds
-    """
-    patterns: dict[fx.Node, ReloadNodeInfo] = {}
-
-    # Find all GPU reload device_put nodes whose inputs are placeholder nodes
-    reload_nodes: list[fx.Node] = [
-        node
-        for node in graph.find_nodes(
-            op="call_function", target=torch.ops.prims.device_put.default
-        )
-        if GPU_RELOAD_PREFIX in node.name
-        and (
-            node.args
-            and isinstance(node.args[0], fx.Node)
-            and node.args[0].op == "placeholder"
-        )
-    ]
-
-    # Extract patterns for each reload device_put node
-    for reload_node in reload_nodes:
-        reload_node_idx: int = node_to_idx[reload_node]
-
-        fork_node: fx.Node = nodes_list[reload_node_idx - 2]
-        wait_stream_node: fx.Node = nodes_list[reload_node_idx - 1]
-        record_event_node: fx.Node = nodes_list[reload_node_idx + 1]
-        join_node: fx.Node = nodes_list[reload_node_idx + 2]
-        wait_event_node: fx.Node = nodes_list[reload_node_idx + 3]
-
-        # Validate the nodes are what we expect
-        # Removed in follow-up commit
-        _validate_pattern_nodes(  # noqa: F821  # pyrefly: ignore [unknown-name]
-            fork_node,
-            wait_stream_node,
-            record_event_node,
-            join_node,
-            wait_event_node,
-        )
-
-        # Calculate transfer size and time
-        transfer_size_bytes: int = _calculate_transfer_size(reload_node)
-        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
-
-        patterns[reload_node] = ReloadNodeInfo(
-            reload_group_nodes=[
-                fork_node,
-                wait_stream_node,
-                reload_node,
-                record_event_node,
-                join_node,
-            ],
-            wait_event_node=wait_event_node,
-            transfer_size_bytes=transfer_size_bytes,
-            transfer_time_ms=transfer_time_ms,
-        )
-
-    return patterns
-
-
-def reorder_for_prefetch(
-    nodes_list: list[fx.Node],
-    reload_patterns: dict[fx.Node, ReloadNodeInfo],
-) -> None:
-    """
-    Reorder nodes to prefetch reload operations by directly manipulating the graph.
-
-    This follows the algorithm as follows:
-    - Go through nodes in reverse order
-    - When encountering a reload pattern, add it to a queue with its transfer time
-    - When encountering a compute node, use its runtime to satisfy overlap requirements
-    - Place reload patterns when their overlap requirement is satisfied
-    - When encountering placeholder nodes, flush queue as reloads cannot move before inputs
-    """
-
-    # Build a set of all nodes in reload groups for quick lookup
-    reload_group_nodes_set: set[fx.Node] = set()
-    for pattern in reload_patterns.values():
-        reload_group_nodes_set.update(pattern.reload_group_nodes)
-
-    # Queue to hold reload group nodes waiting to be placed (FIFO)
-    reload_queue: list[ReloadQueueEntry] = []
-
-    # Loop through nodes in reverse
-    for node in reversed(nodes_list):
-        if node.op == "output":
-            continue
-        elif node.op == "placeholder":
-            # Flush queue - place all remaining reloads after the last placeholder
-            while reload_queue:
-                entry: ReloadQueueEntry = reload_queue.pop(0)
-                for reload_group_node in reversed(entry.pattern.reload_group_nodes):
-                    node.append(reload_group_node)
-            break
-        elif node in reload_patterns:
-            pattern: ReloadNodeInfo = reload_patterns[node]
-            reload_queue.append(
-                ReloadQueueEntry(
-                    pattern=pattern, remaining_time_ms=pattern.transfer_time_ms
-                )
-            )
-        elif node in reload_group_nodes_set:
-            continue
-        else:
-            if not reload_queue:
+    def find_first_compute_user(wait_node: fx.Node) -> fx.Node:
+        queue = [wait_node]
+        visited = set()
+        while queue:
+            curr = queue.pop(0)
+            if curr in visited:
                 continue
-            compute_runtime_ms: float = (
-                benchmark_node(node) if is_compute_node(node) else 0
-            )
-            reload_queue[0].remaining_time_ms -= compute_runtime_ms
+            visited.add(curr)
 
-            # Pop and place reload if its remaining time is satisfied (<= 0)
-            if reload_queue[0].remaining_time_ms <= 0:
-                entry: ReloadQueueEntry = reload_queue.pop(0)
-                for reload_group_node in entry.pattern.reload_group_nodes:
-                    node.prepend(reload_group_node)
+            if curr != wait_node:
+                is_view = curr.op == "call_function" and (
+                    curr.target in _LIFETIME_TRANSPARENT_TARGETS
+                    or "view" in str(curr.target)
+                    or "reshape" in str(curr.target)
+                    or "permute" in str(curr.target)
+                    or "transpose" in str(curr.target)
+                    or curr.target == operator.getitem
+                )
+                if curr.op == "call_function" and not is_view:
+                    return curr
 
+            queue.extend(curr.users)
 
-def activation_offload_sink_wait(fwd_module: fx.GraphModule) -> None:
-    """
-    Sink wait_event operations for offload completion to the end of the graph.
+        return wait_node
 
-    This function identifies wait_event nodes for offload completion and moves them
-    to the end of the graph, allowing computation to overlap with offload operations.
-
-    Args:
-        fwd_module: Forward module graph
-    """
-    graph: fx.Graph = fwd_module.graph
-    nodes_list: list[fx.Node] = list(graph.nodes)
-    node_to_idx: dict[fx.Node, int] = {node: idx for idx, node in enumerate(nodes_list)}
-
-    # Find all CPU offload device_put nodes
-    offload_nodes: list[fx.Node] = [
-        node
-        for node in graph.find_nodes(
-            op="call_function", target=torch.ops.prims.device_put.default
-        )
-        if CPU_OFFLOAD_PREFIX in node.name
-    ]
-
-    # Collect all wait_event nodes that need to be moved
-    wait_nodes_to_sink: list[fx.Node] = []
-    for offload_node in offload_nodes:
-        offload_idx: int = node_to_idx[offload_node]
-        wait_event_node: fx.Node = nodes_list[offload_idx + 3]
-
-        # Validate it's actually a wait_event node
-        if not (
-            wait_event_node.op == "call_function"
-            and wait_event_node.target == torch.ops.streams.wait_event.default
+    def is_real_compute_node(node: fx.Node) -> bool:
+        if node.op != "call_function":
+            return False
+        if node.target in (
+            torch.ops.ao.offload.default,
+            torch.ops.ao.reload.default,
+            torch.ops.ao.wait_tensor.default,
         ):
-            raise ValueError(
-                f"Expected wait_event node three positions after {offload_node.name}"
+            return False
+        is_view = (
+            node.target in _LIFETIME_TRANSPARENT_TARGETS
+            or "view" in str(node.target)
+            or "reshape" in str(node.target)
+            or "permute" in str(node.target)
+            or "transpose" in str(node.target)
+            or node.target == operator.getitem
+        )
+        return not is_view
+
+    def find_compute_before(node: fx.Node) -> fx.Node | None:
+        node_idx = node_to_idx.get(node)
+        if node_idx is None:
+            return None
+        for idx in range(node_idx - 1, -1, -1):
+            prev = nodes_list[idx]
+            if is_real_compute_node(prev):
+                return prev
+        return None
+
+    for i, (reload_node, wait_node) in enumerate(pairs):
+        if i < W:
+            # Place reload node right after the last placeholder (start of backward)
+            start_node.append(reload_node)
+            start_node = reload_node
+        else:
+            # Submit each reload right after the previous reload is consumed.
+            # ao.reload then waits for the compute stream up to this point only,
+            # so the H2D copy can overlap the next layer's backward compute.
+            _, target_wait_node = pairs[i - W]
+            target_compute_node = find_first_compute_user(target_wait_node)
+            consumer_compute_node = find_first_compute_user(wait_node)
+            pre_consumer_compute_node = find_compute_before(consumer_compute_node)
+            target_wait_node.append(reload_node)
+            add_order_only_dependency(wait_node, target_compute_node)
+            if pre_consumer_compute_node is not None:
+                add_order_only_dependency(wait_node, pre_consumer_compute_node)
+
+            # Stagger transfer-stream submissions: ao.reload reads
+            # prefetch_dependency only to wait for the current stream at this
+            # graph point. Must be a single Tensor.
+            args = list(reload_node.args)
+            while len(args) < 3:
+                args.append(None)
+            args[2] = target_wait_node
+            reload_node.args = tuple(args)
+
+    apply_order_only_dependencies(graph)
+
+
+def _validate_topological_order(graph: fx.Graph) -> None:
+    seen: set[fx.Node] = set()
+    for node in graph.nodes:
+        missing = [dep.name for dep in node.all_input_nodes if dep not in seen]
+        if missing:
+            raise RuntimeError(
+                f"Activation offload rewrite produced non-topological node "
+                f"{node.name}; missing dependencies: {missing}"
+            )
+        seen.add(node)
+
+
+def _validate_transfer_wait_pairs(
+    graph: fx.Graph,
+    transfer_op,
+    label: str,
+) -> None:
+    for node in graph.nodes:
+        if node.op != "call_function" or node.target != transfer_op:
+            continue
+        waits = [
+            user
+            for user in node.users
+            if user.op == "call_function"
+            and user.target == torch.ops.ao.wait_tensor.default
+            and user.args
+            and user.args[0] is node
+        ]
+        if len(waits) != 1:
+            raise RuntimeError(
+                f"Expected exactly one ao.wait_tensor for ao.{label} "
+                f"{node.name}, found {len(waits)}"
             )
 
-        wait_nodes_to_sink.append(wait_event_node)
 
-    # Find the output node, and move all wait_event nodes to just before the output node
-    output_node: fx.Node = graph.find_nodes(op="output")[0]
-    for wait_node in wait_nodes_to_sink:
-        output_node.prepend(wait_node)
-
-
-def activation_reload_prefetch(bwd_module: fx.GraphModule) -> None:
-    """
-    Prefetch backward reload operations by moving them earlier in the graph
-    to overlap communication with computation.
-
-    This function identifies backward reload patterns (fork → wait_stream → device_put →
-    record_event → join) and moves them earlier in the execution order to overlap
-    the data transfer with computation, while keeping the wait_event at its original
-    position.
-
-    Args:
-        bwd_module: Backward module graph
-    """
-    graph: fx.Graph = bwd_module.graph
-    nodes_list: list[fx.Node] = list(graph.nodes)
-    node_to_idx: dict[fx.Node, int] = {node: idx for idx, node in enumerate(nodes_list)}
-
-    # Step 1: Identify reload patterns
-    reload_patterns: dict[fx.Node, ReloadNodeInfo] = identify_reload_patterns(
-        graph, nodes_list, node_to_idx
-    )
-
-    # Step 2: Reorder nodes by directly manipulating the graph
-    reorder_for_prefetch(nodes_list, reload_patterns)
+def _validate_async_ao_graph(
+    fwd_module: fx.GraphModule,
+    bwd_module: fx.GraphModule,
+) -> None:
+    _validate_topological_order(fwd_module.graph)
+    _validate_topological_order(bwd_module.graph)
 
 
 def enable_activation_offloading(
@@ -778,6 +745,8 @@ def enable_activation_offloading(
     bwd_module: fx.GraphModule,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: OrderedSet[fx.Node],
+    *,
+    force_async: bool = False,
 ) -> None:
     """
     Main entry point for activation offloading.
@@ -798,13 +767,30 @@ def enable_activation_offloading(
         return
 
     # Step 2: Add offload and reload nodes to the graphs
-    if config.activation_offload_separate_stream:
+    use_async = force_async or config.activation_offload_separate_stream
+    sink_forward_waits = force_async or config.activation_offload_sink_wait
+
+    if use_async:
         # Use async ao ops (2 nodes each: offload/reload + wait_tensor)
         offload_chosen_sets_async(fwd_module, bwd_module)
-        if config.activation_offload_sink_wait:
+        _validate_transfer_wait_pairs(
+            fwd_module.graph,
+            torch.ops.ao.offload.default,
+            "offload",
+        )
+        _validate_transfer_wait_pairs(
+            bwd_module.graph,
+            torch.ops.ao.reload.default,
+            "reload",
+        )
+        if sink_forward_waits:
             activation_offload_sink_wait_async(fwd_module)
-        if config.activation_reload_prefetch:
-            activation_reload_prefetch_async(bwd_module)
+        # Bwd reload prefetch is mandatory under separate-stream offload.
+        # Without it, the natural reload placement under sink_wait produces
+        # wrong gradients (the reload-result lifetimes are too short, and
+        # the wait registry can't sequence the H2D pile correctly).
+        activation_reload_prefetch_async(bwd_module)
+        _validate_async_ao_graph(fwd_module, bwd_module)
     else:
         # Use synchronous device_put (1 node each)
         offload_chosen_sets(fwd_module, bwd_module)

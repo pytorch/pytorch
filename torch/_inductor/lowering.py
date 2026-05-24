@@ -8387,6 +8387,13 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
 
+def _flatten_control_deps(deps, dep_names: list[str]) -> None:
+    for dep in pytree.tree_leaves(deps):
+        if isinstance(dep, IRNode):
+            dep.realize()
+            dep_names.append(dep.get_name())
+
+
 @register_lowering(control_deps, type_promotion_kind=None)
 def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     """
@@ -8397,25 +8404,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     2. Execute the target operation normally
     3. Track the dependencies for the scheduler
     """
-    # Pair lowered deps with their original FX nodes so we can handle void ops
-    # (e.g. record_event) that lower to None but still create operations that
-    # subsequent control_deps nodes (e.g. wait_event) must be ordered after.
-    original_dep_nodes = V.graph.current_node.args[0]
-    assert isinstance(original_dep_nodes, tuple)
-
-    dep_names = []
-    for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
-        dep_ir_nodes = [
-            dep_leaf
-            for dep_leaf in pytree.tree_leaves(dep)
-            if isinstance(dep_leaf, IRNode)
-        ]
-        for dep_ir_node in dep_ir_nodes:
-            dep_ir_node.realize()
-            dep_names.append(dep_ir_node.get_name())
+    dep_names: list[str] = []
+    _flatten_control_deps(additional_deps, dep_names)
+    for orig_node in pytree.tree_leaves(V.graph.current_node.args[0]):
         if isinstance(orig_node, torch.fx.Node):
-            found = V.graph._void_ctrl_dep_op_names.get(orig_node, [])
-            dep_names.extend(found)
+            dep_names.extend(V.graph._void_ctrl_dep_op_names.get(orig_node, []))
 
     original_args = V.graph.current_node.args
     arg_offset = 2  # first two args (additional_deps, subgraph)
@@ -8466,6 +8459,23 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    input_ids = tuple(id(a) for a in args)
+    output_leaves = pytree.tree_leaves(output)
+    for op in new_ops:
+        if not isinstance(op, ir.OperationBuffer):
+            continue
+        for val in output_leaves:
+            if id(val) not in input_ids or not isinstance(val, IRNode):
+                continue
+            val.realize()
+            cast(Any, op).mutation_outputs.append(
+                ir.MutationOutput(
+                    ir.NoneLayout(device=val.get_device()),
+                    val,
+                    op,
+                )
+            )
 
     return output
 
@@ -8614,7 +8624,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
