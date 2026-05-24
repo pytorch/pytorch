@@ -1336,7 +1336,8 @@ Tensor trace_cpu(const Tensor& self) {
   // is set to true
   ScalarType dtype = get_dtype_from_self(self, std::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+       at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
     const auto* t_data = self.const_data_ptr<scalar_t>();
