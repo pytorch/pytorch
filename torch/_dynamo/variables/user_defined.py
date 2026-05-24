@@ -166,6 +166,19 @@ def is_standard_delattr(val: object) -> bool:
     return val in (object.__delattr__, BaseException.__delattr__)
 
 
+_PY_TPFLAGS_HEAPTYPE = 1 << 9
+
+
+def _is_opaque_heap_type_getset_descriptor(descriptor: object) -> bool:
+    owner = getattr(descriptor, "__objclass__", None)
+    return (
+        isinstance(descriptor, types.GetSetDescriptorType)
+        and getattr(descriptor, "__name__", None) != "__dict__"
+        and isinstance(owner, type)
+        and bool(getattr(owner, "__flags__", 0) & _PY_TPFLAGS_HEAPTYPE)
+    )
+
+
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
 
@@ -2611,7 +2624,48 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(descriptor, types.GetSetDescriptorType):
                 if name_str == "__dict__":
+                    if not isinstance(value, variables.DeletedVariable):
+                        try:
+                            is_dict = pydict_check(value)
+                        except NotImplementedError:
+                            unimplemented(
+                                gb_type="C-level descriptor setattr on user-defined object",
+                                context=f"object={self}, name={name_str}, descriptor={descriptor}",
+                                explanation=(
+                                    "Dynamo does not yet model this C-level descriptor setter "
+                                    "for user-defined objects."
+                                ),
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
+                        if not is_dict:
+                            raise_observed_exception(
+                                TypeError,
+                                tx,
+                                args=[
+                                    "__dict__ must be set to a dictionary, "
+                                    f"not a '{value.python_type_name()}'"
+                                ],
+                            )
                     self.dict_vt = None
+                elif name_str == "__weakref__":
+                    raise_observed_exception(
+                        AttributeError,
+                        tx,
+                        args=[
+                            f"attribute '__weakref__' of "
+                            f"'{type(self.value).__name__}' objects is not writable"
+                        ],
+                    )
+                elif _is_opaque_heap_type_getset_descriptor(descriptor):
+                    unimplemented(
+                        gb_type="C-level descriptor setattr on user-defined object",
+                        context=f"object={self}, name={name_str}, descriptor={descriptor}",
+                        explanation=(
+                            "Dynamo does not yet model this C-level descriptor setter "
+                            "for user-defined objects."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 # C get/set descriptors are applied by STORE_ATTR itself, so
                 # replay must stay descriptor-aware rather than using the
                 # descriptor-bypassing instance-dict or slot paths.
