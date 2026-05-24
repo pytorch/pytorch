@@ -5404,7 +5404,28 @@ def _small_unrolled_max_pool_with_offsets(
     strides = [1] * len(reduction_ranges)
     for i in range(len(reduction_ranges) - 2, -1, -1):
         strides[i] = strides[i + 1] * reduction_ranges[i + 1]
-    combine_fn = ir.get_reduction_combine_fn("argmax", dtype)
+
+    def combine_fn(a: tuple[Any, Any], b: tuple[Any, Any]):
+        a_value, a_offset = a
+        b_value, b_offset = b
+        greater = ops.gt(a_value, b_value)
+        equal = ops.eq(a_value, b_value)
+        if is_float_dtype(dtype):
+            a_isnan = ops.ne(a_value, a_value)
+            b_isnan = ops.ne(b_value, b_value)
+            b_is_not_nan = ops.logical_not(b_isnan)
+            greater = ops.logical_or(
+                ops.logical_and(a_isnan, b_is_not_nan),
+                ops.logical_and(greater, b_is_not_nan),
+            )
+            equal = ops.logical_or(equal, ops.logical_and(a_isnan, b_isnan))
+        mask = ops.logical_or(
+            greater, ops.logical_and(equal, ops.lt(a_offset, b_offset))
+        )
+        return (
+            ops.where(mask, a_value, b_value),
+            ops.where(mask, a_offset, b_offset),
+        )
 
     def flatten_index(rindex):
         return sum(i * stride for i, stride in zip(rindex, strides))
