@@ -12,6 +12,7 @@ It includes functionality for:
 
 import collections
 import dataclasses
+import functools
 import re
 import sys
 import types
@@ -63,6 +64,34 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
     from .symbolic_convert import InstructionTranslatorBase
+
+
+@functools.cache
+def _lazy_constant_container_vt_types() -> tuple[type[VariableTracker], ...]:
+    # Keep these imports local: container VTs reference PyCodegen for
+    # reconstruction type annotations and several are imported through
+    # torch._dynamo.variables during startup.
+    from .variables.dicts import ConstDictVariable, MappingProxyVariable
+    from .variables.lists import BaseListVariable, SliceVariable
+    from .variables.sets import SetVariable
+    from .variables.user_defined import (
+        UserDefinedDictVariable,
+        UserDefinedListVariable,
+        UserDefinedSetVariable,
+        UserDefinedTupleVariable,
+    )
+
+    return (
+        BaseListVariable,
+        ConstDictVariable,
+        MappingProxyVariable,
+        SetVariable,
+        SliceVariable,
+        UserDefinedDictVariable,
+        UserDefinedListVariable,
+        UserDefinedSetVariable,
+        UserDefinedTupleVariable,
+    )
 
 
 @dataclasses.dataclass
@@ -136,6 +165,7 @@ class PyCodegen:
     @staticmethod
     def _contains_unrealized_source_backed_lazy_constant(value: Any) -> bool:
         cache: set[int] = set()
+        container_vt_types = _lazy_constant_container_vt_types()
 
         def visit(obj: Any) -> bool:
             idx = id(obj)
@@ -153,6 +183,8 @@ class PyCodegen:
                 obj = obj.unwrap()
                 if visit(obj):
                     return True
+                if not isinstance(obj, container_vt_types):
+                    return False
                 return any(
                     visit(subvalue)
                     for key, subvalue in obj.__dict__.items()

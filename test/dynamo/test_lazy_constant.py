@@ -10,6 +10,8 @@ from torch._dynamo.testing import CompileCounter, same
 
 
 _lazy_constant_summary = {}
+_lazy_constant_tuple_key_summary = {}
+_lazy_constant_update_summary = {}
 _lazy_constant_value_summary = {}
 _lazy_constant_iter_summary = {}
 _lazy_constant_popitem_summary = {}
@@ -589,6 +591,90 @@ class LazyConstantVariableTests(TestCase):
 
         mod(torch.randn(4))
         self.assertEqual(_lazy_constant_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_source_backed_lazy_constant_tuple_dict_key_side_effect_replay(self):
+        global _lazy_constant_tuple_key_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                _lazy_constant_tuple_key_summary[(self.name,)] = 0
+                return out
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_a = SubMod("mod_a")
+                self.mod_b = SubMod("mod_b")
+
+            def forward(self, x):
+                global _lazy_constant_tuple_key_summary
+                _lazy_constant_tuple_key_summary = {}
+                x = self.mod_a(x)
+                x = self.mod_b(x)
+                return x
+
+        mod = Mod()
+        mod(torch.randn(4))
+        self.assertEqual(
+            _lazy_constant_tuple_key_summary, {("mod_a",): 0, ("mod_b",): 0}
+        )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+        mod(torch.randn(4))
+        self.assertEqual(
+            _lazy_constant_tuple_key_summary, {("mod_a",): 0, ("mod_b",): 0}
+        )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_source_backed_lazy_constant_dict_update_side_effect_replay(self):
+        global _lazy_constant_update_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                _lazy_constant_update_summary.update({self.name: 0})
+                return out
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_a = SubMod("mod_a")
+                self.mod_b = SubMod("mod_b")
+
+            def forward(self, x):
+                global _lazy_constant_update_summary
+                _lazy_constant_update_summary = {}
+                x = self.mod_a(x)
+                x = self.mod_b(x)
+                return x
+
+        mod = Mod()
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_update_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_update_summary, {"mod_a": 0, "mod_b": 0})
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 1)
 
