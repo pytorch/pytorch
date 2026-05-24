@@ -3172,12 +3172,12 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         real_written_buffer_name = self.scheduler.mutation_real_name.get(
             written_buffer_name, written_buffer_name
         )
-        mutation_buffer_names = {written_buffer_name, real_written_buffer_name}
+        mutation_buffer_names = OrderedSet([written_buffer_name, real_written_buffer_name])
 
         # Exclude nodes that are part of this fusion attempt.
         # For a FusedSchedulerNode epilogue, also exclude its constituent snodes since
         # they appear individually in scheduler.nodes but will be consumed by the fusion.
-        fusion_node_set: set[BaseSchedulerNode] = {self, node2}
+        fusion_node_set: OrderedSet[BaseSchedulerNode] = OrderedSet([self, node2])
         if isinstance(node2, FusedSchedulerNode):
             fusion_node_set.update(node2.snodes)
 
@@ -3186,7 +3186,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         ) -> bool:
             if other_node in fusion_node_set:
                 return False
-            reads = {d.name for d in other_node.read_writes.reads}
+            reads = OrderedSet([d.name for d in other_node.read_writes.reads])
             return bool(reads & mutation_buffer_names)
 
         if any(
@@ -3295,9 +3295,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             epilogue_nodes, numel_ep, reduction_numel=rnumel
         )
 
-        excluded_names = {
+        excluded_names = OrderedSet([
             ir_node.mutation_outputs[0].name
-        } | self.epilogue.get_buffer_names()
+        ]) | self.epilogue.get_buffer_names()
         external_reads = OrderedSet(
             d.name
             for sn in epilogue_nodes
