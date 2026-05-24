@@ -6,11 +6,13 @@ import unittest
 import torch
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
+from torch._dynamo.exc import UserError
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -2378,6 +2380,41 @@ class MapTests(TestCase):
             dynamic=dynamic,
             autograd=autograd,
         )
+
+
+class SymIntItemTests(TestCase):
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    def test_shape_symint_tensor_item_codegen(self):
+        def fn(x):
+            n = x.shape[0]
+            if n == torch.tensor(n).item():
+                return x + 1
+            return x - 1
+
+        x = torch.ones(3)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        actual, source_codes = run_and_get_code(compiled_fn, x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(compiled_fn(torch.ones(4)), fn(torch.ones(4)))
+
+        code = "\n".join(source_codes)
+        self.assertNotIn("scalar_tensor", code)
+        self.assertNotIn("_local_scalar_dense", code)
+        self.assertNotIn(".item(", code)
+        self.assertNotIn("torch._refs.tensor", code)
+        self.assertNotRegex(code, r"(?:s\d+|arg\d+_\d+)\s*==\s*(?:s\d+|arg\d+_\d+)")
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    def test_shape_symint_tensor_item_expression_not_folded(self):
+        def fn(x):
+            n = x.shape[0] + 2**63
+            if n == torch.tensor(n).item():
+                return x + 1
+            return x - 1
+
+        with self.assertRaisesRegex(UserError, "Could not guard on data-dependent"):
+            torch.compile(fn, dynamic=True, fullgraph=True)(torch.ones(3))
 
 
 instantiate_parametrized_tests(CondTests)
