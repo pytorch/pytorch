@@ -8578,6 +8578,77 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ),
             )
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_index_select_negative_index(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU RuntimeError contract")
+
+        def assert_compiled_index_error(call):
+            try:
+                call()
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                self.fail(f"Unexpected BackendCompilerFailed: {e}")
+            except RuntimeError as e:
+                self.assertRegex(str(e), "index out of bounds")
+            else:
+                self.fail("Expected compiled index_select to raise")
+
+        def fn(a, b):
+            return torch.index_select(a, 0, b)
+
+        def fn_dim1(a, b):
+            return torch.index_select(a, 1, b)
+
+        def fn_with_constant_index(a):
+            index = torch.tensor([-1], dtype=torch.int64, device=a.device)
+            return torch.index_select(a, 0, index)
+
+        a = torch.arange(15, device=self.device).reshape(5, 3)
+        valid_index = torch.tensor([0, 2, 4], device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(a, valid_index), fn(a, valid_index))
+
+        negative_index = torch.tensor([0, -1, 4], device=self.device)
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            fn(a, negative_index)
+        assert_compiled_index_error(lambda: compiled_fn(a, negative_index))
+
+        compiled_fn_with_constant_index = torch.compile(
+            fn_with_constant_index, backend="inductor", dynamic=True
+        )
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            fn_with_constant_index(a)
+        assert_compiled_index_error(lambda: compiled_fn_with_constant_index(a))
+
+        empty_a = torch.randn(0, 3, device=self.device)
+        valid_empty_index = torch.tensor([0], device=self.device)
+        compiled_fn_dim1 = torch.compile(fn_dim1, backend="inductor", fullgraph=True)
+        self.assertEqual(
+            compiled_fn_dim1(empty_a, valid_empty_index),
+            fn_dim1(empty_a, valid_empty_index),
+        )
+
+        empty_3d = torch.randn(0, 3, 4, device=self.device)
+        empty_3d_expected = fn_dim1(empty_3d, valid_empty_index)
+        empty_3d_compiled = compiled_fn_dim1(empty_3d, valid_empty_index)
+        self.assertEqual(empty_3d_compiled, empty_3d_expected)
+        self.assertEqual(empty_3d_compiled.stride(), empty_3d_expected.stride())
+
+        for invalid_empty_index in (
+            torch.tensor([-1], device=self.device),
+            torch.tensor([3], device=self.device),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "out of DATA bounds"):
+                fn_dim1(empty_a, invalid_empty_index)
+            assert_compiled_index_error(
+                lambda invalid_empty_index=invalid_empty_index: compiled_fn_dim1(
+                    empty_a, invalid_empty_index
+                )
+            )
+
     @xfail_if_mps_unimplemented
     @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfXpu
