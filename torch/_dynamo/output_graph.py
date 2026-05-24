@@ -165,6 +165,7 @@ from .utils import (
     same,
     set_example_value,
 )
+from .variables.base import AsPythonConstantNotImplementedError
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -533,13 +534,149 @@ class ExportMetaData:
     # 3) constants
     output_return_type: dict[int, OutputReturnInfo] = dc_field(default_factory=dict)
     # output spec of the traced function
-    out_spec: torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec = (
+    out_spec: torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec | None = (
         torch.utils._pytree._LEAF_SPEC
     )
     module_call_spec: dict[
         str,
         dict[str, torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec],
     ] = dc_field(default_factory=dict)
+
+
+def _out_spec_has_only_tensor_closure_conversion_failures(
+    tx: "InstructionTranslatorBase", out_spec: VariableTracker
+) -> bool:
+    found_tensor_closure_cell = False
+    visiting_fns: set[int] = set()
+    validated_fns: dict[int, bool] = {}
+    visiting_vts: set[int] = set()
+
+    def validate_nested_function(fn: variables.NestedUserFunctionVariable) -> bool:
+        fn_id = id(fn)
+        if fn_id in validated_fns:
+            return validated_fns[fn_id]
+        if fn_id in visiting_fns:
+            validated_fns[fn_id] = False
+            return False
+
+        visiting_fns.add(fn_id)
+        valid = (
+            validate_vt(fn.fn_name, allow_tensor_cell=False)
+            and validate_vt(fn.code, allow_tensor_cell=False)
+            and (
+                fn.defaults is None or validate_vt(fn.defaults, allow_tensor_cell=False)
+            )
+            and (
+                fn.kwdefaults is None
+                or validate_vt(fn.kwdefaults, allow_tensor_cell=False)
+            )
+        )
+
+        if valid and fn.closure:
+            if not isinstance(fn.closure, variables.BaseListVariable):
+                valid = False
+            else:
+                for cell_var in fn.closure.items:
+                    cell_contents = tx.output.side_effects.load_cell(cell_var)
+                    if cell_contents is fn:
+                        valid = False
+                        break
+                    if not validate_vt(cell_contents, allow_tensor_cell=True):
+                        valid = False
+                        break
+
+        if valid and fn.dict_vt and fn.dict_vt.contains("__annotations__"):
+            valid = validate_vt(
+                fn.dict_vt.getitem("__annotations__"), allow_tensor_cell=False
+            )
+
+        visiting_fns.remove(fn_id)
+        validated_fns[fn_id] = valid
+        return valid
+
+    def validate_mask_mod_wrapper(vt: VariableTracker) -> bool | None:
+        from torch.nn.attention.flex_attention import _MaskModWrapper
+
+        if not (
+            isinstance(vt, variables.UserDefinedObjectVariable)
+            and isinstance(vt.value, _MaskModWrapper)
+        ):
+            return None
+
+        side_effects = tx.output.side_effects
+        if not side_effects.has_pending_mutation_of_attr(vt, "fn"):
+            return False
+
+        fn_vt = side_effects.load_attr(vt, "fn", deleted_ok=True)
+        valid = validate_vt(fn_vt, allow_tensor_cell=False)
+        if side_effects.has_pending_mutation_of_attr(vt, "callable_spec"):
+            callable_spec_vt = side_effects.load_attr(
+                vt, "callable_spec", deleted_ok=True
+            )
+            valid = valid and validate_vt(callable_spec_vt, allow_tensor_cell=False)
+        return valid
+
+    def validate_vt(vt: VariableTracker, *, allow_tensor_cell: bool) -> bool:
+        nonlocal found_tensor_closure_cell
+
+        if isinstance(vt, variables.TensorVariable):
+            if allow_tensor_cell:
+                found_tensor_closure_cell = True
+                return True
+            return False
+        if isinstance(vt, variables.NestedUserFunctionVariable):
+            return validate_nested_function(vt)
+
+        vt_id = id(vt)
+        if vt_id in visiting_vts:
+            return False
+        visiting_vts.add(vt_id)
+        try:
+            mask_mod_result = validate_mask_mod_wrapper(vt)
+            if mask_mod_result is not None:
+                return mask_mod_result
+
+            if isinstance(vt, variables.FrozenDataClassVariable):
+                if istype(vt.value, pytree.LeafSpec):
+                    return True
+                if not istype(vt.value, (pytree.TreeSpec, pytree.ConstantNode)):
+                    return False
+                return all(
+                    validate_vt(vt._get_field_vt(field.name), allow_tensor_cell=False)
+                    for field in dataclasses.fields(vt.value)  # type: ignore[arg-type]
+                    if field.init
+                )
+
+            if isinstance(vt, variables.BaseListVariable):
+                return all(
+                    validate_vt(item, allow_tensor_cell=False) for item in vt.items
+                )
+
+            if isinstance(vt, variables.NamedTupleVariable):
+                return all(
+                    validate_vt(item, allow_tensor_cell=False) for item in vt.items
+                )
+
+            if isinstance(vt, variables.ConstDictVariable):
+                return all(
+                    validate_vt(k.vt, allow_tensor_cell=False)
+                    and validate_vt(v, allow_tensor_cell=False)
+                    for k, v in vt.items.items()
+                )
+
+            vt.as_python_constant()
+            return True
+        except (
+            AsPythonConstantNotImplementedError,
+            ClosureConversionError,
+            NotImplementedError,
+            exc.Unsupported,
+        ):
+            return False
+        finally:
+            visiting_vts.remove(vt_id)
+
+    return validate_vt(out_spec, allow_tensor_cell=False) and found_tensor_closure_cell
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -2199,19 +2336,27 @@ class OutputGraph(OutputGraphCommon):
                     try:
                         self.export_metadata.out_spec = out_spec.as_python_constant()
                     except ClosureConversionError as e:
-                        unimplemented(
-                            gb_type="nested function with non-constructible closure in output",
-                            context=f"as_python_constant for out_spec {out_spec}",
-                            explanation=(
-                                "Cannot return a nested function with closure from a compiled function. "
-                                "Dynamo failed to construct the function defined in the compiled region with closure objects."
-                            ),
-                            hints=[
-                                "Define the function at module scope instead of inside another function ",
-                                "Ensure that all closure variables are constants.",
-                            ],
-                            from_exc=e,
-                        )
+                        if any(
+                            info.kind == "graph_out"
+                            for info in output_return_type.values()
+                        ) and _out_spec_has_only_tensor_closure_conversion_failures(
+                            tx, out_spec
+                        ):
+                            self.export_metadata.out_spec = None
+                        else:
+                            unimplemented(
+                                gb_type="nested function with non-constructible closure in output",
+                                context=f"as_python_constant for out_spec {out_spec}",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo failed to construct the function defined in the compiled region with closure objects."
+                                ),
+                                hints=[
+                                    "Define the function at module scope instead of inside another function ",
+                                    "Ensure that all closure variables are constants.",
+                                ],
+                                from_exc=e,
+                            )
 
             output = []
             subgraph_pycode = None
