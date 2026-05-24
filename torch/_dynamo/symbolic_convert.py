@@ -24,6 +24,8 @@ optimization of PyTorch programs.
 
 from __future__ import annotations
 
+import _warnings
+
 import collections
 import collections.abc
 import contextlib
@@ -82,6 +84,7 @@ from .bytecode_transformation import (
     create_jump_absolute,
     create_rot_n,
     create_swap,
+    get_call_callable_depth,
     get_code_keys,
     Instruction,
     is_generator,
@@ -105,7 +108,12 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
+from .output_graph import (
+    CodeOptions,
+    GraphCompileReason,
+    OutputGraph,
+    StackLocalsMetadata,
+)
 from .polyfills import (
     impl_IS_MAPPING,
     impl_MATCH_CLASS,
@@ -196,7 +204,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -804,7 +812,12 @@ def generic_jump(
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
         jump_inst = create_instruction(inst.opname, target=if_jump[0])
-        jump_inst.copy_positions(inst)
+        # For inlined frames, use the root frame's current instruction
+        # positions so the output code maps to the correct source line.
+        positions_inst = (
+            self.output.root_tx.current_instruction if self.parent is not None else inst
+        )
+        jump_inst.copy_positions(positions_inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
@@ -1004,6 +1017,27 @@ def _reconstruct_block_stack(
             cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
 
 
+def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any]:
+    """Create a wrapper for warnings.warn that reports the given source location.
+
+    When warnings.warn (stacklevel=1) inspects its caller frame, it sees the
+    wrapper's code object -- whose co_filename and line table point to the
+    original leaf-frame location.  This preserves Python's per-location
+    warning dedup even when the call is inlined into a different frame by
+    nested graph breaks.
+    """
+    import warnings
+
+    # Use a lambda so all bytecode is on one line and co_firstlineno
+    # equals the body line (no off-by-one vs a multi-line def).
+    wrapper: Callable[..., Any] = lambda *args, **kwargs: warnings.warn(*args, **kwargs)  # noqa: E731
+    wrapper.__code__ = wrapper.__code__.replace(
+        co_filename=filename,
+        co_firstlineno=lineno,
+    )
+    return wrapper
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1095,6 +1129,12 @@ def break_graph_if_unsupported(
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
+            # When warnings.warn is called from an inlined frame, replace
+            # it on the symbolic stack before compile_subgraph so the codegen
+            # naturally reconstructs the wrapper via LOAD_GLOBAL.
+            if self.parent is not None:
+                self._maybe_replace_warnings_warn_on_stack(inst)
+
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=int(push) - stack_effect
@@ -1104,6 +1144,16 @@ def break_graph_if_unsupported(
             _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
+
+            # For inlined frames, use the root frame's current instruction
+            # positions so the output code maps to the correct source line.
+            # The output code is always for the root function, so line numbers
+            # from inlined child frames would be wrong.
+            positions_inst = (
+                self.output.root_tx.current_instruction
+                if self.parent is not None
+                else inst
+            )
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -1123,7 +1173,7 @@ def break_graph_if_unsupported(
                 if inst.arg is None:
                     raise AssertionError("expected inst.arg is not None to be true")
                 call_insts = create_call_function(inst.arg, False)
-                call_insts[-1].copy_positions(inst)
+                call_insts[-1].copy_positions(positions_inst)
                 self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
@@ -1131,6 +1181,7 @@ def break_graph_if_unsupported(
                     raise AssertionError("expected inst.target is None to be true")
                 inst_copy = copy.copy(inst)
                 inst_copy.exn_tab_entry = None
+                inst_copy.copy_positions(positions_inst)
                 self.output.add_output_instructions([inst_copy])
 
             self.output.add_output_instructions(cleanup)
@@ -1367,10 +1418,10 @@ class InstructionTranslatorBase(
             cur_tx = cur_tx.parent
         return False
 
-    def cellvars(self) -> list[str]:
+    def cellvars(self) -> tuple[str, ...]:
         return self.code_options["co_cellvars"]
 
-    def freevars(self) -> list[str]:
+    def freevars(self) -> tuple[str, ...]:
         return self.code_options["co_freevars"]
 
     def new_pycode_varname(self, prefix: str) -> str:
@@ -1386,7 +1437,7 @@ class InstructionTranslatorBase(
         """Return the most recently generated pycode varname for the given prefix."""
         return self._pycode_last_varname[prefix]
 
-    def cell_and_freevars(self) -> list[str]:
+    def cell_and_freevars(self) -> tuple[str, ...]:
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
@@ -1435,7 +1486,7 @@ class InstructionTranslatorBase(
     def inline_generator_function(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1448,7 +1499,7 @@ class InstructionTranslatorBase(
     def inline_user_function_return(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
@@ -2911,6 +2962,10 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)
@@ -3328,6 +3383,43 @@ class InstructionTranslatorBase(
         counters["resumes"][new_code.co_name] += 1
 
         return new_code, resume_name
+
+    def _maybe_replace_warnings_warn_on_stack(self, inst: Instruction) -> None:
+        """Replace warnings.warn on the symbolic stack with a wrapper that
+        preserves the leaf frame's source location for warning dedup.
+
+        When nested graph breaks inline a warnings.warn call into the root
+        frame's bytecode, the root frame's line numbers defeat Python's
+        per-location warning dedup.  This replaces the SkipFunctionVariable
+        for warnings.warn on the symbolic stack before compile_subgraph, so
+        the codegen naturally reconstructs the wrapper via LOAD_GLOBAL.
+        """
+        if inst.arg is None:
+            return
+
+        try:
+            depth = get_call_callable_depth(inst.opname, inst.arg)
+        except ValueError:
+            return
+
+        callable_idx = len(self.stack) - depth
+        callable_var = self.stack[callable_idx]
+        if not (
+            isinstance(callable_var, SkipFunctionVariable)
+            and callable_var.value is _warnings.warn
+        ):
+            return
+
+        leaf_filename = self.f_code.co_filename
+        leaf_lineno = inst.positions.lineno if inst.positions else inst.starts_line
+        if leaf_lineno is None:
+            return
+
+        wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
+        wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
+        self.stack[callable_idx] = SkipFunctionVariable(
+            wrapper, source=GlobalSource(wrapper_name)
+        )
 
     def create_call_resume_at(
         self,
@@ -3944,7 +4036,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -4095,12 +4187,8 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval == 0 or inst.argval == 1 to be true"
             )
-        if inst.argval == 0:
-            new_argval = "is"
-        else:
-            new_argval = "is not"
-        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
-        self.COMPARE_OP(new_inst)
+        argval = "is" if inst.argval == 0 else "is not"
+        self.push(compare_op_handlers[argval](self, self.popn(2), {}))
 
     def CONTAINS_OP(self, inst: Instruction) -> None:
         if not (inst.argval == 0 or inst.argval == 1):
@@ -4308,6 +4396,8 @@ class InstructionTranslatorBase(
         pass
 
     def KW_NAMES(self, inst: Instruction) -> None:
+        if inst.arg is None:
+            raise AssertionError("expected inst.arg is not None to be true")
         kw_names = self.code_options["co_consts"][inst.arg]
         if not isinstance(kw_names, tuple):
             raise AssertionError("expected isinstance(kw_names, tuple) to be true")
@@ -4739,21 +4829,27 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, inst.argval))
 
     # See
-    # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
+    # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/pylifecycle.c#L881
     # for the common constants - make sure it matches for Python 3.14+.
-    # The common constants are all attributes of `builtins`.
     _common_constants = (
-        "AssertionError",
-        "NotImplementedError",
-        "tuple",
-        "all",
-        "any",
+        AssertionError,
+        NotImplementedError,
+        tuple,
+        all,
+        any,
+        list,
+        set,
+        None,
+        "",
+        True,
+        False,
+        -1,
     )
 
     def LOAD_COMMON_CONSTANT(self, inst: Instruction) -> None:
         if not isinstance(inst.arg, int):
             raise AssertionError("expected LOAD_COMMON_CONSTANT arg to be set to int")
-        self.push(self.load_builtin_from_argval(self._common_constants[inst.arg]))
+        self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
@@ -4880,7 +4976,7 @@ class InstructionTranslatorBase(
 
     def log_graph_break(
         self,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         reason: str,
         exc: Unsupported | UserError | StepUnsupported,
     ) -> None:
@@ -5013,7 +5109,7 @@ class InstructionTranslatorBase(
         f_locals: dict[str, Any],
         f_globals: dict[str, Any],
         f_builtins: dict[str, Any],
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
@@ -5077,14 +5173,16 @@ class InstructionTranslatorBase(
         )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
-        self.code_options: dict[str, Any] = code_options
+        self.code_options: CodeOptions = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code, closure=closure, code_options=code_options
+                code=f_code,
+                closure=closure,
+                code_options=code_options,
             )
         else:
             self.exec_recorder = None
@@ -5170,7 +5268,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_builtins: dict[str, Any],
         closure: tuple[Any, ...] | None,
         torch_function_mode_stack: Any,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         compiler_fn: Any,
         one_graph: bool,
         export: bool,
@@ -5536,7 +5634,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         cls,
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tracer = None
@@ -5616,7 +5714,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         if not isinstance(
@@ -5678,11 +5776,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        if code.co_name in ("__setitem__", "__setattr__") and not (
-            args and isinstance(args[0], variables.UserDefinedObjectVariable)
+        if code.co_name in (
+            "__setitem__",
+            "__setattr__",
+            "__delitem__",
+            "__delattr__",
+        ) and not (
+            args
+            and isinstance(
+                args[0],
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
         ):
             unimplemented(
-                gb_type="Unsupported __setitem__/__setattr__ inline attempt",
+                gb_type="Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
                 hints=[],
@@ -5876,7 +5986,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions = cleaned_instructions(code)
             propagate_line_nums(instructions)
             indexof = get_indexof(instructions)
-            code_options = {k: getattr(code, k) for k in get_code_keys()}
+            code_options = cast(
+                CodeOptions, {k: getattr(code, k) for k in get_code_keys()}
+            )
             if tracing_ctx:
                 tracing_ctx.inlined_code_cache[code] = InlinedCodeCache(
                     instructions=instructions,
