@@ -101,6 +101,17 @@ class NullHandler:
     """
 
 
+class NullGraphHandler(NullHandler):
+    """
+    Default graph handler used outside a lowering context.
+
+    Code that only needs to know whether C++ wrapper codegen is active can treat
+    the absence of a graph as normal Python wrapper behavior.
+    """
+
+    cpp_wrapper = False
+
+
 # If a virtualized value is set to _PoisonedVirtual then any attempt to get the
 # value will result in an exception being raised. This is useful if we want to
 # trap uninitialized reads of virtualized globals - for example when compiling
@@ -187,7 +198,7 @@ class NullKernelHandler(NullHandler):
 _ops: Virtualized[OpsHandler[Any]] = Virtualized(
     "ops", cast(type[OpsHandler[Any]], MockHandler)
 )
-_graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
+_graph: Virtualized[GraphLowering] = Virtualized("graph", NullGraphHandler)
 _extern_kernel_nodes: Virtualized[list[ExternKernelNode]] = Virtualized(
     "extern_kernel_nodes", NullHandler
 )

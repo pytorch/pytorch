@@ -132,6 +132,13 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         supported_extern = self._extern_kernel_caller("mm")
         non_extern = select_algorithm.ChoiceCaller("not_extern", [], None, "")
 
+        self.assertEqual(
+            select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                [unsupported_extern]
+            ),
+            [unsupported_extern],
+        )
+
         with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
             self.assertEqual(
                 select_algorithm.filter_cpp_wrapper_unsupported_choices(
