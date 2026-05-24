@@ -184,7 +184,7 @@ def choice(a: ArrayLike, size=None, replace=True, p: ArrayLike | None = None):
     indices = torch.multinomial(p, num_el, replacement=replace)
 
     if _util.is_sequence(size):
-        indices = indices.reshape(size)
+        indices = indices.view(size)
 
     samples = a[indices]
 

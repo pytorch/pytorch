@@ -758,9 +758,7 @@ def indices(dimensions, dtype: DTypeLike | None = int, sparse=False):
     else:
         res = torch.empty((N,) + dimensions, dtype=dtype)
     for i, dim in enumerate(dimensions):
-        idx = torch.arange(dim, dtype=dtype).reshape(
-            shape[:i] + (dim,) + shape[i + 1 :]
-        )
+        idx = torch.arange(dim, dtype=dtype).view(shape[:i] + (dim,) + shape[i + 1 :])
         if sparse:
             res = res + (idx,)
         else:
@@ -1995,7 +1993,7 @@ def histogramdd(
     if weights is not None:
         # range=... is required : interleave min and max values per dimension
         mm = sample.aminmax(dim=0)
-        range = torch.cat(mm).reshape(2, -1).T.flatten()
+        range = torch.cat(mm).view(2, -1).T.flatten()
         range = tuple(range.tolist())
         weights = _util.cast_if_needed(weights, sample.dtype)
         w_kwd = {"weight": weights}

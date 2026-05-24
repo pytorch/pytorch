@@ -69,7 +69,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
                 [0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15],
                 device=device,
             )
-            + (torch.arange(0, nrows // 16, device=device).reshape(-1, 1) * 16).expand(
+            + (torch.arange(0, nrows // 16, device=device).view(-1, 1) * 16).expand(
                 nrows // 16, 16
             )
         ).view(-1)
@@ -79,7 +79,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
                 [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15],
                 device=device,
             )
-            + (torch.arange(0, nrows // 16, device=device).reshape(-1, 1) * 16).expand(
+            + (torch.arange(0, nrows // 16, device=device).view(-1, 1) * 16).expand(
                 nrows // 16, 16
             )
         ).view(-1)
