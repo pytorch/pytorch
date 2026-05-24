@@ -57,11 +57,8 @@ __all__ = [
     "MemRecordsAcc",
 ]
 
-from contextlib import ContextDecorator
-
-
 # Backward-compat alias: private name used to refer to a local fallback class.
-_ContextDecorator = ContextDecorator
+from contextlib import ContextDecorator as _ContextDecorator
 
 
 # global python state - whether profiler is currently enabled
@@ -821,7 +818,7 @@ class profile:
         return all_function_events
 
 
-class record_function(ContextDecorator):
+class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -869,7 +866,7 @@ class record_function(ContextDecorator):
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
             # pyrefly: ignore [not-a-type]
-            Optional["torch.classes.profiler._RecordFunction"],  # noqa: UP045
+            Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
 
