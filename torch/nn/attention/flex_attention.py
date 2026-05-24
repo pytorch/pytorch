@@ -1454,23 +1454,26 @@ class BlockMask:
 
     def _flatten(
         self,
-    ) -> tuple[tuple[BaseArgumentTypes | None, ...], tuple[Any, ...]]:
+    ) -> tuple[tuple[BaseArgumentTypes, ...], tuple[Any, ...]]:
         """Flatten BlockMask into a list of tensors and context.
 
         Closure tensors from mask_mod are extracted into the leaves via
         _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
-        tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        tensor_values = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
         closure_leaves, callable_spec, stripped = _extract_callable_pytree(
             self.mask_mod
         )
-        all_leaves = tensors + closure_leaves
-        context = tuple(
-            self._wrap_context_value(attr, getattr(self, attr))
-            if attr != "mask_mod"
-            else _MaskModWrapper(stripped, callable_spec)
-            for attr in self._CONTEXT_ATTRS
+        all_leaves = tuple(t for t in tensor_values if t is not None) + closure_leaves
+        context = (
+            tuple(t is None for t in tensor_values),
+            *(
+                self._wrap_context_value(attr, getattr(self, attr))
+                if attr != "mask_mod"
+                else _MaskModWrapper(stripped, callable_spec)
+                for attr in self._CONTEXT_ATTRS
+            ),
         )
         return all_leaves, context
 
@@ -1481,31 +1484,39 @@ class BlockMask:
         context: tuple[Any, ...],
     ) -> Self:
         """Unflatten leaves and context back into a BlockMask."""
-        n_regular = len(cls._TENSOR_ATTRS)
+        tensor_none_mask = context[0]
+        n_regular = sum(not is_none for is_none in tensor_none_mask)
         regular_leaves = leaves[:n_regular]
         closure_leaves = leaves[n_regular:]
         kwargs = {}
-        for attr, val in zip(cls._CONTEXT_ATTRS, context):
+        for attr, val in zip(cls._CONTEXT_ATTRS, context[1:], strict=True):
             if attr == "mask_mod" and isinstance(val, _MaskModWrapper):
                 kwargs[attr] = _reconstruct_closure_fn(
                     val.fn, closure_leaves, val.callable_spec
                 )
             else:
                 kwargs[attr] = cls._unwrap_context_value(attr, val)
-        kwargs.update(zip(cls._TENSOR_ATTRS, regular_leaves))
+        leaf_iter = iter(regular_leaves)
+        kwargs.update(
+            (attr, None if is_none else next(leaf_iter))
+            for attr, is_none in zip(cls._TENSOR_ATTRS, tensor_none_mask, strict=True)
+        )
         return cls(**kwargs)
 
     def _flatten_with_keys(
         self,
-    ) -> tuple[tuple[tuple[GetAttrKey, Any], ...], tuple[tuple[GetAttrKey, Any], ...]]:
+    ) -> tuple[tuple[tuple[GetAttrKey, Any], ...], tuple[Any, ...]]:
         """Flatten BlockMask with keys for better tracing.
 
         Closure tensors from mask_mod are extracted into the leaves via
         _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
+        tensor_values = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
         tensors = tuple(
-            (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
+            (GetAttrKey(attr), value)
+            for attr, value in zip(self._TENSOR_ATTRS, tensor_values, strict=True)
+            if value is not None
         )
         closure_leaves, callable_spec, stripped = _extract_callable_pytree(
             self.mask_mod
@@ -1514,11 +1525,14 @@ class BlockMask:
             (GetAttrKey(f"_closure_{i}"), leaf) for i, leaf in enumerate(closure_leaves)
         )
         all_leaves = tensors + closure_with_keys
-        context = tuple(
-            (GetAttrKey(attr), self._wrap_context_value(attr, getattr(self, attr)))
-            if attr != "mask_mod"
-            else (GetAttrKey(attr), _MaskModWrapper(stripped, callable_spec))
-            for attr in self._CONTEXT_ATTRS
+        context = (
+            tuple(t is None for t in tensor_values),
+            *(
+                self._wrap_context_value(attr, getattr(self, attr))
+                if attr != "mask_mod"
+                else _MaskModWrapper(stripped, callable_spec)
+                for attr in self._CONTEXT_ATTRS
+            ),
         )
         return all_leaves, context
 

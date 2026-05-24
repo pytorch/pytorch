@@ -7297,16 +7297,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         tensors_with_keys, context_with_keys = block_mask._flatten_with_keys()
 
-        self.assertEqual(len(tensors_with_keys), len(BlockMask._TENSOR_ATTRS))
-        self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS))
+        self.assertEqual(
+            len(tensors_with_keys),
+            sum(
+                getattr(block_mask, attr) is not None
+                for attr in BlockMask._TENSOR_ATTRS
+            ),
+        )
+        self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS) + 1)
 
         from torch.utils._pytree import GetAttrKey
 
         for key, _tensor in tensors_with_keys:
-            self.assertIsInstance(key, GetAttrKey)
-            self.assertIsNotNone(key)
-
-        for key, _value in context_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
@@ -7329,16 +7331,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         tensors, context = block_mask._flatten()
         reconstructed_mask = BlockMask._unflatten(tensors, context)
 
-        # Verify the number of tensors and context values matches the attribute lists
         self.assertEqual(
             len(tensors),
-            len(BlockMask._TENSOR_ATTRS),
-            "Number of tensors should match _TENSOR_ATTRS length",
+            sum(
+                getattr(block_mask, attr) is not None
+                for attr in BlockMask._TENSOR_ATTRS
+            ),
+            "Number of tensors should match non-None _TENSOR_ATTRS values",
         )
         self.assertEqual(
             len(context),
-            len(BlockMask._CONTEXT_ATTRS),
-            "Number of context values should match _CONTEXT_ATTRS length",
+            len(BlockMask._CONTEXT_ATTRS) + 1,
+            "Context should include tensor None mask and _CONTEXT_ATTRS values",
         )
 
         # Verify all attributes from the lists exist and are equal after reconstruction
