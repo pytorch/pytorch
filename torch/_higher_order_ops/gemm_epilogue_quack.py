@@ -8,7 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 
 
-_QUACK_GEMM_OPS = (
+QUACK_GEMM_OPS = (
     torch.ops.aten.mm.default,
     torch.ops.aten.addmm.default,
     torch.ops.aten.bmm.default,
@@ -16,10 +16,10 @@ _QUACK_GEMM_OPS = (
     torch.ops.aten._scaled_mm.default,
     torch.ops.aten._grouped_mm.default,
 )
-_SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
+SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
 
 
-def _unwrap_output(node: torch.fx.Node) -> Any:
+def unwrap_output(node: torch.fx.Node) -> Any:
     assert node.op == "output"
     value = node.args[0]
     if isinstance(value, (tuple, list)) and len(value) == 1:
@@ -27,19 +27,19 @@ def _unwrap_output(node: torch.fx.Node) -> Any:
     return value
 
 
-def _find_single_quack_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
+def find_single_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
     gemm_nodes = [
         node
         for node in graph_module.graph.nodes
         if (
             node.op == "call_function"
-            and node.target in _QUACK_GEMM_OPS
+            and node.target in QUACK_GEMM_OPS
         )
     ]
     if len(gemm_nodes) != 1:
         raise NotImplementedError(
             "QUACK GEMM epilogue backend currently supports one "
-            f"{_SUPPORTED_QUACK_GEMM_OP_NAMES} body"
+            f"{SUPPORTED_QUACK_GEMM_OP_NAMES} body"
         )
     return gemm_nodes[0]
 
@@ -146,7 +146,7 @@ class QuackTensorSSAReduceDesc:
     requires_nonnegative: bool = False
 
 
-_QUACK_TENSORSSA_REDUCTIONS = {
+QUACK_TENSORSSA_REDUCTIONS = {
     "sum": QuackTensorSSAReduceDesc("cute.ReductionOp.ADD", "0.0"),
     "amax": QuackTensorSSAReduceDesc(
         "cute.ReductionOp.MAX", "0.0", requires_nonnegative=True
@@ -154,19 +154,19 @@ _QUACK_TENSORSSA_REDUCTIONS = {
 }
 
 
-def _normalize_reduce_dims(dim: Any) -> tuple[Any, ...]:
+def normalize_reduce_dims(dim: Any) -> tuple[Any, ...]:
     if isinstance(dim, (list, tuple)):
         return tuple(dim)
     return (dim,)
 
 
-def _normalize_quack_shape(shape: Any) -> Any:
+def normalize_shape(shape: Any) -> Any:
     if isinstance(shape, torch.Size):
         return tuple(shape)
     return shape
 
 
-def _match_quack_view_or_reshape(node: Any) -> QuackViewMatch | None:
+def match_view_or_reshape(node: Any) -> QuackViewMatch | None:
     if not isinstance(node, torch.fx.Node):
         return None
     if node.op == "call_function" and node.target in (
@@ -179,7 +179,7 @@ def _match_quack_view_or_reshape(node: Any) -> QuackViewMatch | None:
     return None
 
 
-def _match_quack_acc_source(base: Any, mm_node: torch.fx.Node) -> torch.fx.Node | None:
+def match_acc_source(base: Any, mm_node: torch.fx.Node) -> torch.fx.Node | None:
     if base is mm_node:
         return mm_node
     if (
@@ -196,12 +196,12 @@ def _match_quack_acc_source(base: Any, mm_node: torch.fx.Node) -> torch.fx.Node 
     return None
 
 
-def _match_quack_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | None:
+def match_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | None:
     if not isinstance(node, torch.fx.Node):
         return None
     if node.op == "call_function" and node.target == torch.ops.aten.sum.dim_IntList:
         view_node = node.args[0]
-        dims = _normalize_reduce_dims(
+        dims = normalize_reduce_dims(
             node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         )
         keepdim = (
@@ -215,7 +215,7 @@ def _match_quack_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | No
         if len(node.args) < 2:
             return None
         view_node = node.args[0]
-        dims = _normalize_reduce_dims(node.args[1])
+        dims = normalize_reduce_dims(node.args[1])
         keepdim = (
             node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
         )
@@ -226,8 +226,8 @@ def _match_quack_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | No
     return None
 
 
-def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None:
-    sum_match = _match_quack_sum(node, allow_method_sum=True)
+def match_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None:
+    sum_match = match_sum(node, allow_method_sum=True)
     if sum_match is not None:
         return QuackTensorSSAReduceMatch(
             node=sum_match.node,
@@ -244,7 +244,7 @@ def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None
         torch.amax,
     ):
         input_node = node.args[0]
-        dims = _normalize_reduce_dims(
+        dims = normalize_reduce_dims(
             node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         )
         keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
@@ -262,7 +262,7 @@ def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None
         return QuackTensorSSAReduceMatch(
             node=node,
             input_node=node.args[0],
-            dims=_normalize_reduce_dims(node.args[1]),
+            dims=normalize_reduce_dims(node.args[1]),
             keepdim=node.kwargs.get("keepdim", False),
             dtype=None,
             kind="amax",
@@ -270,10 +270,10 @@ def _match_quack_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None
     return None
 
 
-def _match_quack_local_n_amax_reduce(
+def match_local_n_amax_reduce(
     node: Any, mm_node: torch.fx.Node, *, scale: float = 1.0
 ) -> QuackLocalReduceInfo | None:
-    reduce_match = _match_quack_tensorssa_reduce(node)
+    reduce_match = match_tensorssa_reduce(node)
     if reduce_match is None or reduce_match.kind != "amax":
         return None
     if reduce_match.dims not in ((-1,), (2,)) or reduce_match.dtype is not None:
@@ -289,14 +289,14 @@ def _match_quack_local_n_amax_reduce(
     ) or (abs_node.op == "call_method" and abs_node.target == "abs")
     if not is_abs:
         return None
-    view_match = _match_quack_view_or_reshape(abs_node.args[0])
+    view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
         return None
-    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    source_node = match_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    shape = _quack_grouped_n_fragment_shape(_normalize_quack_shape(view_match.shape))
-    if not _is_quack_same_fragment_n_group_shape(shape):
+    shape = grouped_n_fragment_shape(normalize_shape(view_match.shape))
+    if not is_same_fragment_n_group_shape(shape):
         return None
     reduce_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
@@ -318,7 +318,7 @@ def _match_quack_local_n_amax_reduce(
     )
 
 
-def _match_quack_scaled_local_n_amax_reduce(
+def match_scaled_local_n_amax_reduce(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
     if not isinstance(node, torch.fx.Node):
@@ -332,11 +332,11 @@ def _match_quack_scaled_local_n_amax_reduce(
             return None
         lhs, rhs = args[:2]
         if isinstance(rhs, (int, float)):
-            local_reduce = _match_quack_local_n_amax_reduce(
+            local_reduce = match_local_n_amax_reduce(
                 lhs, mm_node, scale=float(rhs)
             )
         elif isinstance(lhs, (int, float)):
-            local_reduce = _match_quack_local_n_amax_reduce(
+            local_reduce = match_local_n_amax_reduce(
                 rhs, mm_node, scale=float(lhs)
             )
         else:
@@ -351,7 +351,7 @@ def _match_quack_scaled_local_n_amax_reduce(
         lhs, rhs = args[:2]
         if not isinstance(rhs, (int, float)) or rhs == 0:
             return None
-        local_reduce = _match_quack_local_n_amax_reduce(
+        local_reduce = match_local_n_amax_reduce(
             lhs, mm_node, scale=1.0 / float(rhs)
         )
     else:
@@ -374,7 +374,7 @@ def _match_quack_scaled_local_n_amax_reduce(
     )
 
 
-def _split_quack_scalar_scale(node: Any) -> tuple[Any, float] | None:
+def split_scalar_scale(node: Any) -> tuple[Any, float] | None:
     if not isinstance(node, torch.fx.Node) or node.op != "call_function":
         return None
     target = node.target
@@ -402,7 +402,7 @@ def _split_quack_scalar_scale(node: Any) -> tuple[Any, float] | None:
     return None
 
 
-def _match_quack_local_n_amax_scale_view(
+def match_local_n_amax_scale_view(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
     aux_output_node = node
@@ -418,13 +418,13 @@ def _match_quack_local_n_amax_scale_view(
     ):
         extra_skip_nodes.add(node)
         node = node.args[0]
-    aux_view = _match_quack_view_or_reshape(node)
+    aux_view = match_view_or_reshape(node)
     if aux_view is None:
         return None
     extra_skip_nodes.add(aux_view.node)
     if isinstance(aux_view.base, torch.fx.Node):
         extra_skip_nodes.add(aux_view.base)
-    scaled = _split_quack_scalar_scale(aux_view.base)
+    scaled = split_scalar_scale(aux_view.base)
     if scaled is None:
         # Also accept the unscaled canonical keepdim form:
         #   scale = x.abs().amax(-1, keepdim=True)
@@ -433,7 +433,7 @@ def _match_quack_local_n_amax_scale_view(
         scale = 1.0
     else:
         reduce_node, scale = scaled
-    reduce_match = _match_quack_tensorssa_reduce(reduce_node)
+    reduce_match = match_tensorssa_reduce(reduce_node)
     if reduce_match is None or reduce_match.kind != "amax":
         return None
     if reduce_match.dims not in ((-1,), (2,)) or reduce_match.dtype is not None:
@@ -449,20 +449,20 @@ def _match_quack_local_n_amax_scale_view(
     ) or (abs_node.op == "call_method" and abs_node.target == "abs")
     if not is_abs:
         return None
-    view_match = _match_quack_view_or_reshape(abs_node.args[0])
+    view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
         return None
-    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    source_node = match_acc_source(view_match.base, mm_node)
     epilogue_reduce_source_node = None
     if source_node is None:
-        if not _quack_output_uses_node(view_match.base, mm_node):
+        if not output_uses_node(view_match.base, mm_node):
             return None
         source_node = view_match.base
         epilogue_reduce_source_node = view_match.node
-    grouped_shape = _quack_grouped_n_fragment_shape(
-        _normalize_quack_shape(view_match.shape)
+    grouped_shape = grouped_n_fragment_shape(
+        normalize_shape(view_match.shape)
     )
-    if not _is_quack_same_fragment_n_group_shape(grouped_shape):
+    if not is_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
@@ -487,7 +487,7 @@ def _match_quack_local_n_amax_scale_view(
     )
 
 
-def _match_quack_local_n_primitive_scale_view(
+def match_local_n_primitive_scale_view(
     node: Any,
     mm_node: torch.fx.Node,
     *,
@@ -495,7 +495,7 @@ def _match_quack_local_n_primitive_scale_view(
     kind: str,
     max_power: int = 8,
 ) -> QuackLocalReduceInfo | None:
-    aux_view = _match_quack_view_or_reshape(node)
+    aux_view = match_view_or_reshape(node)
     if aux_view is None:
         return None
     scale_node = aux_view.base
@@ -511,7 +511,7 @@ def _match_quack_local_n_primitive_scale_view(
         if not isinstance(op_max_power, int):
             return None
     reduce_node = scale_node.args[0]
-    reduce_match = _match_quack_tensorssa_reduce(reduce_node)
+    reduce_match = match_tensorssa_reduce(reduce_node)
     if reduce_match is None or reduce_match.kind != "amax":
         return None
     if reduce_match.dims not in ((-1,), (2,)) or reduce_match.dtype is not None:
@@ -527,16 +527,16 @@ def _match_quack_local_n_primitive_scale_view(
     ) or (abs_node.op == "call_method" and abs_node.target == "abs")
     if not is_abs:
         return None
-    view_match = _match_quack_view_or_reshape(abs_node.args[0])
+    view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
         return None
-    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    source_node = match_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    grouped_shape = _quack_grouped_n_fragment_shape(
-        _normalize_quack_shape(view_match.shape)
+    grouped_shape = grouped_n_fragment_shape(
+        normalize_shape(view_match.shape)
     )
-    if not _is_quack_same_fragment_n_group_shape(grouped_shape):
+    if not is_same_fragment_n_group_shape(grouped_shape):
         return None
     aux_meta = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
     mm_meta = mm_node.meta.get("val")
@@ -559,10 +559,10 @@ def _match_quack_local_n_primitive_scale_view(
     )
 
 
-def _match_quack_local_n_mx_scale_view(
+def match_local_n_mx_scale_view(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
-    return _match_quack_local_n_primitive_scale_view(
+    return match_local_n_primitive_scale_view(
         node,
         mm_node,
         target=torch.ops.flex_gemm.mx_e8m0_scale.default,
@@ -570,10 +570,10 @@ def _match_quack_local_n_mx_scale_view(
     )
 
 
-def _match_quack_local_n_nvfp4_scale_view(
+def match_local_n_nvfp4_scale_view(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
-    return _match_quack_local_n_primitive_scale_view(
+    return match_local_n_primitive_scale_view(
         node,
         mm_node,
         target=torch.ops.flex_gemm.nvfp4_e4m3_scale.default,
@@ -581,23 +581,23 @@ def _match_quack_local_n_nvfp4_scale_view(
     )
 
 
-def _match_quack_local_n_reduce(
+def match_local_n_reduce(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
-    sum_match = _match_quack_sum(node, allow_method_sum=True)
+    sum_match = match_sum(node, allow_method_sum=True)
     if sum_match is None:
         return None
     if sum_match.dims not in ((-1,), (2,)) or sum_match.dtype is not None:
         return None
-    view_match = _match_quack_view_or_reshape(sum_match.view_node)
+    view_match = match_view_or_reshape(sum_match.view_node)
     if view_match is None:
         return None
-    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    source_node = match_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    shape = _normalize_quack_shape(view_match.shape)
-    group_shape = _quack_grouped_n_fragment_shape(shape)
-    if not _is_quack_n_group_shape(group_shape):
+    shape = normalize_shape(view_match.shape)
+    group_shape = grouped_n_fragment_shape(shape)
+    if not is_n_group_shape(group_shape):
         return None
     group_size = group_shape[-1]
     mm_meta = mm_node.meta.get("val")
@@ -621,21 +621,21 @@ def _match_quack_local_n_reduce(
     )
 
 
-def _match_quack_local_m_reduce(
+def match_local_m_reduce(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalReduceInfo | None:
-    sum_match = _match_quack_sum(node, allow_method_sum=False)
+    sum_match = match_sum(node, allow_method_sum=False)
     if sum_match is None:
         return None
     if sum_match.dims not in ((1,), (2,)) or sum_match.dtype is not None:
         return None
-    view_match = _match_quack_view_or_reshape(sum_match.view_node)
+    view_match = match_view_or_reshape(sum_match.view_node)
     if view_match is None:
         return None
-    source_node = _match_quack_acc_source(view_match.base, mm_node)
+    source_node = match_acc_source(view_match.base, mm_node)
     if source_node is None:
         return None
-    shape = _normalize_quack_shape(view_match.shape)
+    shape = normalize_shape(view_match.shape)
     if not isinstance(shape, (list, tuple)) or len(shape) not in (3, 4):
         return None
     group_dim = 1 if len(shape) == 3 else 2
@@ -668,30 +668,30 @@ def _match_quack_local_m_reduce(
     )
 
 
-def _match_quack_reciprocal_node(node: Any) -> Any | None:
+def match_reciprocal_node(node: Any) -> Any | None:
     if not isinstance(node, torch.fx.Node) or node.op != "call_function":
         return None
     if node.target in (torch.ops.aten.reciprocal.default, torch.reciprocal):
         return node.args[0]
     if node.target in (torch.ops.aten.div.Tensor, torch.ops.aten.div.Scalar, operator.truediv):
         lhs, rhs = node.args[:2]
-        if _is_quack_scalar_one(lhs):
+        if is_scalar_one(lhs):
             return rhs
     return None
 
 
-def _match_quack_local_norm(
+def match_local_norm(
     node: Any,
     mm_node: torch.fx.Node,
     reduce_matcher: Callable[[Any, torch.fx.Node], QuackLocalReduceInfo | None],
     *,
     dim: int,
 ) -> QuackLocalNormInfo | None:
-    output_view = _match_quack_view_or_reshape(node)
+    output_view = match_view_or_reshape(node)
     if output_view is None:
         return None
     div_node = output_view.base
-    output_shape = _normalize_quack_shape(output_view.shape)
+    output_shape = normalize_shape(output_view.shape)
     if not isinstance(div_node, torch.fx.Node):
         return None
     if div_node.op != "call_function":
@@ -701,10 +701,10 @@ def _match_quack_local_norm(
         lhs, rhs = div_node.args[:2]
     elif div_node.target in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
         lhs, rhs = div_node.args[:2]
-        reciprocal_source = _match_quack_reciprocal_node(rhs)
+        reciprocal_source = match_reciprocal_node(rhs)
         if reciprocal_source is None:
             lhs, rhs = rhs, lhs
-            reciprocal_source = _match_quack_reciprocal_node(rhs)
+            reciprocal_source = match_reciprocal_node(rhs)
         if reciprocal_source is None:
             return None
         extra_skip_nodes.add(rhs)
@@ -737,23 +737,23 @@ def _match_quack_local_norm(
     )
 
 
-def _match_quack_local_n_norm(
+def match_local_n_norm(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalNormInfo | None:
-    return _match_quack_local_norm(
-        node, mm_node, _match_quack_local_n_reduce, dim=1
+    return match_local_norm(
+        node, mm_node, match_local_n_reduce, dim=1
     )
 
 
-def _match_quack_local_m_norm(
+def match_local_m_norm(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalNormInfo | None:
-    return _match_quack_local_norm(
-        node, mm_node, _match_quack_local_m_reduce, dim=0
+    return match_local_norm(
+        node, mm_node, match_local_m_reduce, dim=0
     )
 
 
-def _quack_output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
+def output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
     seen: set[torch.fx.Node] = set()
 
     def visit(item: Any) -> bool:
@@ -767,7 +767,7 @@ def _quack_output_uses_node(value: Any, needle: torch.fx.Node) -> bool:
     return visit(value)
 
 
-def _match_quack_grouped_n_split(
+def match_grouped_n_split(
     node: Any, mm_node: torch.fx.Node
 ) -> tuple[torch.fx.Node, int, tuple[str, ...]] | None:
     if not isinstance(node, torch.fx.Node):
@@ -791,7 +791,7 @@ def _match_quack_grouped_n_split(
     return node, 2, ("B",)
 
 
-def _match_quack_grouped_n_getitem(
+def match_grouped_n_getitem(
     node: Any, mm_node: torch.fx.Node
 ) -> tuple[torch.fx.Node, int, int, tuple[str, ...]] | None:
     if not isinstance(node, torch.fx.Node):
@@ -803,7 +803,7 @@ def _match_quack_grouped_n_getitem(
         and isinstance(node.args[1], int)
     ):
         return None
-    split = _match_quack_grouped_n_split(node.args[0], mm_node)
+    split = match_grouped_n_split(node.args[0], mm_node)
     if split is None:
         return None
     split_node, group_size, concat_layout = split
@@ -812,7 +812,7 @@ def _match_quack_grouped_n_getitem(
     return split_node, node.args[1], group_size, concat_layout
 
 
-def _match_quack_grouped_n_select(
+def match_grouped_n_select(
     node: Any, mm_node: torch.fx.Node
 ) -> tuple[torch.fx.Node, int, int, tuple[str, ...]] | None:
     if not isinstance(node, torch.fx.Node):
@@ -824,9 +824,9 @@ def _match_quack_grouped_n_select(
         and isinstance(node.args[2], int)
     ):
         return None
-    view = _match_quack_view_or_reshape(node.args[0])
-    view_shape = _normalize_quack_shape(view.shape) if view is not None else None
-    if view is None or not _quack_output_uses_node(view.base, mm_node):
+    view = match_view_or_reshape(node.args[0])
+    view_shape = normalize_shape(view.shape) if view is not None else None
+    if view is None or not output_uses_node(view.base, mm_node):
         return None
     if (
         node.args[1] == -1
@@ -835,9 +835,9 @@ def _match_quack_grouped_n_select(
             and node.args[1] == len(view_shape) - 1
         )
     ):
-        shape = _quack_grouped_n_fragment_shape(view_shape)
+        shape = grouped_n_fragment_shape(view_shape)
         if not (
-            _is_quack_same_fragment_n_group_shape(shape)
+            is_same_fragment_n_group_shape(shape)
             and 0 <= node.args[2] < shape[-1]
         ):
             return None
@@ -856,7 +856,7 @@ def _match_quack_grouped_n_select(
     return None
 
 
-def _uses_quack_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
+def uses_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
     seen: set[torch.fx.Node] = set()
 
     def visit(node: Any) -> bool:
@@ -869,11 +869,11 @@ def _uses_quack_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
             and len(node.args) >= 3
             and node.args[1] == 1
         ):
-            view = _match_quack_view_or_reshape(node.args[0])
-            shape = _normalize_quack_shape(view.shape) if view is not None else None
+            view = match_view_or_reshape(node.args[0])
+            shape = normalize_shape(view.shape) if view is not None else None
             if (
                 view is not None
-                and _quack_output_uses_node(view.base, mm_node)
+                and output_uses_node(view.base, mm_node)
                 and isinstance(shape, (list, tuple))
                 and len(shape) == 3
                 and shape[0] == -1
@@ -886,7 +886,7 @@ def _uses_quack_grouped_m_select(value: Any, mm_node: torch.fx.Node) -> bool:
     return visit(value)
 
 
-def _match_quack_grouped_n_contract_main(
+def match_grouped_n_contract_main(
     output_value: Any, mm_node: torch.fx.Node
 ) -> QuackMainOutputTransformInfo | None:
     select_view = None
@@ -902,9 +902,9 @@ def _match_quack_grouped_n_contract_main(
         if value in seen:
             return True
         seen.add(value)
-        select = _match_quack_grouped_n_select(value, mm_node)
+        select = match_grouped_n_select(value, mm_node)
         if select is None:
-            select = _match_quack_grouped_n_getitem(value, mm_node)
+            select = match_grouped_n_getitem(value, mm_node)
         if select is not None:
             view_node, _index, group_size, select_concat_layout = select
             if select_view is None:
@@ -912,7 +912,7 @@ def _match_quack_grouped_n_contract_main(
                 select_group = group_size
                 concat_layout = select_concat_layout
             elif (
-                not _quack_fx_equivalent(select_view, view_node)
+                not fx_equivalent(select_view, view_node)
                 or select_group != group_size
                 or concat_layout != select_concat_layout
             ):
@@ -922,8 +922,8 @@ def _match_quack_grouped_n_contract_main(
         if value is mm_node:
             return False
         if (
-            _match_quack_view_or_reshape(value) is not None
-            and _quack_output_uses_node(value, mm_node)
+            match_view_or_reshape(value) is not None
+            and output_uses_node(value, mm_node)
         ):
             return False
         return all(visit(arg) for arg in pytree.tree_leaves((value.args, value.kwargs)))
@@ -951,10 +951,10 @@ def _match_quack_grouped_n_contract_main(
     )
 
 
-def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
+def analyze_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan:
     local_reduce = None
     aux_output = None
-    local_norm = _match_quack_local_n_norm(output_value, mm_node) or _match_quack_local_m_norm(
+    local_norm = match_local_n_norm(output_value, mm_node) or match_local_m_norm(
         output_value, mm_node
     )
     skip_nodes: set[torch.fx.Node] = set()
@@ -983,18 +983,18 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
         elif len(output_value) == 2:
             aux_value = output_value[1]
             local_reduce = (
-                _match_quack_local_n_reduce(aux_value, mm_node)
-                or _match_quack_local_m_reduce(aux_value, mm_node)
-                or _match_quack_local_n_amax_reduce(aux_value, mm_node)
-                or _match_quack_scaled_local_n_amax_reduce(aux_value, mm_node)
-                or _match_quack_local_n_amax_scale_view(aux_value, mm_node)
-                or _match_quack_local_n_mx_scale_view(aux_value, mm_node)
-                or _match_quack_local_n_nvfp4_scale_view(aux_value, mm_node)
+                match_local_n_reduce(aux_value, mm_node)
+                or match_local_m_reduce(aux_value, mm_node)
+                or match_local_n_amax_reduce(aux_value, mm_node)
+                or match_scaled_local_n_amax_reduce(aux_value, mm_node)
+                or match_local_n_amax_scale_view(aux_value, mm_node)
+                or match_local_n_mx_scale_view(aux_value, mm_node)
+                or match_local_n_nvfp4_scale_view(aux_value, mm_node)
             )
             if local_reduce is not None and not local_reduce.keepdim:
                 if (
                     local_reduce.epilogue_reduce_value_node is not None
-                    and _quack_output_uses_node(
+                    and output_uses_node(
                         output_value[0], local_reduce.epilogue_reduce_value_node
                     )
                 ):
@@ -1004,14 +1004,14 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                         scale=1.0,
                         epilogue_reduce_source_node=local_reduce.epilogue_reduce_value_node,
                     )
-                if not _quack_output_uses_node(output_value[0], local_reduce.aux_output_node):
+                if not output_uses_node(output_value[0], local_reduce.aux_output_node):
                     skip_nodes.add(local_reduce.aux_output_node)
-                if not _quack_output_uses_node(output_value[0], local_reduce.reduce_node):
+                if not output_uses_node(output_value[0], local_reduce.reduce_node):
                     skip_nodes.add(local_reduce.reduce_node)
                 for skip_node in local_reduce.extra_skip_nodes:
-                    if not _quack_output_uses_node(output_value[0], skip_node):
+                    if not output_uses_node(output_value[0], skip_node):
                         skip_nodes.add(skip_node)
-                if not _quack_output_uses_node(output_value[0], local_reduce.view_node):
+                if not output_uses_node(output_value[0], local_reduce.view_node):
                     skip_nodes.add(local_reduce.view_node)
                     if local_reduce.source_node is not mm_node:
                         skip_nodes.add(local_reduce.source_node)
@@ -1039,7 +1039,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
                 "QUACK GEMM epilogue backend expects one output or one supported "
                 "local-reduce aux output"
             )
-    main_output_transform = _match_quack_grouped_n_contract_main(output_value, mm_node)
+    main_output_transform = match_grouped_n_contract_main(output_value, mm_node)
     if main_output_transform is None and isinstance(output_value, torch.fx.Node):
         mm_meta = mm_node.meta.get("val")
         output_meta = output_value.meta.get("val")
@@ -1048,7 +1048,7 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
             and output_meta is not None
             and tuple(output_meta.shape) != tuple(mm_meta.shape)
         ):
-            if _uses_quack_grouped_m_select(output_value, mm_node):
+            if uses_grouped_m_select(output_value, mm_node):
                 raise NotImplementedError(
                     "QUACK M-mode shape-changing main epilogues such as "
                     "acc.view(-1, group_m, N)[:, i, :] are not supported yet"
@@ -1067,13 +1067,13 @@ def _analyze_quack_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOut
     )
 
 
-def _quack_grouped_n_fragment_shape(shape: Any) -> Any:
+def grouped_n_fragment_shape(shape: Any) -> Any:
     if isinstance(shape, (list, tuple)) and len(shape) == 4:
         return shape[-3:]
     return shape
 
 
-def _is_quack_n_group_shape(shape: Any) -> bool:
+def is_n_group_shape(shape: Any) -> bool:
     return (
         isinstance(shape, (list, tuple))
         and len(shape) == 3
@@ -1083,15 +1083,15 @@ def _is_quack_n_group_shape(shape: Any) -> bool:
     )
 
 
-def _is_quack_same_fragment_n_group_shape(shape: Any) -> bool:
-    return _is_quack_n_group_shape(shape) and 32 % shape[-1] == 0
+def is_same_fragment_n_group_shape(shape: Any) -> bool:
+    return is_n_group_shape(shape) and 32 % shape[-1] == 0
 
 
-def _is_quack_concat_half_n_shape(shape: Any) -> bool:
+def is_concat_half_n_shape(shape: Any) -> bool:
     return isinstance(shape, (list, tuple)) and len(shape) == 3 and shape[1] == 2
 
 
-def _is_quack_nonnegative_expr(node: Any) -> bool:
+def is_nonnegative_expr(node: Any) -> bool:
     if not isinstance(node, torch.fx.Node):
         return False
     if node.op == "call_function" and node.target in (
@@ -1107,7 +1107,7 @@ def _is_quack_nonnegative_expr(node: Any) -> bool:
         torch.ops.aten._to_copy.default,
         torch.ops.prims.convert_element_type.default,
     ):
-        return _is_quack_nonnegative_expr(node.args[0])
+        return is_nonnegative_expr(node.args[0])
     if node.op == "call_function" and node.target == torch.ops.aten.clamp.default:
         min_value = node.kwargs.get("min", node.args[1] if len(node.args) > 1 else None)
         return isinstance(min_value, (int, float)) and min_value >= 0
@@ -1117,15 +1117,15 @@ def _is_quack_nonnegative_expr(node: Any) -> bool:
     return False
 
 
-def _is_quack_scalar_value(value: Any, expected: float, *, tolerance: float = 1e-12) -> bool:
+def is_scalar_value(value: Any, expected: float, *, tolerance: float = 1e-12) -> bool:
     return isinstance(value, (int, float)) and abs(float(value) - expected) <= tolerance
 
 
-def _is_quack_scalar_one(value: Any) -> bool:
-    return _is_quack_scalar_value(value, 1.0)
+def is_scalar_one(value: Any) -> bool:
+    return is_scalar_value(value, 1.0)
 
 
-def _quack_fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
+def fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
     if lhs is rhs:
         return True
     if depth <= 0 or not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
@@ -1137,27 +1137,27 @@ def _quack_fx_equivalent(lhs: Any, rhs: Any, *, depth: int = 4) -> bool:
     if len(lhs.args) != len(rhs.args):
         return False
     return all(
-        _quack_fx_equivalent(left_arg, right_arg, depth=depth - 1)
+        fx_equivalent(left_arg, right_arg, depth=depth - 1)
         if isinstance(left_arg, torch.fx.Node) or isinstance(right_arg, torch.fx.Node)
         else left_arg == right_arg
         for left_arg, right_arg in zip(lhs.args, rhs.args)
     )
 
 
-def _match_quack_mul_scalar(node: Any, scalar: float) -> torch.fx.Node | None:
+def match_mul_scalar(node: Any, scalar: float) -> torch.fx.Node | None:
     if not isinstance(node, torch.fx.Node) or node.op != "call_function":
         return None
     if node.target not in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar, operator.mul):
         return None
     lhs, rhs = node.args[:2]
-    if isinstance(lhs, torch.fx.Node) and _is_quack_scalar_value(rhs, scalar):
+    if isinstance(lhs, torch.fx.Node) and is_scalar_value(rhs, scalar):
         return lhs
-    if isinstance(rhs, torch.fx.Node) and _is_quack_scalar_value(lhs, scalar):
+    if isinstance(rhs, torch.fx.Node) and is_scalar_value(lhs, scalar):
         return rhs
     return None
 
 
-def _match_quack_negated_node(value: Any, source: torch.fx.Node) -> bool:
+def match_negated_node(value: Any, source: torch.fx.Node) -> bool:
     if not isinstance(value, torch.fx.Node) or value.op != "call_function":
         return False
     if value.target in (torch.ops.aten.neg.default, operator.neg):
