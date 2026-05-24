@@ -6998,13 +6998,13 @@ class UserTritonStore:
 
 
 @dataclasses.dataclass
-class UserTritonStores:
-    stores: list[UserTritonStore]
+class UserTritonMeta:
+    stores: list[TritonStore]
     func_def: ast.FunctionDef | None = None
 
 
 @functools.cache
-def identify_triton_stores(source_code: str) -> UserTritonStores:
+def identify_triton_stores(source_code: str) -> UserTritonMeta:
     """
     Parse Python source code of the Triton kernel and find all tl.store calls.
     Returns a TritonStores object containing information about pointer, value, and mask.
@@ -7014,7 +7014,7 @@ def identify_triton_stores(source_code: str) -> UserTritonStores:
     return identify_triton_stores_from_ast(ast.parse(source_code))
 
 
-def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonStores:
+def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonMeta:
     stores = []
     func_def = None
 
@@ -7054,7 +7054,7 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonStores:
 
                 stores.append(UserTritonStore(node, pointer_node, value_node))
 
-    return UserTritonStores(stores=stores, func_def=func_def)
+    return UserTritonMeta(stores=stores, func_def=func_def)
 
 
 class FusedUserTritonKernel(TritonKernel):
@@ -7175,9 +7175,9 @@ class FusedUserTritonKernel(TritonKernel):
             self.intermediate_cse_vars[name] = value
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
-        # Both pointwise and reduction outputs use the same capture path: the
-        # existing tl.store pointer/mask are valid (legality-checked), only the
-        # value operand is replaced via AST rewriting.
+        # The user-original tl.store pointer/mask are valid (checked in scheduler), and
+        # only the value operand is replaced via AST rewriting. We may share the same
+        # path as `self.store` here.
         self.store(name, index, value)
 
     def codegen_new_params(self) -> None:
