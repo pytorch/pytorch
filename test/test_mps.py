@@ -8259,6 +8259,19 @@ class TestMPS(TestCaseMPS):
             uniq = mps_out.unique()
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
+    def test_bernoulli_invalid_probabilities(self):
+        for bad_p in (-0.1, 1.1, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+                torch.empty(4, device="mps").bernoulli_(bad_p)
+        # Tensor-p path: error is async; force a sync to surface it.
+        mixed = torch.tensor([0.5, 1.5, -0.3, float("nan"), float("inf")], device="mps")
+        with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+            torch.bernoulli(mixed)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+            torch.empty_like(mixed).bernoulli_(mixed)
+            torch.mps.synchronize()
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_dropout(self, dtype):
         shapes = [
