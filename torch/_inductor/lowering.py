@@ -5411,8 +5411,8 @@ def _small_unrolled_max_pool_with_offsets(
         greater = ops.gt(a_value, b_value)
         equal = ops.eq(a_value, b_value)
         if is_float_dtype(dtype):
-            a_isnan = ops.ne(a_value, a_value)
-            b_isnan = ops.ne(b_value, b_value)
+            a_isnan = ops.isnan(a_value)
+            b_isnan = ops.isnan(b_value)
             b_is_not_nan = ops.logical_not(b_isnan)
             greater = ops.logical_or(
                 ops.logical_and(a_isnan, b_is_not_nan),
