@@ -1498,7 +1498,28 @@ class TensorVariable(VariableTracker):
         tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> None:
+    ) -> VariableTracker | None:
+        example_value = self.proxy.node.meta.get("example_value")
+        # Keep input tensor .item() data-dependent by default, but let
+        # graph-created scalar tensors recover the symbolic scalar they
+        # were constructed from.
+        if (
+            self.source is None
+            and not args
+            and not kwargs
+            and getattr(example_value, "item_memo", None) is not None
+        ):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    "item",
+                    *proxy_args_kwargs([self], {}),
+                ),
+            )
+
         # We enable capture_scalar_outputs when full_graph=True by default.
         if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()

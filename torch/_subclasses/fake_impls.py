@@ -160,6 +160,44 @@ def _is_tensor_constructor(func: OpOverload) -> bool:
     )
 
 
+def _is_size_derived_sym(scalar: object) -> bool:
+    if not isinstance(scalar, (torch.SymBool, torch.SymFloat, torch.SymInt)):
+        return False
+
+    # Fake tensor is used below Dynamo, so keep Dynamo source imports lazy.
+    from torch._dynamo.source import TensorProperty, TensorPropertySource
+    from torch.fx.experimental.symbolic_shapes import free_symbols
+
+    shape_env = scalar.node.shape_env
+    if shape_env is None:
+        return False
+
+    symbols = free_symbols(scalar)
+    expr = scalar.node.expr
+    # Only bare size symbols are guaranteed to have already satisfied tensor
+    # constructor value checks. Expressions like s0 + 2**63 can overflow int64.
+    return (
+        len(symbols) == 1
+        and expr in symbols
+        and all(
+            any(
+                isinstance(source, TensorPropertySource)
+                and source.prop is TensorProperty.SIZE
+                for source in shape_env.var_to_sources.get(symbol, ())
+            )
+            for symbol in symbols
+        )
+    )
+
+
+def _scalar_tensor_item_preserves_value(scalar: object, dtype: torch.dtype) -> bool:
+    return (
+        (isinstance(scalar, torch.SymBool) and dtype == torch.bool)
+        or (isinstance(scalar, torch.SymInt) and dtype == torch.int64)
+        or (isinstance(scalar, torch.SymFloat) and dtype == torch.float64)
+    )
+
+
 def register_op_impl(
     run_impl_check: Callable[[OpOverload], bool]
     | OpOverload
@@ -236,7 +274,14 @@ def constructors(
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
+    out = FakeTensor(fake_mode, r, out_device)
+    if func is aten.scalar_tensor.default:
+        scalar = new_kwargs["s"]
+        if _scalar_tensor_item_preserves_value(
+            scalar, r.dtype
+        ) and _is_size_derived_sym(scalar):
+            out.item_memo = scalar
+    return out
 
 
 @register_op_impl(aten.is_pinned.default)

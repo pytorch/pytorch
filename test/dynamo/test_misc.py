@@ -9824,6 +9824,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Previously would crash with guard on data dependent error
         fn(a, x)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_symint_tensor_item_does_not_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            n = x.shape[0]
+            if n == torch.tensor(n).item():
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend=cnts, dynamic=True)
+
+        for n in (3, 4, 5):
+            x = torch.ones(n)
+            self.assertEqual(opt_fn(x), x + 1)
+
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_python_int_tensor_item_still_graph_breaks(self):
+        counters.clear()
+
+        def fn(x, y):
+            return y + torch.tensor(x).item()
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True)
+        y = torch.ones(3)
+        self.assertEqual(opt_fn(3, y), y + 3)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symint_fold_nontrivial_product_modulo(self):
         @torch.compile(fullgraph=True, backend="eager")
