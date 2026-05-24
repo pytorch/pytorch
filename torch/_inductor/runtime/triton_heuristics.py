@@ -786,15 +786,30 @@ class CachingAutotuner(KernelInterface):
             self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
         self._make_launchers()
 
-    def compile_by_disabling_pipelining(self, config):
+    def _can_disable_pipelining_for_launcher_error(
+        self, config: Config, exc: Exception | None
+    ) -> bool:
+        return (
+            isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+            and (config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1)
+            and self.inductor_meta.get("dynamic_disable_pipelining", True)
+        )
+
+    def _compile_config_with_disabled_pipelining(
+        self, config: Config
+    ) -> tuple[CompileResult[_KernelType], LauncherType]:
         self._ensure_kernel_loaded()
         cfg = copy.deepcopy(config)
         cfg.num_stages = 1
         if "NUM_STAGES" in cfg.kwargs:
             cfg.kwargs["NUM_STAGES"] = 1
         result = self._precompile_config(cfg)
+        return result, result.make_launcher()
+
+    def compile_by_disabling_pipelining(self, config):
+        result, launcher = self._compile_config_with_disabled_pipelining(config)
         self.compile_results = [result]
-        return result.make_launcher()
+        return launcher
 
     def _make_launcher(
         self, compile_result: CompileResult[_KernelType]
@@ -822,22 +837,40 @@ class CachingAutotuner(KernelInterface):
 
         device_interface = self.get_device_interface()
         launchers = []
+        compile_results = []
         exc = None
+        disabled_pipelining_failed = False
         # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             for result in self.compile_results:
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
+                    compile_results.append(result)
+                    continue
+                if self._can_disable_pipelining_for_launcher_error(result.config, exc):
+                    try:
+                        (
+                            fallback_result,
+                            fallback_launcher,
+                        ) = self._compile_config_with_disabled_pipelining(result.config)
+                        launchers.append(fallback_launcher)
+                        compile_results.append(fallback_result)
+                        continue
+                    except (
+                        OutOfResources,
+                        PTXASError,
+                        torch.cuda.OutOfMemoryError,
+                        IntelGPUError,
+                    ) as e:
+                        exc = e
+                        disabled_pipelining_failed = True
             if len(launchers) == 0:
                 result = self.compile_results[-1]
                 config = result.config
                 if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
-                    )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    not disabled_pipelining_failed
+                    and self._can_disable_pipelining_for_launcher_error(config, exc)
                 ):
                     self.launchers = [self.compile_by_disabling_pipelining(config)]
                     return
@@ -845,6 +878,7 @@ class CachingAutotuner(KernelInterface):
                     f"No valid triton configs. {type(exc).__name__}: {exc}"
                 )
         self.launchers = launchers
+        self.compile_results = compile_results
 
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
