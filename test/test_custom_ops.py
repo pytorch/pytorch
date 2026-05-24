@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._dynamo import compiled_autograd
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -3592,6 +3593,168 @@ class TestCustomOpAPI(TestCase):
             torch.ops._torch_testing.foo(w, z=42).sum().backward()
             self.assertTrue(called)
             self.assertEqual(w.grad, torch.full_like(w, 2 * 3 * 42))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_with_torch_func_grad(self):
+        @torch.library.custom_op(
+            "_torch_testing::cube_for_torch_func_grad", mutates_args=()
+        )
+        def cube(x: Tensor) -> Tensor:
+            return x**3
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 3 * x**2
+
+        cube.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        grad = torch.func.grad(lambda x: cube(x).sum())(x)
+        self.assertEqual(grad, 3 * x**2)
+
+        gradgrad = torch.func.grad(
+            lambda x: torch.func.grad(lambda y: cube(y).sum())(x).sum()
+        )(x)
+        self.assertEqual(gradgrad, 6 * x)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    def test_register_autograd_with_torch_func_grad_compile(self):
+        fake_called = False
+
+        @torch.library.custom_op(
+            "_torch_testing::compile_cube_for_torch_func_grad", mutates_args=()
+        )
+        def cube(x: Tensor) -> Tensor:
+            return x**3
+
+        @cube.register_fake
+        def _(x):
+            nonlocal fake_called
+            fake_called = True
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 3 * x**2
+
+        cube.register_autograd(backward, setup_context=setup_context)
+
+        def fn(x):
+            grad = torch.func.grad(lambda y: cube(y).sum())(x)
+            gradgrad = torch.func.grad(
+                lambda y: torch.func.grad(lambda z: cube(z).sum())(y).sum()
+            )(x)
+            return grad, gradgrad
+
+        x = torch.randn(3, requires_grad=True)
+        grad, gradgrad = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(grad, 3 * x**2)
+        self.assertEqual(gradgrad, 6 * x)
+        self.assertTrue(fake_called)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    def test_register_autograd_with_compiled_autograd(self):
+        compiled_graphs = []
+
+        @torch.library.custom_op(
+            "_torch_testing::square_for_compiled_autograd", mutates_args=()
+        )
+        def square(x: Tensor) -> Tensor:
+            return x**2
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 2 * x
+
+        square.register_autograd(backward, setup_context=setup_context)
+
+        def compiler_fn(gm):
+            compiled_graphs.append(gm)
+            return gm
+
+        x = torch.randn(3, requires_grad=True)
+        with compiled_autograd._enable(compiler_fn):
+            square(x).sum().backward()
+
+        self.assertEqual(x.grad, 2 * x)
+        self.assertEqual(len(compiled_graphs), 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_without_setup_context_with_torch_func_grad(self):
+        @torch.library.custom_op(
+            "_torch_testing::double_for_torch_func_grad", mutates_args=()
+        )
+        def double(x: Tensor) -> Tensor:
+            return x * 2
+
+        def backward(ctx, grad):
+            return grad * 2
+
+        double.register_autograd(backward)
+
+        x = torch.randn(3, requires_grad=True)
+        grad = torch.func.grad(lambda x: double(x).sum())(x)
+        self.assertEqual(grad, torch.full_like(x, 2))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_kwargonly_with_torch_func_grad(self):
+        @torch.library.custom_op(
+            "_torch_testing::scale_kwargonly_for_torch_func_grad", mutates_args=()
+        )
+        def scale(x: Tensor, *, factor: float) -> Tensor:
+            return x * factor
+
+        def setup_context(ctx, inputs, keyword_only_inputs, output):
+            if tuple(keyword_only_inputs.keys()) != ("factor",):
+                raise AssertionError(
+                    "expected keyword_only_inputs.keys() == ('factor',), "
+                    f"got {tuple(keyword_only_inputs.keys())}"
+                )
+            ctx.factor = keyword_only_inputs["factor"]
+
+        def backward(ctx, grad):
+            return grad * ctx.factor
+
+        scale.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        grad = torch.func.grad(lambda x: scale(x, factor=3.5).sum())(x)
+        self.assertEqual(grad, torch.full_like(x, 3.5))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_tensorlist_with_torch_func_grad(self):
+        @torch.library.custom_op(
+            "_torch_testing::mul_tensorlist_for_torch_func_grad", mutates_args=()
+        )
+        def mul_tensorlist(xs: List[Tensor]) -> Tensor:
+            return xs[0] * xs[1]
+
+        def setup_context(ctx, inputs, output):
+            (xs,) = inputs
+            ctx.save_for_backward(xs[0], xs[1])
+
+        def backward(ctx, grad):
+            x0, x1 = ctx.saved_tensors
+            return [grad * x1, grad * x0]
+
+        mul_tensorlist.register_autograd(backward, setup_context=setup_context)
+
+        xs = [torch.randn(3, requires_grad=True), torch.randn(3, requires_grad=True)]
+        grads = torch.func.grad(lambda xs: mul_tensorlist(xs).sum())(xs)
+        self.assertEqual(grads, [xs[1], xs[0]])
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
