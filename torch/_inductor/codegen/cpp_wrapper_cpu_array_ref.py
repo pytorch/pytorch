@@ -927,6 +927,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         for (inner_input, inner_input_val), outer_input in zip(
             subgraph.graph.graph_inputs.items(), outer_inputs
         ):
+            if isinstance(inner_input_val, sympy.Symbol):
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(inner_input_val)} = {outer_input};"
+                )
+                continue
             if not isinstance(inner_input_val, ir.TensorBox):
                 continue
 
@@ -968,14 +973,21 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         cond_outer_inputs = []
         for inp, out in zip(outer_carried_inputs, while_loop.outputs):
-            out_name = out.get_name()
-            self.writeline(f"AtenTensorHandle {out_name}_handle;")
-            self.writeline(
-                "AOTI_TORCH_ERROR_CODE_CHECK("
-                f"aoti_torch_assign_tensors_out(borrow_arrayref_tensor_as_tensor({inp}), "
-                f"&{out_name}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+            if isinstance(out, ir.ShapeAsConstantBuffer):
+                assert isinstance(out.expr, sympy.Symbol), out
+                out_name = out.codegen_reference()
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(out.expr)} = {inp};"
+                )
+            else:
+                out_name = out.get_name()
+                self.writeline(f"AtenTensorHandle {out_name}_handle;")
+                self.writeline(
+                    "AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"aoti_torch_assign_tensors_out(borrow_arrayref_tensor_as_tensor({inp}), "
+                    f"&{out_name}_handle));"
+                )
+                self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
         cond_outer_inputs.extend(outer_additional_inputs)

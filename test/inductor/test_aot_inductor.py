@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import itertools
 import logging
 import os
@@ -3007,6 +3008,35 @@ class AOTInductorTestsTemplate:
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_while_loop_with_python_scalar_carry(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("only covers CPU C++ wrapper scalar codegen")
+
+        for model in (
+            WhileLoopModels.PythonScalarCarry(),
+            WhileLoopModels.PythonScalarCarryZeroIterations(),
+        ):
+            inputs = (
+                torch.randn((2, 2), device=self.device),
+                torch.randn((2, 2), device=self.device),
+            )
+            with (
+                torch.no_grad(),
+                config.patch(
+                    {
+                        "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                        "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                    }
+                ),
+            ):
+                actual = AOTIRunnerUtil.run(model, inputs)
+            expected = model(*copy.deepcopy(inputs))
+            actual_scalar = (
+                actual[0].item() if isinstance(actual[0], torch.Tensor) else actual[0]
+            )
+            self.assertEqual(actual_scalar, expected[0])
+            self.assertEqual(actual[1:], expected[1:])
 
     def test_while_loop_with_pytree_inputs(self):
         inputs = (

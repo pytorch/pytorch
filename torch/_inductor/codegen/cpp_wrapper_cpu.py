@@ -2447,6 +2447,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for (inner_input, inner_input_val), outer_input in zip(
             subgraph.graph.graph_inputs.items(), outer_inputs
         ):
+            if isinstance(inner_input_val, sympy.Symbol):
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(inner_input_val)} = {outer_input};"
+                )
+                continue
             if not isinstance(inner_input_val, ir.TensorBox):
                 continue
 
@@ -2555,16 +2560,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         cond_outer_inputs = []
         for inp, out in zip(outer_carried_inputs, while_loop.outputs):
-            # in ABI-compatible mode, the carried inputs are codegened
-            # as buffers outside the while loop and set to the initial
-            # values. at the end of each while_loop iteration, they
-            # will be assigned the carried values.
-            out_name = out.get_name()
-            self.writeline(f"AtenTensorHandle {out_name}_handle;")
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+            if isinstance(out, ir.ShapeAsConstantBuffer):
+                assert isinstance(out.expr, sympy.Symbol), out
+                out_name = out.codegen_reference()
+                self.writeline(
+                    f"{self.codegen_unbacked_symbol_decl(out.expr)} = {inp};"
+                )
+            else:
+                # in ABI-compatible mode, the carried inputs are codegened
+                # as buffers outside the while loop and set to the initial
+                # values. at the end of each while_loop iteration, they
+                # will be assigned the carried values.
+                out_name = out.get_name()
+                self.writeline(f"AtenTensorHandle {out_name}_handle;")
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
+                )
+                self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
         # additional inputs will be assigned within the while_loop
