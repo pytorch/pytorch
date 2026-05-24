@@ -2775,6 +2775,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         these types are not guaranteed to be supported long-term.  When generating code
         for cpp_wrapper mode, we don't have to be forward-compatible, so changing this
         function's implementation in future is fine."""
+        if len(op._schema.returns) > 1 and any(
+            CppWrapperCpu._is_symint_list_type(r.type) for r in op._schema.returns
+        ):
+            return False
+
         supported_types = (
             torch.BoolType,
             torch.DeviceObjType,
@@ -2782,17 +2787,43 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # ScalarTypeType, LayoutType, and MemoryFormatType are seen as IntType
             # when queried via torch.JitType.type.
             torch.IntType,
+            torch.SymIntType,
             torch.TensorType,
         )
 
-        def type_supported(t: torch.JitType) -> bool:
+        def type_supported(t: torch.JitType, *, is_return: bool) -> bool:
             if isinstance(t, torch.OptionalType):
-                return type_supported(t.getElementType())
+                return type_supported(t.getElementType(), is_return=is_return)
+            if isinstance(t, torch.ListType):
+                if is_return:
+                    return CppWrapperCpu._is_symint_list_type(t)
+                return isinstance(t.getElementType(), (torch.IntType, torch.SymIntType))
             return isinstance(t, supported_types)
 
         return all(
-            type_supported(a.type)
-            for a in chain(op._schema.arguments, op._schema.returns)
+            type_supported(a.type, is_return=False) for a in op._schema.arguments
+        ) and all(type_supported(r.type, is_return=True) for r in op._schema.returns)
+
+    @staticmethod
+    def _is_symint_list_type(t: torch.JitType) -> bool:
+        return isinstance(t, torch.ListType) and isinstance(
+            t.getElementType(), (torch.IntType, torch.SymIntType)
+        )
+
+    @classmethod
+    def _is_single_symint_list_return(cls, return_schema: Sequence[Any]) -> bool:
+        return len(return_schema) == 1 and cls._is_symint_list_type(
+            return_schema[0].real_type
+        )
+
+    @classmethod
+    def _symint_list_output_name(
+        cls, buf_name: str, idx: int, return_schema: Sequence[Any]
+    ) -> str:
+        return (
+            buf_name
+            if cls._is_single_symint_list_return(return_schema)
+            else f"{buf_name}_symint_list_{idx}"
         )
 
     def generate_fallback_kernel_with_runtime_lookup(
@@ -2837,10 +2868,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             return_schema = op_overload._schema.returns
 
-        # output_args has the same pytree structure as outputs
+        # output_args has the same pytree structure as outputs, except scalar list
+        # returns are materialized as C++ vectors named after the fallback node.
         if not return_schema:
             # kernel does not return a value
             output_args: _OUTPUT_ARGS_TYPE = []
+        elif self._is_single_symint_list_return(return_schema):
+            assert isinstance(outputs, (list, tuple))
+            assert all(isinstance(o, (int, sympy.Expr)) for o in outputs), outputs
+            output_args = [buf_name]
+        elif len(return_schema) > 1:
+            assert isinstance(outputs, (list, tuple))
+            assert len(outputs) == len(return_schema), (outputs, return_schema)
+            output_args = []
+            for idx, (output, ret) in enumerate(zip(outputs, return_schema)):
+                if self._is_symint_list_type(ret.real_type):
+                    assert isinstance(output, (list, tuple)), output
+                    assert all(isinstance(o, (int, sympy.Expr)) for o in output), output
+                    output_args.append(
+                        self._symint_list_output_name(buf_name, idx, return_schema)
+                    )
+                else:
+                    output_arg = extract_output_name(output)
+                    assert output_arg is None or isinstance(output_arg, str), (
+                        output,
+                        output_arg,
+                    )
+                    output_args.append(output_arg)
         elif isinstance(output_name := extract_output_name(outputs), str):
             output_args = [output_name]
         else:
@@ -2892,6 +2946,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # overhead of calling back into Python, and covers most remaining fallback ops.
         if self._compatible_with_stableivalue(op_overload):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
+                buf_name,
                 get_args,
                 op_overload,
                 output_args,  # type: ignore[arg-type]
@@ -3075,6 +3130,7 @@ if (!custom_op_wrapper) {
 
     def generate_fallback_kernel_with_runtime_lookup_nopython(
         self,
+        buf_name: str,
         get_args: Callable[[], Sequence[str]],
         op_overload: torch._ops.OpOverload,
         output_args: Sequence[str | None],
@@ -3086,13 +3142,26 @@ if (!custom_op_wrapper) {
 
         In the future, we may switch over to directly calling c10::Dispatcher if we need
         to support more datatypes."""
+        return_types = [r.real_type for r in op_overload._schema.returns]
+        has_symint_list_return = any(self._is_symint_list_type(t) for t in return_types)
+
         if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
+            if has_symint_list_return:
+                self.include_extra_header("vector")
+            declarations_before_scope = []
+            for idx, (output_arg, raw_output_arg) in enumerate(
+                zip(output_args, raw_outputs)  # type: ignore[arg-type]
+            ):
+                if output_arg is None:
+                    continue
+                if self._is_symint_list_type(return_types[idx]):
+                    declarations_before_scope.append(
+                        f"std::vector<int64_t> {output_arg};"
+                    )
+                elif not isinstance(raw_output_arg, ir.MutationOutput):
+                    declarations_before_scope.append(
+                        f"RAIIAtenTensorHandle {output_arg};"
+                    )
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
@@ -3161,7 +3230,7 @@ if (!custom_op_wrapper) {
                 parse_arg(a.type, c)
                 for a, c in zip(op_overload._schema.arguments, codegen_args)
             )
-            array_len = max(len(codegen_args), len(output_args))
+            array_len = max(len(codegen_args), len(output_args), len(return_types))
             dispatch_lines.writeline(
                 f"std::array<StableIValue, {array_len}> dispatch_vars{{{', '.join(ivalue_args)}}};"
             )
@@ -3176,9 +3245,17 @@ if (!custom_op_wrapper) {
             for idx, output_arg in enumerate(output_args):
                 if output_arg is None:
                     continue
-                dispatch_lines.writeline(
-                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
-                )
+                assert idx < len(return_types)
+                if self._is_symint_list_type(return_types[idx]):
+                    dispatch_lines.writeline(
+                        f"{output_arg} = torch::stable::detail::to<"
+                        f"std::vector<int64_t>>(dispatch_vars[{idx}]);"
+                    )
+                else:
+                    dispatch_lines.writeline(
+                        f"{output_arg} = torch::stable::detail::to<"
+                        f"AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())
@@ -3199,6 +3276,7 @@ if (!custom_op_wrapper) {
         This function calls into Python to dispatch, which allows it to handle datatypes
         that cannot be contained in StableIValue, at the cost of some performance."""
         self.load_custom_op_wrapper()
+        return_types = [r.real_type for r in op_overload._schema.returns]
 
         num_args = len(raw_args)
         py_args_var = f"py_args_{next(self.arg_var_id)}"
@@ -3233,23 +3311,52 @@ if (!custom_op_wrapper) {
             """
         )
 
-        if len(output_args) == 1 and (output := output_args[0]) is not None:
-            # result is a single tensor
-            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
-        else:
-            # result is a tuple of tensors
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
-                lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
+        def py_result_at(idx: int) -> str:
+            if len(output_args) == 1:
+                return f"py_{buf_name}.get()"
+            return f"PyList_GET_ITEM(py_{buf_name}.get(), {idx})"
+
+        for idx, output_arg in enumerate(output_args):
+            if output_arg is None:
+                continue
+            if self._is_symint_list_type(return_types[idx]):
+                py_output_arg = f"py_{output_arg}"
+                lines += textwrap.dedent(
+                    f"""
+                    PyObject* {py_output_arg} = {py_result_at(idx)};
+                    {output_arg}.reserve(PyList_GET_SIZE({py_output_arg}));
+                    for (Py_ssize_t i = 0; i < PyList_GET_SIZE({py_output_arg}); ++i) {{
+                        PyObject* item = PyList_GET_ITEM({py_output_arg}, i);
+                        {output_arg}.push_back(PyLong_AsLongLong(item));
+                    }}
+                    if (PyErr_Occurred()) {{
+                        return;
+                    }}
+                    """
+                )
+            else:
+                lines += (
+                    f"{output_arg} = reinterpret_cast<AtenTensorHandle>("
+                    f"PyCapsule_GetPointer({py_result_at(idx)}, NULL));\n"
+                )
 
         if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
+            if any(self._is_symint_list_type(t) for t in return_types):
+                self.include_extra_header("vector")
+            declarations_before_scope = []
+            for idx, (output_arg, raw_output_arg) in enumerate(
+                zip(output_args, raw_outputs)  # type: ignore[arg-type]
+            ):
+                if output_arg is None:
+                    continue
+                if self._is_symint_list_type(return_types[idx]):
+                    declarations_before_scope.append(
+                        f"std::vector<int64_t> {output_arg};"
+                    )
+                elif not isinstance(raw_output_arg, ir.MutationOutput):
+                    declarations_before_scope.append(
+                        f"RAIIAtenTensorHandle {output_arg};"
+                    )
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"

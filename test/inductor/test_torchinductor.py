@@ -14660,6 +14660,118 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # No error
         f(x)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_custom_op_unbacked_symint_list_return(self):
+        @torch.library.custom_op("test_unbacked_symints::foo_list", mutates_args={})
+        def foo_list(x: torch.Tensor, y: torch.Tensor) -> list[int]:
+            return [int(y.item()), x.shape[1]]
+
+        @foo_list.register_fake
+        def _(x, y):
+            u0 = torch.library.get_ctx().new_dynamic_size(min=0, max=x.shape[0])
+            return [u0, x.shape[1]]
+
+        def f(x, y):
+            m, n = torch.ops.test_unbacked_symints.foo_list(x, y)
+            return torch.ones(m, n, dtype=x.dtype, device=x.device)
+
+        x = torch.randn(5, 4, device=self.device)
+        y = torch.tensor(3, device=self.device)
+
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch({"implicit_fallbacks": True, "cpp_wrapper": True})
+    def test_custom_op_unbacked_symint_list_return_cpp_wrapper(self):
+        if self.device != "cpu":
+            self.skipTest("cpp_wrapper regression is CPU-specific")
+
+        @torch.library.custom_op(
+            "test_unbacked_symints::foo_list_cpp_wrapper", mutates_args={}
+        )
+        def foo_list_cpp_wrapper(x: torch.Tensor, y: torch.Tensor) -> list[int]:
+            return [int(y.item()), x.shape[1]]
+
+        @foo_list_cpp_wrapper.register_fake
+        def _(x, y):
+            u0 = torch.library.get_ctx().new_dynamic_size(min=0, max=x.shape[0])
+            return [u0, x.shape[1]]
+
+        def f(x, y):
+            m, n = torch.ops.test_unbacked_symints.foo_list_cpp_wrapper(x, y)
+            return torch.ones(m, n, dtype=x.dtype, device=x.device)
+
+        x = torch.randn(5, 4, device=self.device)
+        y = torch.tensor(3, device=self.device)
+
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_custom_op_unbacked_symint_list_mixed_return(self):
+        @torch.library.custom_op(
+            "test_unbacked_symints::foo_mixed_list", mutates_args={}
+        )
+        def foo_mixed_list(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, list[int]]:
+            return x + 1, [int(y.item()), x.shape[1]]
+
+        @foo_mixed_list.register_fake
+        def _(x, y):
+            u0 = torch.library.get_ctx().new_dynamic_size(min=0, max=x.shape[0])
+            return torch.empty_like(x), [u0, x.shape[1]]
+
+        def f(x, y):
+            out, sizes = torch.ops.test_unbacked_symints.foo_mixed_list(x, y)
+            m, n = sizes
+            return out + torch.ones(m, n, dtype=x.dtype, device=x.device)
+
+        x = torch.randn(5, 4, device=self.device)
+        y = torch.tensor(5, device=self.device)
+
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch({"implicit_fallbacks": True, "cpp_wrapper": True})
+    def test_custom_op_unbacked_symint_list_mixed_return_cpp_wrapper(self):
+        if self.device != "cpu":
+            self.skipTest("cpp_wrapper regression is CPU-specific")
+
+        @torch.library.custom_op(
+            "test_unbacked_symints::foo_mixed_list_cpp_wrapper", mutates_args={}
+        )
+        def foo_mixed_list_cpp_wrapper(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, list[int]]:
+            return x + 1, [int(y.item()), x.shape[1]]
+
+        @foo_mixed_list_cpp_wrapper.register_fake
+        def _(x, y):
+            u0 = torch.library.get_ctx().new_dynamic_size(min=0, max=x.shape[0])
+            return torch.empty_like(x), [u0, x.shape[1]]
+
+        def f(x, y):
+            out, sizes = torch.ops.test_unbacked_symints.foo_mixed_list_cpp_wrapper(
+                x, y
+            )
+            m, n = sizes
+            return out + torch.ones(m, n, dtype=x.dtype, device=x.device)
+
+        x = torch.randn(5, 4, device=self.device)
+        y = torch.tensor(5, device=self.device)
+
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)

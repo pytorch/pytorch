@@ -118,6 +118,31 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
+    def test_return_list_int(self):
+        def foo_op(x: torch.Tensor) -> list[int]:
+            return [x.shape[0]]
+
+        result = torch.library.infer_schema(foo_op, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> SymInt[]")
+
+        def foo_op_2(x: torch.Tensor) -> typing.List[int]:  # noqa: UP006
+            return [x.shape[0]]
+
+        result = torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> SymInt[]")
+
+        def foo_op_3(x: torch.Tensor) -> tuple[list[int], int]:
+            return [x.shape[0]], x.shape[1]
+
+        result = torch.library.infer_schema(foo_op_3, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> (SymInt[], SymInt)")
+
+        def foo_op_4(x: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
+            return x, [x.shape[0]]
+
+        result = torch.library.infer_schema(foo_op_4, mutates_args=mutates_args)
+        self.assertEqual(result, "(Tensor x) -> (Tensor, SymInt[])")
+
     @unittest.expectedFailure
     def test_no_library_prefix(self):
         def foo_op(x: Tensor) -> Tensor:
