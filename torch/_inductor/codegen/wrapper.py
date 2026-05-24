@@ -3899,12 +3899,18 @@ class PythonWrapperCodegen(CodeGen):
         # to access the unbacked symbol in a structured way.
         # For example, we might want to generate "u0 = outs[0].stride(1)"", where s = u0, and the keypath
         # describes the structure of "outs[0].stride(1)", like [SequenceKey(0), CallMethodKey("stride"), SequenceKey[1]].
+        def is_scalar_sequence_output(output: Any) -> bool:
+            return isinstance(output, (list, tuple)) and all(
+                isinstance(o, (int, sympy.Expr)) for o in output
+            )
+
+        scalar_sequence_output = is_scalar_sequence_output(outputs)
         for s, keypath in unbacked_bindings.items():
             # `go` recursively constructs a code expression by processing each element of
             # the keypath and construct the expression incrementally.
             # For example, given output name outs and keypath [SequenceKey(0), CallMethodKey("stride", 1)],
             # it generates "outs[0]" based on SequenceKey(0), then recursively go("outs[0]", [CallMethodKey("stride"), ...])
-            def go(expr: str, keypath: pytree.KeyPath):
+            def go(expr: str, keypath: pytree.KeyPath, *, tuple_index_sequences: bool):
                 if keypath == ():
                     return expr
 
@@ -3914,20 +3920,38 @@ class PythonWrapperCodegen(CodeGen):
                     and isinstance(keypath[1], pytree.SequenceKey)
                 ):
                     return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})",
+                        keypath[2:],
+                        tuple_index_sequences=tuple_index_sequences,
                     )
                 elif isinstance(keypath[0], CallMethodKey):
-                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                    return go(
+                        f"{expr}.{keypath[0].name}()",
+                        keypath[1:],
+                        tuple_index_sequences=tuple_index_sequences,
+                    )
                 elif isinstance(keypath[0], pytree.SequenceKey):
                     return (
-                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
-                        if V.graph.cpp_wrapper
-                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                        go(
+                            f"std::get<{keypath[0].idx}>({expr})",
+                            keypath[1:],
+                            tuple_index_sequences=tuple_index_sequences,
+                        )
+                        if V.graph.cpp_wrapper and tuple_index_sequences
+                        else go(
+                            f"{expr}[{keypath[0].idx}]",
+                            keypath[1:],
+                            tuple_index_sequences=tuple_index_sequences,
+                        )
                     )
                 elif isinstance(keypath[0], DivideByKey):
                     # TODO: need to assert divisibility
                     # TODO: this is invalid C++ codegen
-                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                    return go(
+                        f"{expr}.__floordiv__({keypath[0].divisor})",
+                        keypath[1:],
+                        tuple_index_sequences=tuple_index_sequences,
+                    )
                 else:
                     raise AssertionError(f"unrecognized keypath {keypath}")
 
@@ -3936,6 +3960,12 @@ class PythonWrapperCodegen(CodeGen):
             # the keypath based on the context (e.g., single vs. multiple outputs).
             def go_outer():  # type: ignore[no-untyped-def]
                 if V.graph.cpp_wrapper:
+                    if scalar_sequence_output:
+                        return go(
+                            output_name,
+                            keypath,
+                            tuple_index_sequences=False,
+                        )
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
@@ -3950,12 +3980,24 @@ class PythonWrapperCodegen(CodeGen):
                             keypath[1:]
                             if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
                             else keypath,
+                            tuple_index_sequences=True,
                         )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                        output_idx = keypath[0].idx
+                        if is_scalar_sequence_output(outputs[output_idx]):
+                            return go(
+                                f"{output_name}_symint_list_{output_idx}",
+                                keypath[1:],
+                                tuple_index_sequences=False,
+                            )
+                        return go(
+                            outputs[output_idx].get_name(),
+                            keypath[1:],
+                            tuple_index_sequences=True,
+                        )
                 else:
-                    return go(output_name, keypath)
+                    return go(output_name, keypath, tuple_index_sequences=False)
 
             self.writeline(
                 f"{self.codegen_unbacked_symbol_decl(s)} = {go_outer()}{self.ending}"

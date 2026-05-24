@@ -125,8 +125,8 @@ def custom_op(
 
     The following types are supported for the return value:
 
-        ``torch.Tensor``, ``list[torch.Tensor]``, ``int``, ``float``,
-        ``bool``, ``torch.types.Number``.
+        ``torch.Tensor``, ``list[torch.Tensor]``, ``int``, ``list[int]``,
+        ``float``, ``bool``, ``torch.types.Number``.
 
     .. note::
         We recommend not passing in a ``schema`` arg and instead letting us infer

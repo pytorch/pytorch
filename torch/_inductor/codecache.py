@@ -3298,7 +3298,7 @@ end
 _libgomp: CDLL | None = None
 
 
-def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
+def custom_op_wrapper(op: str, *args: Any) -> list[Any] | c_void_p | int | None:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
     def convert_arg(arg: Any) -> Any:
@@ -3336,15 +3336,18 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
     if result is None:
         return None
 
-    if isinstance(result, (list, tuple)):
-        # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
-        result = [torch.tensor([]) if r is None else r for r in result]
-        for r in result:
-            assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+    def convert_result(r: Any) -> Any:
+        if r is None:
+            r = torch.tensor([])
+        if isinstance(r, torch.Tensor):
+            return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(r)
+        if isinstance(r, (list, tuple)):
+            return [convert_result(elem) for elem in r]
+        if isinstance(r, int):
+            return r
+        raise AssertionError(f"{op} returns an unsupported value: {type(r)}")
 
-    assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
-    return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
+    return convert_result(result)
 
 
 # Precompiled headers are persistent past program runtime, but associated with one

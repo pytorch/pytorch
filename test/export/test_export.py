@@ -6544,6 +6544,68 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 int(str(symbol)[len(prefix_str[SymT.UNBACKED_INT]) :]) < next_index
             )
 
+    def test_unbacked_bindings_for_int_list_return_custom_op(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                sizes = torch.ops.mylib.foo_int_list_unbacked(a, b)
+                return torch.empty(sizes[0], sizes[1], dtype=a.dtype, device=a.device)
+
+        @torch.library.custom_op("mylib::foo_int_list_unbacked", mutates_args={})
+        def foo_int_list_unbacked(a: torch.Tensor, b: torch.Tensor) -> list[int]:
+            return [int(b.item()), a.shape[1]]
+
+        @foo_int_list_unbacked.register_fake
+        def foo_int_list_unbacked_fake_impl(a, b):
+            u = torch.library.get_ctx().new_dynamic_size(min=0, max=a.shape[0])
+            return [u, a.shape[1]]
+
+        ep = export(
+            M(),
+            (torch.randn(10, 4), torch.tensor(3)),
+        )
+        foo = [
+            node
+            for node in ep.graph.nodes
+            if node.target is torch.ops.mylib.foo_int_list_unbacked.default
+        ][0]
+        unbacked_bindings = foo.meta["unbacked_bindings"]
+        self.assertEqual(len(unbacked_bindings), 1)
+        path = next(iter(unbacked_bindings.values()))
+        self.assertEqual(path, (pytree.SequenceKey(0),))
+
+    def test_unbacked_bindings_for_mixed_tensor_int_list_return_custom_op(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                out, sizes = torch.ops.mylib.foo_mixed_int_list_unbacked(a, b)
+                return out, torch.empty(
+                    sizes[0], sizes[1], dtype=a.dtype, device=a.device
+                )
+
+        @torch.library.custom_op("mylib::foo_mixed_int_list_unbacked", mutates_args={})
+        def foo_mixed_int_list_unbacked(
+            a: torch.Tensor, b: torch.Tensor
+        ) -> tuple[torch.Tensor, list[int]]:
+            return a + 1, [int(b.item()), a.shape[1]]
+
+        @foo_mixed_int_list_unbacked.register_fake
+        def foo_mixed_int_list_unbacked_fake_impl(a, b):
+            u = torch.library.get_ctx().new_dynamic_size(min=0, max=a.shape[0])
+            return torch.empty_like(a), [u, a.shape[1]]
+
+        ep = export(
+            M(),
+            (torch.randn(10, 4), torch.tensor(3)),
+        )
+        foo = [
+            node
+            for node in ep.graph.nodes
+            if node.target is torch.ops.mylib.foo_mixed_int_list_unbacked.default
+        ][0]
+        unbacked_bindings = foo.meta["unbacked_bindings"]
+        self.assertEqual(len(unbacked_bindings), 1)
+        path = next(iter(unbacked_bindings.values()))
+        self.assertEqual(path, (pytree.SequenceKey(1), pytree.SequenceKey(0)))
+
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
             def forward(self, x1, x2, x3, y):
