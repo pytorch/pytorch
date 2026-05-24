@@ -1363,5 +1363,68 @@ backward() with non-leaf tensor
         self.assertEqual(compiled_grad, eager_grad)
 
 
+@torch._dynamo.config.patch(trace_autograd_ops=False)
+@skipIfTorchDynamo()
+class TestTensorBackwardDefaultConfig(TestCase):
+    @skipIfCrossRef
+    def test_tensor_backward_without_inputs_traces_by_default(self):
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = copy.deepcopy(mod_eager)
+        x = torch.randn(2, 4)
+
+        def fn(mod, x):
+            loss = mod(x).sum()
+            loss.backward()
+            return loss.detach()
+
+        eager_result = fn(mod_eager, x)
+
+        compiled_fn = torch.compile(
+            lambda x: fn(mod_compiled, x), backend="aot_eager", fullgraph=True
+        )
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    @skipIfCrossRef
+    def test_direct_autograd_grad_still_requires_config(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            loss = mod(x).sum()
+            (weight_grad, bias_grad) = torch.autograd.grad(
+                loss, tuple(mod.parameters())
+            )
+            return weight_grad, bias_grad
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "trace_autograd_ops=False",
+        ):
+            compiled_fn(x)
+
+    @skipIfCrossRef
+    def test_tensor_backward_rejects_external_grad_fn_by_default(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4, requires_grad=True)
+        external = x * 2
+
+        def fn(external_input):
+            loss = mod(external_input).sum()
+            loss.backward()
+            return loss.detach()
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            compiled_fn(external)
+
+
 if __name__ == "__main__":
     run_tests()
