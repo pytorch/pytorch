@@ -525,6 +525,66 @@ def forward(self, args_0):
         self.assertEqual(out_eager.shape, out_export.shape)
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = torch.nn.Linear(64, 64, bias=False)
+                self.block_mask = create_block_mask(
+                    lambda b, h, q, kv: q >= kv,
+                    B=None,
+                    H=None,
+                    Q_LEN=16,
+                    KV_LEN=16,
+                    device="cuda",
+                )
+
+            def forward(self, x):
+                q = self.wq(x).view(1, 16, 4, 16).transpose(1, 2)
+                return flex_attention(q, q, q, block_mask=self.block_mask).sum()
+
+        with torch.device("meta"):
+            model = Model()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            for name, param in list(model.named_parameters()):
+                parts = name.split(".")
+                mod = model
+                for part in parts[:-1]:
+                    mod = getattr(mod, part)
+                setattr(
+                    mod,
+                    parts[-1],
+                    torch.nn.Parameter(
+                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        requires_grad=param.requires_grad,
+                    ),
+                )
+            x = torch.randn(1, 16, 64, device="cuda")
+
+        gm = dynamo_graph_capture_for_export(model)(x)
+        block_mask_placeholders = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "placeholder" and "block_mask" in node.name
+        ]
+        self.assertGreater(len(block_mask_placeholders), 0)
+
+        with contextlib.ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        self.assertIsNotNone(joint_with_descriptors.graph_module)
+
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 
@@ -1432,7 +1492,7 @@ def forward(self, arg0_1):
     getitem_7 = sort_3[1];  sort_3 = None
     _to_copy_10 = torch.ops.aten._to_copy.default(sum_5, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_5 = None
     _to_copy_11 = torch.ops.aten._to_copy.default(getitem_7, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_7 = None
-    return (arg0_1, _to_copy_3, _to_copy_4, _to_copy_6, _to_copy_7, _to_copy_8, _to_copy_9, _to_copy_10, _to_copy_11, None, None, None)""",
+    return (arg0_1, _to_copy_3, _to_copy_4, _to_copy_6, _to_copy_7, _to_copy_8, _to_copy_9, _to_copy_10, _to_copy_11)""",
             )
 
             compiled_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
