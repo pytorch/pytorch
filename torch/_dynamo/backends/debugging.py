@@ -166,6 +166,7 @@ def invoke_subgraph_inner_compiler(
     from torch._dynamo import disable
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
+    # pyrefly: ignore [no-matching-overload]
     @disable
     # pyrefly: ignore [deprecated]
     @torch._dynamo.allow_in_graph

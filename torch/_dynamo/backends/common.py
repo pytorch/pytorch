@@ -79,7 +79,7 @@ class AotAutograd:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
                 # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
 
-                return disable(
+                return disable(  # pyrefly: ignore [no-matching-overload]
                     disable(
                         bw_compiler_fn, reason="do not trace backward compiler function"
                     )(*args, **kwargs),  # type: ignore[misc]
