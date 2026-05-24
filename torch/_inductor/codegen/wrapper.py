@@ -40,6 +40,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import CleanDiv
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -1286,6 +1287,7 @@ class PythonWrapperCodegen(CodeGen):
             OrderedSet()
         )  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
+        self.input_precomputed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -1296,6 +1298,8 @@ class PythonWrapperCodegen(CodeGen):
         # caching during lowering of nested subgraphs
         self.codegened_graph_stack = []
         self.computed_sizes_stack = []
+
+        self.register_input_precomputed_sizes()
 
         self.write_header()
 
@@ -2286,12 +2290,34 @@ class PythonWrapperCodegen(CodeGen):
                 self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
+    def _lookup_input_precomputed_size(self, expr: Expr | int) -> sympy.Symbol | None:
+        if (
+            not isinstance(expr, Expr)
+            or isinstance(expr, sympy.Symbol)
+            or not expr.free_symbols
+        ):
+            return None
+
+        sym = V.graph.sizevars.lookup_precomputed_size(expr)
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+            self.input_precomputed_sizes.add(sym)
+            return sym
+        return None
+
+    def register_input_precomputed_sizes(self):
+        for value in self.get_graph_inputs().values():
+            if not isinstance(value, ir.TensorBox):
+                continue
+            for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
+                self._lookup_input_precomputed_size(expr)
+
     def codegen_input_symbol_assignment(
         self,
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
     ):
+        """Bind input-derived shape symbols from runtime tensor metadata."""
         code = self.prefix
 
         @functools.cache
@@ -2304,6 +2330,63 @@ class PythonWrapperCodegen(CodeGen):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        @functools.cache
+        def dimof(base_name, dim):
+            dim_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
+            code.writeline(f"{dim_symbol} = {base_name}[{dim}]")
+            return dim_symbol
+
+        def clean_solution(expr):
+            numerator, denominator = sympy.fraction(expr)
+            if denominator != 1:
+                return CleanDiv(numerator, denominator)
+            return expr
+
+        def bind_precomputed_size(
+            expr: Expr,
+            base_name: str,
+            name_fn: Callable[[str], str],
+            dim: int,
+        ):
+            sym = self._lookup_input_precomputed_size(expr)
+            if sym is None or sym in bound_vars:
+                return
+            base_name = name_fn(base_name)
+            code.writeline(f"{sym} = {base_name}[{dim}]")
+            bound_vars.add(sym)
+            self.computed_sizes.add(sym)
+
+        def codegen_symbol(
+            sym_or_exp: sympy.Symbol | sympy.Expr,
+            base_name: str,
+            name_fn: Callable[[str], str],
+            dim: int,
+        ):
+            if isinstance(sym_or_exp, sympy.Symbol):
+                if sym_or_exp in bound_vars:
+                    return
+                code.writeline(f"{sym_or_exp} = {name_fn(base_name)}[{dim}]")
+                bound_vars.add(sym_or_exp)
+            elif isinstance(sym_or_exp, sympy.Expr):
+                bind_precomputed_size(sym_or_exp, base_name, name_fn, dim)
+                undefined_symbols = [
+                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) != 1:
+                    return
+
+                from torch.utils._sympy.solve import try_solve
+
+                free_symbol = undefined_symbols.pop()
+                base_name = name_fn(base_name)
+                size_symbol = dimof(base_name, dim)
+                solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
+                if solution is not None:
+                    code.writeline(
+                        f"{free_symbol} = {pexpr(clean_solution(solution[1]))}"
+                    )
+                    bound_vars.add(free_symbol)
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
@@ -2311,13 +2394,9 @@ class PythonWrapperCodegen(CodeGen):
             bound_vars.add(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                if isinstance(size, sympy.Symbol) and size not in bound_vars:
-                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
-                    bound_vars.add(size)
+                codegen_symbol(size, name, sizeof, dim)
             for dim, stride in enumerate(value.get_stride()):
-                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
-                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
-                    bound_vars.add(stride)
+                codegen_symbol(stride, name, strideof, dim)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -2350,6 +2429,9 @@ class PythonWrapperCodegen(CodeGen):
             bound_vars: OrderedSet[sympy.Symbol],
         ):
             for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
+                expr = V.graph.sizevars.substitute_precomputed_sizes(
+                    expr, allowed=bound_vars
+                )
                 if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
                     continue
 
@@ -2371,10 +2453,16 @@ class PythonWrapperCodegen(CodeGen):
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+            if sym in self.input_precomputed_sizes:
+                self.computed_sizes.add(sym)
+                return
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            expr = V.graph.sizevars.substitute_precomputed_sizes(
+                expr, allowed=self.input_precomputed_sizes, skip=OrderedSet([sym])
+            )
             arg = SymbolicCallArg(sym, expr)
             self.writeline(SymbolicCallArgLine(self, arg, V.graph))
 
@@ -2385,6 +2473,10 @@ class PythonWrapperCodegen(CodeGen):
         raise RuntimeError("codegen_cpp_sizevar is only implemented for cpp_wrapper!")
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        x = V.graph.sizevars.simplify(x) if simplify else x
+        x = V.graph.sizevars.substitute_precomputed_sizes(
+            x, allowed=self.input_precomputed_sizes
+        )
         return pexpr(x, simplify=simplify)
 
     def codegen_sizevar(self, x: Expr) -> str:
@@ -3131,7 +3223,10 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering
     ) -> None:
-        self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
+        expr = V.graph.sizevars.substitute_precomputed_sizes(
+            arg.inner_expr, allowed=self.input_precomputed_sizes
+        )
+        self.writeline(f"{arg.inner} = {pexpr(expr)}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
         name = ws.get_name()

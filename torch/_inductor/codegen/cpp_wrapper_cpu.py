@@ -579,6 +579,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
     ):
+        """Bind input-derived shape symbols from runtime tensor metadata."""
         code = self.prefix
 
         @functools.cache
@@ -590,6 +591,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         def strideof(name):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
+
+        def bind_precomputed_size(
+            expr: sympy.Expr,
+            base_name: str,
+            name_fn: Callable[[str], str],
+            dim: int,
+        ):
+            sym = self._lookup_input_precomputed_size(expr)
+            if sym is None or sym in bound_vars:
+                return
+            base_name = name_fn(base_name)
+            code.writeline(f"int64_t {sym} = {base_name}[{dim}];")
+            bound_vars.add(sym)
+            self.computed_sizes.add(sym)
 
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
@@ -603,6 +618,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
             elif isinstance(sym_or_exp, sympy.Expr):
+                bind_precomputed_size(sym_or_exp, base_name, name_fn, dim)
                 undefined_symbols = [
                     sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
                 ]
@@ -1925,6 +1941,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
         maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
+        maybe_simplified_x = V.graph.sizevars.substitute_precomputed_sizes(
+            maybe_simplified_x, allowed=self.input_precomputed_sizes
+        )
         # In AOT mode, emit runtime checks for potential division/modulo by zero
         # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
         if V.graph.aot_mode:
@@ -1953,10 +1972,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+            if sym in self.input_precomputed_sizes:
+                self.computed_sizes.add(sym)
+                return
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            expr = V.graph.sizevars.substitute_precomputed_sizes(
+                expr, allowed=self.input_precomputed_sizes, skip=OrderedSet([sym])
+            )
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
     def _generate_symbolic_call_arg_helper(
@@ -1971,9 +1996,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # its own {} scope block, so we must redeclare the variable each
             # time since prior declarations are no longer visible.
             self.kernel_numel_expr.add((arg.inner, graph))
-            self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
+            expr = V.graph.sizevars.substitute_precomputed_sizes(
+                arg.inner_expr, allowed=self.input_precomputed_sizes
+            )
+            self.writeline(f"int64_t {arg.inner} = {cexpr(expr)};")
         else:
-            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
+            expr = V.graph.sizevars.substitute_precomputed_sizes(
+                arg.inner_expr, allowed=self.input_precomputed_sizes
+            )
+            self.writeline(f"{arg.inner} = {cexpr(expr)};")
 
     def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)

@@ -2431,6 +2431,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)
+        index = V.graph.sizevars.substitute_precomputed_sizes(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
             x: self.args.size(x)

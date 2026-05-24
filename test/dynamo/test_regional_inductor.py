@@ -7,6 +7,7 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
+import torch._inductor.config as inductor_config
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
@@ -582,6 +583,130 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
+
+    def test_regional_inductor_unbacked_expr(self):
+        class Model(torch.nn.Module):
+            def forward(self, c):
+                d = torch.concat([c, c], dim=0)
+                with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                    d = d + 1
+                return d
+
+        model = Model()
+        c = torch.randn((64, 32))
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        res = torch.compile(
+            model,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )(c)
+        self.assertEqual(res, model(c))
+
+    def test_regional_inductor_unbacked_multi_symbol_expr(self):
+        def fn(a, b):
+            d = torch.concat([a, b], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                d = d + 1
+            return d
+
+        a = torch.randn((64, 32))
+        b = torch.randn((48, 32))
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_regional_inductor_unbacked_multi_symbol_expr_affine(self):
+        def fn(a, b):
+            d = torch.concat([a, b], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                d = torch.nn.functional.pad(d, (0, 0, 0, 1))
+                d = d + 1
+            return d
+
+        a = torch.randn((64, 32))
+        b = torch.randn((48, 32))
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_regional_inductor_unbacked_rounded_multi_symbol_expr(self):
+        def fn(a, b):
+            d = torch.concat([a, b], dim=0)
+            dim0 = d.shape[0]
+            rounded_dim0 = 8 * ((dim0 + 7) // 8)
+            d = torch.nn.functional.pad(d, (0, 0, 0, rounded_dim0 - dim0))
+            with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                d = d + 1
+            return d
+
+        a = torch.randn((63, 32))
+        b = torch.randn((46, 32))
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def _check_regional_inductor_unbacked_dynamic_padding_inside_region(self):
+        def fn(a, b):
+            d = torch.concat([a, b], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                dim0 = d.shape[0]
+                d = torch.nn.functional.pad(d, (0, 0, 2 * dim0, 0))
+                d = d + 1
+            return d
+
+        a = torch.randn((5, 3))
+        b = torch.randn((7, 3))
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_regional_inductor_unbacked_dynamic_padding_inside_region(self):
+        self._check_regional_inductor_unbacked_dynamic_padding_inside_region()
+
+    def test_regional_inductor_unbacked_multi_symbol_expr_cpp_wrapper(self):
+        def fn(a, b):
+            d = torch.concat([a, b], dim=0)
+            with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                d = d + 1
+            return d
+
+        a = torch.randn((64, 32))
+        b = torch.randn((48, 32))
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+
+        with inductor_config.patch(cpp_wrapper=True):
+            opt_fn = torch.compile(
+                fn,
+                backend=aot_eager_regional_inductor(serialize=False),
+                fullgraph=True,
+            )
+            self.assertEqual(opt_fn(a, b), fn(a, b))
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
