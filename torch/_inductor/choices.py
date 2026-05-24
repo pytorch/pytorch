@@ -417,11 +417,23 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
+        reduction_hint = features.get_reduction_hint()
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(reduction_hint, 64)
 
-        if features.get_reduction_hint() not in (
+        if (
+            reduction_hint == ReductionHint.DEFAULT
+            and not cooperative_reduction
+            and features.has_only_reduction_type("online_softmax_reduce")
+        ):
+            # Some fused softmax rows are logically inner reductions, but are
+            # demoted to DEFAULT by the fused pointwise/multiple-output shape.
+            # For moderate static rows, the persistent path avoids replaying
+            # the mask/bias/logit body in a second pass.
+            threshold = 128
+
+        if reduction_hint not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):

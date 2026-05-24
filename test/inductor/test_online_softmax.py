@@ -28,6 +28,52 @@ def _prepare_softmax(x, dim):
     return xmax, xsum
 
 
+def _gptneo_like_masked_softmax(attn_mask, bmm, cumsum):
+    bsz = 32
+    nhead = 16
+    seq = 128
+    neg_inf = torch.full((), -3.4028234663852886e38, device=bmm.device)
+    logits = bmm.view(bsz, nhead, seq, seq)
+    logits = torch.where(attn_mask[:, :, :seq, :seq], logits, neg_inf)
+
+    i = torch.arange(seq, device=bmm.device)
+    q = i.view(1, 1, seq, 1)
+    k = i.view(1, 1, 1, seq)
+    causal = k <= q
+
+    batch = torch.arange(bsz, device=bmm.device).view(bsz, 1, 1, 1)
+    same_segment = cumsum[batch, q] == cumsum[batch, k]
+    mask = causal & same_segment
+    bias = torch.where(mask.expand(bsz, -1, seq, seq), 0.0, neg_inf)
+    return torch.softmax(logits + bias, dim=-1).view(bsz * nhead, seq, seq)
+
+
+def _swin_like_relative_bias_softmax(bmm, relative_position_index, bias_table):
+    batch = 4
+    nhead = 2
+    seq = 49
+    logits = bmm.view(batch, nhead, seq, seq)
+    bias = bias_table[relative_position_index.view(-1)]
+    bias = bias.view(seq, seq, nhead).permute(2, 0, 1).contiguous()
+    return torch.softmax(logits + bias.unsqueeze(0), dim=-1).view(
+        batch * nhead, seq, seq
+    )
+
+
+def _all_masked_guard_softmax(bmm):
+    batch = 4
+    nhead = 2
+    seq = 128
+    neg_inf = torch.full((), -3.4028234663852886e38, device=bmm.device)
+    logits = bmm.view(batch, nhead, seq, seq)
+    mask = torch.tril(torch.ones(seq, seq, device=bmm.device, dtype=torch.bool))
+    logits = logits + torch.where(mask.view(1, 1, seq, seq), 0.0, neg_inf)
+    has_unmasked = (logits != neg_inf).any(dim=-1, keepdim=True)
+    return torch.where(has_unmasked, torch.softmax(logits, dim=-1), 0.0).view(
+        batch * nhead, seq, seq
+    )
+
+
 class TestOnlineSoftmax(TestCase):
     def do_test_acc_and_perf(self, op):
         if DO_PERF_TEST:
@@ -104,6 +150,43 @@ class TestOnlineSoftmax(TestCase):
         """
         wrapper_code = self.get_softmax_wrapper(1024)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
+
+    def test_codegen_gptneo_masked_softmax_r128_persistent_reduction(self):
+        torch.manual_seed(0)
+        attn_mask = torch.ones(1, 1, 2048, 2048, device=GPU_TYPE, dtype=torch.bool)
+        bmm = torch.randn(32 * 16, 128, 128, device=GPU_TYPE)
+        cumsum = torch.randint(0, 32, (32, 128), device=GPU_TYPE)
+
+        ref = _gptneo_like_masked_softmax(attn_mask, bmm, cumsum)
+        act, (code,) = run_and_get_code(
+            torch.compile(_gptneo_like_masked_softmax), attn_mask, bmm, cumsum
+        )
+
+        torch.testing.assert_close(act, ref)
+        self.assertIn("triton_heuristics.persistent_reduction", code)
+        self.assertEqual(code.count("for r0_offset in"), 0)
+
+    def test_codegen_softmax_persistent_reduction_neutral_guards(self):
+        torch.manual_seed(0)
+
+        swin_bmm = torch.randn(4 * 2, 49, 49, device=GPU_TYPE)
+        relative_position_index = torch.randint(0, 169, (49, 49), device=GPU_TYPE)
+        bias_table = torch.randn(169, 2, device=GPU_TYPE)
+        _, (swin_code,) = run_and_get_code(
+            torch.compile(_swin_like_relative_bias_softmax),
+            swin_bmm,
+            relative_position_index,
+            bias_table,
+        )
+        self.assertIn("triton_heuristics.persistent_reduction", swin_code)
+        self.assertEqual(swin_code.count("for r0_offset in"), 0)
+
+        all_masked_bmm = torch.randn(4 * 2, 128, 128, device=GPU_TYPE)
+        _, (all_masked_code,) = run_and_get_code(
+            torch.compile(_all_masked_guard_softmax), all_masked_bmm
+        )
+        self.assertIn("triton_heuristics.persistent_reduction", all_masked_code)
+        self.assertEqual(all_masked_code.count("for r0_offset in"), 0)
 
     @inductor_config.patch("triton.persistent_reductions", False)
     def test_sdpa(self):

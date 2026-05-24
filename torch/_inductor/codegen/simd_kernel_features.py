@@ -102,6 +102,12 @@ class SIMDKernelFeatures:
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
 
+    def has_only_reduction_type(self, reduction_type: str) -> bool:
+        reductions = self.reduction_nodes()
+        return bool(reductions) and all(
+            node.node.get_reduction_type() == reduction_type for node in reductions
+        )
+
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
