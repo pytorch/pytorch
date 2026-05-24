@@ -43,7 +43,6 @@ from torch import (  # noqa: F401
     pow as power,
     remainder,
     remainder as mod,
-    subtract,
     true_divide,
 )
 
@@ -77,6 +76,32 @@ def matmul(x, y):
         result = result.to(dtype)
 
     return result
+
+
+def _is_bool(x):
+    return _dtypes_impl._dtype_for_scalar_or_tensor(x) == torch.bool
+
+
+def _as_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x
+    return torch.as_tensor(x, dtype=_dtypes_impl._dtype_for_scalar_or_tensor(x))
+
+
+def subtract(x, y):
+    if _is_bool(x) or _is_bool(y):
+        x = _as_tensor(x)
+        y = _as_tensor(y)
+        dtype = _dtypes_impl.result_type_impl(x, y)
+        if dtype == torch.bool:
+            raise TypeError(
+                "numpy boolean subtract, the `-` operator, is not supported, "
+                "use the bitwise_xor, the `^` operator, or the logical_xor "
+                "function instead."
+            )
+        x = _util.cast_if_needed(x, dtype)
+        y = _util.cast_if_needed(y, dtype)
+    return torch.subtract(x, y)
 
 
 # a stub implementation of divmod, should be improved after
