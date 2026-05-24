@@ -38,6 +38,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorConverter,
     FakeTensorMode,
+    maybe_get_fake_mode,
     MetadataMismatchError,
     unset_fake_temporarily,
     UnsupportedOperatorException,
@@ -1130,6 +1131,138 @@ def forward(self, x_1):
 
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
+
+    def test_deepcopy_real_tensor_in_fake_mode_error(self):
+        devices = ["cpu"]
+        if RUN_CUDA:
+            devices.append("cuda")
+
+        for device in devices:
+            with self.subTest(device=device):
+                x = torch.randn([], device=device)
+                with FakeTensorMode():
+                    with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "copy.deepcopy\\(\\) is not supported for real tensors "
+                        "while FakeTensorMode is active",
+                    ):
+                        copy.deepcopy(x)
+
+    def test_deepcopy_fake_tensor_propagate_real_tensors(self):
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with FakeTensorMode():
+                x = torch.randn(2)
+                y = copy.deepcopy(x)
+
+        self.assertIsInstance(y, FakeTensor)
+        self.assertIsNotNone(y.real_tensor)
+        self.assertNotIsInstance(y.real_tensor, FakeTensor)
+        self.assertIsNot(y.real_tensor, x.real_tensor)
+        self.assertEqual(y.real_tensor, x.real_tensor)
+
+    def test_deepcopy_real_tensor_after_fake_tensor_memo_error(self):
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with FakeTensorMode():
+                x = torch.randn(2, requires_grad=True)
+                with unset_fake_temporarily():
+                    x.real_tensor.grad = torch.ones(2)
+                direct_real_tensors = (x.real_tensor, x.real_tensor.grad)
+
+                for real_tensor in direct_real_tensors:
+                    for value in ([real_tensor, x], [x, real_tensor]):
+                        with self.assertRaisesRegex(
+                            NotImplementedError,
+                            "copy.deepcopy\\(\\) is not supported for real tensors "
+                            "while FakeTensorMode is active",
+                        ):
+                            copy.deepcopy(value)
+
+                shared_container = [x.real_tensor]
+                x.shared_container = shared_container
+                for value in ([shared_container, x], [x, shared_container]):
+                    with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "copy.deepcopy\\(\\) is not supported for real tensors "
+                        "while FakeTensorMode is active",
+                    ):
+                        copy.deepcopy(value)
+
+    def test_deepcopy_fake_wrapper_subclass_in_fake_mode(self):
+        with FakeTensorMode():
+            x = TwoTensor(torch.randn(2), torch.randn(2))
+            y = copy.deepcopy(x)
+            y_list, y_a = copy.deepcopy([x, x.a])
+
+        self.assertIsInstance(y, TwoTensor)
+        self.assertIsInstance(y.a, FakeTensor)
+        self.assertIsInstance(y.b, FakeTensor)
+        self.assertIsNotNone(maybe_get_fake_mode(y))
+        self.assertEqual(y.size(), x.size())
+        self.assertIs(y_list.a, y_a)
+
+    def test_deepcopy_fake_wrapper_subclass_slot_real_tensor_state(self):
+        class SlotTensor(torch.Tensor):
+            __slots__ = ("elem", "real_bookkeeping")
+
+            @staticmethod
+            def __new__(cls, elem, real_bookkeeping):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.size(),
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+
+            def __init__(self, elem, real_bookkeeping):
+                self.elem = elem
+                self.real_bookkeeping = real_bookkeeping
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                elem = inner_tensors["elem"]
+                real_bookkeeping = torch.empty_strided(
+                    outer_size,
+                    outer_stride,
+                    dtype=elem.dtype,
+                    device=elem.device,
+                )
+                return SlotTensor(elem, real_bookkeeping)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                elem_args = pytree.tree_map_only(SlotTensor, lambda x: x.elem, args)
+                elem_kwargs = pytree.tree_map_only(SlotTensor, lambda x: x.elem, kwargs)
+                out = func(*elem_args, **elem_kwargs)
+
+                def wrap(out_elem):
+                    real_bookkeeping = torch.empty_strided(
+                        out_elem.size(),
+                        out_elem.stride(),
+                        dtype=out_elem.dtype,
+                        device=out_elem.device,
+                    )
+                    return SlotTensor(out_elem, real_bookkeeping)
+
+                return pytree.tree_map_only(torch.Tensor, wrap, out)
+
+        real_bookkeeping = torch.randn(2)
+        with FakeTensorMode():
+            x = SlotTensor(torch.randn(2), real_bookkeeping)
+            y = copy.deepcopy(x)
+
+        self.assertIsInstance(y, SlotTensor)
+        self.assertIsInstance(y.elem, FakeTensor)
+        self.assertNotIsInstance(y.real_bookkeeping, FakeTensor)
+        self.assertIsNot(y.real_bookkeeping, real_bookkeeping)
+        self.assertEqual(y.real_bookkeeping, real_bookkeeping)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"

@@ -32,6 +32,11 @@ from torch.overrides import (
 
 _P = ParamSpec("_P")
 _TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
+# Private keys for copy.deepcopy memo while copying FakeTensor bookkeeping.
+_INTERNAL_FAKE_TENSOR_DEEPCOPY = object()
+_INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO = object()
+_INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS = object()
+_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS = object()
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
@@ -150,6 +155,26 @@ class Tensor(torch._C.TensorBase):
                 "of a torch.nn.utils.weight_norm usage, "
                 "see https://github.com/pytorch/pytorch/pull/103001"
             )
+        fake_mode = _C._get_dispatch_mode(_C._TorchDispatchModeKey.FAKE)
+        copying_fake_tensor_state = False
+        if fake_mode is not None:
+            from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
+            copying_fake_tensor_state = maybe_get_fake_mode(self) is not None
+            if self.device.type != "meta" and not copying_fake_tensor_state:
+                if memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0):
+                    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+                    # Keep real tensor bookkeeping copies out of the user's memo.
+                    state_memo = memo.setdefault(
+                        _INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO, {}
+                    )
+                    with unset_fake_temporarily():
+                        return self.__deepcopy__(state_memo)
+                raise NotImplementedError(
+                    "copy.deepcopy() is not supported for real tensors while "
+                    f"FakeTensorMode is active. Got a tensor on device {self.device}."
+                )
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
@@ -248,25 +273,55 @@ class Tensor(torch._C.TensorBase):
                         new_tensor = new_tensor.neg()
             if self.requires_grad:
                 new_tensor.requires_grad_()
-            if self.grad is not None:
-                new_tensor.grad = self.grad.__deepcopy__(memo)
+            if copying_fake_tensor_state:
+                if not memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0):
+                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS] = set(memo)
+                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS] = set()
+                memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY] = (
+                    memo.get(_INTERNAL_FAKE_TENSOR_DEEPCOPY, 0) + 1
+                )
+                memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS].add(id(self))
 
-            if type(self) is not Tensor:
-                if type(new_tensor) is not type(self):
-                    raise RuntimeError(
-                        "Type of deepcopy result does not match the type of the source tensor. "
-                        "If you encounter this, please open an issue on PyTorch's GitHub."
-                    )
+            try:
+                if self.grad is not None:
+                    new_tensor.grad = deepcopy(self.grad, memo)
 
-                # Plain Tensors don't have slots
-                slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-                for slot in slots_to_save:
-                    if hasattr(self, slot):
-                        setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
+                if type(self) is not Tensor:
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError(
+                            "Type of deepcopy result does not match the type of the source tensor. "
+                            "If you encounter this, please open an issue on PyTorch's GitHub."
+                        )
 
-            # don't try to deepcopy non-serializable cached data
-            self._clear_non_serializable_cached_data()
-            new_tensor.__dict__ = deepcopy(self.__dict__, memo)
+                    # Plain Tensors don't have slots
+                    slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+                    for slot in slots_to_save:
+                        if hasattr(self, slot):
+                            setattr(
+                                new_tensor, slot, deepcopy(getattr(self, slot), memo)
+                            )
+
+                # don't try to deepcopy non-serializable cached data
+                self._clear_non_serializable_cached_data()
+                new_tensor.__dict__ = deepcopy(self.__dict__, memo)
+            finally:
+                if copying_fake_tensor_state:
+                    memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY] -= 1
+                    if not memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY]:
+                        del memo[_INTERNAL_FAKE_TENSOR_DEEPCOPY]
+                        memo.pop(_INTERNAL_FAKE_TENSOR_DEEPCOPY_MEMO, None)
+                        initial_keys = memo.pop(
+                            _INTERNAL_FAKE_TENSOR_DEEPCOPY_INITIAL_KEYS, set()
+                        )
+                        keep_ids = memo.pop(
+                            _INTERNAL_FAKE_TENSOR_DEEPCOPY_KEEP_IDS, set()
+                        )
+                        for memo_key in list(memo):
+                            if (
+                                memo_key not in initial_keys
+                                and memo_key not in keep_ids
+                            ):
+                                memo.pop(memo_key, None)
 
             memo[id(self)] = new_tensor
             return new_tensor
