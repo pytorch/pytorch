@@ -419,7 +419,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             self.process_group = process_group
         else:
             pg = dist.group.WORLD
-            assert pg is not None, "No process group available"
+            if pg is None:
+                raise RuntimeError("No process group available")
             self.process_group = pg
         self.world_size: int = dist.get_world_size(self.process_group)
         self.rank: int = dist.get_rank(self.process_group)
