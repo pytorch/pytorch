@@ -332,10 +332,11 @@ def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
 
 @triton.jit
 def _random_4x_to_block(r0, r1, r2, r3):
-    # tl.cat is binary, and random values are order-observable.
-    out0 = tl.cat(tl.ravel(r0), tl.ravel(r1))
-    out1 = tl.cat(tl.ravel(r2), tl.ravel(r3))
-    return tl.cat(out0, out1)
+    # tl.cat can reorder elements, which is invalid for observable random lanes.
+    size: tl.constexpr = r0.numel
+    out0 = tl.reshape(tl.trans(tl.join(r0, r1)), [size * 2])
+    out1 = tl.reshape(tl.trans(tl.join(r2, r3)), [size * 2])
+    return tl.reshape(tl.trans(tl.join(out0, out1)), [size * 4])
 
 
 @triton.jit
@@ -628,9 +629,13 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = libdevice.ilogb(x) + 1
-    exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
+    zero = x == 0
+    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
+    special = zero | not_finite
+    safe_x = tl.where(special, 1.0, x)
+    y = libdevice.ilogb(safe_x) + 1
+    exponent = tl.where(special, 0, y)
+    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
     return mantissa, exponent
 
 

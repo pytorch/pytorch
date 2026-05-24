@@ -73,7 +73,8 @@ if HAS_GPU:
         offsets = tl.arange(0, BLOCK_SIZE)
 
         if BLOCK_SIZE >= 4 and BLOCK_SIZE % 4 == 0:
-            reduced_offsets = tl.arange(0, BLOCK_SIZE // 4)
+            quarter_block_size: tl.constexpr = BLOCK_SIZE // 4
+            reduced_offsets = tl.arange(0, quarter_block_size)
 
             if NORMAL:
                 helper = randn4x(seed, offsets, BLOCK_SIZE)
@@ -82,9 +83,10 @@ if HAS_GPU:
                 helper = rand4x(seed, offsets, BLOCK_SIZE)
                 r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
 
-            expected0 = tl.cat(tl.ravel(r0), tl.ravel(r1))
-            expected1 = tl.cat(tl.ravel(r2), tl.ravel(r3))
-            expected = tl.cat(expected0, expected1)
+            tl.store(expected_result_ptr + reduced_offsets, r0)
+            tl.store(expected_result_ptr + quarter_block_size + reduced_offsets, r1)
+            tl.store(expected_result_ptr + 2 * quarter_block_size + reduced_offsets, r2)
+            tl.store(expected_result_ptr + 3 * quarter_block_size + reduced_offsets, r3)
         else:
             if NORMAL:
                 helper = randn4x(seed, offsets, BLOCK_SIZE)
@@ -93,8 +95,9 @@ if HAS_GPU:
                 helper = rand4x(seed, offsets, BLOCK_SIZE)
                 expected = tl.rand(seed, offsets)
 
+            tl.store(expected_result_ptr + offsets, expected)
+
         tl.store(helper_result_ptr + offsets, helper)
-        tl.store(expected_result_ptr + offsets, expected)
 
     @triton.jit
     def test_kernel_rand4x_distribution(
