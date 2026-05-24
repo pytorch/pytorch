@@ -656,6 +656,11 @@ def convolution(
             in_chan,
             dtype_size=dtype_size,
         ):
+            unroll = is_ones(kernel_shape)
+            # The non-unrolled loop in these templates triggers triton#1254
+            # with 8 warps, producing incorrect results for non-1x1 kernels.
+            num_warps = cfg.num_warps if unroll else min(cfg.num_warps, 4)
+
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
                     choices,
@@ -670,10 +675,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
             elif ndim == 3:
@@ -693,10 +698,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
     if use_ck_conv_template(layout):
