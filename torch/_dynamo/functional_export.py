@@ -250,6 +250,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         graph_output_map: dict[int, OutputReturnInfo],
         fake_mode: Any | None = None,
         graph_inputs: dict[int, Any] | None = None,
+        preserve_graph_outputs: bool = False,
     ) -> None:
         super().__init__(module)
 
@@ -265,6 +266,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         self.graph_output_map = graph_output_map
         self.fake_mode = fake_mode
         self.graph_inputs = graph_inputs or {}
+        self.preserve_graph_outputs = preserve_graph_outputs
 
         # Get original placeholders and output
         self.placeholders = [n for n in module.graph.nodes if n.op == "placeholder"]
@@ -374,6 +376,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         self, target: Target, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> Any:
         """Transform output according to graph_output_map."""
+        if self.preserve_graph_outputs:
+            return super().output(target, tuple(args), kwargs)
+
         original_outputs = args[0]
 
         # Build new output list based on graph_output_map
@@ -827,6 +832,145 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         return f"return {returned}"
 
 
+class DynamoExportTracerOutputUnflatten:
+    def __init__(
+        self,
+        input_processor: InputProcessor,
+        in_spec: Any,
+        out: CaptureOutput,
+        f_globals: dict[str, object],
+    ) -> None:
+        self.input_processor = input_processor
+        self.in_spec = in_spec
+        self.out = out
+        self.f_globals = f_globals
+
+    @dynamo_disable(reason="do not trace internal dynamo graph capture")  # type: ignore[misc]
+    def __call__(self, flat_outs: Sequence[object], orig_inputs: object) -> object:
+        def backend_dummy(*example_inputs: object) -> Sequence[object]:
+            return flat_outs
+
+        flat_inputs = torch.fx._pytree.tree_flatten_spec(orig_inputs, self.in_spec)
+        args, kwargs = self.input_processor(tuple(flat_inputs))
+        with torch._C._DisableTorchDispatch():
+            result = self.out.forward_callable(
+                compiled_fn=backend_dummy, extra_globals=self.f_globals
+            )(*args, **kwargs)
+        if not isinstance(result, ExportTracerOutput):
+            raise AssertionError(f"expected ExportTracerOutput, got {type(result)}")
+        return pytree.tree_unflatten(result.flat_args, result.out_spec)
+
+
+class _ExportTracerOutputCodeGen(_PyTreeCodeGen):
+    def __init__(
+        self,
+        pytree_info: _PyTreeInfo,
+        export_tracer_output_unflatten: DynamoExportTracerOutputUnflatten,
+    ) -> None:
+        super().__init__(pytree_info)
+        self.export_tracer_output_unflatten = export_tracer_output_unflatten
+        self._inputs: tuple[Any, ...] | None = None
+
+    def process_inputs(self, *inputs: Any) -> Any:
+        self._inputs = inputs
+        return super().process_inputs(*inputs)
+
+    def process_outputs(self, out: Any) -> Any:
+        try:
+            return self.export_tracer_output_unflatten(out, self._runtime_orig_inputs())
+        finally:
+            self._inputs = None
+
+    def _runtime_orig_inputs(self) -> object:
+        if self._inputs is None:
+            raise AssertionError("inputs must be set before process_outputs")
+        in_spec = self.pytree_info.in_spec
+        has_args_kwargs_tuple = (
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
+        )
+        if has_args_kwargs_tuple:
+            count_args = in_spec.child(0).num_children
+            return (
+                list(self._inputs[:count_args]),
+                dict(zip(in_spec.child(1).context, self._inputs[count_args:])),
+            )
+        return self._inputs
+
+    def _orig_inputs_expr(self, fn_args: list[str]) -> str:
+        in_spec = self.pytree_info.in_spec
+        has_args_kwargs_tuple = (
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
+        )
+        if has_args_kwargs_tuple:
+            count_args = in_spec.child(0).num_children
+            orig_args = self.pytree_info.orig_args[:count_args]
+            orig_kwargs = self.pytree_info.orig_args[count_args:]
+            fn_kwargs = (
+                "{"
+                + ", ".join(
+                    f"'{k}': {v}" for k, v in zip(in_spec.child(1).context, orig_kwargs)
+                )
+                + "}"
+            )
+            return f"([{', '.join(orig_args)}], {fn_kwargs})"
+        return f"[{', '.join(fn_args)}]"
+
+    def gen_var_bindings(
+        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
+    ) -> str:
+        bindings = super().gen_var_bindings(fn_args, free_vars, expanded_def)
+        bindings += f"""
+    _orig_inputs = {self._orig_inputs_expr(fn_args)}"""
+        return bindings
+
+    def gen_fn_def(
+        self,
+        free_vars: list[str],
+        maybe_return_annotation: str,
+        *,
+        expanded_def: bool = False,
+    ) -> str:
+        if self.pytree_info is None:
+            return super().gen_fn_def(
+                free_vars, maybe_return_annotation, expanded_def=expanded_def
+            )
+
+        fn_args = self.pytree_info.orig_args
+        has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
+        if has_orig_self:
+            free_vars.insert(0, "self")
+        fn_definition = torch.fx.graph.CodeGen.gen_fn_def(
+            self, fn_args[:], maybe_return_annotation, expanded_def=expanded_def
+        )
+
+        if len(free_vars) > 0:
+            fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
+        else:
+            fn_definition += f"""
+    _orig_inputs = {self._orig_inputs_expr(fn_args)}"""
+        return fn_definition
+
+    def generate_output(
+        self,
+        output_args: torch.fx.node.Argument,
+        *,
+        descs: object | None = None,
+        repr_fn: Any | None = None,
+    ) -> str:
+        if repr_fn is None:
+            repr_fn = repr
+        if not isinstance(output_args, (list, tuple)):
+            output_args = (output_args,)
+        returned = f"self._dynamo_export_tracer_output_unflatten(({', '.join([repr_fn(a) for a in output_args])},), _orig_inputs)"
+        return f"return {returned}"
+
+
 def dynamo_graph_capture_for_export(
     fn: Callable[..., Any],
     constraints: list[Constraint] | None = None,
@@ -1011,6 +1155,52 @@ def _dynamo_graph_capture_for_export(
 
             for real_idx, graph_idx in graph_input_order.items():
                 flat_inputs[real_idx] = example_inputs[graph_idx]
+
+            if out_spec is None:
+                transformed_graph = DynamoGraphTransformer(
+                    graph,
+                    flat_inputs,
+                    flat_args_dynamic_dims,
+                    graph_input_order,
+                    graph_output_map,
+                    fake_mode,
+                    graph_inputs,
+                    preserve_graph_outputs=True,
+                ).transform()
+
+                export_tracer_output_unflatten = DynamoExportTracerOutputUnflatten(
+                    InputProcessor(module_to_trace, len(flat_inputs), []),
+                    in_spec,
+                    out,
+                    out.graph_capture_output.f_globals,
+                )
+                transformed_graph.graph._codegen = _ExportTracerOutputCodeGen(
+                    _PyTreeInfo(
+                        argument_names(  # type: ignore[attr-defined, arg-type]
+                            inspect.signature(orig_callable), args, kwargs
+                        ),
+                        in_spec,
+                        None,
+                    ),
+                    export_tracer_output_unflatten,
+                )
+                if hasattr(transformed_graph, "_dynamo_export_tracer_output_unflatten"):
+                    raise AssertionError(
+                        "graph_module already has "
+                        "_dynamo_export_tracer_output_unflatten attribute"
+                    )
+                transformed_graph.__dict__["_dynamo_export_tracer_output_unflatten"] = (
+                    export_tracer_output_unflatten
+                )
+                transformed_graph.recompile()
+
+                clean_nn_module_stack_and_source_fn(transformed_graph, True)
+                clean_export_root(transformed_graph)
+
+                transformed_graph.meta["module_call_specs"] = module_call_spec
+                transformed_graph.meta["fake_mode"] = fake_mode
+
+                return transformed_graph
 
             # Use FX transformer to rebuild the graph cleanly
             transformed_graph = DynamoGraphTransformer(

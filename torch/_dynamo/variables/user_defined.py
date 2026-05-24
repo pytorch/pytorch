@@ -1720,8 +1720,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             tx = InstructionTranslator.current_tx()
             if tx is not None and tx.export:
-                fn_vt = tx.output.side_effects.load_attr(self, "fn", deleted_ok=True)
-                if fn_vt is not None:
+                side_effects = tx.output.side_effects
+                if side_effects.has_pending_mutation_of_attr(self, "fn"):
+                    fn_vt = side_effects.load_attr(self, "fn", deleted_ok=True)
                     # Let as_python_constant() raise the proper exception
                     # (e.g., ClosureConversionError for non-constant closures)
                     fn = fn_vt.as_python_constant()
