@@ -10087,6 +10087,8 @@ class Conditional(ExternKernel):
         operands: list[TensorBox],
     ) -> list[MultiOutput]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
+        from torch._higher_order_ops.cond import _COND_EFFECT_TOKEN_COUNT_META_KEY
+
         # pyrefly: ignore [bad-assignment]
         predicate = cls.realize_input(predicate)
         # pyrefly: ignore [bad-assignment]
@@ -10105,6 +10107,12 @@ class Conditional(ExternKernel):
                 # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
+        if V.graph.current_node.target is torch.ops.higher_order.with_effects:
+            assert V.graph.current_node.args[1] is torch.ops.higher_order.cond
+            # AOTAutograd unlift wraps token-threaded cond as with_effects(cond)
+            # but Inductor's Conditional layouts describe only real cond outputs.
+            num_tokens = V.graph.current_node.meta[_COND_EFFECT_TOKEN_COUNT_META_KEY]
+            fake_outputs = fake_outputs[num_tokens:]
 
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
@@ -10203,9 +10211,7 @@ class Conditional(ExternKernel):
             )
             # as the true and false outputs are equivalent,
             # we can use either of them here as a "template"
-            for i, (output, merged_output) in enumerate(
-                zip(true_outputs, V.graph.current_node.meta["val"])
-            )
+            for i, (output, merged_output) in enumerate(zip(true_outputs, fake_outputs))
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]

@@ -8565,6 +8565,7 @@ def with_effects(token, op, *args, **kwargs):
     We lower the operator directly, and then we add StarDep dependencies to all
     the newly created nodes in the graph.
     """
+    from torch._higher_order_ops.cond import _COND_EFFECTS_META_KEY
     from torch._higher_order_ops.effects import _get_effect, _get_schema
 
     # Get effect type
@@ -8584,6 +8585,10 @@ def with_effects(token, op, *args, **kwargs):
                 if effects:
                     assert len(effects) == 1, "Multiple effects NYI"
                     effect_type = next(iter(effects))
+    if effect_type is None and op is torch.ops.higher_order.cond:
+        effects = V.graph.current_node.meta[_COND_EFFECTS_META_KEY]
+        assert len(effects) == 1, "Multiple effects NYI"
+        effect_type = effects[0]
 
     # Track operations before
     operation_len = len(V.graph.operations)
@@ -8619,6 +8624,11 @@ def with_effects(token, op, *args, **kwargs):
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
         )
+
+    if op is torch.ops.higher_order.cond:
+        if isinstance(result, (tuple, list)):
+            return (token, *result)
+        return (token, result)
 
     try:
 
