@@ -149,19 +149,24 @@ def _normalize_dim(dim: int, ndim: int) -> int | None:
     return dim
 
 
-def _sum_kwargs(dtype: Any | None) -> dict[str, Any]:
+def _dtype_kwargs(dtype: Any | None) -> dict[str, Any]:
     return {} if dtype is None else {"dtype": dtype}
 
 
-def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
+def _reassociate_cat_under_reduction(
+    graph: torch.fx.Graph,
+    reduction_op: torch._ops.OpOverload,
+    counter_name: str,
+) -> None:
     """
-    Rewrite sum(cat(xs, dim=C), dims) into cat(sum(x, dims), dim=C) when C is
-    not reduced.  This lets lowering avoid a masked reduction over cat arms.
+    Rewrite reduction(cat(xs, dim=C), dims) into
+    cat(reduction(x, dims), dim=C) when C is not reduced.  This lets lowering
+    avoid a masked reduction over cat arms.
     """
-    for sum_node in list(
-        graph.find_nodes(op="call_function", target=aten.sum.dim_IntList)
+    for reduction_node in list(
+        graph.find_nodes(op="call_function", target=reduction_op)
     ):
-        cat_node = get_arg_value(sum_node, 0, "input")
+        cat_node = get_arg_value(reduction_node, 0, "input")
         if not (
             isinstance(cat_node, torch.fx.Node)
             and cat_node.op == "call_function"
@@ -172,9 +177,9 @@ def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
 
         tensors = get_arg_value(cat_node, 0, "tensors")
         cat_dim = get_arg_value(cat_node, 1, "dim")
-        reduce_dims = get_arg_value(sum_node, 1, "dim")
-        keepdim = get_arg_value(sum_node, 2, "keepdim")
-        dtype = get_arg_value(sum_node, 3, "dtype")
+        reduce_dims = get_arg_value(reduction_node, 1, "dim")
+        keepdim = get_arg_value(reduction_node, 2, "keepdim")
+        dtype = get_arg_value(reduction_node, 3, "dtype")
 
         if cat_dim is None:
             cat_dim = 0
@@ -195,9 +200,9 @@ def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
             continue
 
         cat_val = cat_node.meta.get("val")
-        sum_val = sum_node.meta.get("val")
+        reduction_val = reduction_node.meta.get("val")
         if not isinstance(cat_val, torch.Tensor) or not isinstance(
-            sum_val, torch.Tensor
+            reduction_val, torch.Tensor
         ):
             continue
         if not is_gpu(cat_val.device.type):
@@ -235,32 +240,44 @@ def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
         if len(tensor_vals) != len(tensors):
             continue
 
-        new_sum_nodes = []
-        with graph.inserting_before(sum_node):
+        new_reduction_nodes = []
+        with graph.inserting_before(reduction_node):
             for tensor, tensor_val in zip(tensors, tensor_vals):
-                new_sum = graph.call_function(
-                    aten.sum.dim_IntList,
+                new_reduction = graph.call_function(
+                    reduction_op,
                     args=(tensor, normalized_reduce_dims, keepdim),
-                    kwargs=_sum_kwargs(dtype),
+                    kwargs=_dtype_kwargs(dtype),
                 )
-                new_sum.meta["val"] = aten.sum.dim_IntList(
+                new_reduction.meta["val"] = reduction_op(
                     tensor_val,
                     normalized_reduce_dims,
                     keepdim,
-                    **_sum_kwargs(dtype),
+                    **_dtype_kwargs(dtype),
                 )
-                new_sum_nodes.append(new_sum)
+                new_reduction_nodes.append(new_reduction)
             new_cat = graph.call_function(
                 aten.cat.default,
-                args=(new_sum_nodes,),
+                args=(new_reduction_nodes,),
                 kwargs={"dim": new_cat_dim},
             )
-            new_cat.meta.update(sum_node.meta)
-            sum_node.replace_all_uses_with(new_cat)
-            graph.erase_node(sum_node)
+            new_cat.meta.update(reduction_node.meta)
+            reduction_node.replace_all_uses_with(new_cat)
+            graph.erase_node(reduction_node)
             if len(cat_node.users) == 0:
                 graph.erase_node(cat_node)
-            counters["inductor"]["cat_under_sum_reassociation"] += 1
+            counters["inductor"][counter_name] += 1
+
+
+def _reassociate_cat_under_sum(graph: torch.fx.Graph) -> None:
+    _reassociate_cat_under_reduction(
+        graph, aten.sum.dim_IntList, "cat_under_sum_reassociation"
+    )
+
+
+def _reassociate_cat_under_mean(graph: torch.fx.Graph) -> None:
+    _reassociate_cat_under_reduction(
+        graph, aten.mean.dim, "cat_under_mean_reassociation"
+    )
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -329,6 +346,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "reassociate_cat_under_sum").apply_graph_pass(
             _reassociate_cat_under_sum
+        )
+        GraphTransformObserver(gm, "reassociate_cat_under_mean").apply_graph_pass(
+            _reassociate_cat_under_mean
         )
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
