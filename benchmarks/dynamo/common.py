@@ -198,8 +198,10 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "tf_efficientnet_b0",
+    "convnextv2_nano.fcmae_ft_in22k_in1k",
     "ghostnet_100",
+    "tf_efficientnet_b0",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 # These models OOM in CI
