@@ -63,6 +63,7 @@ def _patch_dynamic_shape_rnn_decompositions(dynamic_shapes):
         yield
         return
 
+    # Import lazily to avoid loading decomposition registrations on torch.onnx import.
     from torch.export._patches import (
         register_gru_while_loop_decomposition,
         register_lstm_while_loop_decomposition,
