@@ -1931,7 +1931,7 @@ def _export_to_aten_ir_make_fx(
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
-                for buf, name in assigned_buffers.items():  # type: ignore[possibly-undefined]
+                for buf, name in assigned_buffers.items():
                     buf_node = _find_node(gm, buffer_input_names[buf])
                     name_node = _find_node(gm, name)
                     with gm.graph.inserting_before(output_node):

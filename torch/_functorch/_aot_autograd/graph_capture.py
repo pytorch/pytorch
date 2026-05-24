@@ -359,7 +359,7 @@ def aot_dispatch_base_graph(
         # We update metadata to consider any assigned buffers as buffer mutations.
         i = len(dict(mod_when_exporting_non_strict.named_parameters()))
         for name, _ in mod_when_exporting_non_strict.named_buffers():
-            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:  # type: ignore[possibly-undefined]
+            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:
                 fw_metadata.input_info[i] = dataclasses.replace(
                     fw_metadata.input_info[i], mutates_data=True
                 )
@@ -369,7 +369,7 @@ def aot_dispatch_base_graph(
         # We add nodes corresponding to buffer assignments as output nodes in the graph.
         add_nodes = []
         output_node = list(fw_module.graph.nodes)[-1]
-        for name in assigned_buffers.values():  # type: ignore[possibly-undefined]
+        for name in assigned_buffers.values():
             for node in fw_module.graph.nodes:
                 if node.name == name:
                     add_nodes.append(node)
