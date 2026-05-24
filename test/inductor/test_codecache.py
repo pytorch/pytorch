@@ -463,6 +463,30 @@ class TestFxGraphCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False})
+    def test_cpu_thread_count_change_misses_fx_graph_cache(self):
+        def fn(x, y):
+            return (x + y).relu()
+
+        x = torch.randn(1 << 12)
+        y = torch.randn(1 << 12)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            torch.set_num_threads(1)
+            self.assertEqual(fn(x, y), compiled_fn(x, y))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            torch.set_num_threads(2)
+            self.assertEqual(fn(x, y), compiled_fn(x, y))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2825,6 +2849,79 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def _fx_graph_cache_key(self, gm, example_inputs):
+        details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
+        return FxGraphCachePickler(gm).get_key(details)
+
+    def _no_input_factory_graph(self, device=None):
+        graph = torch.fx.Graph()
+        kwargs: dict[str, Any] = {"dtype": torch.float32}
+        if device is not None:
+            kwargs["device"] = torch.device(device)
+        result = graph.call_function(torch.empty, ((4,),), kwargs)
+        graph.output(result)
+        return torch.fx.GraphModule({}, graph)
+
+    def test_cpu_thread_count_affects_cache_key(self):
+        def fn(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.ones(4)
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertNotEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": True}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+
+            with config.patch({"cpp.threads": 4, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [x])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [x])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_affects_cache_key_for_no_input_cpu_factory(self):
+        gm = self._no_input_factory_graph()
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertNotEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    def test_cpu_thread_count_ignored_for_explicit_non_cpu_factory(self):
+        gm = self._no_input_factory_graph(device="cuda")
+        orig_num_threads = torch.get_num_threads()
+
+        try:
+            with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+                torch.set_num_threads(1)
+                key_1 = self._fx_graph_cache_key(gm, [])
+                torch.set_num_threads(2)
+                key_2 = self._fx_graph_cache_key(gm, [])
+                self.assertEqual(key_1, key_2)
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
