@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest import mock
 
 import sympy
 
@@ -14,7 +15,9 @@ import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _hierarchical_indexer_cute,
-    _max_direct_aux_load_vec_size,
+    _select_aux_mod_vec_size,
+    AuxLoadVecInfo,
+    direct_aux_load_vec_size_and_kind,
     ensure_flash_available,
     HierarchicalIndex,
 )
@@ -46,6 +49,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,
+    instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import MockGraphHandler
@@ -91,7 +95,7 @@ def _distance_decay(score, _b, _h, q_idx, kv_idx):
 
 @contextmanager
 def force_flex_flash_score_mod_vec_size(vec_size: int):
-    original = flex_flash_attention_module._get_flex_flash_fwd_configs
+    original = flex_flash_attention_module.get_flex_flash_fwd_configs
 
     def configs(
         has_score_mod,
@@ -99,6 +103,10 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
         device=None,
         score_mod_graph_module=None,
         score_mod_other_buffers=(),
+        has_mask_mod=False,
+        has_mask_aux_tensors=False,
+        mask_mod_graph_module=None,
+        mask_mod_other_buffers=(),
     ):
         if has_score_mod and has_aux_tensors:
             return [
@@ -106,11 +114,42 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
-    flex_flash_attention_module._get_flex_flash_fwd_configs = configs
+    flex_flash_attention_module.get_flex_flash_fwd_configs = configs
     try:
         yield
     finally:
-        flex_flash_attention_module._get_flex_flash_fwd_configs = original
+        flex_flash_attention_module.get_flex_flash_fwd_configs = original
+
+
+@contextmanager
+def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
+    original = flex_flash_attention_module.get_flex_flash_fwd_configs
+
+    def configs(
+        has_score_mod,
+        has_aux_tensors,
+        device=None,
+        score_mod_graph_module=None,
+        score_mod_other_buffers=(),
+        has_mask_mod=False,
+        has_mask_aux_tensors=False,
+        mask_mod_graph_module=None,
+        mask_mod_other_buffers=(),
+    ):
+        if has_mask_mod:
+            return [
+                flex_flash_attention_module.FlexFlashConfig(
+                    mask_mod_vec_size=vec_size,
+                    mask_mod_vec_size_forced=True,
+                )
+            ]
+        return [flex_flash_attention_module.FlexFlashConfig()]
+
+    flex_flash_attention_module.get_flex_flash_fwd_configs = configs
+    try:
+        yield
+    finally:
+        flex_flash_attention_module.get_flex_flash_fwd_configs = original
 
 
 def _sm100_bias(*shape):
@@ -174,6 +213,7 @@ def _aux_index_graph():
     return graph, graph.placeholder("q_idx"), graph.placeholder("kv_idx")
 
 
+@instantiate_parametrized_tests
 class TestFlexFlashAuxVecSelection(InductorTestCase):
     def test_direct_aux_load_vec_size_selector(self):
         graph, q_idx, kv_idx = _aux_index_graph()
@@ -195,54 +235,247 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         buffer = FakeAuxBuffer((128,), (1,))
         with V.set_graph_handler(MockGraphHandler()):
             self.assertEqual(
-                _max_direct_aux_load_vec_size([kv_idx], buffer, q_idx, kv_idx), 8
+                direct_aux_load_vec_size_and_kind([kv_idx], buffer, q_idx, kv_idx),
+                AuxLoadVecInfo(8, True),
             )
             self.assertEqual(
-                _max_direct_aux_load_vec_size([kv_mod_4], buffer, q_idx, kv_idx), 4
+                direct_aux_load_vec_size_and_kind([kv_mod_4], buffer, q_idx, kv_idx),
+                AuxLoadVecInfo(4, True),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_stride_mix], buffer, q_idx, kv_idx)
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
+                    [kv_stride_mix], buffer, q_idx, kv_idx
+                ),
+                AuxLoadVecInfo(None, False),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_times_2], buffer, q_idx, kv_idx)
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind([kv_times_2], buffer, q_idx, kv_idx),
+                AuxLoadVecInfo(None, False),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_floor_div_2], buffer, q_idx, kv_idx)
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
+                    [kv_floor_div_2], buffer, q_idx, kv_idx
+                ),
+                AuxLoadVecInfo(None, False),
+            )
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
+                    [kv_idx, q_idx],
+                    FakeAuxBuffer((128, 128), (128, 1)),
+                    q_idx,
+                    kv_idx,
+                ),
+                AuxLoadVecInfo(None, False),
             )
 
     def test_direct_aux_load_vec_size_requires_contiguous_aligned_vector_dim(self):
         graph, q_idx, kv_idx = _aux_index_graph()
         with V.set_graph_handler(MockGraphHandler()):
             self.assertEqual(
-                _max_direct_aux_load_vec_size(
+                direct_aux_load_vec_size_and_kind(
                     [q_idx, kv_idx],
                     FakeAuxBuffer((128, 128), (128, 1)),
                     q_idx,
                     kv_idx,
                 ),
-                8,
+                AuxLoadVecInfo(8, True),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
+                    [q_idx, kv_idx],
+                    FakeAuxBuffer((128, 48), (48, 1)),
+                    q_idx,
+                    kv_idx,
+                    max_vec_size=32,
+                ),
+                AuxLoadVecInfo(16, True),
+            )
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
                     [q_idx, kv_idx],
                     FakeAuxBuffer((128, 128), (1, 128)),
                     q_idx,
                     kv_idx,
-                )
+                ),
+                AuxLoadVecInfo(None, False),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
                     [q_idx, kv_idx],
                     FakeAuxBuffer((128, 128), (9, 1)),
                     q_idx,
                     kv_idx,
-                )
+                ),
+                AuxLoadVecInfo(None, False),
             )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind(
                     [kv_idx], FakeAuxBuffer((128,), (1,), offset=1), q_idx, kv_idx
-                )
+                ),
+                AuxLoadVecInfo(None, False),
             )
+
+    @parametrize(
+        "case",
+        [
+            "direct_qkv",
+            "chained_rank4_batch_head_qkv",
+            "kv_in_prefix",
+            "rank1_kv",
+            "mixed_gather",
+            "gather_only",
+        ],
+        name_fn=lambda case: case,
+    )
+    def test_mask_mod_vec_size_selector_invariants(self, case):
+        graph = torch.fx.Graph()
+        b = graph.placeholder("b")
+        h = graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+
+        def load(buffer, indices):
+            return graph.call_function(torch.ops.aten.index.Tensor, (buffer, indices))
+
+        def floordiv(index, divisor):
+            return graph.call_function(
+                torch.ops.aten.div.Tensor_mode,
+                (index, divisor),
+                {"rounding_mode": "floor"},
+            )
+
+        expected = 32
+        match case:
+            case "direct_qkv":
+                mask_bias = graph.placeholder("mask_bias")
+                output = load(mask_bias, [q_idx, kv_idx])
+                buffers = [FakeAuxBuffer((128, 128), (128, 1))]
+            case "chained_rank4_batch_head_qkv":
+                bias = graph.placeholder("bias")
+                batch_slice = load(bias, [b])
+                head_slice = load(batch_slice, [h])
+                row = load(head_slice, [q_idx])
+                output = load(row, [kv_idx])
+                buffers = [FakeAuxBuffer((2, 4, 128, 128), (65536, 16384, 128, 1))]
+            case "kv_in_prefix":
+                bias = graph.placeholder("bias")
+                direct_load = load(bias, [b, kv_idx, q_idx])
+                kv_slice = load(bias, [b, kv_idx])
+                output = (direct_load, load(kv_slice, [q_idx]))
+                buffers = [FakeAuxBuffer((2, 128, 128), (16384, 128, 1))]
+                expected = 1
+            case "rank1_kv":
+                mask_bias = graph.placeholder("mask_bias")
+                output = load(mask_bias, [kv_idx])
+                buffers = [FakeAuxBuffer((128,), (1,))]
+                expected = 1
+            case "mixed_gather":
+                mask_bias = graph.placeholder("mask_bias")
+                block_keep = graph.placeholder("block_keep")
+                output = (
+                    load(mask_bias, [q_idx, kv_idx]),
+                    load(block_keep, [floordiv(q_idx, 128), floordiv(kv_idx, 128)]),
+                )
+                buffers = [
+                    FakeAuxBuffer((128, 128), (128, 1)),
+                    FakeAuxBuffer((1, 1), (1, 1)),
+                ]
+            case "gather_only":
+                block_keep = graph.placeholder("block_keep")
+                output = load(block_keep, [floordiv(q_idx, 128), floordiv(kv_idx, 128)])
+                buffers = [FakeAuxBuffer((1, 1), (1, 1))]
+                expected = 1
+            case _:
+                raise AssertionError(case)
+
+        graph.output(output)
+        graph_module = torch.fx.GraphModule({}, graph)
+        with V.set_graph_handler(MockGraphHandler()):
+            self.assertEqual(
+                _select_aux_mod_vec_size(
+                    graph_module,
+                    buffers,
+                    q_idx_placeholder=2,
+                    kv_idx_placeholder=3,
+                    max_vec_size=32,
+                    min_index_rank_for_contiguous_load=2,
+                    allow_gather_loads=True,
+                    require_contiguous_load=True,
+                ),
+                expected,
+            )
+
+    @parametrize("chained", [False, True], name_fn=lambda chained: str(chained))
+    def test_score_mod_vec_size_selector_rejects_score_placeholder_index(self, chained):
+        graph = torch.fx.Graph()
+        score = graph.placeholder("score")
+        graph.placeholder("b")
+        graph.placeholder("h")
+        graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        bias = graph.placeholder("bias")
+        if chained:
+            row = graph.call_function(torch.ops.aten.index.Tensor, (bias, [score]))
+            load = graph.call_function(torch.ops.aten.index.Tensor, (row, [kv_idx]))
+        else:
+            load = graph.call_function(
+                torch.ops.aten.index.Tensor, (bias, [score, kv_idx])
+            )
+        graph.output(load)
+        graph_module = torch.fx.GraphModule({}, graph)
+        with V.set_graph_handler(MockGraphHandler()):
+            self.assertEqual(
+                _select_aux_mod_vec_size(
+                    graph_module,
+                    [FakeAuxBuffer((128, 128), (128, 1))],
+                    q_idx_placeholder=3,
+                    kv_idx_placeholder=4,
+                    max_vec_size=8,
+                    non_lane_placeholder_start=1,
+                ),
+                1,
+            )
+
+    @parametrize(
+        "cuda_major", [9, 10, 11, 12], name_fn=lambda cuda_major: str(cuda_major)
+    )
+    def test_mask_mod_vec_config_supports_only_sm100_path(self, cuda_major):
+        expected_config = (
+            flex_flash_attention_module.FlexFlashConfig(mask_mod_vec_size=32)
+            if cuda_major in (10, 11)
+            else flex_flash_attention_module.FlexFlashConfig()
+        )
+        with mock.patch.object(torch.cuda, "is_available", return_value=True):
+            with mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(cuda_major, 0)
+            ):
+                self.assertEqual(
+                    flex_flash_attention_module.get_flex_flash_fwd_configs(
+                        False, False, has_mask_mod=True
+                    ),
+                    [expected_config],
+                )
+
+    @torch._inductor.config.patch(
+        {"max_autotune": True, "test_configs.max_flex_configs": None}
+    )
+    def test_mask_mod_vec_config_combines_with_max_autotune_score_sizes(self):
+        with mock.patch.object(torch.cuda, "is_available", return_value=True):
+            with mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(10, 0)
+            ):
+                self.assertEqual(
+                    flex_flash_attention_module.get_flex_flash_fwd_configs(
+                        True, False, has_mask_mod=True
+                    ),
+                    [
+                        flex_flash_attention_module.FlexFlashConfig(
+                            score_mod_vec_size=vec_size,
+                            mask_mod_vec_size=32,
+                        )
+                        for vec_size in (1, 2, 4, 8, 16, 32, 64, 128)
+                    ],
+                )
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
@@ -1393,6 +1626,231 @@ class TestFlexFlash(InductorTestCase):
             self.assertIn("cute.autovec_copy", auto_src)
         else:
             self.assertNotIn("cute.autovec_copy", auto_src)
+
+    def _assert_sm100_mask_vec_matches_scalar(
+        self,
+        fn,
+        *args,
+        expect_autovec: bool = True,
+    ):
+        expected = fn(*args)
+        with force_flex_flash_mask_mod_vec_size(None):
+            torch._dynamo.reset()
+            scalar, scalar_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *args
+            )
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(scalar, expected, atol=3e-2, rtol=3e-2)
+        self.assertEqual(actual, scalar, atol=0, rtol=0)
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        if expect_autovec:
+            self.assertIn("cute.autovec_copy", src)
+        return src
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        mask_bias = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, score_bias, mask_bias):
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) | (mask_bias[q_idx, kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, score_bias, mask_bias)
+        expected = fn(*args)
+        with force_flex_flash_mask_mod_vec_size(None):
+            torch._dynamo.reset()
+            scalar_mask, scalar_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *args
+            )
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(scalar_mask, expected, atol=3e-2, rtol=3e-2)
+        self.assertEqual(actual, scalar_mask, atol=0, rtol=0)
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
+        src = "\n".join(code)
+        self.assertIn("score_mod.__vec_size__ = 8", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        self.assertIn("cute.autovec_copy", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_rank1_aux_stays_scalar(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, col_mask):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (col_mask[kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v, col_mask)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, col_mask
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertNotIn("mask_mod.__vec_size__", src)
+        self.assertNotIn("cute.autovec_copy", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_vec_lane_uniform_no_aux(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, _kv_idx):
+                return q_idx < 64
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, expect_autovec=False)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_forced_vec_size(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                lane = kv_idx % 32
+                return (q_idx >= kv_idx) & (
+                    (lane == 0) | (lane == 15) | (lane == 16) | (lane == 31)
+                )
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        with force_flex_flash_mask_mod_vec_size(8):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+            )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        self.assertIn("mask_mod.__vec_size__ = 8", "\n".join(code))
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_aux_mask_mod_vec_mixed_gather_tail(self):
+        seq_len = 130
+        padded_len = 160
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        mask_bias = torch.randn(
+            padded_len, padded_len, device="cuda", dtype=torch.float16
+        )
+        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, mask_bias, col_mask):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (mask_bias[q_idx, kv_idx] > 0) & (col_mask[kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, mask_bias, col_mask)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)

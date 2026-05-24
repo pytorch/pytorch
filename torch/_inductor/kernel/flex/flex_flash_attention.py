@@ -153,9 +153,6 @@ def get_flex_flash_fwd_configs(
     return configs
 
 
-_get_flex_flash_fwd_configs = get_flex_flash_fwd_configs
-
-
 def select_mask_mod_vec_size(
     *,
     has_mask_mod: bool,
@@ -380,17 +377,6 @@ def direct_aux_load_vec_size_and_kind(
             return AuxLoadVecInfo(vec_size, True)
         vec_size //= 2
     return AuxLoadVecInfo(None, False)
-
-
-def _max_direct_aux_load_vec_size(
-    indices: object,
-    buffer: TensorBox,
-    q_idx_node: torch.fx.Node,
-    kv_idx_node: torch.fx.Node,
-) -> int | None:
-    return direct_aux_load_vec_size_and_kind(
-        indices, buffer, q_idx_node, kv_idx_node
-    ).vec_size
 
 
 def _fx_aux_index_to_sympy(
@@ -776,34 +762,19 @@ def create_flex_flash_attention_kernel(
         subgraphs.append(subgraph_buffer)
     subgraphs.append(mask_graph_buffer)
 
-    if needs_block_mask:
-        configs = get_flex_flash_fwd_configs(
-            has_score_mod=has_score_mod,
-            has_aux_tensors=len(score_mod_other_buffers) > 0,
-            device=device,
-            score_mod_graph_module=(
-                subgraph.graph_module
-                if has_score_mod and subgraph is not None
-                else None
-            ),
-            score_mod_other_buffers=score_mod_other_buffers,
-            has_mask_mod=needs_block_mask,
-            has_mask_aux_tensors=len(mask_mod_other_buffers) > 0,
-            mask_mod_graph_module=mask_graph.graph_module,
-            mask_mod_other_buffers=mask_mod_other_buffers,
-        )
-    else:
-        configs = _get_flex_flash_fwd_configs(
-            has_score_mod=has_score_mod,
-            has_aux_tensors=len(score_mod_other_buffers) > 0,
-            device=device,
-            score_mod_graph_module=(
-                subgraph.graph_module
-                if has_score_mod and subgraph is not None
-                else None
-            ),
-            score_mod_other_buffers=score_mod_other_buffers,
-        )
+    configs = get_flex_flash_fwd_configs(
+        has_score_mod=has_score_mod,
+        has_aux_tensors=len(score_mod_other_buffers) > 0,
+        device=device,
+        score_mod_graph_module=(
+            subgraph.graph_module if has_score_mod and subgraph is not None else None
+        ),
+        score_mod_other_buffers=score_mod_other_buffers,
+        has_mask_mod=needs_block_mask,
+        has_mask_aux_tensors=len(mask_mod_other_buffers) > 0,
+        mask_mod_graph_module=mask_graph.graph_module,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
     error: NotImplementedError | None = None
     for conf in configs:
         with patch_fixed_layout_indexer_for_cutedsl():
