@@ -2,9 +2,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 __device__ __constant__ float cublas_one_device;
 __device__ __constant__ float cublas_zero_device;
@@ -44,6 +42,4 @@ float *get_user_alpha_ptr() {
   return alpha_ptr;
 }
 
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail
