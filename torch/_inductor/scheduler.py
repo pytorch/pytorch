@@ -3132,7 +3132,13 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 )
                 return False
 
-        if self.node.mutable_args[0].layout != node2.node.layout:
+        layout1 = self.node.mutable_args[0].layout
+        layout2 = node2.node.layout
+        if (
+            layout1.size != layout2.size
+            or layout1.stride != layout2.stride
+            or layout1.device != layout2.device
+        ):
             why("user's Triton kernel and epilogue have different buffer layouts")
             return False
 
