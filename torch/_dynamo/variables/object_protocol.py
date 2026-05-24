@@ -7,9 +7,15 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
+import abc
+import enum
+import sys
+import types
+import typing
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
+import torch
 from torch._C._dynamo import (
     get_type_slots,
     has_slot,
@@ -117,6 +123,13 @@ def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     return has_slot(seq_slots, slot)
 
 
+def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given mp slot."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, slot)
+
+
+# PySequenceSlots
 type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
 type_implements_sq_length = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
@@ -130,24 +143,30 @@ type_implements_sq_inplace_concat = partial(
 type_implements_sq_contains = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_CONTAINS
 )
+type_implements_sq_ass_item = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_ASS_ITEM
+)
+type_implements_sq_repeat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_REPEAT
+)
 
+type_implements_sq_inplace_repeat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_REPEAT
+)
 
-def type_implements_sq_repeat(obj_type: type) -> bool:
-    """Check whether obj_type implements the sq_repeat slot (sequence repetition)."""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_REPEAT)
-
-
-def type_implements_sq_inplace_repeat(obj_type: type) -> bool:
-    """Check whether obj_type implements the sq_inplace_repeat slot."""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_INPLACE_REPEAT)
-
-
-def type_implements_mp_length(obj_type: type) -> bool:
-    """Check whether obj_type implements __len__ as mapping protocol"""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
+# PyMappingSlots
+type_implements_mp_length = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_LENGTH
+)
+type_implements_mp_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_SUBSCRIPT
+)
+type_implements_mp_ass_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_ASS_SUBSCRIPT
+)
+type_implements_mp_length = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_LENGTH
+)
 
 
 def type_implements_nb_bool(obj_type: type) -> bool:
@@ -172,12 +191,6 @@ def type_implements_nb_float(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_float slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
-
-
-def type_implements_mp_subscript(obj_type: type) -> bool:
-    """Check whether obj_type has tp_as_mapping->mp_subscript."""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
 
 
 def type_implements_nb_negative(obj_type: type) -> bool:
@@ -227,6 +240,12 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pyindex_check(obj_type: type) -> bool:
+    """Implements _PyIndex_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
+    return type_implements_nb_index(obj_type)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
@@ -410,6 +429,104 @@ def vt_sequence_getitem(
         raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
 
     raise_type_error(tx, f"'{obj.python_type_name()}' object does not support indexing")
+
+
+def vt_sequence_setitem(
+    tx: "InstructionTranslator",
+    s: VariableTracker,
+    i: VariableTracker,
+    o: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1926-L1957 (PySequence_SetItem)
+    s_type = maybe_get_python_type(s)
+    if type_implements_sq_ass_item(s_type):
+        # Negative index wrapping (abstract.c L1944-1952)
+        if isinstance(i, ConstantVariable):
+            index_val = i.as_python_constant()
+            if isinstance(index_val, int) and index_val < 0:
+                if type_implements_sq_length(s_type):
+                    length = s.sq_length(tx)
+                    i = ConstantVariable.create(index_val + length.as_python_constant())
+        return s.sq_ass_item_impl(tx, i, o)
+
+    if type_implements_mp_ass_subscript(s_type):
+        raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
+
+    raise_type_error(
+        tx, f"'{s.python_type_name()}' object does not support item assignment"
+    )
+
+
+def generic_setitem(
+    tx: "InstructionTranslator",
+    o: VariableTracker,
+    key: VariableTracker,
+    value: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L222-L254
+    o_type = maybe_get_python_type(o)
+    if type_implements_mp_ass_subscript(o_type):
+        return o.mp_ass_subscript_impl(tx, key, value)
+
+    if type_implements_sq_ass_item(o_type):
+        key_type = maybe_get_python_type(key)
+        if pyindex_check(key_type):
+            key = key.nb_index_impl(tx)
+            return vt_sequence_setitem(tx, o, key, value)
+        raise_type_error(
+            tx, f"sequence index must be integer, not '{key.python_type_name()}'"
+        )
+    raise_type_error(
+        tx, f"'{o.python_type_name()}' object does not support item assignment"
+    )
+
+
+def sequence_delitem(
+    tx: "InstructionTranslator",
+    s: VariableTracker,
+    i: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1959-L1990
+
+    s_type = maybe_get_python_type(s)
+    if type_implements_sq_ass_item(s_type):
+        if isinstance(i, ConstantVariable):
+            idx = i.as_python_constant()
+            if idx < 0:
+                if type_implements_sq_length(s_type):
+                    length = s.sq_length(tx)
+                    i = vt_add(tx, i, length)
+        return s.sq_ass_item_impl(tx, i, None)
+
+    if type_implements_mp_ass_subscript(s_type):
+        raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
+
+    raise_type_error(
+        tx, f"'{s.python_type_name()}' object does not support item deletion"
+    )
+
+
+def generic_delitem(
+    tx: "InstructionTranslator",
+    o: VariableTracker,
+    key: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L256-L288
+
+    o_type = maybe_get_python_type(o)
+    if type_implements_mp_ass_subscript(o_type):
+        return o.mp_ass_subscript_impl(tx, key, None)
+
+    key_type = maybe_get_python_type(key)
+    if pyindex_check(key_type):
+        key_value = key.nb_index_impl(tx)
+        return sequence_delitem(tx, o, key_value)
+    elif type_implements_sq_ass_item(o_type):
+        raise_type_error(
+            tx, f"sequence index must be integer, not {key.python_type_name()}"
+        )
+
+    raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
 
 
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
@@ -1072,3 +1189,112 @@ def generic_contains(
         return VariableTracker.build(
             tx, polyfills.impl_CONTAINS_OP_fallback
         ).call_function(tx, [item, it], {})
+
+
+# Metaclasses whose __subclasscheck__ Dynamo can't trace but whose
+# behavior we're willing to observe at trace time via Python's issubclass.
+# Each entry trades fidelity to the metaclass's side effects (e.g. ABC's
+# subclass cache mutation) for coverage of the common case.
+_CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES: tuple[type, ...] = (
+    abc.ABCMeta,
+    torch._C._TensorMeta,  # actually just type.__subclasscheck__, but easier to list it here
+    enum.EnumMeta,
+)
+
+
+def generic_issubclass(
+    tx: "InstructionTranslator",
+    derived: VariableTracker,
+    cls: VariableTracker,
+) -> VariableTracker:
+    """Mirrors CPython's PyObject_IsSubclass / object_issubclass.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2766-L2823
+
+    This only attempts to replicate object_issubclass, otherwise we delegate to cpython
+    """
+    derived_py = derived.get_real_python_backed_value()
+    cls_py = cls.get_real_python_backed_value()
+    if derived_py is NO_SUCH_SUBOBJ or cls_py is NO_SUCH_SUBOBJ:
+        unimplemented(
+            gb_type="issubclass() with unsupported arguments",
+            context=f"issubclass({derived}, {cls})",
+            explanation="Arguments to issubclass() must be backed by python values.",
+            hints=[
+                "Make sure your arguments are types.",
+                *graph_break_hints.USER_ERROR,
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+    cls_type = maybe_get_python_type(cls)
+
+    # Step 1: PyType_CheckExact fast path — abstract.c L2772
+    if cls_type is type:
+        try:
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,  # pyrefly: ignore [invalid-argument]
+                )
+            )
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
+    # Step 2: PEP 604 Union (e.g. ``int | str``) — abstract.c L2779-2781.
+    union_types = {types.UnionType}
+    if sys.version_info < (3, 14):
+        union_types.add(
+            typing._UnionGenericAlias  # pyrefly: ignore [missing-attribute]
+        )
+    if cls_type in union_types:
+        # TODO can trace this once TypingVariable is removed
+        args = typing.get_args(cls_py)
+        cls = VariableTracker.build(tx, args)
+
+    # Step 3: tuple of classes — abstract.c L2783-2799.  Check for
+    # TupleVariable instead of tuple to make the type checker happy.
+    from .lists import TupleVariable
+
+    if isinstance(cls, TupleVariable):
+        for item in cls.items:
+            r = generic_issubclass(tx, derived, item)
+            if isinstance(r, ConstantVariable) and r.value:
+                return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
+    # Allowlist short-circuit for Step 4: constant-fold via Python's
+    # issubclass for metaclasses whose ``__subclasscheck__`` Dynamo can't
+    # trace (see _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES).  Note that ABCMeta
+    # is problematic in particular since it caches registered subclasses.
+    # Ideally this should be traced or guarded
+    if isinstance(cls_py, type) and issubclass(
+        type(cls_py), _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES
+    ):
+        try:
+            return ConstantVariable.create(
+                issubclass(
+                    derived_py,  # pyrefly: ignore [bad-argument-type]
+                    cls_py,
+                )
+            )
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
+    # TypeError gate, mirroring abstract.c L2822 ``recursive_issubclass``:
+    # CPython reaches that fallback when ``_PyObject_LookupSpecial`` for
+    # ``__subclasscheck__`` returns NULL, and its first action is
+    # ``check_class(cls, ...)`` which raises this TypeError.  We check
+    # eagerly because Dynamo's ``call_method`` below would graph-break
+    # rather than cleanly signal "no such method".
+    if not isinstance(cls_py, type):
+        raise_type_error(
+            tx,
+            "issubclass() arg 2 must be a class, a tuple of classes, or a union",
+        )
+
+    # Step 4: general case — call ``__subclasscheck__`` on cls's metaclass
+    # (abstract.c L2801-2815).  Runs user code on a custom metaclass.
+    result = cls.call_method(tx, "__subclasscheck__", [derived], {})
+
+    # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
+    return generic_bool(tx, result)
