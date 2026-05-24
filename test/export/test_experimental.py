@@ -480,6 +480,36 @@ def forward(self, args_0):
         finally:
             pytree._deregister_pytree_node(FunctionContext)
 
+    def test_export_out_spec_tensor_closure_with_only_constant_flat_outputs(self):
+        class FunctionContext:
+            def __init__(self, fn):
+                self.fn = fn
+
+        pytree.register_pytree_node(
+            FunctionContext,
+            lambda ctx: ([], ctx.fn),
+            lambda values, context: FunctionContext(context),
+        )
+        try:
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    closure_tensor = x + 1
+
+                    def fn(y):
+                        _ = closure_tensor
+                        return y
+
+                    return 1, FunctionContext(fn)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "nested function with non-constructible closure in output",
+            ):
+                _dynamo_graph_capture_for_export(Model())(torch.randn(2, 3))
+        finally:
+            pytree._deregister_pytree_node(FunctionContext)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_self_recursive(self):
         from torch.nn.attention.flex_attention import create_block_mask
@@ -685,6 +715,66 @@ def forward(self, args_0):
         out_export = gm(*params, x)[0]
         self.assertEqual(out_eager.shape, out_export.shape)
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = torch.nn.Linear(64, 64, bias=False)
+                self.block_mask = create_block_mask(
+                    lambda b, h, q, kv: q >= kv,
+                    B=None,
+                    H=None,
+                    Q_LEN=16,
+                    KV_LEN=16,
+                    device="cuda",
+                )
+
+            def forward(self, x):
+                q = self.wq(x).view(1, 16, 4, 16).transpose(1, 2)
+                return flex_attention(q, q, q, block_mask=self.block_mask).sum()
+
+        with torch.device("meta"):
+            model = Model()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            for name, param in list(model.named_parameters()):
+                parts = name.split(".")
+                mod = model
+                for part in parts[:-1]:
+                    mod = getattr(mod, part)
+                setattr(
+                    mod,
+                    parts[-1],
+                    torch.nn.Parameter(
+                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        requires_grad=param.requires_grad,
+                    ),
+                )
+            x = torch.randn(1, 16, 64, device="cuda")
+
+        gm = dynamo_graph_capture_for_export(model)(x)
+        block_mask_placeholders = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "placeholder" and "block_mask" in node.name
+        ]
+        self.assertGreater(len(block_mask_placeholders), 0)
+
+        with contextlib.ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        self.assertIsNotNone(joint_with_descriptors.graph_module)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim

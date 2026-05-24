@@ -603,15 +603,16 @@ def _out_spec_has_only_tensor_closure_conversion_failures(
         ):
             return None
 
-        fn_vt = tx.output.side_effects.load_attr(vt, "fn", deleted_ok=True)
-        if fn_vt is None:
-            return None
+        side_effects = tx.output.side_effects
+        if not side_effects.has_pending_mutation_of_attr(vt, "fn"):
+            return False
 
+        fn_vt = side_effects.load_attr(vt, "fn", deleted_ok=True)
         valid = validate_vt(fn_vt, allow_tensor_cell=False)
-        callable_spec_vt = tx.output.side_effects.load_attr(
-            vt, "callable_spec", deleted_ok=True
-        )
-        if callable_spec_vt is not None:
+        if side_effects.has_pending_mutation_of_attr(vt, "callable_spec"):
+            callable_spec_vt = side_effects.load_attr(
+                vt, "callable_spec", deleted_ok=True
+            )
             valid = valid and validate_vt(callable_spec_vt, allow_tensor_cell=False)
         return valid
 
@@ -2335,11 +2336,11 @@ class OutputGraph(OutputGraphCommon):
                     try:
                         self.export_metadata.out_spec = out_spec.as_python_constant()
                     except ClosureConversionError as e:
-                        if (
-                            output_return_type
-                            and _out_spec_has_only_tensor_closure_conversion_failures(
-                                tx, out_spec
-                            )
+                        if any(
+                            info.kind == "graph_out"
+                            for info in output_return_type.values()
+                        ) and _out_spec_has_only_tensor_closure_conversion_failures(
+                            tx, out_spec
                         ):
                             self.export_metadata.out_spec = None
                         else:
