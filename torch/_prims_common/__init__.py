@@ -263,15 +263,15 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     """
 
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
         guard_or_true,
         is_nested_int,
+        statically_known_true,
     )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_length_one = statically_known_true if false_if_dde else eval_eager
     maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
@@ -280,7 +280,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
+        if maybe_length_one(x == 1):
             continue
 
         if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
