@@ -90,7 +90,11 @@ _MASKED_INVARIANT_EXPAND_DIV_OPS = (
     aten.div.Tensor,
     aten.div.Scalar,
 )
+# This rewrite currently materializes the mask count before the final reduction.
+# Keep it to shapes large enough to amortize the extra launches.
 _MIN_MASKED_INVARIANT_EXPAND_COUNT = 128
+_MIN_MASKED_INVARIANT_BASE_REDUCTION_COUNT = 128
+_MIN_MASKED_INVARIANT_EXPANDED_NUMEL = 1_000_000
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -198,6 +202,15 @@ def _static_dim_product(shape: Sequence[Any], dims: list[int]) -> int | None:
     product = 1
     for dim in dims:
         size = shape[dim]
+        if not isinstance(size, int):
+            return None
+        product *= size
+    return product
+
+
+def _static_shape_numel(shape: Sequence[Any]) -> int | None:
+    product = 1
+    for size in shape:
         if not isinstance(size, int):
             return None
         product *= size
@@ -340,6 +353,12 @@ def _match_masked_invariant_expand_reduction(
         or count_dim_product < _MIN_MASKED_INVARIANT_EXPAND_COUNT
     ):
         return None
+    expanded_numel = _static_shape_numel(expand_meta.shape)
+    if (
+        expanded_numel is None
+        or expanded_numel < _MIN_MASKED_INVARIANT_EXPANDED_NUMEL
+    ):
+        return None
     # Keep this to the average-over-expanded-lanes pattern from the repro.
     if divisor != count_dim_product:
         return None
@@ -362,6 +381,15 @@ def _match_masked_invariant_expand_reduction(
         if expanded_dim in reduced_dim_set:
             remaining_base_reduced_dims.append(base_dim)
         base_dim += 1
+
+    base_reduction_product = _static_dim_product(
+        base_meta.shape, remaining_base_reduced_dims
+    )
+    if (
+        base_reduction_product is None
+        or base_reduction_product < _MIN_MASKED_INVARIANT_BASE_REDUCTION_COUNT
+    ):
+        return None
 
     expected_output_shape = [
         size
