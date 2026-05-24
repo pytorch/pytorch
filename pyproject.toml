@@ -152,6 +152,62 @@ exclude = [
     "**/*.png",
     "**/*.sh",
     "**/*.proto",
+    "**/*.pyi.in",   # codegen templates -> .pyi at build time
+    "**/BUCK.oss",   # Bazel build file
+    # Docs and editor / dev metadata that scikit-build-core's package walk
+    # picks up but legacy setup.py omitted.
+    "**/*.md",
+    "**/.gitignore",
+    "**/*.vim",
+    # Lint-tool input only (consumed by tools/linter/adapters/header_only_linter.py),
+    # not at runtime.
+    "torch/header_only_apis.txt",
+    # Example / benchmark sub-trees that look like Python sub-packages but
+    # which legacy setup.py shipped 0 files from. Keeping them in lockstep
+    # with the legacy wheel surface.
+    "torch/ao/pruning/_experimental/data_sparsifier/benchmarks/**",
+    "torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/**",
+    "torch/ao/quantization/experimental/**",
+    "torch/distributed/benchmarks/**",
+    "torch/distributed/checkpoint/examples/**",
+    "torch/distributed/examples/**",
+    "torch/distributed/tensor/examples/**",
+    "torch/fx/experimental/shape_inference/**",
+    # Only the sparse/ sub-dir is leakage; legacy ships the rest of
+    # torch/utils/benchmark/examples/.
+    "torch/utils/benchmark/examples/sparse/**",
+    "torch/utils/_strobelight/examples/**",
+    # Stray license file under torch/fx/experimental/unification/ that
+    # legacy did not ship (the canonical vendored-code licenses we do ship
+    # live under torch/_vendor/).
+    "torch/fx/experimental/unification/LICENSE.txt",
+    # torchgen codegen-generator scripts (not consumed at runtime); legacy
+    # did not ship these either.
+    "torchgen/decompositions/gen_*.py",
+    "torchgen/fuse/gen_*.py",
+    "torchgen/shape_functions/gen_*.py",
+    # Thrift-generated C++ headers under torch/_export/serde/gen-cpp2/ and
+    # the ATen Declarations.yaml codegen artefact -- not in legacy wheels.
+    "torch/_export/serde/gen-cpp2/**",
+    "torch/share/ATen/Declarations.yaml",
+    # Convenience headers duplicated at the package root; the canonical
+    # copies live at torch/include/torch/*.h. legacy ships only the
+    # torch/include/... versions.
+    "torch/script.h",
+    "torch/library.h",
+    "torch/extension.h",
+    "torch/custom_class.h",
+    "torch/custom_class_detail.h",
+    # .py files placed under torch/include/fp16/ by the third_party/FP16
+    # source layout (legacy ships only the .h files from that directory);
+    # and protobuf .inc files legacy did not ship under torch/include/google/.
+    "torch/include/fp16/*.py",
+    "torch/include/google/protobuf/*.inc",
+    # Browser-side JS files loaded from a CDN URL (torch/cuda/_memory_viz.py
+    # references the jsdelivr URL directly) -- the local install copy is
+    # never consumed.
+    "torch/utils/viz/*.js",
+    "torch/distributed/tensor/debug/*.js",
 ]
 
 [tool.scikit-build.editable]
