@@ -4378,6 +4378,10 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: "index_select(): Expected dtype int32 or int64 for index",
+    )
     if index.ndim == 0:
         index = index.unsqueeze(0)
     if x.ndim == 0:
@@ -4385,6 +4389,17 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
+    if x.numel() == 0:
+        # Validate index bounds even when the final indexing has no elements to read.
+        torch.ops.aten._assert_async.msg(
+            ((index >= 0) & (index < x.shape[dim])).all(),
+            "index out of bounds",
+        )
+
+    # Advanced indexing wraps negative indices, unlike index_select.  Preserve
+    # its dtype coverage and autograd behavior, but map negatives to a positive
+    # out-of-range index so existing bounds checks reject them.
+    index = torch.where(index < 0, x.shape[dim], index)
     idx = (slice(None),) * dim + (index,)
     return x[idx].contiguous(memory_format=utils.suggest_memory_format(x))
 
