@@ -964,10 +964,15 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            # subclasses may have multiple child tensors so we need to use swap_tensors
+            # subclasses may have multiple child tensors so we need to use swap_tensors.
+            # FakeTensorMode keeps weakrefs to fake tensors, so fake module
+            # conversions must use the overwrite path instead.
+            is_fake_param_or_result = isinstance(param, FakeTensor) or isinstance(
+                param_applied, FakeTensor
+            )
             p_should_use_swap_tensors = (
                 should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
-            )
+            ) and not is_fake_param_or_result
 
             param_grad = param.grad
             if p_should_use_swap_tensors:
