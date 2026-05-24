@@ -733,6 +733,31 @@ class TestNN(NNTestCase):
         m.register_parameter('param_name', param3)
         self.assertEqual(m.param_name, param3)
 
+    def test_class_attr_shadows_registered_module(self):
+        class BadModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def relu(self):
+                return "method"
+
+        with self.assertRaisesRegex(AttributeError, "class attribute would shadow"):
+            BadModule()
+
+    def test_class_attr_shadows_registered_parameter(self):
+        class BadModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(3))
+
+            @property
+            def weight(self):
+                return None
+
+        with self.assertRaisesRegex(AttributeError, "class attribute would shadow"):
+            BadModule()
+
     def test_add_module_raises_error_if_attr_exists(self):
         methods_to_test = ['add_module', 'register_module']
         for fn in methods_to_test:

@@ -1968,6 +1968,21 @@ class Module:
             f"'{type(self).__name__}' object has no attribute '{name}'"
         )
 
+    def _check_attr_shadowing(self, name: str, category: str) -> None:
+        for cls in type(self).__mro__:
+            if cls is Module:
+                break
+            if name in cls.__dict__:
+                attr = cls.__dict__[name]
+                if callable(attr) or isinstance(attr, property):
+                    kind = "property" if isinstance(attr, property) else type(attr).__name__
+                    raise AttributeError(
+                        f"cannot register {category} '{name}': a {kind} with the same "
+                        f"name is already defined as a class attribute in "
+                        f"{cls.__qualname__}. The class attribute would shadow the "
+                        f"registered {category}, making it inaccessible."
+                    )
+
     def __setattr__(self, name: str, value: Union[Tensor, "Module"]) -> None:
         def remove_from(*dicts_or_sets) -> None:
             for d in dicts_or_sets:
@@ -1983,6 +1998,7 @@ class Module:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call"
                 )
+            self._check_attr_shadowing(name, "parameter")
             remove_from(
                 self.__dict__,
                 self._buffers,
@@ -2004,6 +2020,7 @@ class Module:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call"
                     )
+                self._check_attr_shadowing(name, "module")
                 remove_from(
                     self.__dict__,
                     self._parameters,
