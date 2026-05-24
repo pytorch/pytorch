@@ -108,6 +108,31 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @unittest.skipIf(not HAS_GPU or GPU_TYPE != "cuda", "requires cuda")
+    def test_masked_invariant_expand_reduction(self):
+        counters.clear()
+
+        def fn(base, mask):
+            expanded = base.reshape(4, 5, 1, 1).expand(4, 5, 13, 13)
+            return torch.where(
+                mask,
+                torch.zeros((), device=base.device, dtype=base.dtype),
+                expanded / 169,
+            ).sum((0, 2, 3))
+
+        base = torch.randn(4, 5, device=GPU_TYPE) * 0.25
+        base[0, 0] = float("nan")
+        base[1, 0] = float("inf")
+        mask = torch.randint(0, 2, (4, 5, 13, 13), device=GPU_TYPE, dtype=torch.bool)
+        mask[:, 0, :, :] = True
+
+        expected = fn(base, mask)
+        actual = torch.compile(fn)(base, mask)
+
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+        self.assertEqual(counters["inductor"]["masked_invariant_expand_reduction"], 1)
+        counters.clear()
+
     @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
