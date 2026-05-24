@@ -6,6 +6,7 @@ import sympy
 
 import torch
 from torch._inductor import ir
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
@@ -17,6 +18,11 @@ from torch.utils._ordered_set import OrderedSet
 class TestPythonWrapperCodegen(TestCase):
     def _new_wrapper(self):
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.prefix = IndentedBuffer()
+        return wrapper
+
+    def _new_cpp_wrapper(self):
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
         wrapper.prefix = IndentedBuffer()
         return wrapper
 
@@ -67,6 +73,61 @@ class TestPythonWrapperCodegen(TestCase):
 
         self.assertEqual(graph.symbolic_input_sources, {})
 
+    def test_record_symbolic_input_source_ignores_input_view(self):
+        s0 = sympy.Symbol("s0")
+        base = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[10],
+                    stride=[1],
+                ),
+            )
+        )
+        view = ir.TensorBox.create(
+            ir.ReinterpretView(
+                data=base.data,
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0],
+                    stride=[1],
+                ),
+            )
+        )
+        graph = SimpleNamespace(
+            graph_inputs={"arg0_1": base}, symbolic_input_sources={}
+        )
+
+        with V.set_graph_handler(graph):
+            _record_symbolic_input_source(view, 0, s0, "size")
+
+        self.assertEqual(graph.symbolic_input_sources, {})
+
+    def test_record_symbolic_input_source_records_direct_input(self):
+        s0 = sympy.Symbol("s0")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0],
+                    stride=[1],
+                ),
+            )
+        )
+        graph = SimpleNamespace(
+            graph_inputs={"arg0_1": tensor}, symbolic_input_sources={}
+        )
+
+        with V.set_graph_handler(graph):
+            _record_symbolic_input_source(tensor, 0, s0, "size")
+
+        self.assertEqual(graph.symbolic_input_sources, {s0: ("arg0_1", "size", 0)})
+
     def test_codegen_inputs_binds_recorded_symbolic_input_source(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
@@ -115,6 +176,23 @@ class TestPythonWrapperCodegen(TestCase):
         with V.set_graph_handler(graph):
             with self.assertRaisesRegex(AssertionError, "expected .*s0"):
                 wrapper.codegen_inputs()
+
+    def test_cpp_bind_input_symbol_uses_cpp_tensor_access(self):
+        wrapper = self._new_cpp_wrapper()
+        bound_vars = OrderedSet()
+        s0 = sympy.Symbol("s0")
+        s1 = sympy.Symbol("s1")
+
+        wrapper.bind_input_symbol(s0, "arg0_1", "size", 0, bound_vars)
+        wrapper.bind_input_symbol(s1, "arg0_1", "stride", 1, bound_vars)
+
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+int64_t s0 = arg0_1.sizes()[0];
+int64_t s1 = arg0_1.strides()[1];""",
+        )
+        self.assertEqual(list(bound_vars), [s0, s1])
 
 
 if __name__ == "__main__":

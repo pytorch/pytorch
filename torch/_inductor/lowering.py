@@ -8141,10 +8141,15 @@ def _record_symbolic_input_source(
     if not isinstance(expr, sympy.Symbol) or not isinstance(tensor, TensorBox):
         return
 
-    if not tensor.is_input_buffer():
+    if not isinstance(tensor.data, ir.StorageBox) or not isinstance(
+        tensor.data.data, ir.InputBuffer
+    ):
         return
 
     name = tensor.get_name()
+    if name not in V.graph.graph_inputs:
+        return
+
     V.graph.symbolic_input_sources.setdefault(expr, (name, kind, int(dim)))
 
 

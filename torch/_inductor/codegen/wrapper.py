@@ -2369,6 +2369,22 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
 
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        if kind == "size":
+            self.prefix.writeline(f"{sym} = {input_name}.size()[{dim}]")
+        else:
+            self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
+        bound_vars.add(sym)
+
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
         bound_vars = OrderedSet[sympy.Symbol]()
@@ -2386,26 +2402,12 @@ class PythonWrapperCodegen(CodeGen):
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
-        def bind_input_symbol(
-            sym: sympy.Symbol,
-            input_name: str,
-            kind: Literal["size", "stride"],
-            dim: int,
-        ) -> None:
-            if sym in bound_vars:
-                return
-            if kind == "size":
-                self.prefix.writeline(f"{sym} = {input_name}.size()[{dim}]")
-            else:
-                self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
-            bound_vars.add(sym)
-
         for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
             if sym in bound_vars:
                 continue
             if input_name not in graph_inputs:
                 continue
-            bind_input_symbol(sym, input_name, kind, dim)
+            self.bind_input_symbol(sym, input_name, kind, dim, bound_vars)
 
         # Input size/stride assertions are emitted after codegen_inputs(), but
         # their expected tuples can reference bare symbols that are not explicit
@@ -2420,10 +2422,14 @@ class PythonWrapperCodegen(CodeGen):
                     continue
                 for dim, size in enumerate(value.get_size()):
                     if isinstance(size, sympy.Symbol):
-                        bind_input_symbol(size, input_name, "size", dim)
+                        self.bind_input_symbol(
+                            size, input_name, "size", dim, bound_vars
+                        )
                 for dim, stride in enumerate(value.get_stride()):
                     if isinstance(stride, sympy.Symbol):
-                        bind_input_symbol(stride, input_name, "stride", dim)
+                        self.bind_input_symbol(
+                            stride, input_name, "stride", dim, bound_vars
+                        )
 
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
