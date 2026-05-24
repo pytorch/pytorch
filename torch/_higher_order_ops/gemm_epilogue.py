@@ -2541,6 +2541,12 @@ class GemmEpilogueFusion(HigherOrderOperator):
 
         if not isinstance(gemm_kwargs, dict):
             raise RuntimeError(f"gemm_kwargs must be a dict, got {type(gemm_kwargs)}")
+        if any(
+            isinstance(value, torch.Tensor) for value in pytree.tree_leaves(gemm_kwargs)
+        ):
+            raise RuntimeError(
+                "gemm_kwargs must not contain tensor values; pass tensor inputs through gemm_args"
+            )
 
         if not isinstance(kernel_options, dict):
             raise RuntimeError(
@@ -2561,6 +2567,20 @@ class GemmEpilogueFusion(HigherOrderOperator):
 
 
 _gemm_epilogue_fusion = GemmEpilogueFusion()
+
+
+def _pop_kwarg_alias(
+    kwargs: dict[str, Any], primary: str, alias: str, default: Any = None
+) -> Any:
+    has_primary = primary in kwargs
+    has_alias = alias in kwargs
+    if has_primary and has_alias:
+        raise RuntimeError(f"cannot specify both {primary!r} and {alias!r}")
+    if has_primary:
+        return kwargs.pop(primary)
+    if has_alias:
+        return kwargs.pop(alias)
+    return default
 
 
 def gemm_epilogue_fusion(
@@ -2587,16 +2607,16 @@ def gemm_epilogue_fusion(
         scale_a_len = len(scale_a_args)
         body_kwargs = dict(gemm_kwargs)
         recipe_a = _enum_values(
-            body_kwargs.pop("recipe_a", body_kwargs.pop("scale_recipe_a", None))
+            _pop_kwarg_alias(body_kwargs, "recipe_a", "scale_recipe_a")
         )
         recipe_b = _enum_values(
-            body_kwargs.pop("recipe_b", body_kwargs.pop("scale_recipe_b", None))
+            _pop_kwarg_alias(body_kwargs, "recipe_b", "scale_recipe_b")
         )
         swizzle_a = _enum_values(body_kwargs.pop("swizzle_a", None))
         swizzle_b = _enum_values(body_kwargs.pop("swizzle_b", None))
         bias = body_kwargs.pop("bias", None)
-        out_dtype = body_kwargs.pop(
-            "out_dtype", body_kwargs.pop("output_dtype", torch.bfloat16)
+        out_dtype = _pop_kwarg_alias(
+            body_kwargs, "out_dtype", "output_dtype", torch.bfloat16
         )
         contraction_dim = list(body_kwargs.pop("contraction_dim", ()))
         use_fast_accum = body_kwargs.pop("use_fast_accum", False)
@@ -2739,12 +2759,17 @@ def grouped_mm_epilogue(
             )
         )
 
+    kernel_options = (
+        {"backend": "TRITON"} if kernel_options is None else dict(kernel_options)
+    )
+    kernel_options["grouped_mm_has_offs"] = offs is not None
+    kernel_options["grouped_mm_has_bias"] = bias is not None
     return _gemm_epilogue_fusion(
         torch.ops.aten._grouped_mm.default,
         body_fn,
         tuple(gemm_args),
         {},
-        {"backend": "TRITON"} if kernel_options is None else kernel_options,
+        kernel_options,
     )
 
 

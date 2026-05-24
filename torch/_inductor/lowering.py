@@ -8422,6 +8422,39 @@ def process_subgraph_nodes_replacing_gemm(
     return output
 
 
+def _meta_value_from_fx_output(value: Any) -> Any:
+    if isinstance(value, torch.fx.Node):
+        return value.meta.get("val")
+    if isinstance(value, tuple):
+        return tuple(_meta_value_from_fx_output(item) for item in value)
+    if isinstance(value, list):
+        return [_meta_value_from_fx_output(item) for item in value]
+    return value
+
+
+def _cast_output_to_fx_meta_dtype(output: Any, meta_value: Any) -> Any:
+    if isinstance(output, tuple) and isinstance(meta_value, tuple):
+        return tuple(
+            _cast_output_to_fx_meta_dtype(item, meta_item)
+            for item, meta_item in zip(output, meta_value)
+        )
+    if isinstance(output, list) and isinstance(meta_value, list):
+        return [
+            _cast_output_to_fx_meta_dtype(item, meta_item)
+            for item, meta_item in zip(output, meta_value)
+        ]
+    if isinstance(meta_value, torch.Tensor):
+        return to_dtype(output, meta_value.dtype, use_compute_types=False)
+    return output
+
+
+def _subgraph_output_meta_value(graph_module: torch.fx.GraphModule) -> Any:
+    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
+    if len(output_nodes) != 1:
+        return None
+    return _meta_value_from_fx_output(output_nodes[0].args[0])
+
+
 @register_lowering(hints_wrapper, type_promotion_kind=None)
 def hints_wrapper_lowering(subgraph, args, kwargs, hints):
     return process_subgraph_nodes(subgraph.graph_module, list(args))
@@ -8531,12 +8564,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         output = process_subgraph_nodes_replacing_gemm(
             subgraph.graph_module, list(args), gemm_op, acc
         )
-        if isinstance(output, tuple):
-            return tuple(
-                to_dtype(item, mat1.get_dtype(), use_compute_types=False)
-                for item in output
-            )
-        return to_dtype(output, mat1.get_dtype(), use_compute_types=False)
+        return _cast_output_to_fx_meta_dtype(
+            output, _subgraph_output_meta_value(subgraph.graph_module)
+        )
 
     if backend == "QUACK":
         if (
@@ -8595,11 +8625,14 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                     "BlockWise1x32 float8_e8m0fnu scales"
                 )
         if gemm_op == torch.ops.aten._grouped_mm.default:
+            grouped_mm_has_offs = kernel_options.get("grouped_mm_has_offs", False)
+            grouped_mm_has_bias = kernel_options.get("grouped_mm_has_bias", False)
             grouped_mm_supported = (
-                len(quack_args) == 3
+                grouped_mm_has_offs
+                and not grouped_mm_has_bias
+                and len(quack_args) == 3
                 and len(quack_args[0].get_size()) == 2
                 and len(quack_args[1].get_size()) in (2, 3)
-                and gemm_kwargs.get("bias") is None
             )
             varlen_k_layout_supported = grouped_mm_supported and (
                 len(quack_args[1].get_size()) != 2
@@ -8763,48 +8796,54 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             choices,
             input_nodes=input_nodes,
             layout=layout,
-            epilogue_name=epilogue_key,
-            epilogue_source=epilogue_source,
-            gemm_op=gemm_op_info.quack_name,
-            alpha=alpha,
-            beta=beta,
-            out_dtype=main_output_dtype,
-            epilogue_arg_indices=epilogue_arg_indices,
-            epilogue_arg_kinds=epilogue_arg_kinds,
-            local_reduce_out_index=local_reduce_out_index,
-            aux_out_index=aux_out_index,
-            local_reduce_group=(
-                local_reduce.group_size
+            config=ir.QuackGemmEpilogueConfig(
+                epilogue_name=epilogue_key,
+                epilogue_source=epilogue_source,
+                gemm_op=gemm_op_info.quack_name,
+                alpha=alpha,
+                beta=beta,
+                out_dtype=main_output_dtype,
+                epilogue_arg_indices=epilogue_arg_indices,
+                epilogue_arg_kinds=epilogue_arg_kinds,
+                local_reduce_out_index=local_reduce_out_index,
+                aux_out_index=aux_out_index,
+                local_reduce_group=(
+                    local_reduce.group_size
+                    if local_reduce is not None
+                    else aux_output.group_size
+                    if aux_output is not None
+                    else None
+                ),
+                local_reduce_dim=(
+                    local_reduce.dim
+                    if local_reduce is not None
+                    else aux_output.dim
+                    if aux_output is not None
+                    else None
+                ),
+                local_reduce_op=local_reduce.kind if local_reduce is not None else None,
+                local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
+                local_reduce_max_power=local_reduce.max_power
                 if local_reduce is not None
-                else aux_output.group_size
-                if aux_output is not None
-                else None
-            ),
-            local_reduce_dim=(
-                local_reduce.dim
+                else 8,
+                local_reduce_feeds_main=local_reduce.feeds_main
                 if local_reduce is not None
-                else aux_output.dim
-                if aux_output is not None
-                else None
+                else False,
+                local_reduce_source_from_epilogue=(
+                    local_reduce.epilogue_reduce_source_node is not None
+                    if local_reduce is not None
+                    else False
+                ),
+                main_output_transform=main_output_transform.kind
+                if main_output_transform is not None
+                else None,
+                main_output_transform_group=main_output_transform.group_size
+                if main_output_transform is not None
+                else None,
+                concat_layout=concat_layout,
+                tuned=tuned,
             ),
-            local_reduce_op=local_reduce.kind if local_reduce is not None else None,
-            local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
-            local_reduce_max_power=local_reduce.max_power if local_reduce is not None else 8,
-            local_reduce_feeds_main=local_reduce.feeds_main if local_reduce is not None else False,
-            local_reduce_source_from_epilogue=(
-                local_reduce.epilogue_reduce_source_node is not None
-                if local_reduce is not None
-                else False
-            ),
-            main_output_transform=main_output_transform.kind
-            if main_output_transform is not None
-            else None,
-            main_output_transform_group=main_output_transform.group_size
-            if main_output_transform is not None
-            else None,
-            concat_layout=concat_layout,
             mutated_inputs=mutated_inputs or None,
-            tuned=tuned,
         )
         node, _ = autotune_select_algorithm(
             "quack_gemm_epilogue", choices, input_nodes, layout

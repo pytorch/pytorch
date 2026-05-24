@@ -6009,59 +6009,49 @@ class QuackSplitKTemplateBuffer(TemplateBuffer):
         return False
 
 
+@dataclasses.dataclass(frozen=True)
+class QuackGemmEpilogueConfig:
+    epilogue_name: str
+    epilogue_source: str
+    gemm_op: str
+    alpha: float
+    beta: float
+    out_dtype: Any | None = None
+    epilogue_arg_indices: tuple[int, ...] = ()
+    epilogue_arg_kinds: tuple[str, ...] = ()
+    local_reduce_out_index: int | None = None
+    aux_out_index: int | None = None
+    local_reduce_group: int | None = None
+    local_reduce_dim: int | None = None
+    local_reduce_op: str | None = None
+    local_reduce_scale: float = 1.0
+    local_reduce_max_power: int = 8
+    local_reduce_feeds_main: bool = False
+    local_reduce_source_from_epilogue: bool = False
+    main_output_transform: str | None = None
+    main_output_transform_group: int | None = None
+    concat_layout: tuple[str, ...] = ()
+    tuned: bool = True
+
+
 class QuackGemmEpilogueTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        epilogue_name: str,
-        epilogue_source: str,
-        gemm_op: str,
-        alpha: float,
-        beta: float,
-        out_dtype: Any | None = None,
-        epilogue_arg_indices: Sequence[int] = (),
-        epilogue_arg_kinds: Sequence[str] = (),
-        local_reduce_out_index: int | None = None,
-        aux_out_index: int | None = None,
-        local_reduce_group: int | None = None,
-        local_reduce_dim: int | None = None,
-        local_reduce_op: str | None = None,
-        local_reduce_scale: float = 1.0,
-        local_reduce_max_power: int = 8,
-        local_reduce_feeds_main: bool = False,
-        local_reduce_source_from_epilogue: bool = False,
-        main_output_transform: str | None = None,
-        main_output_transform_group: int | None = None,
-        concat_layout: Sequence[str] = (),
+        config: QuackGemmEpilogueConfig,
         mutated_inputs: Iterable[IRNode] | None = None,
-        tuned: bool = True,
     ) -> None:
-        super().__init__(layout, inputs, make_kernel_render=None, mutated_inputs=mutated_inputs)
-        self.epilogue_name = epilogue_name
-        self.epilogue_source = epilogue_source
-        self.gemm_op = gemm_op
-        self.alpha = alpha
-        self.beta = beta
-        self.out_dtype = out_dtype
-        self.epilogue_arg_indices = tuple(epilogue_arg_indices)
-        self.epilogue_arg_kinds = tuple(epilogue_arg_kinds)
-        self.local_reduce_out_index = local_reduce_out_index
-        self.aux_out_index = aux_out_index
-        self.local_reduce_group = local_reduce_group
-        self.local_reduce_dim = local_reduce_dim
-        self.local_reduce_op = local_reduce_op
-        self.local_reduce_scale = local_reduce_scale
-        self.local_reduce_max_power = local_reduce_max_power
-        self.local_reduce_feeds_main = local_reduce_feeds_main
-        self.local_reduce_source_from_epilogue = local_reduce_source_from_epilogue
-        self.main_output_transform = main_output_transform
-        self.main_output_transform_group = main_output_transform_group
-        self.concat_layout = tuple(concat_layout)
-        self.tuned = tuned
+        super().__init__(
+            layout, inputs, make_kernel_render=None, mutated_inputs=mutated_inputs
+        )
+        self.config = config
 
     def should_allocate(self) -> bool:
         return False
+
+    def get_outputs(self) -> list[Buffer]:
+        return [self, *self.mutation_outputs]
 
 
 class CuteDSLTemplateBuffer(TemplateBuffer):

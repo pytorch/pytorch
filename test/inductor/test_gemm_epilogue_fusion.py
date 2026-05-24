@@ -80,6 +80,36 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
+    def test_rejects_tensor_gemm_kwargs(self):
+        bias = torch.randn(2, 4)
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+
+        with self.assertRaisesRegex(RuntimeError, "gemm_kwargs must not contain tensor"):
+            gemm_epilogue_fusion(
+                torch.ops.aten.addmm.default,
+                (bias, a, b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"alpha": torch.tensor(1.0)},
+            )
+
+    def test_scaled_mm_v2_rejects_duplicate_kwarg_aliases(self):
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+        scale_a = torch.ones(())
+        scale_b = torch.ones(())
+
+        with self.assertRaisesRegex(RuntimeError, "cannot specify both"):
+            gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "out_dtype": torch.float16,
+                    "output_dtype": torch.bfloat16,
+                },
+            )
+
     def test_shorthand_mm_eager_matches_reference(self):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
@@ -1785,6 +1815,26 @@ class GemmEpilogueFusionTests(TestCase):
         FileCheck().check("aux_out=").check_not("local_reduce_out=").check_not(
             "extern_kernels.mm"
         ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_tuple_epilogue_generic_aux_only_is_live(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (acc.relu(), acc.float().abs()),
+                kernel_options={"backend": "QUACK"},
+            )[1]
+
+        a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-1, rtol=1e-2)
+        FileCheck().check("aux_out=").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_local_amax_aux_fuses(self):
