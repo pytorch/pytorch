@@ -151,6 +151,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.cuda.use_mem_pool,
+        torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
@@ -661,6 +663,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
+            CUDAMemPoolContextVariable,
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
             FSDPParamGroupUseTrainingStateVariable,
@@ -684,6 +687,39 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
+        elif self.value in (
+            torch.cuda.use_mem_pool,
+            torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
+            if unexpected_kwargs:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() got an unexpected keyword argument "
+                    f"'{unexpected_kwargs[0]}'",
+                )
+            if args and "pool" in kwargs:
+                raise_type_error(
+                    tx, "use_mem_pool() got multiple values for argument 'pool'"
+                )
+            if len(args) > 1 and "device" in kwargs:
+                raise_type_error(
+                    tx, "use_mem_pool() got multiple values for argument 'device'"
+                )
+            if len(args) > 2:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() takes from 1 to 2 positional arguments "
+                    f"but {len(args)} were given",
+                )
+            if not args and "pool" not in kwargs:
+                raise_type_error(
+                    tx,
+                    "use_mem_pool() missing 1 required positional argument: 'pool'",
+                )
+            mempool = args[0] if args else kwargs["pool"]
+            device = args[1] if len(args) > 1 else kwargs.get("device")
+            return CUDAMemPoolContextVariable.create(tx, mempool, device)
         elif self.value is torch.enable_grad:
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable

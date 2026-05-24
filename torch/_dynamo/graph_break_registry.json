@@ -3883,6 +3883,22 @@
       ]
     }
   ],
+  "GB2473": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool graph break",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool.",
+      "Hints": []
+    }
+  ],
+  "GB4996": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool with non-constant device",
+      "Context": "device={device}",
+      "Explanation": "Dynamo requires the device argument to torch.cuda.use_mem_pool to be a Python constant.",
+      "Hints": []
+    }
+  ],
   "GB6604": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_2 handler",

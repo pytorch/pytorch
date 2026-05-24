@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -2022,6 +2023,168 @@ class GraphModule(torch.nn.Module):
 
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+    def _check_cuda_use_mem_pool(self, backend=None):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        pool = torch.cuda.MemPool()
+        opt_fn = (
+            torch.compile(fn, backend=backend, fullgraph=True)
+            if backend is not None
+            else torch.compile(fn, fullgraph=True)
+        )
+        res = opt_fn(pool)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_context_manager(self):
+        self._check_cuda_use_mem_pool(backend="eager")
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_context_manager_inductor(self):
+        self._check_cuda_use_mem_pool()
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_realize_at_boundary_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                x = inp + 1
+            return x + 1
+
+        pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_fallback_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.histc(inp, bins=4, min=0, max=4)
+
+        pool = torch.cuda.MemPool()
+        inp = torch.arange(16, device="cuda", dtype=torch.float32) % 4
+        res = torch.compile(fn, fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((4,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_foreach_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, xs):
+            with torch.cuda.use_mem_pool(pool):
+                return torch._foreach_add(xs, 1.0)
+
+        pool = torch.cuda.MemPool()
+        xs = [
+            torch.ones(64, device="cuda"),
+            torch.full((64,), 2.0, device="cuda"),
+        ]
+        res = torch.compile(fn, fullgraph=True)(pool, xs)
+        torch.cuda.synchronize()
+        self.assertEqual(res[0], torch.full((64,), 2.0, device="cuda"))
+        self.assertEqual(res[1], torch.full((64,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_forced_extern_multi_template_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, y):
+            with torch.cuda.use_mem_pool(pool):
+                return x @ y
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(32, 32, device="cuda")
+        y = torch.randn(32, 32, device="cuda")
+        with torch._inductor.config.patch(
+            {
+                "test_configs.force_extern_kernel_in_multi_template": True,
+                "triton.native_matmul": False,
+            }
+        ):
+            res = torch.compile(fn, mode="max-autotune-no-cudagraphs", fullgraph=True)(
+                pool, x, y
+            )
+        torch.cuda.synchronize()
+        self.assertEqual(res, x @ y, atol=1e-4, rtol=1e-4)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
+    def test_cuda_use_mem_pool_device_none_resolves_at_entry_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda:0")
+
+        with torch.cuda.device(1):
+            pool = torch.cuda.MemPool()
+            res = torch.compile(fn, fullgraph=True)(pool)
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(res, torch.ones(16, device="cuda:0"))
+        self.assertEqual(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_invalid_signatures(self):
+        pool = torch.cuda.MemPool()
+
+        def missing(_pool):
+            with torch.cuda.use_mem_pool():
+                return torch.ones(1, device="cuda")
+
+        def too_many(pool):
+            with torch.cuda.use_mem_pool(pool, None, None):
+                return torch.ones(1, device="cuda")
+
+        def unexpected_kwarg(pool):
+            with torch.cuda.use_mem_pool(pool, foo=None):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_pool(pool):
+            with torch.cuda.use_mem_pool(pool, pool=pool):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_device(pool):
+            with torch.cuda.use_mem_pool(pool, None, device=None):
+                return torch.ones(1, device="cuda")
+
+        cases = [
+            (missing, "missing 1 required positional argument: 'pool'"),
+            (
+                too_many,
+                "takes from 1 to 2 positional arguments but 3 were given",
+            ),
+            (unexpected_kwarg, "unexpected keyword argument 'foo'"),
+            (duplicate_pool, "multiple values for argument 'pool'"),
+            (duplicate_device, "multiple values for argument 'device'"),
+        ]
+        for fn, msg in cases:
+            with self.subTest(msg=msg):
+                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+                    torch.compile(fn, backend="eager", fullgraph=True)(pool)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):

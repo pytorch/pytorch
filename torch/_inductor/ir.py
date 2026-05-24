@@ -558,6 +558,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_mempool: ClassVar[tuple[int, int] | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -568,6 +569,8 @@ class IRNode:
     annotations: dict[str, Any] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
+    # User-annotated CUDA MemPool from FX node metadata (set during lowering)
+    mempool: tuple[int, int] | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -590,6 +593,18 @@ class IRNode:
             yield
         finally:
             IRNode._current_stream_idx = old
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_mempool(
+        mempool: tuple[int, int] | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_mempool
+        IRNode._current_mempool = mempool
+        try:
+            yield
+        finally:
+            IRNode._current_mempool = old
 
     @staticmethod
     def is_realized_node(node: IRNode) -> bool:
@@ -623,6 +638,7 @@ class IRNode:
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        self._post_init_setattr("mempool", self._current_mempool)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -910,6 +926,10 @@ class Operation:
     def get_stream_idx(self) -> int | None:
         assert hasattr(self, "stream_idx")
         return self.stream_idx
+
+    def get_mempool(self) -> tuple[int, int] | None:
+        assert hasattr(self, "mempool")
+        return self.mempool
 
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
@@ -9798,6 +9818,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         self.data.stream_idx = self.data.data.stream_idx
+        self.data.mempool = self.data.data.mempool
         return self.data.name
 
     def realize_hint(self) -> None:

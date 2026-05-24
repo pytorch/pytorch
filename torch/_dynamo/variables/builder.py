@@ -235,6 +235,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -1262,6 +1263,17 @@ class VariableBuilder:
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
                 stream_proxy, value, source=self.source, user_object_index=index
+            )
+            return self.tx.output.side_effects.track_object_existing(value, var)
+        elif isinstance(value, torch.cuda.MemPool):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
+            mempool_proxy = self.tx.output.create_proxy(
+                "call_function", get_external_object_by_index, (index,), {}
+            )
+            set_example_value(mempool_proxy.node, value)
+            var = CUDAMemPoolVariable(
+                mempool_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):

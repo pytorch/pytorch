@@ -3430,18 +3430,25 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     continue
                 device_groups[device].append(node)
 
-            # Sub-group by stream to avoid mixing nodes across stream
-            # boundaries.  When multi-stream scheduling is inactive every
-            # node maps to DEFAULT_STREAM_IDX so this is a no-op.
+            # Sub-group by stream and mempool to avoid mixing nodes across
+            # context boundaries. When a context is inactive every node maps to
+            # the default key so this is a no-op.
             for device_nodes in device_groups.values():
-                stream_groups: dict[int, list[BaseSchedulerNode]] = defaultdict(list)
+                context_groups: dict[
+                    tuple[int, tuple[int, int] | None], list[BaseSchedulerNode]
+                ] = defaultdict(list)
                 for node in device_nodes:
-                    stream_groups[scheduler.node_to_stream.get(node, 0)].append(node)
-                for stream_nodes in stream_groups.values():
+                    context_groups[
+                        (
+                            scheduler.node_to_stream.get(node, 0),
+                            scheduler.node_to_mempool.get(node),
+                        )
+                    ].append(node)
+                for context_nodes in context_groups.values():
                     grouped_nodes.extend(
                         [
-                            stream_nodes[i : i + max_num_nodes]
-                            for i in range(0, len(stream_nodes), max_num_nodes)
+                            context_nodes[i : i + max_num_nodes]
+                            for i in range(0, len(context_nodes), max_num_nodes)
                         ]
                     )
         return grouped_nodes
@@ -4080,6 +4087,10 @@ class Scheduler:
         # Maps stream_idx → user_object_index for retrieving user stream objects
         self.stream_idx_to_user_obj_idx: dict[int, int] = {}
         self._populate_stream_assignments()
+        self.node_to_mempool: dict[BaseSchedulerNode, tuple[int, int] | None] = {}
+        self.buff_to_mempool: dict[str, tuple[int, int] | None] = {}
+        self._mempool_nodes: bool = False
+        self._populate_mempool_assignments()
 
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
@@ -4285,10 +4296,57 @@ class Scheduler:
         """Check if any nodes are assigned to non-default streams."""
         return self._multi_stream_nodes
 
+    def _populate_mempool_assignments(self) -> None:
+        """Populate node_to_mempool and buff_to_mempool from IR node metadata."""
+        for node in self.nodes:
+            mempool = self._get_node_mempool(node)
+            self.node_to_mempool[node] = mempool
+
+            # Also populate buff_to_mempool for all buffers produced by this node.
+            # Mutation renames are resolved at lookup time via get_buf_mempool.
+            for buf in node.get_buffer_names():
+                self.buff_to_mempool[buf] = mempool
+
+        self._mempool_nodes = any(
+            mempool is not None for mempool in self.node_to_mempool.values()
+        )
+
+    def _has_mempool_nodes(self) -> bool:
+        """Check if any nodes are assigned to a user CUDA MemPool."""
+        return self._mempool_nodes
+
+    def _get_node_mempool(self, node: BaseSchedulerNode) -> tuple[int, int] | None:
+        """Return the CUDA MemPool assigned to a scheduler node.
+
+        Grouped scheduler nodes such as ForeachKernelSchedulerNode have
+        node.node == None, so derive their context from the underlying nodes.
+        """
+        if node.node is not None:
+            return node.node.get_mempool()
+
+        mempools = OrderedSet(
+            self._get_node_mempool(subnode)
+            for subnode in node.get_nodes()
+            if subnode is not node
+        )
+        if not mempools:
+            return None
+        if len(mempools) != 1:
+            raise AssertionError(
+                f"Scheduler node {node.get_name()} contains mixed CUDA MemPool "
+                f"contexts: {list(mempools)}"
+            )
+        return next(iter(mempools))
+
     def get_buf_stream(self, buf_name: str) -> int:
         """Return the stream index for a buffer, resolving mutation renames."""
         real = self.mutation_renames.get(buf_name, buf_name)
         return self.buff_to_stream.get(real, self.buff_to_stream.get(buf_name, 0))
+
+    def get_buf_mempool(self, buf_name: str) -> tuple[int, int] | None:
+        """Return the CUDA MemPool for a buffer, resolving mutation renames."""
+        real = self.mutation_renames.get(buf_name, buf_name)
+        return self.buff_to_mempool.get(real, self.buff_to_mempool.get(buf_name, None))
 
     def has_cross_stream_hazard(self, buf_name: str, node: BaseSchedulerNode) -> bool:
         """True if buf_name was produced on a different stream than node.
@@ -5180,6 +5238,13 @@ class Scheduler:
         new_scheduler_node.ancestors = node.ancestors
         new_scheduler_node.last_usage = node.last_usage
 
+        mempool = self.node_to_mempool.get(node)
+        self.node_to_mempool[new_scheduler_node] = mempool
+        for buf in new_scheduler_node.get_buffer_names():
+            self.buff_to_mempool[buf] = mempool
+        if mempool is not None:
+            self._mempool_nodes = True
+
     def _any_atomic_add(self, node_list: Sequence[BaseSchedulerNode]) -> bool:
         return any(
             hasattr(n.node, "data")
@@ -5632,6 +5697,8 @@ class Scheduler:
         stream1 = self.node_to_stream.get(node1)
         if stream1 is not None:
             self.node_to_stream[node3] = stream1
+        mempool1 = self.node_to_mempool.get(node1)
+        self.node_to_mempool[node3] = mempool1
 
         return node3
 
@@ -5995,6 +6062,7 @@ class Scheduler:
             stream = self.node_to_stream.get(accepted[0])
             if stream is not None:
                 self.node_to_stream[combo_node] = stream
+            self.node_to_mempool[combo_node] = self.node_to_mempool.get(accepted[0])
 
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
@@ -7255,6 +7323,11 @@ class Scheduler:
             stream1 = self.node_to_stream.get(node1)
             stream2 = self.node_to_stream.get(node2)
             if stream1 is not None and stream2 is not None and stream1 != stream2:
+                return False
+        if self._has_mempool_nodes():
+            mempool1 = self.node_to_mempool.get(node1)
+            mempool2 = self.node_to_mempool.get(node2)
+            if mempool1 != mempool2:
                 return False
 
         if isinstance(node1, FusedNestedReductions):
@@ -9282,9 +9355,22 @@ class Scheduler:
             if self._has_multi_stream_nodes() and self.current_device is not None:
                 self.generate_stream_ctx_switching(node)
 
+            node_mempool = None
+            mempool_ctx_entered = False
+            if not isinstance(node, NopKernelSchedulerNode):
+                node_mempool = self.node_to_mempool.get(node)
+            if node_mempool is not None:
+                # Flush any previously queued wrapper code before entering a
+                # pool that only applies to the current scheduler node.
+                self.flush()
+                V.graph.wrapper_code.codegen_cuda_mempool_enter(node_mempool)
+                mempool_ctx_entered = True
+
             # Emit deferred alignment copies for inputs first used by this
             # node.  This runs *after* stream context switching so the copy
-            # executes on the same stream as the consuming kernel.
+            # executes on the same stream as the consuming kernel.  It also
+            # runs inside the mempool context when the consuming node came
+            # from a torch.cuda.use_mem_pool body.
             # TODO: inputs read on multiple streams should be copied in the
             # prologue instead, to avoid cross-stream races.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
@@ -9349,6 +9435,12 @@ class Scheduler:
                     and self.get_backend(device).ready_to_flush()
                 ):
                     self.flush()
+
+            if mempool_ctx_entered:
+                # Ensure backends that emit wrapper code at flush time still
+                # allocate and launch inside the active pool.
+                self.flush()
+                V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
                 self.previous_node = node
