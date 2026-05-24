@@ -167,7 +167,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for (const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(options.dtype_opt()),
@@ -467,7 +467,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
-  for (const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(res_option.dtype_opt()),
