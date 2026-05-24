@@ -8487,6 +8487,278 @@ def _infer_quack_epilogue_arg_kinds(
     return tuple(epilogue_arg_kinds)
 
 
+def _quack_tensor_args(args):
+    return tuple(
+        arg for arg in args if isinstance(arg, IRNode) and arg.has_tensor_output()
+    )
+
+
+def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
+    if (
+        len(quack_args) != 4
+        or gemm_kwargs.get("out_dtype") is None
+        or gemm_kwargs.get("bias") is not None
+        or gemm_kwargs.get("scale_result") is not None
+        or gemm_kwargs.get("use_fast_accum", False)
+    ):
+        raise NotImplementedError(
+            "QUACK _scaled_mm epilogue currently supports only "
+            "(A, B, scale_a, scale_b) with explicit out_dtype"
+        )
+    from torch.nn.functional import ScalingType, SwizzleType
+
+    scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(
+        quack_args[0], quack_args[2]
+    )
+    scale_b_type, scale_b_swizzle = infer_scale_swizzle_ir(
+        quack_args[1], quack_args[3], transpose=True
+    )
+    expected_swizzle = (
+        SwizzleType.NO_SWIZZLE if torch.version.hip else SwizzleType.SWIZZLE_32_4_4
+    )
+    if (
+        scale_a_type != ScalingType.BlockWise1x32
+        or scale_b_type != ScalingType.BlockWise1x32
+        or scale_a_swizzle != expected_swizzle
+        or scale_b_swizzle != expected_swizzle
+    ):
+        raise NotImplementedError(
+            "QUACK _scaled_mm epilogue currently supports only MXFP8-like "
+            "BlockWise1x32 float8_e8m0fnu scales"
+        )
+
+
+def _validate_quack_grouped_mm(kernel_options, quack_args) -> None:
+    grouped_mm_supported = (
+        kernel_options.get("grouped_mm_has_offs", False)
+        and not kernel_options.get("grouped_mm_has_bias", False)
+        and len(quack_args) == 3
+        and len(quack_args[0].get_size()) == 2
+        and len(quack_args[1].get_size()) in (2, 3)
+    )
+    varlen_k_layout_supported = grouped_mm_supported and (
+        len(quack_args[1].get_size()) != 2
+        or (quack_args[0].get_stride()[0] == 1 and quack_args[1].get_stride()[1] == 1)
+    )
+    if not grouped_mm_supported or not varlen_k_layout_supported:
+        raise NotImplementedError(
+            "QUACK grouped_mm epilogue currently supports only 2D/3D "
+            "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
+        )
+
+
+def _infer_quack_main_layout(
+    gemm_op, gemm_op_info, quack_args, graph_module, gemm_kwargs
+):
+    mat1 = quack_args[gemm_op_info.mat1_index]
+    mat2 = quack_args[gemm_op_info.mat2_index]
+    if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
+        m, n = mat1.get_size()[0], mat2.get_size()[2]
+        size = [m, n]
+        stride = [n, 1]
+    elif gemm_op == torch.ops.aten._grouped_mm.default:
+        groups = quack_args[2].get_size()[0]
+        m, n = mat1.get_size()[0], mat2.get_size()[1]
+        size = [groups, m, n]
+        stride = [m * n, n, 1]
+    elif gemm_op_info.is_batched:
+        b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
+        size = [b, m, n]
+        stride = [m * n, n, 1]
+    else:
+        m, n = mat1.get_size()[0], mat2.get_size()[1]
+        size = [m, n]
+        stride = [n, 1]
+
+    main_output_dtype = gemm_kwargs.get("out_dtype", mat1.get_dtype())
+    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
+    if len(output_nodes) == 1:
+        output_value = output_nodes[0].args[0]
+        if isinstance(output_value, (tuple, list)):
+            output_value = output_value[0]
+        output_meta = (
+            output_value.meta.get("val")
+            if isinstance(output_value, torch.fx.Node)
+            else None
+        )
+        main_output_dtype = getattr(output_meta, "dtype", main_output_dtype)
+        if output_meta is not None:
+            size = list(output_meta.shape)
+            stride = list(output_meta.stride())
+
+    return ir.FixedLayout(
+        mat1.get_device_or_error(),
+        main_output_dtype,
+        size,
+        stride,
+    ), main_output_dtype, size
+
+
+def _quack_epilogue_arg_indices(graph_module, epilogue_arg_placeholders):
+    tensor_placeholders = [
+        node
+        for node in graph_module.graph.nodes
+        if node.op == "placeholder" and isinstance(node.meta.get("val"), torch.Tensor)
+    ]
+    return tuple(
+        tensor_placeholders.index(node) for node in epilogue_arg_placeholders
+    )
+
+
+def _validate_quack_aux_outputs(gemm_op, epilogue_arg_indices, local_reduce, aux_output):
+    if local_reduce is not None:
+        if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
+            raise NotImplementedError(
+                "QUACK local-reduce tuple epilogues currently support only aten.mm and aten.bmm"
+            )
+        if epilogue_arg_indices and local_reduce.epilogue_reduce_source_node is None:
+            raise NotImplementedError(
+                "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
+            )
+    if aux_output is not None:
+        if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
+            raise NotImplementedError(
+                "QUACK generic aux tuple epilogues currently support only aten.mm and aten.bmm"
+            )
+        if epilogue_arg_indices:
+            raise NotImplementedError(
+                "QUACK generic aux tuple epilogues do not support captured tensor reads yet"
+            )
+        if local_reduce is not None:
+            raise NotImplementedError(
+                "QUACK generic aux tuple epilogues cannot be combined with local reduce"
+            )
+
+
+def _allocate_quack_local_reduce_out(local_reduce, size, mat1):
+    if local_reduce is None or local_reduce.feeds_main:
+        return None
+    group_size = local_reduce.group_size
+    local_reduce_val = local_reduce.aux_output_node.meta.get("val")
+    local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
+    if local_reduce_val is not None:
+        local_reduce_size = list(local_reduce_val.shape)
+        local_reduce_stride = list(local_reduce_val.stride())
+    else:
+        *prefix, m, n = size
+        if local_reduce.dim == 0:
+            local_reduce_size = [*prefix, FloorDiv(m, group_size), n]
+            local_reduce_stride = [n * FloorDiv(m, group_size), n, 1]
+        else:
+            local_reduce_size = [*prefix, m, FloorDiv(n, group_size)]
+            local_reduce_stride = [
+                m * FloorDiv(n, group_size),
+                FloorDiv(n, group_size),
+                1,
+            ]
+    return empty_strided(
+        local_reduce_size,
+        local_reduce_stride,
+        dtype=local_reduce_dtype,
+        device=mat1.get_device_or_error(),
+    )
+
+
+def _allocate_quack_aux_out(aux_output, mat1):
+    if aux_output is None:
+        return None
+    aux_val = aux_output.output_value.meta.get("val")
+    if aux_val is None:
+        raise NotImplementedError(
+            "QUACK generic aux tuple epilogues require fake tensor metadata"
+        )
+    return empty_strided(
+        list(aux_val.shape),
+        list(aux_val.stride()),
+        dtype=aux_val.dtype,
+        device=mat1.get_device_or_error(),
+    )
+
+
+def _realize_quack_inputs(quack_args, local_reduce_out, aux_out):
+    input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in quack_args]
+    mutated_inputs = []
+    local_reduce_out_index = None
+    aux_out_index = None
+    if local_reduce_out is not None:
+        local_reduce_node = ir.TemplateBuffer.realize_template_input(local_reduce_out)
+        local_reduce_out_index = len(input_nodes)
+        input_nodes.append(local_reduce_node)
+        mutated_inputs.append(local_reduce_node)
+    if aux_out is not None:
+        aux_node = ir.TemplateBuffer.realize_template_input(aux_out)
+        aux_out_index = len(input_nodes)
+        input_nodes.append(aux_node)
+        mutated_inputs.append(aux_node)
+    return input_nodes, mutated_inputs, local_reduce_out_index, aux_out_index
+
+
+def _quack_local_group_value(local_reduce, aux_output, attr, default=None):
+    if local_reduce is not None:
+        return getattr(local_reduce, attr)
+    if aux_output is not None:
+        return getattr(aux_output, attr)
+    return default
+
+
+def _build_quack_epilogue_config(
+    *,
+    epilogue_key,
+    epilogue_source,
+    gemm_op_info,
+    alpha,
+    beta,
+    main_output_dtype,
+    epilogue_arg_indices,
+    epilogue_arg_kinds,
+    local_reduce_out_index,
+    aux_out_index,
+    local_reduce,
+    aux_output,
+    main_output_transform,
+    concat_layout,
+    tuned,
+):
+    return ir.QuackGemmEpilogueConfig(
+        epilogue_name=epilogue_key,
+        epilogue_source=epilogue_source,
+        gemm_op=gemm_op_info.quack_name,
+        alpha=alpha,
+        beta=beta,
+        out_dtype=main_output_dtype,
+        epilogue_arg_indices=epilogue_arg_indices,
+        epilogue_arg_kinds=epilogue_arg_kinds,
+        local_reduce_out_index=local_reduce_out_index,
+        aux_out_index=aux_out_index,
+        local_reduce_group=_quack_local_group_value(
+            local_reduce, aux_output, "group_size"
+        ),
+        local_reduce_dim=_quack_local_group_value(local_reduce, aux_output, "dim"),
+        local_reduce_op=local_reduce.kind if local_reduce is not None else None,
+        local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
+        local_reduce_max_power=(
+            local_reduce.max_power if local_reduce is not None else 8
+        ),
+        local_reduce_feeds_main=(
+            local_reduce.feeds_main if local_reduce is not None else False
+        ),
+        local_reduce_source_from_epilogue=(
+            local_reduce is not None
+            and local_reduce.epilogue_reduce_source_node is not None
+        ),
+        main_output_transform=(
+            main_output_transform.kind if main_output_transform is not None else None
+        ),
+        main_output_transform_group=(
+            main_output_transform.group_size
+            if main_output_transform is not None
+            else None
+        ),
+        concat_layout=concat_layout,
+        tuned=tuned,
+    )
+
+
 @register_lowering(_gemm_epilogue_fusion, type_promotion_kind=None)
 def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
@@ -8584,65 +8856,11 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
 
         alpha = gemm_kwargs.get("alpha", 1.0)
         beta = gemm_kwargs.get("beta", 1.0)
-        quack_args = tuple(
-            arg
-            for arg in args
-            if isinstance(arg, IRNode) and arg.has_tensor_output()
-        )
+        quack_args = _quack_tensor_args(args)
         if gemm_op == torch.ops.aten._scaled_mm.default:
-            if (
-                len(quack_args) != 4
-                or gemm_kwargs.get("out_dtype") is None
-                or gemm_kwargs.get("bias") is not None
-                or gemm_kwargs.get("scale_result") is not None
-                or gemm_kwargs.get("use_fast_accum", False)
-            ):
-                raise NotImplementedError(
-                    "QUACK _scaled_mm epilogue currently supports only "
-                    "(A, B, scale_a, scale_b) with explicit out_dtype"
-                )
-            from torch.nn.functional import ScalingType, SwizzleType
-
-            scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(
-                quack_args[0], quack_args[2]
-            )
-            scale_b_type, scale_b_swizzle = infer_scale_swizzle_ir(
-                quack_args[1], quack_args[3], transpose=True
-            )
-            expected_swizzle = (
-                SwizzleType.NO_SWIZZLE
-                if torch.version.hip
-                else SwizzleType.SWIZZLE_32_4_4
-            )
-            if (
-                scale_a_type != ScalingType.BlockWise1x32
-                or scale_b_type != ScalingType.BlockWise1x32
-                or scale_a_swizzle != expected_swizzle
-                or scale_b_swizzle != expected_swizzle
-            ):
-                raise NotImplementedError(
-                    "QUACK _scaled_mm epilogue currently supports only MXFP8-like "
-                    "BlockWise1x32 float8_e8m0fnu scales"
-                )
+            _validate_quack_scaled_mm(gemm_kwargs, quack_args)
         if gemm_op == torch.ops.aten._grouped_mm.default:
-            grouped_mm_has_offs = kernel_options.get("grouped_mm_has_offs", False)
-            grouped_mm_has_bias = kernel_options.get("grouped_mm_has_bias", False)
-            grouped_mm_supported = (
-                grouped_mm_has_offs
-                and not grouped_mm_has_bias
-                and len(quack_args) == 3
-                and len(quack_args[0].get_size()) == 2
-                and len(quack_args[1].get_size()) in (2, 3)
-            )
-            varlen_k_layout_supported = grouped_mm_supported and (
-                len(quack_args[1].get_size()) != 2
-                or (quack_args[0].get_stride()[0] == 1 and quack_args[1].get_stride()[1] == 1)
-            )
-            if not grouped_mm_supported or not varlen_k_layout_supported:
-                raise NotImplementedError(
-                    "QUACK grouped_mm epilogue currently supports only 2D/3D "
-                    "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
-                )
+            _validate_quack_grouped_mm(kernel_options, quack_args)
         (
             epilogue_key,
             epilogue_source,
@@ -8662,184 +8880,47 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 "QUACK concat-layout gated epilogues require B's output dimension to be non-contiguous, "
                 "as in linear weight.t(); row-major Kx2N B would need a different swizzle"
             )
-        if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
-            m, n = mat1.get_size()[0], mat2.get_size()[2]
-            size = [m, n]
-            stride = [n, 1]
-        elif gemm_op == torch.ops.aten._grouped_mm.default:
-            groups, m, n = quack_args[2].get_size()[0], mat1.get_size()[0], mat2.get_size()[1]
-            size = [groups, m, n]
-            stride = [m * n, n, 1]
-        elif gemm_op_info.is_batched:
-            b, m, n = mat1.get_size()[0], mat1.get_size()[1], mat2.get_size()[2]
-            size = [b, m, n]
-            stride = [m * n, n, 1]
-        else:
-            m, n = mat1.get_size()[0], mat2.get_size()[1]
-            size = [m, n]
-            stride = [n, 1]
-        output_nodes = [
-            node
-            for node in subgraph.graph_module.graph.nodes
-            if node.op == "output"
-        ]
-        main_output_dtype = gemm_kwargs.get("out_dtype", mat1.get_dtype())
-        if len(output_nodes) == 1:
-            output_value = output_nodes[0].args[0]
-            if isinstance(output_value, (tuple, list)):
-                output_value = output_value[0]
-            output_meta = (
-                output_value.meta.get("val")
-                if isinstance(output_value, torch.fx.Node)
-                else None
-            )
-            main_output_dtype = getattr(output_meta, "dtype", main_output_dtype)
-            if output_meta is not None:
-                size = list(output_meta.shape)
-                stride = list(output_meta.stride())
-        layout = ir.FixedLayout(
-            mat1.get_device_or_error(),
-            main_output_dtype,
-            size,
-            stride,
+        layout, main_output_dtype, size = _infer_quack_main_layout(
+            gemm_op, gemm_op_info, quack_args, subgraph.graph_module, gemm_kwargs
         )
-        placeholders = [
-            node
-            for node in subgraph.graph_module.graph.nodes
-            if node.op == "placeholder"
-        ]
-        tensor_placeholders = [
-            node
-            for node in placeholders
-            if isinstance(node.meta.get("val"), torch.Tensor)
-        ]
-        epilogue_arg_indices = tuple(
-            tensor_placeholders.index(node) for node in epilogue_arg_placeholders
+        epilogue_arg_indices = _quack_epilogue_arg_indices(
+            subgraph.graph_module, epilogue_arg_placeholders
         )
-        if local_reduce is not None:
-            if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
-                raise NotImplementedError(
-                    "QUACK local-reduce tuple epilogues currently support only aten.mm and aten.bmm"
-                )
-            if epilogue_arg_indices and local_reduce.epilogue_reduce_source_node is None:
-                raise NotImplementedError(
-                    "QUACK local-reduce tuple epilogues do not support captured tensor reads yet"
-                )
-        if aux_output is not None:
-            if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
-                raise NotImplementedError(
-                    "QUACK generic aux tuple epilogues currently support only aten.mm and aten.bmm"
-                )
-            if epilogue_arg_indices:
-                raise NotImplementedError(
-                    "QUACK generic aux tuple epilogues do not support captured tensor reads yet"
-                )
-            if local_reduce is not None:
-                raise NotImplementedError(
-                    "QUACK generic aux tuple epilogues cannot be combined with local reduce"
-                )
+        _validate_quack_aux_outputs(
+            gemm_op, epilogue_arg_indices, local_reduce, aux_output
+        )
         epilogue_arg_kinds = _infer_quack_epilogue_arg_kinds(
             gemm_op, quack_args, epilogue_arg_indices, size
         )
-        local_reduce_out = None
-        local_reduce_out_index = None
-        aux_out = None
-        aux_out_index = None
-        mutated_inputs = []
-        if local_reduce is not None and not local_reduce.feeds_main:
-            group_size = local_reduce.group_size
-            local_reduce_val = local_reduce.aux_output_node.meta.get("val")
-            local_reduce_dtype = getattr(local_reduce_val, "dtype", torch.float32)
-            if local_reduce_val is not None:
-                local_reduce_size = list(local_reduce_val.shape)
-                local_reduce_stride = list(local_reduce_val.stride())
-            else:
-                *prefix, m, n = size
-                if local_reduce.dim == 0:
-                    local_reduce_size = [*prefix, FloorDiv(m, group_size), n]
-                    local_reduce_stride = [n * FloorDiv(m, group_size), n, 1]
-                else:
-                    local_reduce_size = [*prefix, m, FloorDiv(n, group_size)]
-                    local_reduce_stride = [m * FloorDiv(n, group_size), FloorDiv(n, group_size), 1]
-            local_reduce_out = empty_strided(
-                local_reduce_size,
-                local_reduce_stride,
-                dtype=local_reduce_dtype,
-                device=mat1.get_device_or_error(),
-            )
-        if aux_output is not None:
-            aux_val = aux_output.output_value.meta.get("val")
-            if aux_val is None:
-                raise NotImplementedError(
-                    "QUACK generic aux tuple epilogues require fake tensor metadata"
-                )
-            aux_out = empty_strided(
-                list(aux_val.shape),
-                list(aux_val.stride()),
-                dtype=aux_val.dtype,
-                device=mat1.get_device_or_error(),
-            )
-
-        input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in quack_args]
-        if local_reduce_out is not None:
-            local_reduce_node = ir.TemplateBuffer.realize_template_input(local_reduce_out)
-            local_reduce_out_index = len(input_nodes)
-            input_nodes.append(local_reduce_node)
-            mutated_inputs.append(local_reduce_node)
-        if aux_out is not None:
-            aux_node = ir.TemplateBuffer.realize_template_input(aux_out)
-            aux_out_index = len(input_nodes)
-            input_nodes.append(aux_node)
-            mutated_inputs.append(aux_node)
+        local_reduce_out = _allocate_quack_local_reduce_out(
+            local_reduce, size, mat1
+        )
+        aux_out = _allocate_quack_aux_out(aux_output, mat1)
+        (
+            input_nodes,
+            mutated_inputs,
+            local_reduce_out_index,
+            aux_out_index,
+        ) = _realize_quack_inputs(quack_args, local_reduce_out, aux_out)
         choices: list[Any] = []
         quack_gemm_epilogue_template.maybe_append_choice(
             choices,
             input_nodes=input_nodes,
             layout=layout,
-            config=ir.QuackGemmEpilogueConfig(
-                epilogue_name=epilogue_key,
+            config=_build_quack_epilogue_config(
+                epilogue_key=epilogue_key,
                 epilogue_source=epilogue_source,
-                gemm_op=gemm_op_info.quack_name,
+                gemm_op_info=gemm_op_info,
                 alpha=alpha,
                 beta=beta,
-                out_dtype=main_output_dtype,
+                main_output_dtype=main_output_dtype,
                 epilogue_arg_indices=epilogue_arg_indices,
                 epilogue_arg_kinds=epilogue_arg_kinds,
                 local_reduce_out_index=local_reduce_out_index,
                 aux_out_index=aux_out_index,
-                local_reduce_group=(
-                    local_reduce.group_size
-                    if local_reduce is not None
-                    else aux_output.group_size
-                    if aux_output is not None
-                    else None
-                ),
-                local_reduce_dim=(
-                    local_reduce.dim
-                    if local_reduce is not None
-                    else aux_output.dim
-                    if aux_output is not None
-                    else None
-                ),
-                local_reduce_op=local_reduce.kind if local_reduce is not None else None,
-                local_reduce_scale=local_reduce.scale if local_reduce is not None else 1.0,
-                local_reduce_max_power=local_reduce.max_power
-                if local_reduce is not None
-                else 8,
-                local_reduce_feeds_main=local_reduce.feeds_main
-                if local_reduce is not None
-                else False,
-                local_reduce_source_from_epilogue=(
-                    local_reduce.epilogue_reduce_source_node is not None
-                    if local_reduce is not None
-                    else False
-                ),
-                main_output_transform=main_output_transform.kind
-                if main_output_transform is not None
-                else None,
-                main_output_transform_group=main_output_transform.group_size
-                if main_output_transform is not None
-                else None,
+                local_reduce=local_reduce,
+                aux_output=aux_output,
+                main_output_transform=main_output_transform,
                 concat_layout=concat_layout,
                 tuned=tuned,
             ),
