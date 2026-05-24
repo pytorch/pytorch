@@ -71,7 +71,7 @@ class SobolEngine:
             self._scramble()
 
         self.quasi = self.shift.clone(memory_format=torch.contiguous_format)
-        self._first_point = (self.quasi / 2**self.MAXBIT).reshape(1, -1)
+        self._first_point = (self.quasi / 2**self.MAXBIT).view(1, -1)
         self.num_generated = 0
 
     def draw(
