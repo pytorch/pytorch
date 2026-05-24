@@ -493,7 +493,10 @@ class FakeTensorConverter:
             # observable way without hitting UB.
             and t.dtype
             in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
-            and (source is not None or shape_env is None)
+            # Dynamo may pass shape_env=None for static fakification while
+            # the mode still owns a ShapeEnv. In that case, do not install a
+            # concrete Python scalar where Dynamo expects a SymNode-like memo.
+            and (source is not None or fake_mode.shape_env is None)
             # Impede setting up item() on things coming from random.  These
             # are not "real" item() calls, instead UnspecializedPythonVariable
             # is unsafely pretending an int is a tensor, which can sometimes

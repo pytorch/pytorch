@@ -211,6 +211,18 @@ class FakeTensorTest(TestCase):
                     out = x[idx]
                 self.checkType(out, "cpu", [4])
 
+    def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
+        shape_env = ShapeEnv()
+        for dtype in (torch.int64, torch.float64):
+            with self.subTest(dtype=dtype):
+                scalar = torch.tensor(0, dtype=dtype)
+                with FakeTensorMode(shape_env=shape_env) as mode:
+                    scalar = mode.from_tensor(
+                        scalar,
+                        static_shapes=True,
+                    )
+                    self.assertIsNone(scalar.item_memo)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with FakeTensorMode():
