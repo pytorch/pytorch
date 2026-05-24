@@ -39,11 +39,12 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 
 def _get_packed_sequence_batch_size(
     batch_sizes: Tensor, sorted_indices: Tensor | None
-) -> int | torch.SymInt:
+) -> int:
+    # TorchScript treats SymInt as int and cannot compile int | torch.SymInt.
     if not torch.jit.is_scripting() and sorted_indices is not None:
-        return sorted_indices.size(0)
+        return cast(int, sorted_indices.size(0))
     if not torch.jit.is_scripting():
-        return cast(int | torch.SymInt, batch_sizes[0].item())
+        return cast(int, batch_sizes[0].item())
     return batch_sizes[0]  # pyrefly: ignore [bad-return]
 
 
@@ -365,7 +366,7 @@ class RNNBase(Module):
     def check_hidden_size(
         self,
         hx: Tensor,
-        expected_hidden_size: tuple[int, int | torch.SymInt, int],
+        expected_hidden_size: tuple[int, int, int],
         msg: str = "Expected hidden size {}, got {}",
     ) -> None:
         if hx.size() != expected_hidden_size:
