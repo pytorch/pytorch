@@ -25,7 +25,7 @@ from torch._library.custom_ops import custom_op
 def _get_mempool_by_index(index: int) -> torch.cuda.MemPool:
     mempool = get_external_object_by_index(index)
     if not isinstance(mempool, torch.cuda.MemPool):
-        raise AssertionError(
+        raise RuntimeError(
             f"use_mem_pool expected a torch.cuda.MemPool object at index {index}"
         )
     return mempool
@@ -89,8 +89,6 @@ class CUDAMemPoolVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "id":
-            from ..guards import GuardBuilder, install_guard
-
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(self.value.id)

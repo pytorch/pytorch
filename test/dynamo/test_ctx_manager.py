@@ -2129,6 +2129,30 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(pool.use_count(), 1)
 
     @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_nested_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(outer_pool, inner_pool, inp):
+            with torch.cuda.use_mem_pool(outer_pool):
+                outer = inp + 1
+                with torch.cuda.use_mem_pool(inner_pool):
+                    inner = inp + 2
+                outer = outer + 3
+            return outer, inner
+
+        outer_pool = torch.cuda.MemPool()
+        inner_pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        outer, inner = torch.compile(fn, fullgraph=True)(outer_pool, inner_pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(outer, torch.full((16,), 5.0, device="cuda"))
+        self.assertEqual(inner, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(outer_pool.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(inner_pool.id)), 0)
+        self.assertEqual(outer_pool.use_count(), 1)
+        self.assertEqual(inner_pool.use_count(), 1)
+
+    @requires_cuda_and_triton
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
     def test_cuda_use_mem_pool_device_none_resolves_at_entry_inductor(self):
         torch.cuda.empty_cache()
