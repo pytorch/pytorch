@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 # Defined in torch/csrc/jit/python/python_tree_views.cpp
 
