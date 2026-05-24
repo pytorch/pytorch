@@ -3,7 +3,6 @@
 import contextlib
 import os
 import sys
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -159,7 +158,8 @@ class TestJoin(MultiProcessTestCase):
     @property
     def process_group(self) -> dist.ProcessGroup:
         pg = dist.group.WORLD
-        assert pg is not None, "No process group available"
+        if pg is None:
+            raise RuntimeError("No process group available")
         return pg
 
     def tearDown(self):
@@ -226,7 +226,7 @@ class TestJoin(MultiProcessTestCase):
             num_allreduces (int): number of all-reduces to perform per input.
             run_post_hooks (bool): ``True`` to run post-hooks; ``False``
                 otherwise.
-            expected_total (Optional[int]): ``None`` to not check the expected
+            expected_total (int | None): ``None`` to not check the expected
                 all-reduce total; otherwise, the expected total; default is
                 ``None``.
         """
