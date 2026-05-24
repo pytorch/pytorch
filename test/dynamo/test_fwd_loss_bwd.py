@@ -19,6 +19,83 @@ from torch.testing._internal.common_utils import (
 )
 
 
+@skipIfTorchDynamo()
+class TestAutogradGradDefault(TestCase):
+    @skipIfCrossRef
+    def test_autograd_grad_manual_update_default(self):
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = copy.deepcopy(mod_eager)
+        x = torch.randn(2, 4)
+
+        def step_fn(mod):
+            res = mod(x)
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            param_grads = torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+            for p, g_p in zip(params, param_grads):
+                if p.grad is None:
+                    p.grad = g_p
+                elif g_p is not None:
+                    p.grad.add_(g_p)
+            return loss.detach()
+
+        eager_loss = step_fn(mod_eager)
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_step_fn = torch.compile(
+            lambda: step_fn(mod_compiled), backend=backend, fullgraph=True
+        )
+        compiled_loss = compiled_step_fn()
+
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertTrue(
+            any(
+                node.target is torch.autograd.grad
+                for node in backend.graphs[0].graph.nodes
+            )
+        )
+
+    @skipIfCrossRef
+    def test_autograd_grad_default_rejects_external_grad_fn(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step(res):
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            return torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with external grad_fn",
+        ):
+            step(mod(x))
+
+    def test_tensor_backward_still_gated_by_trace_autograd_ops(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step():
+            loss = mod(x).sum()
+            loss.backward(inputs=list(mod.parameters()))
+            return loss.detach()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "trace_autograd_ops is off",
+        ):
+            step()
+
+
 @torch._dynamo.config.patch(trace_autograd_ops=True)
 @skipIfTorchDynamo()
 class TestForwardLossBackward(TestCase):
