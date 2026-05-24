@@ -7058,6 +7058,24 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=False,
             ).graph
 
+    def test_sym_min_positive_affine_guard_nonstrict(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape[1]
+                torch._check(torch.sym_min(64 * s, 512 * s) == 64 * s)
+                return x + 1
+
+        seq_len = torch.export.Dim("seq_len", min=1, max=128)
+
+        ep = export(
+            M(),
+            (torch.randn(1, 12),),
+            dynamic_shapes=({1: seq_len},),
+            strict=False,
+        )
+        x = torch.randn(1, 16)
+        self.assertTrue(torch.allclose(ep.module()(x), x + 1))
+
     def test_math_pow(self):
         class M(torch.nn.Module):
             def forward(self, x, y):

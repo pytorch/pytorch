@@ -923,8 +923,9 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         replaces that member; if this is never true, then the value is simply
         appended to the localzeros.
 
-        Unlike the sympy implementation, we only look for zero and one, we don't
-        do generic is connected test pairwise which is slow
+        Unlike the sympy implementation, we mostly look for zero and one.  For
+        two symbolic arguments, we also use a small dominance check when the
+        difference is simple enough to avoid the slow generic pairwise search.
         """
 
         # First, collapse all numeric arguments
@@ -944,10 +945,21 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             else:
                 other_values.add(arg)
 
-        # Special cases when there is only one symbolic value
         if num_value is None:
+            if len(other_values) == 2:
+                a, b = other_values
+                diff = a - b
+                if not _is_wide_add(diff):
+                    try:
+                        if diff.is_nonnegative:
+                            return {a} if cls is Max else {b}
+                        if diff.is_nonpositive:
+                            return {b} if cls is Max else {a}
+                    except (TypeError, ValueError):
+                        pass
             return other_values
 
+        # Special cases when there is only one symbolic value
         if len(other_values) == 0:
             return {num_value}
 

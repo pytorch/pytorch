@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    Max,
+    Min,
     OpaqueUnaryFn_cos,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
@@ -948,6 +950,14 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    def test_min_max_simplify_ordered_positive_terms(self):
+        s = sympy.Symbol("s", positive=True, integer=True)
+
+        self.assertEqual(Min(64 * s, 512 * s), 64 * s)
+        self.assertEqual(Max(64 * s, 512 * s), 512 * s)
+        self.assertEqual(Min(64 * s + 64, 512 * s + 512), 64 * s + 64)
+        self.assertEqual(Max(64 * s + 64, 512 * s + 512), 512 * s + 512)
+
     def test_pickle(self):
         x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
         r = pickle.loads(pickle.dumps(x))
