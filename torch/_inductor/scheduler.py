@@ -3239,6 +3239,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
 
         block_aliases = None
         pid_cache = {}
+        epilogue_needs_indexing = self.kernel_node.epilogue_requires_new_store(
+            self.fused_epilogue
+        )
         if ir_node.output_tile:
             k = len(ir_node.output_tile)
             _all_axes = ["XBLOCK", "YBLOCK", "ZBLOCK"]
@@ -3259,7 +3262,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             kernel_features,
             self,
             additional_args,
-            block_aliases=block_aliases,
+            block_aliases=block_aliases if epilogue_needs_indexing else None,
             pid_cache=pid_cache,
         )
         new_kernel_src = fused_user_kernel.codegen()
