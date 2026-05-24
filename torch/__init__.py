@@ -65,6 +65,19 @@ if TYPE_CHECKING:
     from torch.types import Device, IntLikeType
 
 
+def _format_symnode(value, format_spec, cast):
+    try:
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols(value):
+            return builtins.format(cast(value), format_spec)
+    except AssertionError:
+        if not value.node.has_hint():
+            return builtins.format(cast(value), format_spec)
+
+    return object.__format__(value, format_spec)
+
+
 __all__ = [
     "BoolStorage",
     "BoolTensor",
@@ -611,6 +624,9 @@ class SymInt:
     def __repr__(self):
         return self.node._graph_repr()
 
+    def __format__(self, format_spec):
+        return _format_symnode(self, format_spec, builtins.int)
+
     def _sympy_(self):
         return self.node.expr
 
@@ -748,6 +764,9 @@ class SymFloat:
     def __repr__(self):
         return self.node._graph_repr()
 
+    def __format__(self, format_spec):
+        return _format_symnode(self, format_spec, builtins.float)
+
     def _sympy_(self):
         return self.node.expr
 
@@ -819,6 +838,9 @@ class SymBool:
 
     def __repr__(self):
         return self.node._graph_repr()
+
+    def __format__(self, format_spec):
+        return _format_symnode(self, format_spec, builtins.bool)
 
     def _sympy_(self):
         return self.node.expr

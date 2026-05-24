@@ -1856,6 +1856,7 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIs(j1 == j3, False)
         self.assertIs(j1 != j3, True)
         self.assertIs(j1 != j2, False)
+        self.assertEqual(f"{j3}", "j3")
 
         x = self.get_constant_bool(True)
         #
