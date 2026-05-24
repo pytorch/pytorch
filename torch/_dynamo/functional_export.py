@@ -818,6 +818,8 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
 def dynamo_graph_capture_for_export(
     fn: Callable[..., Any],
     constraints: list[Constraint] | None = None,
+    *,
+    export: bool = False,
 ) -> Callable[..., Any]:
     if isinstance(fn, torch._ops.OpOverload):
 
@@ -847,7 +849,9 @@ def op_overload_wrapper({", ".join(arg_list)}):
         with (
             _compiling_state_context(),
             torch._dynamo.config.patch(
-                replay_side_effects=False, side_effect_replay_policy="warn"
+                replay_side_effects=False,
+                side_effect_replay_policy="warn",
+                lift_export_input_symbols=export,
             ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
@@ -857,6 +861,7 @@ def op_overload_wrapper({", ".join(arg_list)}):
                 args,
                 kwargs,
                 constraints=constraints,
+                _is_export_deprecated_do_not_use=export,
             )
         graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module

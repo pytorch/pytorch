@@ -53,6 +53,7 @@ from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
+    _unlift_symbolic_placeholders,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch.export.graph_signature import (
@@ -508,6 +509,211 @@ graph():
 
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
+
+    def test_strict_export_lifts_symint_in_torch_ir_and_unlifts_later(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + x.shape[0]
+
+        inp = (torch.randn(3, 2),)
+        dynamic_shapes = {"x": {0: Dim("batch", min=1)}}
+
+        gm = _export_to_torch_ir(
+            Module(),
+            inp,
+            {},
+            dynamic_shapes,
+            preserve_module_call_signature=(),
+            restore_fqn=False,
+            prefer_deferred_runtime_asserts_over_guards=False,
+            _log_export_usage=False,
+        )
+        placeholders = list(gm.graph.find_nodes(op="placeholder"))
+        symint_placeholders = [
+            node
+            for node in placeholders
+            if isinstance(node.meta.get("val"), torch.SymInt)
+        ]
+        tensor_placeholders = [
+            node
+            for node in placeholders
+            if isinstance(node.meta.get("val"), torch.Tensor)
+        ]
+
+        self.assertEqual(len(symint_placeholders), 1)
+        self.assertEqual(len(tensor_placeholders), 1)
+        self.assertEqual(
+            symint_placeholders[0].meta["val"].node.expr,
+            tensor_placeholders[0].meta["val"].shape[0].node.expr,
+        )
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        symint_source = getattr(symint_placeholders[0], "_dynamo_source", None)
+        tensor_source = getattr(tensor_placeholders[0], "_dynamo_source", None)
+        self.assertIsInstance(symint_source, TensorPropertySource)
+        self.assertEqual(symint_source.prop, TensorProperty.SIZE)
+        self.assertEqual(symint_source.idx, 0)
+        self.assertEqual(symint_source.base, tensor_source)
+        self.assertFalse(
+            any(node.target == torch.ops.aten.sym_size.int for node in gm.graph.nodes)
+        )
+        self.assertTrue(
+            any(symint_placeholders[0] in node.args for node in gm.graph.nodes)
+        )
+
+        ep = export(
+            Module(),
+            inp,
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
+        )
+        final_placeholders = list(ep.graph.find_nodes(op="placeholder"))
+        sym_size_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+
+        self.assertEqual(len(final_placeholders), 1)
+        self.assertEqual(final_placeholders[0].name, "x")
+        self.assertIsInstance(final_placeholders[0].meta["val"], torch.Tensor)
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], final_placeholders[0])
+        self.assertEqual(sym_size_nodes[0].args[1], 0)
+        self.assertEqual(ep.module()(torch.randn(4, 2)).shape, torch.Size([4, 2]))
+
+    def test_strict_export_unlifts_shape_only_output(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.shape[0]
+
+        inp = (torch.randn(3, 2),)
+        dynamic_shapes = {"x": {0: Dim("batch", min=1)}}
+
+        ep = export(Module(), inp, dynamic_shapes=dynamic_shapes, strict=True)
+        final_placeholders = list(ep.graph.find_nodes(op="placeholder"))
+        sym_size_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+
+        self.assertEqual(len(final_placeholders), 1)
+        self.assertEqual(final_placeholders[0].name, "x")
+        self.assertIsInstance(final_placeholders[0].meta["val"], torch.Tensor)
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], final_placeholders[0])
+        self.assertEqual(sym_size_nodes[0].args[1], 0)
+        self.assertIsNotNone(sym_size_nodes[0].meta.get("nn_module_stack"))
+        self.assertEqual(ep.module()(torch.randn(4, 2)), 4)
+
+    def test_strict_export_unlifts_shape_output_with_tensor_output(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return (x.shape[0], x + 1)
+
+        inp = (torch.randn(3, 2),)
+        dynamic_shapes = {"x": {0: Dim("batch", min=1)}}
+
+        ep = export(Module(), inp, dynamic_shapes=dynamic_shapes, strict=True)
+        final_placeholders = list(ep.graph.find_nodes(op="placeholder"))
+        sym_size_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+        runtime_inp = torch.randn(4, 2)
+        out = ep.module()(runtime_inp)
+
+        self.assertEqual(len(final_placeholders), 1)
+        self.assertEqual(final_placeholders[0].name, "x")
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("x",))
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], final_placeholders[0])
+        self.assertIsNotNone(sym_size_nodes[0].meta.get("nn_module_stack"))
+        self.assertEqual(out[0], 4)
+        self.assertEqual(out[1], runtime_inp + 1)
+
+    def test_unlift_symbolic_placeholders_preserves_explicit_symint_input(self):
+        from torch._dynamo.source import (
+            ConstantSource,
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
+        from torch._functorch._aot_autograd.schemas import GraphSignature
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        with FakeTensorMode(shape_env=shape_env):
+            s0 = shape_env.create_symintnode(
+                shape_env.create_symbol(
+                    val=3,
+                    source=ConstantSource("s0"),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                ),
+                hint=3,
+            )
+            x_meta = torch.empty((s0, 2), device="meta")
+
+        graph = torch.fx.Graph()
+        n = graph.placeholder("n")
+        n.meta["val"] = s0
+        lifted_s0 = graph.placeholder("lifted_s0")
+        lifted_s0.meta["val"] = s0
+        x = graph.placeholder("x")
+        x.meta["val"] = x_meta
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, lifted_s0))
+        add.meta["val"] = x_meta
+        graph.output((add, n))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        leaf_spec = pytree.tree_flatten((None,))[1]
+        graph_signature = GraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=["n", "lifted_s0", "x"],
+            user_outputs=["add", "n"],
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            parameters_to_mutate={},
+            user_inputs_to_mutate={},
+            in_spec=leaf_spec,
+            out_spec=leaf_spec,
+            backward_signature=None,
+            input_tokens=[],
+            output_tokens=[],
+        )
+        x_source = LocalSource("x", is_input=True)
+
+        _unlift_symbolic_placeholders(
+            gm,
+            graph_signature,
+            [
+                LocalSource("n", is_input=True),
+                TensorPropertySource(x_source, TensorProperty.SIZE, 0),
+                x_source,
+            ],
+        )
+
+        placeholders = list(gm.graph.find_nodes(op="placeholder"))
+        sym_size_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+        self.assertEqual([node.name for node in placeholders], ["n", "x"])
+        self.assertEqual(graph_signature.user_inputs, ["n", "x"])
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], placeholders[1])
+        self.assertEqual(sym_size_nodes[0].args[1], 0)
+        self.assertTrue(
+            any(placeholders[0] in node.all_input_nodes for node in gm.graph.nodes)
+        )
 
     def test_export_strict_narrow_unbacked_expr(self):
         # Tests that we are able to handle 0/1 specialization on sizes represented

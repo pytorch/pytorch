@@ -57,6 +57,7 @@ def insert_deferred_runtime_asserts(
     shape_env: ShapeEnv,
     name: str,
     export: bool = False,
+    emit_runtime_asserts: bool = True,
 ) -> None:
     """
     During tracing, we may have discovered that some data-dependent values
@@ -243,6 +244,8 @@ def insert_deferred_runtime_asserts(
         )
 
     def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
+        if not emit_runtime_asserts:
+            return
         for ra in ras:
             if (
                 # redundant
@@ -369,7 +372,7 @@ def insert_deferred_runtime_asserts(
                 add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             # deduplicate asserts already present in graph, and remove trivial asserts
-            if node.target in (
+            if emit_runtime_asserts and node.target in (
                 torch._check,
                 torch.ops.aten._assert_scalar.default,
             ):
@@ -463,7 +466,7 @@ def insert_deferred_runtime_asserts(
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.
-            if node.target in (
+            if emit_runtime_asserts and node.target in (
                 torch.ops.aten.sym_constrain_range.default,
                 torch.ops.aten.sym_constrain_range_for_size.default,
             ):
@@ -624,7 +627,10 @@ def insert_deferred_runtime_asserts(
                     # treat upper bound == sys.maxsize - 1 for int symbols as +oo
                     # to avoid redundant runtime assert
                     vr = ValueRanges(vr.lower, int_oo)
-                if not shape_env._default_unspecified_value_range().issubset(vr):
+                if (
+                    emit_runtime_asserts
+                    and not shape_env._default_unspecified_value_range().issubset(vr)
+                ):
                     # The runtime range is constrained, so add a runtime
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime

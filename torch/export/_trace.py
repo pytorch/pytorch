@@ -24,6 +24,14 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._dynamo.source import (
+    AttrSource,
+    DictGetItemSource,
+    GetItemSource,
+    LocalSource,
+    TensorProperty,
+    TensorPropertySource,
+)
 from torch._export.db.logging import (
     exportdb_error_message,
     get_class_if_classified_error,
@@ -44,6 +52,7 @@ from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
 )
 from torch._export.utils import (
+    _bind_signature_to_inputs,
     _collect_param_buffer_metadata,
     _compiling_state_context,
     _fakify_params_buffers,
@@ -70,7 +79,7 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_joint_with_descriptors,
 )
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import detect_fake_mode, Source, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import dtrace_structured
@@ -588,6 +597,194 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
+def _source_from_public_input_path(path) -> Source | None:
+    if not path or not isinstance(path[0], pytree.MappingKey):
+        return None
+    if not isinstance(path[0].key, str):
+        return None
+
+    source: Source = LocalSource(path[0].key, is_input=True)
+    for key in path[1:]:
+        if isinstance(key, pytree.SequenceKey):
+            source = GetItemSource(source, key.idx)
+        elif isinstance(key, pytree.MappingKey):
+            source = DictGetItemSource(source, key.key)
+        elif isinstance(key, pytree.GetAttrKey):
+            source = AttrSource(source, key.name)
+        else:
+            return None
+    return source
+
+
+def _collect_public_input_source_values(
+    mod: torch.nn.Module,
+    fake_args,
+    fake_kwargs,
+) -> tuple[list[Source], dict[Source, Any]]:
+    combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
+    flat_args_with_path, _ = pytree.tree_flatten_with_path(combined_args)
+
+    public_input_sources = []
+    source_to_value = {}
+    for path, value in flat_args_with_path:
+        source = _source_from_public_input_path(path)
+        if source is None:
+            continue
+        public_input_sources.append(source)
+        source_to_value[source] = value
+    return public_input_sources, source_to_value
+
+
+def _root_nn_module_stack(mod: torch.nn.Module) -> dict[str, tuple[str, str]]:
+    root_cls = type(mod)
+    return {
+        "L__self__": ("", root_cls.__module__ + "." + root_cls.__qualname__),
+    }
+
+
+def _tracked_fake_for_source(symint: torch.SymInt, source: Source) -> Any | None:
+    shape_env = getattr(symint.node, "shape_env", None)
+    if shape_env is None:
+        return None
+
+    for tracked_fake in getattr(shape_env, "tracked_fakes", ()):
+        if tracked_fake.source == source:
+            return tracked_fake.fake
+    return None
+
+
+def _unlift_symbolic_placeholders(
+    gm: torch.fx.GraphModule,
+    graph_signature,
+    aot_input_sources,
+    public_input_sources=None,
+    source_to_public_input_value=None,
+    default_node_meta=None,
+) -> None:
+    placeholders = list(gm.graph.find_nodes(op="placeholder"))
+    if not placeholders or not aot_input_sources:
+        return
+
+    public_input_sources = public_input_sources or []
+    source_to_public_input_value = source_to_public_input_value or {}
+    default_node_meta = default_node_meta or {}
+
+    if len(graph_signature.user_inputs) != len(aot_input_sources):
+        raise AssertionError(
+            "Expected AOT input source metadata to line up with graph signature "
+            f"user inputs, got {len(aot_input_sources)} sources for "
+            f"{len(graph_signature.user_inputs)} user inputs."
+        )
+
+    placeholders_by_name = {node.name: node for node in placeholders}
+    input_name_to_source = dict(zip(graph_signature.user_inputs, aot_input_sources))
+    source_to_input_name = {
+        source: name
+        for name, source in input_name_to_source.items()
+        if source is not None
+    }
+
+    removed_placeholders: set[str] = set()
+    reintroduced_user_inputs: list[str] = []
+    for node_name, source in list(input_name_to_source.items()):
+        if not isinstance(source, TensorPropertySource):
+            continue
+
+        node = placeholders_by_name.get(node_name)
+        if node is None or not isinstance(node.meta.get("val"), torch.SymInt):
+            continue
+
+        base_node_name = source_to_input_name.get(source.base)
+        base_node = (
+            placeholders_by_name.get(base_node_name)
+            if base_node_name is not None
+            else None
+        )
+        if base_node is None:
+            base_value = _tracked_fake_for_source(node.meta["val"], source.base)
+            if base_value is None:
+                base_value = source_to_public_input_value.get(source.base)
+            if not isinstance(base_value, torch.Tensor):
+                raise AssertionError(
+                    f"Could not find tensor input for lifted source {source.name}"
+                )
+            first_non_placeholder = next(
+                (node for node in gm.graph.nodes if node.op != "placeholder"), None
+            )
+            with gm.graph.inserting_before(first_non_placeholder):
+                base_node = gm.graph.placeholder(f"arg{len(placeholders_by_name)}_1")
+            base_node.meta["val"] = base_value
+            base_node._dynamo_source = source.base  # type: ignore[attr-defined]
+            placeholders_by_name[base_node.name] = base_node
+            input_name_to_source[base_node.name] = source.base
+            source_to_input_name[source.base] = base_node.name
+            reintroduced_user_inputs.append(base_node.name)
+
+        if node.users:
+            if source.prop is TensorProperty.SIZE:
+                target = torch.ops.aten.sym_size.int
+                args = (base_node, source.idx)
+            elif source.prop is TensorProperty.STRIDE:
+                target = torch.ops.aten.sym_stride.int
+                args = (base_node, source.idx)
+            elif source.prop is TensorProperty.STORAGE_OFFSET:
+                target = torch.ops.aten.sym_storage_offset.default
+                args = (base_node,)
+            else:
+                raise AssertionError(f"Unsupported tensor property source: {source}")
+
+            first_non_placeholder = next(
+                (node for node in gm.graph.nodes if node.op != "placeholder"), None
+            )
+            with gm.graph.inserting_before(first_non_placeholder):
+                replacement = gm.graph.call_function(target, args)
+                replacement.meta.update(node.meta)
+                for user in (*node.users, *base_node.users):
+                    if user.op == "output":
+                        continue
+                    for key in ("nn_module_stack", "stack_trace", "custom"):
+                        if key not in replacement.meta and key in user.meta:
+                            replacement.meta[key] = user.meta[key]
+                for key in ("nn_module_stack", "stack_trace", "custom"):
+                    if key not in replacement.meta and key in default_node_meta:
+                        replacement.meta[key] = default_node_meta[key]
+            node.replace_all_uses_with(replacement)
+        gm.graph.erase_node(node)
+        removed_placeholders.add(node.name)
+
+    if removed_placeholders:
+        remaining_user_inputs = [
+            name
+            for name in graph_signature.user_inputs
+            if name not in removed_placeholders
+        ]
+        remaining_user_inputs.extend(reintroduced_user_inputs)
+        if public_input_sources:
+            source_to_user_input_names: dict[Source, list[str]] = {}
+            for name in remaining_user_inputs:
+                source = input_name_to_source[name]
+                source_to_user_input_names.setdefault(source, []).append(name)
+
+            ordered_user_inputs = []
+            for source in public_input_sources:
+                ordered_user_inputs.extend(source_to_user_input_names.pop(source, []))
+            for name in remaining_user_inputs:
+                if name not in ordered_user_inputs:
+                    ordered_user_inputs.append(name)
+            remaining_user_inputs = ordered_user_inputs
+
+        graph_signature.user_inputs = remaining_user_inputs
+        first_non_placeholder = next(
+            (node for node in gm.graph.nodes if node.op != "placeholder"), None
+        )
+        if first_non_placeholder is not None:
+            for name in graph_signature.user_inputs:
+                if name in placeholders_by_name:
+                    first_non_placeholder.prepend(placeholders_by_name[name])
+        gm.graph.lint()
+        gm.recompile()
+
+
 def _produce_aten_artifact(
     *,
     gm: torch.fx.GraphModule,
@@ -598,6 +795,13 @@ def _produce_aten_artifact(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
+    public_fake_args=None,
+    public_fake_kwargs=None,
+    mod_for_placeholder_naming=None,
+    aot_input_sources=None,
+    public_input_sources=None,
+    source_to_public_input_value=None,
+    default_unlift_node_meta=None,
     _prettify_placeholder_names=True,
 ) -> ATenExportArtifact:
     """
@@ -615,8 +819,21 @@ def _produce_aten_artifact(
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
-    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    public_fake_args = fake_args if public_fake_args is None else public_fake_args
+    public_fake_kwargs = (
+        fake_kwargs if public_fake_kwargs is None else public_fake_kwargs
+    )
+    flat_fake_args = pytree.tree_leaves((public_fake_args, public_fake_kwargs))
     gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
+    if aot_input_sources is not None:
+        _unlift_symbolic_placeholders(
+            gm,
+            graph_signature,
+            aot_input_sources,
+            public_input_sources=public_input_sources,
+            source_to_public_input_value=source_to_public_input_value,
+            default_node_meta=default_unlift_node_meta,
+        )
 
     # Simplify unbacked_bindings by recomputing them.
     # Useful for any pass that's interpreter-based and might call rebind_unbacked(),
@@ -678,9 +895,9 @@ def _produce_aten_artifact(
         placeholder_naming_pass(
             gm,
             export_graph_signature,
-            mod,
-            fake_args,
-            fake_kwargs,
+            mod if mod_for_placeholder_naming is None else mod_for_placeholder_naming,
+            public_fake_args,
+            public_fake_kwargs,
             fake_params_buffers,
             constants,
         )
@@ -903,13 +1120,34 @@ def _export_to_torch_ir(
                     )
 
                     if use_legacy_dynamo_graph_capture():
-                        dynamo_graph_capture = _dynamo_graph_capture_for_export(
-                            f, constraints=constraints, dynamic_shapes=dynamic_shapes
-                        )
+                        if constraints or dynamic_shapes:
+                            # Dynamic export needs bytecode-flattened capture here:
+                            # the transformer capture keeps the public signature
+                            # and does not preserve TensorPropertySource on the
+                            # lifted shape placeholders we unlift after AOT.
+                            dynamo_graph_capture = torch._dynamo.config.patch(
+                                replay_side_effects=False,
+                                assume_static_by_default=True,
+                            )(
+                                dynamo_graph_capture_for_export(
+                                    f, constraints=constraints, export=True
+                                )
+                            )
+                        else:
+                            dynamo_graph_capture = _dynamo_graph_capture_for_export(
+                                f,
+                                constraints=constraints,
+                                dynamic_shapes=dynamic_shapes,
+                            )
                     else:
                         dynamo_graph_capture = torch._dynamo.config.patch(
-                            replay_side_effects=False
-                        )(dynamo_graph_capture_for_export(f))
+                            replay_side_effects=False,
+                            assume_static_by_default=True,
+                        )(
+                            dynamo_graph_capture_for_export(
+                                f, export=bool(constraints or dynamic_shapes)
+                            )
+                        )
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
@@ -1015,6 +1253,13 @@ def _export_to_aten_ir(
     decomp_table=None,
     _prettify_placeholder_names: bool = True,
     decompose_custom_triton_ops: bool = False,
+    public_fake_args=None,
+    public_fake_kwargs=None,
+    mod_for_placeholder_naming=None,
+    aot_input_sources=None,
+    public_input_sources=None,
+    source_to_public_input_value=None,
+    default_unlift_node_meta=None,
 ) -> ATenExportArtifact:
     custom_triton_ops_decomposition_ctx = (
         nullcontext
@@ -1090,6 +1335,13 @@ def _export_to_aten_ir(
         fake_args=fake_args,
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
+        public_fake_args=public_fake_args,
+        public_fake_kwargs=public_fake_kwargs,
+        mod_for_placeholder_naming=mod_for_placeholder_naming,
+        aot_input_sources=aot_input_sources,
+        public_input_sources=public_input_sources,
+        source_to_public_input_value=source_to_public_input_value,
+        default_unlift_node_meta=default_unlift_node_meta,
         _prettify_placeholder_names=_prettify_placeholder_names,
     )
 
@@ -1665,8 +1917,15 @@ def _strict_export(
         # Since we're using bytecode codegen, we need to separately apply tuple
         # output instead of modifying pytree spec inplace.
         orig_arg_names = gm_torch_level.graph._codegen.orig_arg_names
-        out_spec = orig_out_spec = None
-        wrap_tuple = gm_torch_level.graph._codegen.wrap_tuple = True
+        if dynamo_fake_mode is None:
+            raise AssertionError("dynamo_fake_mode must not be None")
+        with dynamo_fake_mode:
+            _, orig_out_spec = pytree.tree_flatten(
+                gm_torch_level(*fake_args, **fake_kwargs)
+            )
+        out_spec = orig_out_spec
+        if out_spec.type not in (list, tuple):
+            wrap_tuple = gm_torch_level.graph._codegen.wrap_tuple = True
     else:
         raise RuntimeError(f"Unknown codegen type: {gm_torch_level.graph._codegen}")
 
@@ -1701,13 +1960,55 @@ def _strict_export(
         tracing(tx),
         mock.patch.object(dynamo_fake_mode, "allow_non_fake_inputs", True),
     ):
+        public_fake_args = fake_args
+        public_fake_kwargs = fake_kwargs
+        public_input_sources = None
+        source_to_public_input_value = None
+        default_unlift_node_meta = None
+        placeholder_nodes = list(gm_torch_level.graph.find_nodes(op="placeholder"))
+        aot_input_sources = [
+            getattr(node, "_dynamo_source", None) for node in placeholder_nodes
+        ]
+        has_lifted_tensor_property_input = any(
+            isinstance(source, TensorPropertySource) for source in aot_input_sources
+        )
+        if has_lifted_tensor_property_input:
+            aot_args = tuple(
+                node.meta["val"]
+                if "val" in node.meta and node.meta["val"] is not None
+                else node.meta.get("example_value")
+                for node in placeholder_nodes
+            )
+            gm_torch_level.graph._codegen = torch.fx.graph.CodeGen()
+            gm_torch_level.recompile()
+            public_input_sources, source_to_public_input_value = (
+                _collect_public_input_source_values(
+                    mod, public_fake_args, public_fake_kwargs
+                )
+            )
+            default_unlift_node_meta = {
+                "nn_module_stack": _root_nn_module_stack(mod),
+            }
+        else:
+            aot_args = _convert_to_positional_args(
+                orig_arg_names, fake_args, fake_kwargs
+            )
+            aot_input_sources = None
+
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
-            _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+            aot_args,
             {},
             fake_params_buffers,
             constant_attrs,
+            public_fake_args=public_fake_args,
+            public_fake_kwargs=public_fake_kwargs,
+            mod_for_placeholder_naming=mod,
+            aot_input_sources=aot_input_sources,
+            public_input_sources=public_input_sources,
+            source_to_public_input_value=source_to_public_input_value,
+            default_unlift_node_meta=default_unlift_node_meta,
         )
 
     # Decompose for readability.
@@ -1765,6 +2066,13 @@ def _export_to_aten_ir_make_fx(
     constant_attrs: ConstantAttrMap,
     produce_guards_callback=None,
     transform=lambda x: x,
+    public_fake_args=None,
+    public_fake_kwargs=None,
+    mod_for_placeholder_naming=None,
+    aot_input_sources=None,
+    public_input_sources=None,
+    source_to_public_input_value=None,
+    default_unlift_node_meta=None,
 ) -> ATenExportArtifact:
     def _make_fx_helper(stack, mod, args, kwargs, **flags):
         kwargs = kwargs or {}
@@ -2045,6 +2353,13 @@ def _export_to_aten_ir_make_fx(
         fake_args=fake_args,
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
+        public_fake_args=public_fake_args,
+        public_fake_kwargs=public_fake_kwargs,
+        mod_for_placeholder_naming=mod_for_placeholder_naming,
+        aot_input_sources=aot_input_sources,
+        public_input_sources=public_input_sources,
+        source_to_public_input_value=source_to_public_input_value,
+        default_unlift_node_meta=default_unlift_node_meta,
     )
 
 
