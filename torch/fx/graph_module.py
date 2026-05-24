@@ -177,9 +177,13 @@ def _format_import_statement(name: str, obj: object, importer: Importer) -> str:
 
 
 def _format_import_block(globals: dict[str, Any], importer: Importer) -> str:
-    import_strs: set[str] = {
-        _format_import_statement(name, obj, importer) for name, obj in globals.items()
-    }
+    import_strs: set[str] = set()
+    for name, obj in globals.items():
+        if isinstance(obj, str):
+            # Forward-reference string annotations are globals in generated code.
+            import_strs.add(f"{name} = {obj!r}")
+        else:
+            import_strs.add(_format_import_statement(name, obj, importer))
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
