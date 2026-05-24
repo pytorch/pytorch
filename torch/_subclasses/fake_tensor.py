@@ -245,6 +245,8 @@ def _fake_tensor_leaves(x: object) -> list[FakeTensor]:
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
+    if isinstance(x, FakeTensor):
+        return True
     return _append_fake_tensor_leaves(x, [])
 
 
@@ -2575,8 +2577,8 @@ class FakeTensorMode(TorchDispatchMode):
             if type(args[0]) is Tensor:
                 return converter.from_real_tensor(self, args[0])
 
-        # Recompute flat_arg_fake_tensors here again in case some of the inputs
-        # were real tensors and fakified in validate_and_convert_non_fake_tensors
+        # Recompute fake tensors and fake leaves here again in case some of the
+        # inputs were real tensors and fakified in validate_and_convert_non_fake_tensors.
         (flat_args, flat_arg_fake_tensors) = self.validate_and_convert_non_fake_tensors(
             func, converter, flat_args, args_spec
         )
