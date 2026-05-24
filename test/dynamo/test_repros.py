@@ -66,6 +66,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     SM70OrLater,
+    tf32_enabled,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -9192,6 +9193,41 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 class CUDAReproTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_aot_eager_decomp_partition_layer_norm_sequence_reduction_conv_tf32(
+        self,
+    ):
+        if not torch.cuda.is_tf32_supported():
+            raise unittest.SkipTest("requires TF32")
+
+        height = 64
+        width = 64
+        channels = 16
+
+        class LayerNormSequenceReduction(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(channels)
+                self.sr = torch.nn.Conv2d(channels, channels, kernel_size=8, stride=8)
+
+            def forward(self, x):
+                x = self.norm(x)
+                batch, _, num_channels = x.shape
+                x = x.permute(0, 2, 1).reshape(batch, num_channels, height, width)
+                return self.sr(x)
+
+        torch.manual_seed(0)
+        model = LayerNormSequenceReduction().eval().cuda()
+        x = torch.randn(2, height * width, channels, device="cuda")
+
+        with torch.no_grad(), tf32_enabled():
+            eager = model(x)
+
+            compiled = torch.compile(
+                model, backend="aot_eager_decomp_partition", fullgraph=True
+            )(x)
+            torch.testing.assert_close(eager, compiled)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_sync(self):
         def fn(x):
