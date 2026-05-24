@@ -1750,6 +1750,12 @@
   ],
   "GB0131": [
     {
+      "Gb_type": "Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
+      "Context": "code name: {code.co_name}, args: {args}",
+      "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
+      "Hints": []
+    },
+    {
       "Gb_type": "Unsupported __setitem__/__setattr__ inline attempt",
       "Context": "code name: {code.co_name}, args: {args}",
       "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
@@ -2793,6 +2799,17 @@
       "Hints": []
     }
   ],
+  "GB4393": [
+    {
+      "Gb_type": "issubclass() with unsupported arguments",
+      "Context": "issubclass({derived}, {cls})",
+      "Explanation": "Arguments to issubclass() must be backed by python values.",
+      "Hints": [
+        "Make sure your arguments are types.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0203": [
     {
       "Gb_type": "non-const keys in dict_keys",
@@ -2870,6 +2887,14 @@
         "Remove torch._dynamo.assume_constant_result from this function",
         "Ensure all arguments passed to the function can be converted to constants"
       ]
+    }
+  ],
+  "GB0781": [
+    {
+      "Gb_type": "unsupported __setitem__ (sq_ass_item)",
+      "Context": "sq_ass_item_impl {self} {key} {value}",
+      "Explanation": "Dynamo does not know how to handle sq_ass_item on {self}",
+      "Hints": []
     }
   ],
   "GB0209": [
@@ -4884,6 +4909,16 @@
       "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
       "Hints": [
         "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB7786": [
+    {
+      "Gb_type": "missing_mp_ass_subscript",
+      "Context": "mp_ass_subscript_impl not defined for {self.python_type_name()}",
+      "Explanation": "Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
