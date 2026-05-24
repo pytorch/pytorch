@@ -765,6 +765,24 @@ class TestAutogradFunctional(TestCase):
             autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
+    def test_jacobian_err_check_forward_mode_requires_vectorize(self, ctors):
+        # See https://github.com/pytorch/pytorch/issues/184842 -
+        # strategy='forward-mode' with vectorize=False must be rejected at
+        # argument-validation time with a ValueError, not at execution time
+        # with a NotImplementedError raised from deep inside _jacfwd.
+        def foo(x):
+            return x.exp()
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError, r'strategy="forward-mode"` requires `vectorize=True`'
+        ):
+            autogradF.jacobian(foo, inp, strategy="forward-mode", vectorize=False)
+
+        # The combination that *is* supported keeps working.
+        autogradF.jacobian(foo, inp, strategy="forward-mode", vectorize=True)
+
+    @base_and_logging_tensor
     def test_jacobian_no_grad(self, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
@@ -1123,6 +1141,26 @@ class TestAutogradFunctional(TestCase):
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             autogradF.hessian(foo, inp, strict=True, vectorize=True)
+
+    @base_and_logging_tensor
+    def test_hessian_err_check_forward_mode_requires_vectorize(self, ctors):
+        # See https://github.com/pytorch/pytorch/issues/184842 - same as
+        # the jacobian case, but for outer_jacobian_strategy on hessian.
+        def foo(x):
+            return (x**3).sum()
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError,
+            r'outer_jacobian_strategy="forward-mode"` requires `vectorize=True`',
+        ):
+            autogradF.hessian(
+                foo, inp, outer_jacobian_strategy="forward-mode", vectorize=False
+            )
+
+        autogradF.hessian(
+            foo, inp, outer_jacobian_strategy="forward-mode", vectorize=True
+        )
 
     @base_and_logging_tensor
     def test_hessian_no_grad(self, ctors):
