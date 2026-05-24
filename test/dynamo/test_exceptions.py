@@ -1127,6 +1127,52 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(torch.zeros(1)), 1)
 
+    @parametrize("use_builtin", [False, True])
+    def test_invalid_weakref_setattr_in_try_except(self, use_builtin):
+        class Custom:
+            pass
+
+        attr_name = "__weakref__"
+
+        def fn(x, obj):
+            try:
+                if use_builtin:
+                    setattr(obj, attr_name, None)
+                else:
+                    obj.__weakref__ = None
+            except AttributeError:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(3)
+        ref = fn(x, Custom())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, Custom())
+        self.assertEqual(ref, res)
+
+    @parametrize("use_builtin", [False, True])
+    def test_invalid_dunder_dict_setattr_in_try_except(self, use_builtin):
+        class Custom:
+            pass
+
+        attr_name = "__dict__"
+
+        def fn(x, obj):
+            try:
+                if use_builtin:
+                    setattr(obj, attr_name, [])
+                else:
+                    obj.__dict__ = []
+            except TypeError:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(3)
+        ref = fn(x, Custom())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, Custom())
+        self.assertEqual(ref, res)
+
     def test_exception_traceback_access(self):
         # Test that __traceback__ is accessible after raising/catching an exception
         def fn(x):
