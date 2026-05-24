@@ -243,6 +243,49 @@ def extend_user_visible_output_strides(
     return result
 
 
+def _has_non_overlapping_strided_slice_users(n: Node) -> bool:
+    """Detect x[r::s] fanout where distinct residues do not reuse elements."""
+    users = list(n.users)
+    if len(users) <= 1:
+        return False
+
+    slice_dim: int | None = None
+    slice_step: int | None = None
+    residues: OrderedSet[int] = OrderedSet()
+    for user in users:
+        if user.target is not aten.slice.Tensor or len(user.args) < 5:
+            return False
+        if user.args[0] is not n:
+            return False
+
+        dim, start, _end, step = user.args[1:5]
+        if not (
+            isinstance(dim, int) and isinstance(start, int) and isinstance(step, int)
+        ):
+            return False
+        if start < 0 or step <= 1:
+            return False
+
+        if dim < 0:
+            val = n.meta.get("val")
+            if val is None:
+                return False
+            dim += val.dim()
+
+        if slice_dim is None:
+            slice_dim = dim
+            slice_step = step
+        elif dim != slice_dim or step != slice_step:
+            return False
+
+        residue = start % step
+        if residue in residues:
+            return False
+        residues.add(residue)
+
+    return True
+
+
 def mark_nodes_dislike_padding(
     g: Graph, user_visible_output_strides: dict[Node, tuple[int, ...]]
 ) -> None:
@@ -2023,6 +2066,9 @@ class GraphLowering(torch.fx.Interpreter):
             # already too many reads and rematerializing can be bad.
             num_users = len(OrderedSet(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
+                reuse_users = (
+                    1 if _has_non_overlapping_strided_slice_users(n) else num_users
+                )
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
@@ -2105,12 +2151,12 @@ class GraphLowering(torch.fx.Interpreter):
                     _data = _data.data
 
                 if isinstance(_data, StorageBox) and _data.should_realize_on_reuse(
-                    len(n.users)
+                    reuse_users
                 ):
                     result = maybe_apply_channels_last_stride_order(result, n)
 
                 # TODO(jansel): introduce a store vs inline choice
-                result.mark_reuse(len(n.users))
+                result.mark_reuse(reuse_users)
 
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
