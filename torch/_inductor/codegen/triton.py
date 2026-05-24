@@ -3255,7 +3255,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if len(self.features.reduction_nodes()) < 2:
             return False
         node_schedule = self.features.node_schedule
-        if DisableReduction not in node_schedule or EnableReduction not in node_schedule:
+        if (
+            DisableReduction not in node_schedule
+            or EnableReduction not in node_schedule
+        ):
             return False
         # Reusing loop-local full tiles is only correct when every R loop is
         # forced to a single iteration. Reuse the existing persistent-RBLOCK
@@ -3272,12 +3275,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.min_rblock = max(self.min_rblock or 1, persistent_rblock)
         return True
 
-    def _has_channel_resident_reduction_tile_shape(
-        self, value: CSEVariable
-    ) -> bool:
+    def _has_channel_resident_reduction_tile_shape(self, value: CSEVariable) -> bool:
         if value.shape is None:
             return False
-        value_dims = {str(dim) for dim in value.shape}
+        value_dims = OrderedSet([str(dim) for dim in value.shape])
         reduction_blocks = [
             tree.block_size_str() for tree in self.range_trees if tree.is_reduction
         ]
@@ -3297,11 +3298,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
         if not output.users:
             return False
-        scheduled_names = {
-            node.get_name()
-            for node in self.features.scheduler_nodes()
-            if isinstance(node, SchedulerNode)
-        }
+        scheduled_names = OrderedSet(
+            [
+                node.get_name()
+                for node in self.features.scheduler_nodes()
+                if isinstance(node, SchedulerNode)
+            ]
+        )
         for user in output.users:
             if isinstance(user.node, OutputNode):
                 return False
