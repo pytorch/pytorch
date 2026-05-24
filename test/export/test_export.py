@@ -364,6 +364,27 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_export_dynamic_dim_slice_with_step(self):
+        class SliceStep(torch.nn.Module):
+            def forward(self, input1):
+                return input1[::9, :]
+
+        model = SliceStep()
+        inp = (torch.randn(41, 6),)
+        ep = export(
+            model,
+            inp,
+            dynamic_shapes={"input1": {0: Dim("t1", min=1, max=1000)}},
+        )
+
+        for length in (1, 9, 10, 41):
+            test_inp = torch.randn(length, 6)
+            expected = model(test_inp)
+            actual = ep.module()(test_inp)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+            self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
+
     def test_no_grad_param_inplace(self):
         class Foo(torch.nn.Module):
             def __init__(self):

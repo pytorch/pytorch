@@ -1017,6 +1017,18 @@ def forward(self, x_1):
             )
         )
 
+    def test_contiguous_metadata_does_not_guard_on_symbolic_singleton_dim(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 41, duck=False)
+        a = torch.empty_strided(((s0 + 8) // 9, 6), (54, 1), device="meta")
+
+        self.assertFalse(
+            torch._prims_common.is_contiguous_for_memory_format_or_false(
+                a, memory_format=torch.contiguous_format
+            )
+        )
+        self.assertEqual(len(shape_env.guards), 0)
+
     def test_sympy_optimized_add_binary_search(self):
         import sympy
 
