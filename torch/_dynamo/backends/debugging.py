@@ -49,6 +49,21 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _inductor_decomp_table_without_native_layer_norm() -> dict[Any, Callable[..., Any]]:
+    decomp_table = import_module("torch._inductor.compile_fx").select_decomp_table()
+    decomp_table = dict(decomp_table)
+    # aot_eager_decomp_partition executes Inductor's decomp table eagerly. CUDA
+    # native_layer_norm and the generic decomposition are close but not
+    # bit-equivalent, and a following TF32 op can amplify that delta. Real
+    # Inductor can handle this as a codegen numerics/perf tradeoff; this eager
+    # debug backend keeps layer norm native to preserve eager numerics while
+    # isolating AOT/partitioning behavior.
+    native_layer_norm = torch.ops.aten.native_layer_norm
+    decomp_table.pop(native_layer_norm.default, None)
+    decomp_table.pop(native_layer_norm.out, None)
+    return decomp_table
+
+
 @register_backend
 def eager(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
@@ -460,10 +475,8 @@ def aot_eager_decomp_partition(
             # these are taken from memory_efficient_fusion()
             fw_compiler=get_nop_func(),
             bw_compiler=get_nop_func(),
-            # NB: lambda here is to delay import of inductor
-            decompositions=lambda: import_module(
-                "torch._inductor.compile_fx"
-            ).select_decomp_table(),
+            # NB: the helper delays import of inductor
+            decompositions=_inductor_decomp_table_without_native_layer_norm,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
@@ -487,10 +500,8 @@ def aot_eager_decomp_partition_with_mode(
         # these are taken from memory_efficient_fusion()
         fw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
         bw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
-        # NB: lambda here is to delay import of inductor
-        decompositions=lambda: import_module(
-            "torch._inductor.compile_fx"
-        ).select_decomp_table(),
+        # NB: the helper delays import of inductor
+        decompositions=_inductor_decomp_table_without_native_layer_norm,
         partition_fn=functools.partial(
             min_cut_rematerialization_partition, compiler="inductor"
         ),
