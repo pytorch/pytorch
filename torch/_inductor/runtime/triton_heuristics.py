@@ -786,15 +786,30 @@ class CachingAutotuner(KernelInterface):
             self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
         self._make_launchers()
 
-    def compile_by_disabling_pipelining(self, config):
+    def _can_disable_pipelining_for_launcher_error(
+        self, config: Config, exc: Exception | None
+    ) -> bool:
+        return (
+            isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+            and (config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1)
+            and self.inductor_meta.get("dynamic_disable_pipelining", True)
+        )
+
+    def _compile_config_with_disabled_pipelining(
+        self, config: Config
+    ) -> tuple[CompileResult[_KernelType], LauncherType]:
         self._ensure_kernel_loaded()
         cfg = copy.deepcopy(config)
         cfg.num_stages = 1
         if "NUM_STAGES" in cfg.kwargs:
             cfg.kwargs["NUM_STAGES"] = 1
         result = self._precompile_config(cfg)
+        return result, result.make_launcher()
+
+    def compile_by_disabling_pipelining(self, config):
+        result, launcher = self._compile_config_with_disabled_pipelining(config)
         self.compile_results = [result]
-        return result.make_launcher()
+        return launcher
 
     def _make_launcher(
         self, compile_result: CompileResult[_KernelType]
@@ -822,22 +837,40 @@ class CachingAutotuner(KernelInterface):
 
         device_interface = self.get_device_interface()
         launchers = []
+        compile_results = []
         exc = None
+        disabled_pipelining_failed = False
         # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             for result in self.compile_results:
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
+                    compile_results.append(result)
+                    continue
+                if self._can_disable_pipelining_for_launcher_error(result.config, exc):
+                    try:
+                        (
+                            fallback_result,
+                            fallback_launcher,
+                        ) = self._compile_config_with_disabled_pipelining(result.config)
+                        launchers.append(fallback_launcher)
+                        compile_results.append(fallback_result)
+                        continue
+                    except (
+                        OutOfResources,
+                        PTXASError,
+                        torch.cuda.OutOfMemoryError,
+                        IntelGPUError,
+                    ) as e:
+                        exc = e
+                        disabled_pipelining_failed = True
             if len(launchers) == 0:
                 result = self.compile_results[-1]
                 config = result.config
                 if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
-                    )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    not disabled_pipelining_failed
+                    and self._can_disable_pipelining_for_launcher_error(config, exc)
                 ):
                     self.launchers = [self.compile_by_disabling_pipelining(config)]
                     return
@@ -845,6 +878,7 @@ class CachingAutotuner(KernelInterface):
                     f"No valid triton configs. {type(exc).__name__}: {exc}"
                 )
         self.launchers = launchers
+        self.compile_results = compile_results
 
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
@@ -3721,17 +3755,131 @@ def pointwise(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
 
-    from torch._inductor.heuristics.registry import get_codegen_heuristic
+    configs = None
+    if len(size_hints) == 1:
+        if not inductor_meta.get("autotune_pointwise", True) and not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+        ):
+            configs = [triton_config_with_settings(size_hints, bs)]
+        else:
+            configs = [
+                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
+                triton_config_with_settings(
+                    size_hints, bs // 2, num_elements_per_warp=64
+                ),
+                *hinted_configs,
+            ]
+            # Additional configs appended for ROCm builds
+            if torch.version.hip:
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                        ),
+                        triton_config_with_settings(
+                            size_hints,
+                            4096,  # wrt: better than the max_block for some kernel
+                        ),
+                        triton_config_with_settings(
+                            size_hints,
+                            2048,
+                            num_warps=8,
+                            num_stages=2,
+                            waves_per_eu=1,  # 20% improvement
+                        ),
+                    ]
+                )
+                if inductor_meta.get("atomic_add_found"):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints,
+                                64,
+                                num_warps=1,
+                                num_stages=1,  # 250% improvement
+                            )
+                        ]
+                    )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [  # intel-xpu-backend-for-triton #5133
+                        triton_config_with_settings(size_hints, 32),
+                    ]
+                )
+    if len(size_hints) == 2:
+        # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
+        # ROCm has observed improvement by diverging here
+        if (
+            not inductor_meta.get("autotune_pointwise", True)
+            or (
+                torch.version.hip is None
+                and tile_hint == TileHint.SQUARE
+                and torch.version.xpu is None
+            )
+        ) and not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+        ):
+            configs = [triton_config_with_settings(size_hints, 32, 32)]
+        else:
+            configs = [
+                triton_config_with_settings(size_hints, 32, 32),
+                triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
+                triton_config_with_settings(size_hints, 256, 16),
+                triton_config_with_settings(size_hints, 16, 256),
+                triton_config_with_settings(size_hints, bs, 1),
+                triton_config_with_settings(size_hints, 1, bs),
+                *hinted_configs,
+            ]
+            # Additional configs appended for ROCm builds
+            if torch.version.hip:
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, 64, 32
+                        ),  # better for some kernels
+                        triton_config_with_settings(
+                            size_hints, 128, 16
+                        ),  # +10% for some kernels
+                        triton_config_with_settings(
+                            size_hints, 128, 32
+                        ),  # additional 10% more
+                        triton_config_with_settings(
+                            size_hints, 32, 512
+                        ),  # +30% for some kernels
+                    ]
+                )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [
+                        # intel-xpu-backend-for-triton #5198
+                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
+                        # intel-xpu-backend-for-triton #5199
+                        triton_config_with_settings(size_hints, 4, 256),
+                    ]
+                )
+    if len(size_hints) == 3:
+        if not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+            or torch.xpu.is_available()
+        ):
+            configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
+        else:
+            configs = [
+                triton_config_with_settings(size_hints, 16, 16, 16),
+                triton_config_with_settings(size_hints, 64, 8, 8),
+                triton_config_with_settings(size_hints, 8, 64, 8),
+                triton_config_with_settings(size_hints, 8, 8, 64),
+                triton_config_with_settings(size_hints, bs, 1, 1),
+                triton_config_with_settings(size_hints, 1, bs, 1),
+                triton_config_with_settings(size_hints, 1, 1, bs),
+                *hinted_configs,
+            ]
 
-    pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
-    configs = pointwise_heuristic.get_configs(
-        size_hints,
-        bs,
-        triton_config_with_settings,
-        hinted_configs,
-        tile_hint=tile_hint,
-        inductor_meta=inductor_meta,
-    )
+    if not configs:
+        raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     if return_configs:
