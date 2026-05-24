@@ -3,6 +3,7 @@
 
 import collections
 import contextlib
+import contextvars
 import functools
 import gc
 import io
@@ -7861,6 +7862,70 @@ for shape in [(1,), ()]:
             out = checkpoint(
                 lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn
             )
+
+    def test_checkpointing_without_reentrant_context_fn_exits_on_forward_exception(
+        self,
+    ):
+        active_context = contextvars.ContextVar("active_context", default=False)
+        events = []
+        exit_exc = []
+
+        class Context:
+            def __enter__(self):
+                events.append("enter")
+                self.token = active_context.set(True)
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                events.append("exit")
+                exit_exc.append((exc_type, exc_value))
+                active_context.reset(self.token)
+
+        def context_fn():
+            return Context(), contextlib.nullcontext()
+
+        def fn(x):
+            self.assertTrue(active_context.get())
+            raise RuntimeError("forward failed")
+
+        exc = None
+        x = torch.tensor(1.0, requires_grad=True)
+        try:
+            checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        except RuntimeError as e:
+            exc = e
+
+        self.assertIsNotNone(exc)
+        self.assertEqual(events, ["enter", "exit"])
+        self.assertEqual(exit_exc[0][0], RuntimeError)
+        self.assertEqual(str(exit_exc[0][1]), "forward failed")
+        self.assertFalse(active_context.get())
+
+    def test_checkpointing_without_reentrant_context_fn_cannot_suppress_forward_exception(
+        self,
+    ):
+        class Context:
+            def __enter__(self):
+                pass
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.exc_type = exc_type
+                self.exc_value = exc_value
+                return True
+
+        context = Context()
+
+        def context_fn():
+            return context, contextlib.nullcontext()
+
+        def fn(x):
+            raise ValueError("forward failed")
+
+        x = torch.tensor(1.0, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "context_fn suppressed"):
+            checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        self.assertEqual(context.exc_type, ValueError)
+        self.assertEqual(str(context.exc_value), "forward failed")
 
     def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(1, requires_grad=True)
