@@ -1289,7 +1289,7 @@ void cuComputePartGradGammaBeta(
     const int i2_off = blockIdx.x * blockDim.x + thr_load_col_off;
     alignas(sizeof(double)) extern __shared__ char shared[];
     T_ACC * buf = reinterpret_cast<T_ACC*>(&shared); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
-    T_ACC* warp_buf1 = (T_ACC*)buf;
+    T_ACC* warp_buf1 = buf;
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight

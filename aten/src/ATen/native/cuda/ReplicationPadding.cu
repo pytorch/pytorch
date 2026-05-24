@@ -479,12 +479,8 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
       "replication_pad1d only supports output tensors with less than 2^63 - 1 elements");
 
   const int64_t padL = paddingSize[0];
-  int64_t dimw = 1;
 
   int64_t numInputDims = input.ndimension();
-  if (numInputDims == 3) {
-    dimw++;
-  }
 
   if (gradInput.numel() == 0) {
     return;
