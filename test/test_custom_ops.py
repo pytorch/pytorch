@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._dynamo import compiled_autograd
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -3659,6 +3660,37 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(grad, 3 * x**2)
         self.assertEqual(gradgrad, 6 * x)
         self.assertTrue(fake_called)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    def test_register_autograd_with_compiled_autograd(self):
+        compiled_graphs = []
+
+        @torch.library.custom_op(
+            "_torch_testing::square_for_compiled_autograd", mutates_args=()
+        )
+        def square(x: Tensor) -> Tensor:
+            return x**2
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 2 * x
+
+        square.register_autograd(backward, setup_context=setup_context)
+
+        def compiler_fn(gm):
+            compiled_graphs.append(gm)
+            return gm
+
+        x = torch.randn(3, requires_grad=True)
+        with compiled_autograd._enable(compiler_fn):
+            square(x).sum().backward()
+
+        self.assertEqual(x.grad, 2 * x)
+        self.assertEqual(len(compiled_graphs), 1)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_without_setup_context_with_torch_func_grad(self):

@@ -88,12 +88,16 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             f"Please use register_autograd to add one."
         )
 
+    def compiled_autograd_key(ctx):
+        return (ctx._autograd_function_id,)
+
     Generated = type(
         name,
         (autograd.function._SingleLevelFunction,),
         {
             "forward": staticmethod(forward),
             "backward": staticmethod(backward),
+            "_compiled_autograd_key": staticmethod(compiled_autograd_key),
         },
     )
 
