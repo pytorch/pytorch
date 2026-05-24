@@ -68,6 +68,35 @@ class GemmEpilogueFusionTests(TestCase):
                 raise AssertionError(f"invalid grouped_mm op shape: {op}")
         return a, b, offs
 
+    def _check_code(self, code, checks=(), check_nots=()):
+        file_check = FileCheck()
+        for pattern in checks:
+            file_check = file_check.check(pattern)
+        for pattern in check_nots:
+            file_check = file_check.check_not(pattern)
+        file_check.run(code)
+
+    def _assert_quack_tuple_epilogue(
+        self,
+        fn,
+        *args,
+        main_atol=1e-2,
+        main_rtol=1e-2,
+        aux_atol=1e-1,
+        aux_rtol=1e-2,
+        checks=(),
+        check_nots=("extern_kernels.mm",),
+    ):
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), *args
+        )
+        expected = fn(*args)
+
+        torch.testing.assert_close(actual[0], expected[0], atol=main_atol, rtol=main_rtol)
+        torch.testing.assert_close(actual[1], expected[1], atol=aux_atol, rtol=aux_rtol)
+        self._check_code(code, checks=checks, check_nots=check_nots)
+        return actual, expected, code
+
     def test_eager_matches_reference(self):
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
@@ -1781,16 +1810,12 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(M, 128, device="cuda", dtype=torch.float16)
         b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        self._assert_quack_tuple_epilogue(
+            fn,
+            a,
+            b,
+            checks=("local_reduce_group=32", "local_reduce_dim=1", "local_reduce_out="),
         )
-        expected = fn(a, b)
-
-        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
-        torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
-        FileCheck().check("local_reduce_group=32").check("local_reduce_dim=1").check(
-            "local_reduce_out="
-        ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_generic_aux_fuses(self):
@@ -1805,16 +1830,13 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
         b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        self._assert_quack_tuple_epilogue(
+            fn,
+            a,
+            b,
+            checks=("aux_out=",),
+            check_nots=("local_reduce_out=", "extern_kernels.mm"),
         )
-        expected = fn(a, b)
-
-        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
-        torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
-        FileCheck().check("aux_out=").check_not("local_reduce_out=").check_not(
-            "extern_kernels.mm"
-        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_generic_aux_only_is_live(self):
@@ -1859,18 +1881,18 @@ class GemmEpilogueFusionTests(TestCase):
                 a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
                 b = torch.randn(64, N, device="cuda", dtype=torch.float16)
 
-                actual, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                self._assert_quack_tuple_epilogue(
+                    fn,
+                    a,
+                    b,
+                    checks=(
+                        f"local_reduce_group={group}",
+                        "local_reduce_dim=1",
+                        "local_reduce_out=",
+                        "local_reduce_op='amax_abs'",
+                    ),
+                    check_nots=("aux_out=", "extern_kernels.mm"),
                 )
-                expected = fn(a, b)
-
-                torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
-                torch.testing.assert_close(actual[1], expected[1], atol=1e-1, rtol=1e-2)
-                FileCheck().check(f"local_reduce_group={group}").check(
-                    "local_reduce_dim=1"
-                ).check("local_reduce_out=").check("local_reduce_op='amax_abs'").check_not(
-                    "aux_out="
-                ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_local_amax_scale_aux_fuses(self):
@@ -1893,18 +1915,21 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
         b = torch.randn(64, N, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        self._assert_quack_tuple_epilogue(
+            fn,
+            a,
+            b,
+            aux_atol=1e-3,
+            aux_rtol=1e-3,
+            checks=(
+                f"local_reduce_group={group}",
+                "local_reduce_dim=1",
+                "local_reduce_out=",
+                "local_reduce_op='amax_abs'",
+                "local_reduce_scale=",
+            ),
+            check_nots=("aux_out=", "extern_kernels.mm"),
         )
-        expected = fn(a, b)
-
-        torch.testing.assert_close(actual[0], expected[0], atol=1e-2, rtol=1e-2)
-        torch.testing.assert_close(actual[1], expected[1], atol=1e-3, rtol=1e-3)
-        FileCheck().check(f"local_reduce_group={group}").check(
-            "local_reduce_dim=1"
-        ).check("local_reduce_out=").check("local_reduce_op='amax_abs'").check(
-            "local_reduce_scale="
-        ).check_not("aux_out=").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_local_amax_scale_main_and_aux_fuses(self):
