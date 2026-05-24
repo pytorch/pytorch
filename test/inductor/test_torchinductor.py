@@ -9922,6 +9922,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_index_put_deterministic_fallback(self):
+        if is_mps_backend(self.device):
+            # MPS has no deterministic implementation for
+            # index_put_(accumulate=True) on floating dtypes
+            raise unittest.SkipTest("no deterministic index_put accumulate on MPS")
         with DeterministicGuard(True):
 
             def fn(a, b, c):
