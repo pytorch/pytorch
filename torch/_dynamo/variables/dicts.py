@@ -155,9 +155,11 @@ class ConstDictVariable(VariableTracker):
         return dict_cls
 
     def as_proxy(self) -> dict[Any, Any]:
+        self.materialize_deferred_keys()
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
     def debug_repr(self) -> str:
+        self.materialize_deferred_keys()
         items: list[str] = []
         for k, v in self.items.items():
             key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
@@ -166,6 +168,7 @@ class ConstDictVariable(VariableTracker):
         return "{" + ", ".join(items) + "}"
 
     def as_python_constant(self) -> dict[Any, Any]:
+        self.materialize_deferred_keys()
         return {
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
@@ -181,6 +184,7 @@ class ConstDictVariable(VariableTracker):
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
+        self.materialize_deferred_keys()
         # Use is_hashable as a side-effect-free pre-check.  We can't catch
         # ObservedTypeError from HashableTracker because it modifies
         # tx.exn_vt_stack as a side effect.
@@ -199,6 +203,7 @@ class ConstDictVariable(VariableTracker):
         rest: Sequence[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.materialize_deferred_keys()
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -250,6 +255,7 @@ class ConstDictVariable(VariableTracker):
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
+        self.materialize_deferred_keys()
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -296,6 +302,7 @@ class ConstDictVariable(VariableTracker):
         )
 
     def len(self) -> int:
+        self.materialize_deferred_keys()
         return sum(
             not isinstance(x, variables.DeletedVariable) for x in self.items.values()
         )
@@ -313,6 +320,18 @@ class ConstDictVariable(VariableTracker):
         if value and value.is_realized() and other.is_realized():
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
+
+    def materialize_deferred_keys(self) -> None:
+        if not any(key._defer_guard for key in self.items):
+            return
+
+        # Any dict operation that observes keys needs the actual hash/equality
+        # behavior, so it must realize deferred setitem keys and install the
+        # corresponding value guards.
+        new_items = type(self.items)()
+        for key, value in self.items.items():
+            new_items[key.materialize()] = value
+        self.items = new_items
 
     def reconstruct_kvs_into_new_dict(self, codegen: "PyCodegen") -> None:
         # Build a dictionary that contains the keys and values.
@@ -384,6 +403,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        self.materialize_deferred_keys()
         key = HashableTracker(arg)
         if key not in self.items:
             raise_observed_exception(KeyError, tx, args=[arg])
@@ -392,6 +412,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        self.materialize_deferred_keys()
         key = HashableTracker(arg)
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
@@ -407,12 +428,14 @@ class ConstDictVariable(VariableTracker):
         return self.items[key]
 
     def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
+        self.materialize_deferred_keys()
         key = HashableTracker(arg)
         if key not in self.items:
             return None
         return self.items[key]
 
     def realize_key_vt(self, arg: VariableTracker) -> None:
+        self.materialize_deferred_keys()
         # Realize the LazyVT on a particular index
         if arg not in self:
             raise AssertionError(f"Key {arg} not found in dict")
@@ -423,6 +446,7 @@ class ConstDictVariable(VariableTracker):
             original_key_vt.realize()
 
     def install_dict_keys_match_guard(self) -> None:
+        self.materialize_deferred_keys()
         if self.source:
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
@@ -490,6 +514,7 @@ class ConstDictVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictIterator
 
+        self.materialize_deferred_keys()
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             tx.output.guard_on_key_order.add(self.source)
@@ -567,7 +592,6 @@ class ConstDictVariable(VariableTracker):
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__setitem__" and self.is_mutable():
-            self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -575,8 +599,13 @@ class ConstDictVariable(VariableTracker):
                     "2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            if not tx.output.side_effects.is_modified(self):
+                # A plain setitem replays as an update, not a wholesale dict
+                # replacement. Deletions/pops still opt back into reconstructing
+                # every key so removals are reflected.
+                self.should_reconstruct_all = False
             tx.output.side_effects.mutation(self)
-            self.items[Hashable(args[0])] = args[1]
+            self.items[Hashable(args[0], defer_guard=True)] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
@@ -621,6 +650,7 @@ class ConstDictVariable(VariableTracker):
             if len(args):
                 raise_args_mismatch(tx, name)
 
+            self.materialize_deferred_keys()
             if not self.items:
                 raise_observed_exception(
                     KeyError,
@@ -942,6 +972,7 @@ class DictViewVariable(VariableTracker):
     def view_items(self) -> Any:
         if self.kv is None:
             raise AssertionError("kv must not be None")
+        self.dv_dict.materialize_deferred_keys()
         return getattr(self.dv_dict.items, self.kv)()
 
     def is_hashable(self) -> bool:
@@ -1037,6 +1068,7 @@ class DictKeysVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictKeysIterator
 
+        self.dv_dict.materialize_deferred_keys()
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictKeysIterator(self.dv_dict.items)
@@ -1136,6 +1168,7 @@ class DictValuesVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictValuesIterator
 
+        self.dv_dict.materialize_deferred_keys()
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
@@ -1191,6 +1224,7 @@ class DictItemsVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
         from ..utils import iter_contains
 
+        self.dv_dict.materialize_deferred_keys()
         if not is_hashable(item):
             raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
 
@@ -1208,6 +1242,7 @@ class DictItemsVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictItemsIterator
 
+        self.dv_dict.materialize_deferred_keys()
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)

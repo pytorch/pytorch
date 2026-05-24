@@ -101,9 +101,25 @@ class HashableTracker:
 
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker) -> None:
+    def __init__(self, vt: VariableTracker, *, defer_guard: bool = False) -> None:
         # We specialize SymNodes
         vt = specialize_symnode(vt)
+        self.vt: VariableTracker
+        self._defer_guard = False
+
+        if (
+            defer_guard
+            and isinstance(vt, variables.LazyConstantVariable)
+            and not vt.is_realized()
+            and vt.source is not None
+        ):
+            # Dict setitem side-effect replay can reload this key from its
+            # source later. Use identity hashing until a dict operation actually
+            # observes key equality and needs the real constant value.
+            self._hash = id(self)
+            self.vt = vt
+            self._defer_guard = True
+            return
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -168,6 +184,11 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
+    def materialize(self) -> "HashableTracker":
+        if not self._defer_guard:
+            return self
+        return HashableTracker(self.vt.realize())
+
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -183,6 +204,8 @@ class HashableTracker:
         """
         if not isinstance(other, HashableTracker):
             return False
+        if self._defer_guard or other._defer_guard:
+            return self is other
         if self.vt is other.vt:
             return True
 

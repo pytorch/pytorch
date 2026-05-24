@@ -4197,6 +4197,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
         elif name == "popitem":
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None in popitem")
+            self._base_vt.materialize_deferred_keys()  # type: ignore[union-attr]
             if not self._base_vt.items:  # type: ignore[union-attr]
                 raise_observed_exception(
                     KeyError, tx, args=["popitem(): dictionary is empty"]
