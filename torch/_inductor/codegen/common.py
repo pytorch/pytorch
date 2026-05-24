@@ -2870,10 +2870,17 @@ class CSEProxy(DefaultHandler):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        self.kernel.store_buffer_names.add(name)
         # Update store cache when mode is None or "tma"
         if mode != "atomic_add":
             self._update_store_cache(name, value)
+        should_elide_channel_resident_store = getattr(
+            self.kernel, "should_elide_channel_resident_reduction_store", None
+        )
+        if should_elide_channel_resident_store is not None and (
+            should_elide_channel_resident_store(name, value, mode=mode)
+        ):
+            return
+        self.kernel.store_buffer_names.add(name)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
