@@ -280,7 +280,10 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
-            self.num_features = input.shape[1]
+            num_features = input.shape[1]
+            if isinstance(num_features, torch.SymInt):
+                num_features = int(num_features)
+            self.num_features = num_features
             if self.affine:
                 if not isinstance(self.weight, UninitializedParameter):
                     raise AssertionError(

@@ -1581,8 +1581,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1594,8 +1592,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1691,8 +1687,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
