@@ -10272,7 +10272,7 @@ class WhileLoop(ExternKernel):
     additional_inputs: Sequence[IRNode] | None = None
     cond_subgraph: Subgraph | None = None
     body_subgraph: Subgraph | None = None
-    outputs: Sequence[MultiOutput] | None = None
+    outputs: Sequence[IRNode] | None = None
 
     def __init__(
         self,
@@ -10344,7 +10344,9 @@ class WhileLoop(ExternKernel):
 
     @staticmethod
     def _maybe_wrap_as_tensor_box(out: IRNode) -> IRNode:
-        if isinstance(out, TensorBox):
+        if isinstance(out, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+            return out
+        elif isinstance(out, TensorBox):
             return out
         elif isinstance(out, (StorageBox, ReinterpretView)):
             return TensorBox(out)
@@ -10396,12 +10398,52 @@ class WhileLoop(ExternKernel):
                     ret.append(tb)
             return ret
 
-        fx_carried_inputs = V.graph.current_node.args[-2]
-        fx_additional_inputs = V.graph.current_node.args[-1]
-        fx_all_inputs = fx_carried_inputs + fx_additional_inputs  # type: ignore[operator]
-        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
-        fake_carried_inputs = [x.meta["val"] for x in fx_carried_inputs]  # type: ignore[union-attr]
-        fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
+        fx_carried_inputs_arg = V.graph.current_node.args[-2]
+        fx_additional_inputs_arg = V.graph.current_node.args[-1]
+        assert isinstance(fx_carried_inputs_arg, Sequence), type(fx_carried_inputs_arg)
+        assert isinstance(fx_additional_inputs_arg, Sequence), type(
+            fx_additional_inputs_arg
+        )
+        fx_carried_inputs: Sequence[Any] = fx_carried_inputs_arg
+        fx_additional_inputs: Sequence[Any] = fx_additional_inputs_arg
+        fx_all_inputs = [*fx_carried_inputs, *fx_additional_inputs]
+
+        def _get_fake_input(x: Any) -> Any:
+            return x.meta["val"] if isinstance(x, Node) else x
+
+        def _get_subgraph_fake_inputs(gm: torch.fx.GraphModule) -> list[Any] | None:
+            fake_inputs = []
+            for node in gm.graph.nodes:
+                if node.op != "placeholder":
+                    continue
+                if "val" not in node.meta:
+                    return None
+                fake_inputs.append(node.meta["val"])
+            return fake_inputs
+
+        fallback_fake_all_inputs = [_get_fake_input(x) for x in fx_all_inputs]
+        body_fake_all_inputs = (
+            _get_subgraph_fake_inputs(body_fn.graph_module) or fallback_fake_all_inputs
+        )
+        cond_fake_all_inputs = (
+            _get_subgraph_fake_inputs(cond_fn.graph_module) or fallback_fake_all_inputs
+        )
+        assert len(body_fake_all_inputs) == len(fx_all_inputs), (
+            body_fake_all_inputs,
+            fx_all_inputs,
+        )
+        assert len(cond_fake_all_inputs) == len(fx_all_inputs), (
+            cond_fake_all_inputs,
+            fx_all_inputs,
+        )
+        fake_all_inputs = body_fake_all_inputs
+        fake_carried_inputs = fake_all_inputs[: len(fx_carried_inputs)]
+        fake_additional_inputs = fake_all_inputs[len(fx_carried_inputs) :]
+
+        def _fake_scalar_to_expr(x: Any) -> Expr:
+            if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                return x.node.expr
+            return sympy.sympify(x)
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
         carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
@@ -10412,17 +10454,20 @@ class WhileLoop(ExternKernel):
         )
         all_inputs = carried_inputs_ + additional_inputs_
 
-        for subgraph in (cond_fn, body_fn):
+        for subgraph, subgraph_fake_all_inputs in (
+            (cond_fn, cond_fake_all_inputs),
+            (body_fn, body_fake_all_inputs),
+        ):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 assert isinstance(fx_all_inputs, Sequence), type(fx_all_inputs)
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
-                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
+                    example_inputs=subgraph_fake_all_inputs,  # type: ignore[arg-type]
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_all_inputs)
+                    subgraph.graph.run(*subgraph_fake_all_inputs)
                     # For body_fn, we require its output to have the exact same stride
                     # as inputs because the previous output is the input of next iteration.
                     #
@@ -10459,15 +10504,24 @@ class WhileLoop(ExternKernel):
             "torch.while_loop is assumed to have at least one operand."
         )
 
-        device = all_inputs[0].get_device()
+        device = next(
+            (d for x in all_inputs if (d := x.get_device()) is not None), None
+        )
 
-        assert device is not None  # to make linter happy
+        assert device is not None, "cannot determine device"
         # make sure carried_inputs_ and body outputs are structurally equivalent
         assert len(carried_inputs_) == len(body_outputs), (
             carried_inputs_,
             body_outputs,
         )
         for i, (op, bo) in enumerate(zip(carried_inputs_, body_outputs)):
+            if isinstance(op, ShapeAsConstantBuffer) or isinstance(
+                bo, ShapeAsConstantBuffer
+            ):
+                assert isinstance(op, ShapeAsConstantBuffer) and isinstance(
+                    bo, ShapeAsConstantBuffer
+                ), (i, op, bo)
+                continue
 
             def _guard_list_equals(
                 lhs_exprs: Sequence[int | Expr],
@@ -10517,6 +10571,7 @@ class WhileLoop(ExternKernel):
         mutated_inputs_iter = iter(mutated_inputs)
         all_outputs: list[IRNode] = []
         while_loop.outputs = []
+        outputs: list[IRNode] = while_loop.outputs
         while_loop.mutation_outputs = []
         if stack_output:
             assert len(mutated_idx_set) == 0, (
@@ -10534,9 +10589,10 @@ class WhileLoop(ExternKernel):
                     while_loop,
                     [(list, idx)],
                 )
-                while_loop.outputs.append(multi_out)
+                outputs.append(multi_out)
                 all_outputs.append(multi_out)
         else:
+            fake_outputs = V.graph.current_node.meta["val"]
             for idx, output in enumerate(body_outputs):
                 if idx in mutated_idx_set:
                     assert idx < len(carried_inputs), "only carries can be mutated."
@@ -10546,6 +10602,12 @@ class WhileLoop(ExternKernel):
                         MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
                     )
                     all_outputs.append(mutated_input)
+                elif isinstance(output, ShapeAsConstantBuffer):
+                    scalar_out = ShapeAsConstantBuffer(
+                        expr=_fake_scalar_to_expr(fake_outputs[idx])
+                    )
+                    outputs.append(scalar_out)
+                    all_outputs.append(scalar_out)
                 else:
                     multi_out = MultiOutput(
                         FixedLayout(
@@ -10558,10 +10620,12 @@ class WhileLoop(ExternKernel):
                         while_loop,
                         [(list, idx)],
                     )
-                    while_loop.outputs.append(multi_out)
+                    outputs.append(multi_out)
                     all_outputs.append(multi_out)
 
-        for inp, out in zip(carried_inputs, all_outputs):
+        for inp, out in zip(carried_inputs_, all_outputs):
+            if isinstance(inp, ShapeAsConstantBuffer):
+                continue
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations

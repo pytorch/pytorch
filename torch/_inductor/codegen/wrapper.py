@@ -3953,12 +3953,22 @@ class PythonWrapperCodegen(CodeGen):
                         )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                        out = outputs[keypath[0].idx]
+                        if isinstance(out, ir.ShapeAsConstantBuffer):
+                            return out.codegen_reference()
+                        return go(out.get_name(), keypath[1:])
                 else:
                     return go(output_name, keypath)
 
+            rhs = go_outer()
+            if (
+                V.graph.cpp_wrapper
+                and rhs == str(s)
+                and str(s) in self.unbacked_symbol_decls
+            ):
+                continue
             self.writeline(
-                f"{self.codegen_unbacked_symbol_decl(s)} = {go_outer()}{self.ending}"
+                f"{self.codegen_unbacked_symbol_decl(s)} = {rhs}{self.ending}"
             )
 
     def codegen_subgraph_by_inlining(self, subgraph, outer_inputs, outer_outputs):
@@ -4217,9 +4227,14 @@ class PythonWrapperCodegen(CodeGen):
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, carried_input in enumerate(outer_carried_inputs):
+            for i, (carried_input, ir_input) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                if isinstance(ir_input, ir.ShapeAsConstantBuffer):
+                    self.writeline(f"{name}[{i}] = {carried_input}")
+                else:
+                    self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))
 
         self.writeline("while should_loop:")

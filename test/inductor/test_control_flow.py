@@ -829,6 +829,34 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a, b])
 
+    class PythonScalarCarry(torch.nn.Module):
+        def forward(self, a, b):
+            def cond_fn(i, x, y):
+                return i < 3
+
+            def body_fn(i, x, y):
+                return i + 1, x + a, y + b
+
+            return torch.while_loop(
+                cond_fn,
+                body_fn,
+                (0, torch.zeros_like(a), torch.zeros_like(b)),
+            )
+
+    class PythonScalarCarryZeroIterations(torch.nn.Module):
+        def forward(self, a, b):
+            def cond_fn(i, x, y):
+                return i < 0
+
+            def body_fn(i, x, y):
+                return i + 1, x + a, y + b
+
+            return torch.while_loop(
+                cond_fn,
+                body_fn,
+                (0, torch.zeros_like(a), torch.zeros_like(b)),
+            )
+
     class Nested(torch.nn.Module):
         def forward(self, ci, cj, a, b):
             def cond_fn(i1, j1, x1, y1):
@@ -1280,6 +1308,21 @@ class WhileLoopTests(TestCase):
                             )
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    def test_while_loop_python_scalar_carry(self):
+        for model in (
+            WhileLoopModels.PythonScalarCarry(),
+            WhileLoopModels.PythonScalarCarryZeroIterations(),
+        ):
+            self._run_test(
+                model=model,
+                inputs=(
+                    torch.randn(2, 2),
+                    torch.randn(2, 2),
+                ),
+                device="cpu",
+                num_counters=0,
+            )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
