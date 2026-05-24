@@ -859,8 +859,13 @@ class TensorVariable(VariableTracker):
         """
 
         # This is seen in inspect signature where we check if the value is a default value
-        if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
-            return variables.ConstantVariable.create(False)
+        if (
+            name in ("__eq__", "__ne__")
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], UserDefinedClassVariable)
+        ):
+            return variables.ConstantVariable.create(name == "__ne__")
 
         if name == "wait":
             if args or kwargs:
