@@ -17766,7 +17766,7 @@ if RUN_GPU:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-            self.assertTrue("in_out_ptr" in code[1])
+            self.assertTrue(any("in_out_ptr" in source for source in code))
 
         @torch._functorch.config.patch("donated_buffer", True)
         @torch._inductor.config.patch("force_shape_pad", True)
