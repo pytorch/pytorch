@@ -540,6 +540,7 @@ class ScanAutogradImpl:
         self.saved_intermediates: list[Any] = []
         self.fw_spec = pytree.tree_flatten((init, xs, additional_inputs))[1]
         self._optimize_forward_intermediates()
+        self._break_bw_input_output_aliasing()
 
     def _insert_clone(
         self, need_copy_node: torch.fx.Node, output_node: torch.fx.Node
@@ -554,6 +555,39 @@ class ScanAutogradImpl:
                 need_copy_node.meta.copy() if hasattr(need_copy_node, "meta") else {}
             )
         return clone_node
+
+    def _break_bw_input_output_aliasing(self) -> None:
+        """
+        The min-cut partitioner can produce a ``bw_gm`` that returns an input
+        placeholder directly (for example when an input doesn't require grad
+        and its gradient is ``zeros_like(input)`` which the partitioner saved as
+        a forward intermediate).
+
+        When this ``bw_gm`` is later wrapped into the per-step backward used by
+        ``scan_op``, the resulting subgraph has an input that is returned as an
+        output, which violates ``scan_op``'s aliasing-free invariant and causes
+        ``UncapturedHigherOrderOpError`` under dynamo. To prevent this, clone
+        any ``bw_gm`` output that is a placeholder.
+        """
+        bw_gm = self.hop_partitioned_graph.bw_gm
+        bw_output_node = next(iter(bw_gm.graph.find_nodes(op="output")))
+        if len(bw_output_node.args) != 1:
+            raise AssertionError(
+                f"expected bw_gm output to have 1 arg, got {len(bw_output_node.args)}"
+            )
+        bw_outputs = bw_output_node.args[0]
+        new_bw_outputs = []
+        rewrote = False
+        for out in bw_outputs:
+            if isinstance(out, torch.fx.Node) and out.op == "placeholder":
+                new_bw_outputs.append(self._insert_clone(out, bw_output_node))
+                rewrote = True
+            else:
+                new_bw_outputs.append(out)
+        if rewrote:
+            bw_output_node.args = (tuple(new_bw_outputs),)
+            bw_gm.graph.lint()
+            bw_gm.recompile()
 
     def _optimize_forward_intermediates(self):
         """
