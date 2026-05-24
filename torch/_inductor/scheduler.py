@@ -3148,8 +3148,42 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         # The epilogue may require additional index expressions.
         # If the user has provided the dimensions of the "output tile", we may be able to fuse.
         if self.output_tile:
-            # TODO(jjvraw): is_compatible
-            pass
+            from .codegen.simd import SIMDScheduling
+
+            node_schedule = node2.get_nodes()
+            _, (numel_ep, rnumel_ep) = node2.group
+            # TODO(jjvraw): Do we need to be explicit here about reductions? Or is it implied via 
+            # FusedSchedulerNode.
+            if isinstance(node2, FusedSchedulerNode) and any(
+                isinstance(sn, SchedulerNode)
+                and isinstance(sn.node, ComputedBuffer)
+                and isinstance(sn.node.data, ir.Reduction)
+                for sn in node2.snodes
+            ):
+                # Reduction intermediates require a 1D tile large enough for a persistent
+                # reduction (single pass over the full reduction width).
+                if len(self.output_tile) != 1:
+                    why("reduction epilogue fusion only supports a 1D output_tile")
+                    return False
+                tile_val = self.node.kwargs.get(self.output_tile[0])
+                if tile_val is not None and not V.graph.sizevars.statically_known_geq(
+                    tile_val, rnumel_ep
+                ):
+                    why("user kernel does not support 1d persistent reduction")
+                    return False
+            k = len(self.output_tile)
+            tiling = (
+                SIMDScheduling.create_tiling([numel_ep], [rnumel_ep])
+                if k == 1
+                else SIMDScheduling.create_tiling(
+                    list(self.node.mutable_args[0].shape[-k:]), [rnumel_ep]
+                )
+            )
+            if not SIMDScheduling.tiling_is_compatible(
+                node_schedule, numel_ep, rnumel_ep, tiling
+            ):
+                why("epilogue iteration space is incompatible with output_tile dimensions")
+                return False
         else:
             if self.epilogue_requires_new_store(writing_node):
                 why(
