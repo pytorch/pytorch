@@ -7060,10 +7060,6 @@ class FusedUserTritonKernel(TritonKernel):
     in the scheduler.
     """
 
-    # TODO(jjvraw): indent buffer should respect the user's indent level.
-    # TODO(jjvraw): alias args for input pointers in case of in-place pointer arithmetic.
-    #               e.g. out += BLOCK_SIZE.
-    # TODO(jjvraw): handle reduction ops.
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
@@ -7073,6 +7069,9 @@ class FusedUserTritonKernel(TritonKernel):
         block_aliases: dict[str, str] | None = None,
         pid_cache: dict[str, str] | None = None,
     ) -> None:
+        self.ir_node: ir.UserDefinedTritonKernel = scheduler_node.kernel_node.node
+        override_persistent = True if features.is_reduction() else None
+
         super().__init__(
             tiling,
             features=features,
@@ -7082,9 +7081,9 @@ class FusedUserTritonKernel(TritonKernel):
             hint_override=None,
             is_combo_kernel=False,
             pid_cache=pid_cache,
+            override_persistent_reduction=override_persistent,
         )
         self.scheduler_node = scheduler_node
-        self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
         self.block_aliases = block_aliases
         self.additional_buf_args = {buf: param for param, buf in additional_buf_args}
 
@@ -7097,12 +7096,31 @@ class FusedUserTritonKernel(TritonKernel):
         self.func_def = self.kernel_stores.func_def
 
         self.new_store_cse_var: CSEVariable | None = None
+        self.intermediate_cse_vars: dict[str, CSEVariable] = {}
+
+        writing_node = scheduler_node.writing_node
+        assert isinstance(writing_node.node, ir.ComputedBuffer)
+        self.epilogue_output_names: OrderedSet[str] = writing_node.get_buffer_names()
+        self.output_store_dtype: torch.dtype = writing_node.node.layout.dtype
+
+    def want_no_x_dim(self) -> bool:
+        # For now, we enforce 1d reductions. Thus, supress XBLOCK=1 for reductions.
+        return self.features.is_reduction()
+
+    def _get_persistent_RBLOCK(self, rnumel) -> int | str:
+        if self.ir_node.output_tile:
+            # For now, only allow 1d persistent reductions, hence len(grid) == 1.
+            assert len(self.ir_node.output_tile) == 1
+            return self.ir_node.output_tile[0]
+        raise AssertionError(
+            "Reduction epilogue fusion requires an annotated output_tile on the user kernel"
+        )
 
     def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
         assert len(self.ir_node.mutable_args) == 1
         if name == self.ir_node.mutable_args[0].get_name():
-            # when the fused epilogue nodes tries to load the mutated buffer
-            # we replace the load with the expression stored by the user kernel
+            # Replace loads of the mutation buffer with the value the user
+            # kernel computed (the original tl.store expression).
             loaded_expr = self.original_stored_expr
             indexing = self.indexing(index)
             dtype = V.graph.get_dtype(name)
@@ -7114,7 +7132,12 @@ class FusedUserTritonKernel(TritonKernel):
                 self.loads, loaded_expr, dtype=dtype, shape=shape
             )
             return result_var
+        elif name in self.intermediate_cse_vars:
+            # An earlier epilogue snode stored to this buffer; return its
+            # captured CSE variable directly instead of emitting a tl.load.
+            return self.intermediate_cse_vars[name]
         elif name in self.additional_buf_args:
+            # This is a "new" buffer which isn't in the original user's context
             param_name = self.additional_buf_args[name]
             dtype = V.graph.get_dtype(name)
             indexing = self.indexing(index, block_ptr=False)
@@ -7135,18 +7158,21 @@ class FusedUserTritonKernel(TritonKernel):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
-        if name == self.scheduler_node.fused_epilogue.node.get_name():
-            store_dtype = self.scheduler_node.fused_epilogue.node.layout.dtype
-            cast_var = self.cse.generate(
+        if name in self.epilogue_output_names:
+            self.new_store_cse_var = self.cse.generate(
                 self.compute,
-                f"{value}.to({triton_store_type(store_dtype)})",
-                dtype=store_dtype,
+                f"{value}.to({triton_store_type(self.output_store_dtype)})",
+                dtype=self.output_store_dtype,
                 shape=value.shape,
             )
-            self.new_store_cse_var = cast_var
         else:
-            super().store(name, index, value, mode)
+            self.intermediate_cse_vars[name] = value
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        # Both pointwise and reduction outputs use the same capture path: the
+        # existing tl.store pointer/mask are valid (legality-checked), only the
+        # value operand is replaced via AST rewriting.
+        self.store(name, index, value)
 
     def codegen_new_params(self) -> None:
         new_args = [ast.arg(arg=p) for p in self.additional_buf_args.values()]
@@ -7154,7 +7180,8 @@ class FusedUserTritonKernel(TritonKernel):
         ast.fix_missing_locations(self.kernel_ast)
 
     def codegen_aliases(self) -> list[str]:
-        assert self.block_aliases
+        if not self.block_aliases:
+            return []
 
         aliases = []
         indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
@@ -7168,19 +7195,22 @@ class FusedUserTritonKernel(TritonKernel):
         Returns a string which is the source code of a modified version of the user kernel that includes
         the epilogue.
 
-        Epilogue fusion is gated on pointwise operations. There are two paths:
+        There are two injection paths:
 
-            1. The epilogue requires additional index expressions.
-               The user must have annotated tile dimensions via torch.library.wrap_triton.
-               New index/load/compute/store lines are injected into the kernel body.
-            2. The epilogue is strictly unary. Only the stored value is replaced via AST rewriting,
-               preserving the original index expression.
+            1. block_aliases is not None
+               - Full body injection: range tree, static numels, indexing, loads, computes,
+                 and any BLOCK aliases are inserted after the function def line.
+            2. block_aliases is None (unary pointwise, no tile annotations):
+               - Only load/compute lines are inserted before the tl.store.
+
+        In both paths the tl.store value operand is replaced with the epilogue output variable.
+        For reductions the pointer and mask are preserved unchanged; legality ensures the
+        output buffer has the same shape/layout as the user kernel's mutable argument.
         """
         with self:
-            index_vars = self.split_and_set_ranges(
-                self.scheduler_node.epilogue.get_ranges()
-            )
-            self.scheduler_node.epilogue.codegen(index_vars)
+            for sn in self.scheduler_node.epilogue.get_nodes():
+                index_vars = self.split_and_set_ranges(sn.get_ranges())
+                sn.codegen(index_vars)
 
         indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
         load_lines = [indentations + l for l in self.loads.get_lines_ref()]
@@ -7208,7 +7238,7 @@ class FusedUserTritonKernel(TritonKernel):
         kernel_stores = identify_triton_stores(src_with_store_replaced)
         store_line_index = kernel_stores.stores[0].store_node.lineno - 1
 
-        if self.block_aliases:
+        if self.block_aliases is not None:
             numel_buf = IndentedBuffer()
             self.codegen_static_numels(numel_buf)
             numel_lines = [indentations + l for l in numel_buf.get_lines_ref()]
