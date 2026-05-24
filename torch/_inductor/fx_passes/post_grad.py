@@ -22,7 +22,11 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    guard_bool,
+    statically_known_true,
+    sym_eq,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
@@ -666,13 +670,21 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.scan import _extract_carry_and_out
+        from torch._higher_order_ops.scan import _extract_carry_and_out, _FULL_UNROLL
 
         assert len(kwargs) == 0, (
             "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
         )
 
-        combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
+        if len(args) == 4:
+            combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
+            unroll = 1
+        else:
+            combine_subgraph, fx_init, fx_xs, fx_additional_inputs, unroll = args
+        if not isinstance(unroll, int) or (unroll != _FULL_UNROLL and unroll < 1):
+            raise RuntimeError(
+                f"Expected scan unroll to be a positive int, but got {unroll}"
+            )
         assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
         sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
         cur_node = match.nodes[0]
@@ -718,27 +730,47 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 )
                 for ys_out in ys_outputs
             ]
+            has_ys_outputs = len(ys_outs) > 0
 
-            while_loop_operands = (loop_idx, ys_outs, init, xs)
-            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+            while_loop_operands = (
+                (loop_idx, ys_outs, init, xs)
+                if has_ys_outputs
+                else (loop_idx, init, xs)
+            )
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
                 (*while_loop_operands, additional_inputs)
             )
 
-            # Step 2: create the cond_fn and body_fn for while_loop
-            def cond_fn(*flat_args):
-                loop_idx, _, _, _, _ = pytree.tree_unflatten(
-                    flat_args, operands_and_additional_inputs_spec
-                )  # type: ignore[has-type]
-                return loop_idx < scan_length  # type: ignore[has-type]
+            def unpack_loop_args(flat_args):
+                if has_ys_outputs:
+                    (
+                        loop_idx,
+                        ys_outs,
+                        carry,
+                        xs,
+                        additional_inputs,
+                    ) = pytree.tree_unflatten(
+                        flat_args, operands_and_additional_inputs_spec
+                    )
+                else:
+                    loop_idx, carry, xs, additional_inputs = pytree.tree_unflatten(
+                        flat_args, operands_and_additional_inputs_spec
+                    )
+                    ys_outs = []
+                return loop_idx, ys_outs, carry, xs, additional_inputs
 
-            def body_fn(*flat_args):
-                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
-                    flat_args,
-                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
-                )
+            def pack_loop_outputs(loop_idx, ys_outs, next_carry, xs):
+                if has_ys_outputs:
+                    return loop_idx, *ys_outs, *next_carry, *xs
+                return loop_idx, *next_carry, *xs
 
-                idx_int = loop_idx.item()
+            def unpack_loop_operands(operands):
+                if has_ys_outputs:
+                    return operands
+                loop_idx, carry, xs = operands
+                return loop_idx, [], carry, xs
+
+            def scan_step(idx_int, ys_outs, carry, xs, additional_inputs):
                 torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
                 torch.ops.aten._assert_scalar.default(idx_int < scan_length, "")
                 sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
@@ -749,19 +781,95 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 for y, y_out in zip(ys, ys_outs):
                     y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_int)
                     y_out_slice.copy_(y)
-                return loop_idx + 1, *ys_outs, *next_carry, *xs
+                return next_carry
+
+            def run_while_loop(cond_fn, body_fn, operands):
+                flat_operands, operands_spec = pytree.tree_flatten(operands)
+                return pytree.tree_unflatten(
+                    torch.ops.higher_order.while_loop(
+                        cond_fn,
+                        body_fn,
+                        tuple(flat_operands),
+                        tuple(additional_inputs),
+                    ),
+                    operands_spec,
+                )
+
+            # Step 2: create the cond_fn and body_fn for while_loop
+            def tail_cond_fn(*flat_args):
+                loop_idx, _, _, _, _ = unpack_loop_args(flat_args)
+                return loop_idx < scan_length  # type: ignore[has-type]
+
+            def tail_body_fn(*flat_args):
+                loop_idx, ys_outs, carry, xs, additional_inputs = unpack_loop_args(
+                    flat_args
+                )
+
+                idx_int = loop_idx.item()
+                next_carry = scan_step(idx_int, ys_outs, carry, xs, additional_inputs)
+                return pack_loop_outputs(loop_idx + 1, ys_outs, next_carry, xs)
 
             # Step 3: call the while_loop operator
-            _, ys_outs, last_carry, _ = pytree.tree_unflatten(
-                torch.ops.higher_order.while_loop(
-                    cond_fn,
-                    body_fn,
-                    tuple(flat_operands),
-                    tuple(additional_inputs),
-                ),
-                operands_spec,
+            if unroll == _FULL_UNROLL:
+                for idx in range(int(scan_length)):
+                    init = scan_step(idx, ys_outs, init, xs, additional_inputs)
+                last_carry = init
+            else:
+                if unroll > 1 and guard_bool(scan_length >= unroll):
+
+                    def main_cond_fn(*flat_args):
+                        loop_idx, _, _, _, _ = unpack_loop_args(flat_args)
+                        return loop_idx + unroll <= scan_length  # type: ignore[has-type]
+
+                    def main_body_fn(*flat_args):
+                        (
+                            loop_idx,
+                            ys_outs,
+                            carry,
+                            xs,
+                            additional_inputs,
+                        ) = unpack_loop_args(flat_args)
+
+                        idx_int = loop_idx.item()
+                        next_carry = carry
+                        for offset in range(unroll):
+                            next_carry = scan_step(
+                                idx_int + offset,
+                                ys_outs,
+                                next_carry,
+                                xs,
+                                additional_inputs,
+                            )
+                        return pack_loop_outputs(
+                            loop_idx + unroll, ys_outs, next_carry, xs
+                        )
+
+                    loop_idx, ys_outs, init, xs = unpack_loop_operands(
+                        run_while_loop(main_cond_fn, main_body_fn, while_loop_operands)
+                    )
+                    while_loop_operands = (
+                        (loop_idx, ys_outs, init, xs)
+                        if has_ys_outputs
+                        else (loop_idx, init, xs)
+                    )
+
+                _, ys_outs, last_carry, _ = unpack_loop_operands(
+                    run_while_loop(tail_cond_fn, tail_body_fn, while_loop_operands)
+                )
+            carry_outs = (
+                (last_carry[0],)
+                if isinstance(last_carry, (list, tuple)) and num_init_leaves == 1
+                else (last_carry,)
+                if num_init_leaves == 1
+                else tuple(last_carry)
             )
-            return list(last_carry) + list(ys_outs)
+            flat_outputs = carry_outs + (tuple(ys_outs) if has_ys_outputs else ())
+            if len(flat_outputs) == 1:
+                # Pattern replacement unwraps a single-output example and leaves
+                # the original scan[0] user as an indexing op on that tensor.
+                # Return a second, unused value to preserve tuple replacement.
+                return (*flat_outputs, loop_idx)
+            return flat_outputs
 
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (
