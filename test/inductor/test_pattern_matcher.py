@@ -124,9 +124,7 @@ class TestPatternMatcher(TestCase):
         base = torch.randn(128, 64, device=GPU_TYPE) * 0.25
         base[0, 0] = float("nan")
         base[1, 0] = float("inf")
-        mask = torch.randint(
-            0, 2, (128, 64, 13, 13), device=GPU_TYPE, dtype=torch.bool
-        )
+        mask = torch.randint(0, 2, (128, 64, 13, 13), device=GPU_TYPE, dtype=torch.bool)
         mask[:, 0, :, :] = True
 
         expected = fn(base, mask)

@@ -354,10 +354,7 @@ def _match_masked_invariant_expand_reduction(
     ):
         return None
     expanded_numel = _static_shape_numel(expand_meta.shape)
-    if (
-        expanded_numel is None
-        or expanded_numel < _MIN_MASKED_INVARIANT_EXPANDED_NUMEL
-    ):
+    if expanded_numel is None or expanded_numel < _MIN_MASKED_INVARIANT_EXPANDED_NUMEL:
         return None
     # Keep this to the average-over-expanded-lanes pattern from the repro.
     if divisor != count_dim_product:
