@@ -40,8 +40,14 @@ inline bool bitonic_lt(T vi, IdxT ii, T vp, IdxT ip, bool /*i_am_low*/, bool des
 }
 
 template <bool STABLE, typename T, typename IdxT, ::metal::enable_if_t<!STABLE, bool> = true>
-inline bool bitonic_lt(T vi, IdxT /*ii*/, T vp, IdxT /*ip*/, bool i_am_low, bool desc) {
-  return sort_compare(vi, vp, desc) || (!sort_compare(vp, vi, desc) && i_am_low);
+inline bool bitonic_lt(T vi, IdxT ii, T vp, IdxT ip, bool /*i_am_low*/, bool desc) {
+  // Tie-break by index: padding's sentinel ~0 (the largest index) sorts last,
+  // so its out-of-range index never leaks into the output.
+  if (sort_compare(vi, vp, desc))
+    return true;
+  if (sort_compare(vp, vi, desc))
+    return false;
+  return ii < ip;
 }
 
 // Padding value for out-of-range slots. Chosen to sort to the end of the
@@ -342,7 +348,7 @@ kernel void sort_block(const device T* inp [[buffer(0)]],
   long base_out = long(tid.y) * long(size);
   for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
     tgv[i] = i < size ? inp[base_in + i * stride_sort] : init;
-    tgi[i] = i;
+    tgi[i] = i < size ? uint(i) : ~uint(0);
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   block_merge_sort<T, uint, TPTG, TN, STABLE>(tgv, tgi, lid.x, desc);
@@ -386,7 +392,7 @@ kernel void mb_sort_block(const device T* inp [[buffer(0)]],
   for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
     int g = blk + i;
     tgv[i] = g < size ? inp[seg + g * stride_sort] : init;
-    tgi[i] = IdxT(g);
+    tgi[i] = g < size ? IdxT(g) : ~IdxT(0);
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   block_merge_sort<T, IdxT, TPTG, TN, STABLE>(tgv, tgi, lid.x, desc);
