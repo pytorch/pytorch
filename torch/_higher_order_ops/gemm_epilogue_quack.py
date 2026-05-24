@@ -47,23 +47,19 @@ def find_single_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
 @dataclass(frozen=True)
 class QuackLocalReduceInfo:
     view_node: torch.fx.Node
-    reduce_node: torch.fx.Node
+    reduce_op_node: torch.fx.Node
     source_node: torch.fx.Node
     keepdim: bool
     group_size: int
     dim: int
+    aux_output_node: torch.fx.Node
     feeds_main: bool = False
     kind: str = "sum"
     scale: float = 1.0
     max_power: int = 8
-    output_node: torch.fx.Node | None = None
-    extra_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
+    producer_skip_nodes: frozenset[torch.fx.Node] = field(default_factory=frozenset)
     epilogue_reduce_source_node: torch.fx.Node | None = None
     epilogue_reduce_value_node: torch.fx.Node | None = None
-
-    @property
-    def aux_output_node(self) -> torch.fx.Node:
-        return self.output_node if self.output_node is not None else self.reduce_node
 
 
 @dataclass(frozen=True)
@@ -307,14 +303,15 @@ def match_local_n_amax_reduce(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=reduce_match.node,
+        reduce_op_node=reduce_match.node,
+        aux_output_node=reduce_match.node,
         source_node=source_node,
         keepdim=False,
         group_size=shape[-1],
         dim=1,
         kind="amax_abs",
         scale=scale,
-        extra_skip_nodes=frozenset((abs_node, node)),
+        producer_skip_nodes=frozenset((abs_node,)),
     )
 
 
@@ -360,7 +357,7 @@ def match_scaled_local_n_amax_reduce(
         return None
     return QuackLocalReduceInfo(
         view_node=local_reduce.view_node,
-        reduce_node=local_reduce.reduce_node,
+        reduce_op_node=local_reduce.reduce_op_node,
         source_node=local_reduce.source_node,
         keepdim=local_reduce.keepdim,
         group_size=local_reduce.group_size,
@@ -369,8 +366,8 @@ def match_scaled_local_n_amax_reduce(
         kind=local_reduce.kind,
         scale=local_reduce.scale,
         max_power=local_reduce.max_power,
-        output_node=node,
-        extra_skip_nodes=local_reduce.extra_skip_nodes | frozenset((node,)),
+        aux_output_node=node,
+        producer_skip_nodes=local_reduce.producer_skip_nodes,
     )
 
 
@@ -471,17 +468,20 @@ def match_local_n_amax_scale_view(
     expected_shape = (*tuple(mm_meta.shape[:-1]), mm_meta.shape[-1] // grouped_shape[-1])
     if tuple(aux_meta.shape) != tuple(expected_shape):
         return None
+    producer_skip_nodes = extra_skip_nodes | {abs_node}
+    producer_skip_nodes.discard(aux_output_node)
+    producer_skip_nodes.discard(reduce_node)
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=reduce_node,
+        reduce_op_node=reduce_node,
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
         kind="amax_abs",
         scale=scale,
-        output_node=aux_output_node,
-        extra_skip_nodes=frozenset(extra_skip_nodes | {reduce_node, abs_node}),
+        aux_output_node=aux_output_node,
+        producer_skip_nodes=frozenset(producer_skip_nodes),
         epilogue_reduce_source_node=epilogue_reduce_source_node,
         epilogue_reduce_value_node=aux_view.base,
     )
@@ -547,15 +547,15 @@ def match_local_n_primitive_scale_view(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=reduce_node,
+        reduce_op_node=reduce_node,
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
         dim=1,
         kind=kind,
         max_power=op_max_power,
-        output_node=aux_view.node,
-        extra_skip_nodes=frozenset((scale_node, reduce_node, abs_node, aux_view.node)),
+        aux_output_node=aux_view.node,
+        producer_skip_nodes=frozenset((scale_node, abs_node)),
     )
 
 
@@ -613,7 +613,8 @@ def match_local_n_reduce(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=sum_match.node,
+        reduce_op_node=sum_match.node,
+        aux_output_node=sum_match.node,
         source_node=source_node,
         keepdim=bool(sum_match.keepdim),
         group_size=group_size,
@@ -660,7 +661,8 @@ def match_local_m_reduce(
         return None
     return QuackLocalReduceInfo(
         view_node=view_match.node,
-        reduce_node=sum_match.node,
+        reduce_op_node=sum_match.node,
+        aux_output_node=sum_match.node,
         source_node=source_node,
         keepdim=bool(sum_match.keepdim),
         group_size=group_size,
@@ -729,7 +731,7 @@ def match_local_norm(
         output_node=node,
         div_node=div_node,
         view_node=local_reduce.view_node,
-        reduce_node=local_reduce.reduce_node,
+        reduce_node=local_reduce.reduce_op_node,
         source_node=local_reduce.source_node,
         group_size=local_reduce.group_size,
         dim=dim,
@@ -970,7 +972,8 @@ def analyze_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan
         )
         local_reduce = QuackLocalReduceInfo(
             view_node=local_norm.view_node,
-            reduce_node=local_norm.reduce_node,
+            reduce_op_node=local_norm.reduce_node,
+            aux_output_node=local_norm.reduce_node,
             source_node=local_norm.source_node,
             keepdim=True,
             group_size=local_norm.group_size,
@@ -1006,9 +1009,9 @@ def analyze_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan
                     )
                 if not output_uses_node(output_value[0], local_reduce.aux_output_node):
                     skip_nodes.add(local_reduce.aux_output_node)
-                if not output_uses_node(output_value[0], local_reduce.reduce_node):
-                    skip_nodes.add(local_reduce.reduce_node)
-                for skip_node in local_reduce.extra_skip_nodes:
+                if not output_uses_node(output_value[0], local_reduce.reduce_op_node):
+                    skip_nodes.add(local_reduce.reduce_op_node)
+                for skip_node in local_reduce.producer_skip_nodes:
                     if not output_uses_node(output_value[0], skip_node):
                         skip_nodes.add(skip_node)
                 if not output_uses_node(output_value[0], local_reduce.view_node):
