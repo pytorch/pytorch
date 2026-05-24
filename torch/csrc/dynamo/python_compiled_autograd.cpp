@@ -979,7 +979,7 @@ static CacheNode* _compiled_autograd_impl(
     InputBuffers input_buffers;
 
     for (size_t i = 0; i < ordered_calls.size(); i++) {
-      NodeCall& call = *ordered_calls[i];
+      const NodeCall& call = *ordered_calls[i];
 
       std::string _node_name = call.node->name();
       THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));

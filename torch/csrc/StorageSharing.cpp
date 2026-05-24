@@ -97,7 +97,7 @@ static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       storage.device_type() == at::kCPU,
       "_share_filename_: only available on CPU");
-  THManagedMapAllocator* ctx =
+  const THManagedMapAllocator* ctx =
       THManagedMapAllocator::fromDataPtr(storage.data_ptr());
   // Storage is already in shared memory, just return a handle
   if (ctx) {
@@ -205,7 +205,8 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU, "_share_fd_: only available on CPU");
-  at::MapAllocator* ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());
+  const at::MapAllocator* ctx =
+      at::MapAllocator::fromDataPtr(storage.data_ptr());
   // Storage is already in shared memory, just return a handle
   if (ctx) {
     // done
@@ -609,7 +610,7 @@ static PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
 static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
-  at::MapAllocator* ctx = nullptr;
+  const at::MapAllocator* ctx = nullptr;
   const auto& storage = THPStorage_Unpack(self);
   if (storage.device_type() == at::kCPU) {
     ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());

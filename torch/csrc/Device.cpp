@@ -117,8 +117,8 @@ static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
   if (!THPDevice_Check(a) || !THPDevice_Check(b)) {
     Py_RETURN_NOTIMPLEMENTED;
   }
-  THPDevice* da = reinterpret_cast<THPDevice*>(a);
-  THPDevice* db = reinterpret_cast<THPDevice*>(b);
+  const THPDevice* da = reinterpret_cast<THPDevice*>(a);
+  const THPDevice* db = reinterpret_cast<THPDevice*>(b);
 
   switch (op) {
     case Py_EQ:
