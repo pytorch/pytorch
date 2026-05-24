@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
+    CleanDiv,
     FloorDiv,
     Identity,
     Mod,
@@ -799,6 +800,51 @@ class TestPrecomputedSizeHinting(InductorTestCase):
         # optimization_hint should resolve ps0 -> s0*5 -> 50, then add 3 -> 53
         hint = sizevars.optimization_hint(expr)
         self.assertEqual(hint, 53)
+
+    def test_substitute_precomputed_size_scaled_expression(self):
+        sizevars = SizeVarAllocator()
+        u0, u1 = sympy.symbols("u0 u1", integer=True)
+
+        ps0 = sizevars.lookup_precomputed_size(u0 + u1)
+        self.assertEqual(sizevars.substitute_precomputed_sizes(u0 + u1 + 1), ps0 + 1)
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(32 * u0 + 32 * u1), 32 * ps0
+        )
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(u0 + 2 * u1), u0 + 2 * u1
+        )
+
+        rounded = 8 * FloorDiv(u0 + u1 + 39, 8)
+        ps1 = sizevars.lookup_precomputed_size(rounded)
+        self.assertEqual(sizevars.substitute_precomputed_sizes(32 * rounded), 32 * ps1)
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(4 * FloorDiv(u0 + u1 + 39, 8)),
+            CleanDiv(ps1, 2),
+        )
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(
+                u0 + u1 + 4 * FloorDiv(u0 + u1 + 39, 8)
+            ),
+            ps0 + CleanDiv(ps1, 2),
+        )
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(rounded, skip={ps1}),
+            8 * FloorDiv(ps0 + 39, 8),
+        )
+
+        sizevars = SizeVarAllocator()
+        ps_double = sizevars.lookup_precomputed_size(2 * u0 + 2 * u1)
+        ps_sum = sizevars.lookup_precomputed_size(u0 + u1)
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(u0 + u1, allowed=[ps_sum]), ps_sum
+        )
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(u0 + u1, allowed=[ps_double]),
+            CleanDiv(ps_double, 2),
+        )
+        self.assertEqual(
+            sizevars.substitute_precomputed_sizes(u0 + u1, allowed=[]), u0 + u1
+        )
 
 
 class TestHintDisproves(InductorTestCase):

@@ -23,7 +23,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -976,6 +976,148 @@ class SizeVarAllocator:
         if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
+
+    @staticmethod
+    def _scale_precomputed_size(sym: sympy.Symbol, scale: Expr) -> Expr:
+        scale = sympy.simplify(scale)
+        if scale == 0:
+            return sympy.S.Zero
+        if scale == 1:
+            return sym
+        if scale == -1:
+            return -sym
+        if isinstance(scale, sympy.Rational):
+            numerator = scale.p * sym
+            denominator = scale.q
+            if denominator == 1:
+                return numerator
+            return CleanDiv(numerator, denominator)
+        return scale * sym
+
+    def _try_substitute_scaled_precomputed_size(
+        self, expr: Expr, source: Expr, sym: sympy.Symbol
+    ) -> Expr | None:
+        if source == 0:
+            return None
+
+        scale = sympy.cancel(expr / source)
+        source_symbols = source.free_symbols
+        if isinstance(scale, Expr) and scale.free_symbols.isdisjoint(source_symbols):
+            return self._scale_precomputed_size(sym, scale)
+        return None
+
+    def _try_substitute_affine_precomputed_size(
+        self, expr: Expr, source: Expr, sym: sympy.Symbol
+    ) -> Expr | None:
+        source_symbols = tuple(sorted(source.free_symbols, key=lambda s: s.name))
+        if not source_symbols:
+            return None
+
+        try:
+            source_expanded = sympy.expand(source)
+            expr_expanded = sympy.expand(expr)
+            source_poly = sympy.Poly(source_expanded, *source_symbols)
+        except sympy.PolynomialError:
+            return None
+
+        if source_poly.total_degree() != 1:
+            return None
+
+        source_symbol_set = OrderedSet(source_symbols)
+        scale = None
+        for source_symbol in source_symbols:
+            source_coeff = source_expanded.coeff(source_symbol)
+            if source_coeff == 0:
+                continue
+            expr_coeff = expr_expanded.coeff(source_symbol)
+            candidate = sympy.cancel(expr_coeff / source_coeff)
+            if not isinstance(candidate, Expr) or not candidate.free_symbols.isdisjoint(
+                source_symbol_set
+            ):
+                return None
+            if scale is None:
+                scale = candidate
+            elif sympy.simplify(scale - candidate) != 0:
+                return None
+
+        if scale is None:
+            return None
+
+        remainder = sympy.simplify(expr - scale * source)
+        if not remainder.free_symbols.isdisjoint(source_symbol_set):
+            return None
+        return self._scale_precomputed_size(sym, scale) + remainder
+
+    def _substitute_precomputed_size(
+        self, expr: Expr | int, source: Expr, sym: sympy.Symbol
+    ) -> Expr | int:
+        if not isinstance(expr, Expr):
+            return expr
+        if expr == source:
+            return sym
+
+        result = sympy_subs(expr, {source: sym})
+        if not isinstance(result, Expr) or result != expr:
+            return result
+
+        result = self._try_substitute_scaled_precomputed_size(expr, source, sym)
+        if result is not None:
+            return result
+
+        result = self._try_substitute_affine_precomputed_size(expr, source, sym)
+        if result is not None:
+            return result
+
+        if expr.args:
+            args = tuple(
+                self._substitute_precomputed_size(arg, source, sym)
+                if isinstance(arg, Expr)
+                else arg
+                for arg in expr.args
+            )
+            if args != expr.args:
+                return expr.func(*args)
+
+        return expr
+
+    def substitute_precomputed_sizes(
+        self,
+        expr: Expr | int,
+        *,
+        allowed: Iterable[sympy.Symbol] | None = None,
+        skip: Iterable[sympy.Symbol] | None = None,
+    ) -> Expr | int:
+        """Replace known precomputed-size expressions with their runtime symbols."""
+        if not isinstance(expr, Expr):
+            return expr
+
+        allowed_set = OrderedSet(allowed) if allowed is not None else None
+        skipped = OrderedSet(skip or ())
+        replacements = [
+            (source, sym)
+            for source, sym in self.precomputed_replacements.items()
+            if sym not in skipped and (allowed_set is None or sym in allowed_set)
+        ]
+        if not replacements:
+            return expr
+
+        replacements.sort(
+            key=lambda item: (
+                len(item[0].free_symbols),
+                sympy.count_ops(item[0]),
+                str(item[0]),
+            ),
+            reverse=True,
+        )
+
+        result = expr
+        for _ in range(len(replacements)):
+            previous = result
+            for source, sym in replacements:
+                result = self._substitute_precomputed_size(result, source, sym)
+            if result == previous:
+                break
+        return result
 
     def replace_backed_symbols_with_hints(
         self,
