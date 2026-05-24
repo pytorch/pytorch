@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import datetime
 import math
 import random
 import unittest
@@ -78,6 +79,86 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
+
+    def test_datetime_now_attr_fullgraph(self):
+        def fn(x):
+            current_time = datetime.datetime.now()
+            return x + current_time.second
+
+        x = torch.ones(3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+        seconds = res - x
+        self.assertEqual(seconds, seconds[0].expand_as(seconds))
+        self.assertGreaterEqual(seconds[0].item(), 0)
+        self.assertLessEqual(seconds[0].item(), 59)
+
+    def test_datetime_now_attr_import_alias_fullgraph(self):
+        from datetime import datetime as dt
+
+        def fn(x):
+            current_time = dt.now()
+            return x * current_time.minute
+
+        x = torch.ones(3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+        minutes = res / x
+        self.assertEqual(minutes, minutes[0].expand_as(minutes))
+        self.assertGreaterEqual(minutes[0].item(), 0)
+        self.assertLessEqual(minutes[0].item(), 59)
+
+    def test_datetime_now_attr_runtime_value(self):
+        import torch._dynamo.variables.user_defined as user_defined
+
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time = datetime.datetime.now()
+                return (
+                    x + current_time.second,
+                    x + current_time.minute - current_time.second,
+                )
+
+            x = torch.zeros(())
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            res1, diff1 = opt_fn(x)
+            res2, diff2 = opt_fn(x)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(res1.item(), 2)
+            self.assertEqual(res2.item(), 3)
+            self.assertEqual(diff1.item(), 0)
+            self.assertEqual(diff2.item(), 0)
+            self.assertEqual(len(calls), 3)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
+    def test_datetime_now_reconstruct_across_graph_break(self):
+        def fn(x):
+            current_time = datetime.datetime.now()
+            torch._dynamo.graph_break()
+            return x + current_time.second
+
+        x = torch.ones(3)
+        res = torch.compile(fn, backend="eager")(x)
+        seconds = res - x
+        self.assertEqual(seconds, seconds[0].expand_as(seconds))
+        self.assertGreaterEqual(seconds[0].item(), 0)
+        self.assertLessEqual(seconds[0].item(), 59)
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):

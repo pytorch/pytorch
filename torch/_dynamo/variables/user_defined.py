@@ -26,6 +26,7 @@ import builtins
 import collections
 import contextlib
 import dataclasses
+import datetime
 import enum
 import functools
 import inspect
@@ -938,6 +939,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
+            self.value is datetime.datetime
+            and name == "now"
+            and len(args) == 0
+            and not kwargs
+        ):
+            source = self.source
+            if source:
+                source = CallFunctionNoArgsSource(AttrSource(source, "now"))
+            return DatetimeNowVariable(source=source)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
@@ -1557,6 +1568,75 @@ def call_random_fn(
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
+_DATETIME_NOW_ATTRS = (
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "microsecond",
+)
+_DATETIME_NOW_ATTR_INDEX = {name: i for i, name in enumerate(_DATETIME_NOW_ATTRS)}
+
+
+def _get_datetime_now_attrs() -> tuple[int, ...]:
+    timestamp = datetime.datetime.now()
+    return tuple(getattr(timestamp, name) for name in _DATETIME_NOW_ATTRS)
+
+
+class DatetimeNowVariable(VariableTracker):
+    def __init__(
+        self,
+        attrs_source: RandomValueSource | None = None,
+        attrs: tuple[int, ...] | None = None,
+        attr_vars: dict[str, VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.attrs_source = attrs_source
+        self.attrs = attrs
+        self.attr_vars = attr_vars if attr_vars is not None else {}
+
+    def python_type(self) -> type[datetime.datetime]:
+        return datetime.datetime
+
+    def _setup_runtime_attrs(self, tx: "InstructionTranslator") -> None:
+        if self.attrs_source is not None:
+            return
+        random_call_index = len(tx.output.random_calls)
+        self.attrs = _get_datetime_now_attrs()
+        self.attrs_source = RandomValueSource(random_call_index)
+        tx.output.random_calls.append((_get_datetime_now_attrs, (), {}))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name in _DATETIME_NOW_ATTR_INDEX:
+            if name not in self.attr_vars:
+                from .builder import VariableBuilder
+
+                self._setup_runtime_attrs(tx)
+                if self.attrs is None or self.attrs_source is None:
+                    raise AssertionError("datetime.now() attrs must be initialized")
+                index = _DATETIME_NOW_ATTR_INDEX[name]
+                self.attr_vars[name] = VariableBuilder(
+                    tx, GetItemSource(self.attrs_source, index)
+                ).wrap_unspecialized_primitive(self.attrs[index])
+            return self.attr_vars[name]
+        return super().var_getattr(tx, name)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(datetime),
+                    codegen.create_load_attr("datetime"),
+                    codegen.create_load_attr("now"),
+                ]
+            )
+        )
+        codegen.call_function(0, False)
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
