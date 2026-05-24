@@ -1171,12 +1171,11 @@ def main() -> None:
 
     torch_package_data = [
         "py.typed",
-        # torch._C is built by CMake (torch/CMakeLists.txt) and installed
-        # into torch/.  Pick up the SOABI-tagged shared module here so
-        # setuptools includes it in the wheel.
-        "_C*.so",
-        "_C*.pyd",
-        "_C*.dylib",
+        # torch._C is built by CMake (torch/CMakeLists.txt) and installed into
+        # torch/.  Match this interpreter's exact extension suffix, not a glob:
+        # build_all.sh reuses one build/ dir across Python versions, so a glob
+        # would also pick up other ABIs' _C modules left behind in the tree.
+        f"_C{sysconfig.get_config_var('EXT_SUFFIX')}",
         "bin/*",
         "bin/**/*",
         "test/*",
