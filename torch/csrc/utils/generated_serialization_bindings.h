@@ -10,16 +10,17 @@
 namespace pybind11::detail {
 template <>
 struct type_caster<torch::_export::F64> {
+  // NOLINTNEXTLINE(modernize-type-traits,modernize-use-constraints)
   PYBIND11_TYPE_CASTER(torch::_export::F64, const_name("float"));
 
-  bool load(handle, bool) {
+  bool load(handle src, bool convert) {
     return false;
   }
 
   static handle cast(
       const torch::_export::F64& src,
-      return_value_policy,
-      handle) {
+      return_value_policy policy,
+      handle parent) {
     return PyFloat_FromDouble(src.get());
   }
 };
@@ -27,9 +28,10 @@ struct type_caster<torch::_export::F64> {
 template <typename T>
 struct type_caster<torch::_export::ForwardRef<T>> {
   using value_conv = make_caster<T>;
+  // NOLINTNEXTLINE(modernize-type-traits,modernize-use-constraints)
   PYBIND11_TYPE_CASTER(torch::_export::ForwardRef<T>, value_conv::name);
 
-  bool load(handle, bool) {
+  bool load(handle src, bool convert) {
     return false;
   }
 
@@ -42,8 +44,7 @@ struct type_caster<torch::_export::ForwardRef<T>> {
 };
 } // namespace pybind11::detail
 
-namespace torch {
-namespace _export {
+namespace torch::_export {
 
 inline void registerSerializationBindings(py::module_& m) {
 
@@ -1033,7 +1034,6 @@ inline void registerSerializationBindings(py::module_& m) {
 
 }
 
-} // namespace _export
-} // namespace torch
+} // namespace torch::_export
 
 // clang-format on

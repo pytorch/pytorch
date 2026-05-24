@@ -166,6 +166,21 @@ def _staged_schema():
                         f"Optional field {ty.__name__}.{f.name} must have default value to be None."
                     )
 
+                # Skip emitting "= {}" for non-primitive types whose
+                # default-construction already yields the same empty value
+                # (containers, strings, classes). Emitting it would trigger
+                # readability-redundant-member-init. Keep it for primitives
+                # (int64_t, bool, F64) which require explicit value-init.
+                if cpp_default == "{}" and cpp_type not in ("int64_t", "bool", "F64"):
+                    cpp_default = None
+            elif cpp_type in ("int64_t", "bool", "F64"):
+                # Value-initialize primitive/enum members (enums map to int64_t)
+                # to satisfy cppcoreguidelines-pro-type-member-init. Non-primitive
+                # types (std::string, containers, classes) default-construct
+                # themselves; emitting "= {}" for those would trigger
+                # readability-redundant-member-init.
+                cpp_default = "{}"
+
             return ret, cpp_type, cpp_default, thrift_type, thrift_id
 
         yaml_ret = {}
@@ -244,8 +259,9 @@ enum {name} {{
     return {name};
   }}
 
-  void set_{name}({ty} def) {{
-    {name} = std::move(def);
+  template <typename U>
+  void set_{name}(U&& def) {{
+    {name} = std::forward<U>(def);
   }}
 """
 
@@ -322,8 +338,9 @@ struct {name} {{
     return std::get<{idx + 1}>(variant_);
   }}
 
-  void set_{name}({ty} def) {{
-    variant_.emplace<{idx + 1}>(std::move(def));
+  template <typename U>
+  void set_{name}(U&& def) {{
+    variant_.emplace<{idx + 1}>(std::forward<U>(def));
     tag_ = Tag::{name.upper()};
   }}
 """
@@ -361,7 +378,7 @@ class {name} {{
 
  private:
   std::variant<Void, {", ".join(f["cpp_type"] for f in cpp_fields.values())}> variant_;
-  Tag tag_;
+  Tag tag_{{}};
 
  public:
   Tag tag() const {{
@@ -547,8 +564,7 @@ struct adl_serializer<std::optional<T>> {{
 }};
 NLOHMANN_JSON_NAMESPACE_END
 
-namespace torch {{
-namespace _export {{
+namespace torch::_export {{
 
 template <typename T>
 class ForwardRef {{
@@ -556,9 +572,9 @@ class ForwardRef {{
 
  public:
   ForwardRef(): ptr_(std::make_unique<T>()) {{}}
-  ForwardRef(ForwardRef<T>&&);
+  ForwardRef(ForwardRef<T>&&) noexcept;
   ForwardRef(const ForwardRef<T>& other): ptr_(std::make_unique<T>(*other.ptr_)) {{}}
-  ForwardRef<T>& operator=(ForwardRef<T>&&);
+  ForwardRef<T>& operator=(ForwardRef<T>&&) noexcept;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
@@ -601,7 +617,7 @@ class F64 {{
   }}
 
  private:
-  double value_;
+  double value_{{}};
 }};
 
 inline void to_json(nlohmann::json& j, const F64& f) {{
@@ -633,11 +649,10 @@ inline void from_json(const nlohmann::json& j, F64& f) {{
 {"".join(dict(sorted(cpp_class_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 {chr(10).join(cpp_json_defs)}
 
-template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
-template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) noexcept = default;
+template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) noexcept = default;
 template <typename T> ForwardRef<T>::~ForwardRef() = default;
-}} // namespace _export
-}} // namespace torch
+}} // namespace torch::_export
 """
     sorted_pybind_class_defs = dict(
         sorted(
@@ -658,16 +673,17 @@ template <typename T> ForwardRef<T>::~ForwardRef() = default;
 namespace pybind11::detail {{
 template <>
 struct type_caster<torch::_export::F64> {{
+  // NOLINTNEXTLINE(modernize-type-traits,modernize-use-constraints)
   PYBIND11_TYPE_CASTER(torch::_export::F64, const_name("float"));
 
-  bool load(handle, bool) {{
+  bool load(handle src, bool convert) {{
     return false;
   }}
 
   static handle cast(
       const torch::_export::F64& src,
-      return_value_policy,
-      handle) {{
+      return_value_policy policy,
+      handle parent) {{
     return PyFloat_FromDouble(src.get());
   }}
 }};
@@ -675,9 +691,10 @@ struct type_caster<torch::_export::F64> {{
 template <typename T>
 struct type_caster<torch::_export::ForwardRef<T>> {{
   using value_conv = make_caster<T>;
+  // NOLINTNEXTLINE(modernize-type-traits,modernize-use-constraints)
   PYBIND11_TYPE_CASTER(torch::_export::ForwardRef<T>, value_conv::name);
 
-  bool load(handle, bool) {{
+  bool load(handle src, bool convert) {{
     return false;
   }}
 
@@ -690,16 +707,14 @@ struct type_caster<torch::_export::ForwardRef<T>> {{
 }};
 }} // namespace pybind11::detail
 
-namespace torch {{
-namespace _export {{
+namespace torch::_export {{
 
 inline void registerSerializationBindings(py::module_& m) {{
 {pybind_enum_defs}
 {pybind_class_defs}
 }}
 
-}} // namespace _export
-}} // namespace torch
+}} // namespace torch::_export
 """
     thrift_schema = f"""
 namespace py3 torch._export
