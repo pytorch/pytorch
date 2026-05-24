@@ -2962,6 +2962,10 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)
@@ -4032,7 +4036,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -4183,12 +4187,8 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval == 0 or inst.argval == 1 to be true"
             )
-        if inst.argval == 0:
-            new_argval = "is"
-        else:
-            new_argval = "is not"
-        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
-        self.COMPARE_OP(new_inst)
+        argval = "is" if inst.argval == 0 else "is not"
+        self.push(compare_op_handlers[argval](self, self.popn(2), {}))
 
     def CONTAINS_OP(self, inst: Instruction) -> None:
         if not (inst.argval == 0 or inst.argval == 1):
@@ -4829,21 +4829,27 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, inst.argval))
 
     # See
-    # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
+    # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/pylifecycle.c#L881
     # for the common constants - make sure it matches for Python 3.14+.
-    # The common constants are all attributes of `builtins`.
     _common_constants = (
-        "AssertionError",
-        "NotImplementedError",
-        "tuple",
-        "all",
-        "any",
+        AssertionError,
+        NotImplementedError,
+        tuple,
+        all,
+        any,
+        list,
+        set,
+        None,
+        "",
+        True,
+        False,
+        -1,
     )
 
     def LOAD_COMMON_CONSTANT(self, inst: Instruction) -> None:
         if not isinstance(inst.arg, int):
             raise AssertionError("expected LOAD_COMMON_CONSTANT arg to be set to int")
-        self.push(self.load_builtin_from_argval(self._common_constants[inst.arg]))
+        self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
@@ -5770,11 +5776,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        if code.co_name in ("__setitem__", "__setattr__") and not (
-            args and isinstance(args[0], variables.UserDefinedObjectVariable)
+        if code.co_name in (
+            "__setitem__",
+            "__setattr__",
+            "__delitem__",
+            "__delattr__",
+        ) and not (
+            args
+            and isinstance(
+                args[0],
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
         ):
             unimplemented(
-                gb_type="Unsupported __setitem__/__setattr__ inline attempt",
+                gb_type="Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
                 hints=[],
