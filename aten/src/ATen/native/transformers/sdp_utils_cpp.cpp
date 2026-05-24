@@ -15,8 +15,10 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last)) {
+  const bool same_head_dim_size =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(value_size_last));
+  if (!same_head_dim_size) {
     if (debug) {
       TORCH_WARN(
           "Flash attention requires q,k,v to have the same last dimension.",
