@@ -3259,6 +3259,8 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
         raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
+    if a.ndim == 0:
+        return torch.clone(a)
     return prims.rev(a, dims)
 
 
@@ -4387,23 +4389,19 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
-    index_size = index.numel()
-    index_shape = [1] * x.ndim
-    index_shape[dim] = index_size
-    output_shape = list(x.shape)
-    output_shape[dim] = index_size
-
     if x.numel() == 0:
-        # Validate index bounds even when the final gather has no elements to read.
+        # Validate index bounds even when the final indexing has no elements to read.
         torch.ops.aten._assert_async.msg(
             ((index >= 0) & (index < x.shape[dim])).all(),
             "index out of bounds",
         )
 
-    index = index.reshape(index_shape).expand(output_shape)
-    return torch.gather(x, dim, index).contiguous(
-        memory_format=utils.suggest_memory_format(x)
-    )
+    # Advanced indexing wraps negative indices, unlike index_select.  Preserve
+    # its dtype coverage and autograd behavior, but map negatives to a positive
+    # out-of-range index so existing bounds checks reject them.
+    index = torch.where(index < 0, x.shape[dim], index)
+    idx = (slice(None),) * dim + (index,)
+    return x[idx].contiguous(memory_format=utils.suggest_memory_format(x))
 
 
 @register_decomposition(aten.squeeze.dims)
