@@ -29,7 +29,7 @@ from torch._higher_order_ops.gemm_epilogue import (
     _SUPPORTED_GEMM_OP_NAMES,
     GEMM_EPILOGUE_OPS,
 )
-from torch._higher_order_ops.gemm_epilogue_quack import materialize_quack_epilogue
+from torch._higher_order_ops.gemm_epilogue_quack_emit import materialize_quack_epilogue
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
