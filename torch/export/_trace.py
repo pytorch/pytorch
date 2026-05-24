@@ -1139,25 +1139,40 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> set[str]:
 
 
 def _rewrite_dynamo_tensor_constants(
-    orig_mod_buffers: set[torch.Tensor],
+    param_buffer_table: dict[str, str],
+    traced_mod_params: dict[str, torch.nn.Parameter],
     traced_mod_buffers: dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
     constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """
-    Dynamo erroneously marks tensor attributes on modules as buffers.
-    Rewrite them to be tensor constants.
+    Dynamo can install free/global tensors on the traced module as parameters
+    or buffers. If they do not correspond to state from the original module,
+    rewrite them to be tensor constants.
     """
+    traced_mod_state: dict[str, torch.Tensor] = {
+        **traced_mod_params,
+        **traced_mod_buffers,
+    }
     for spec in graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER:
+        if spec.kind in (InputKind.PARAMETER, InputKind.BUFFER):
             if spec.target is None:
-                raise AssertionError("spec.target must not be None for BUFFER kind")
-            value = traced_mod_buffers[spec.target]
-            if value not in orig_mod_buffers:
-                # This was a tensor constant erroneously marked as a buffer.
-                # Convert it into a constant in the graph signature, and add its
-                # value to the constants table.
+                raise AssertionError(
+                    f"spec.target must not be None for {spec.kind} kind"
+                )
+            if spec.target not in param_buffer_table:
+                if spec.target not in traced_mod_state:
+                    raise AssertionError(
+                        f"Unable to find traced state value for {spec.target!r}"
+                    )
+                # This was a tensor constant erroneously marked as state.
+                # Convert it into a constant in the graph signature, and add
+                # its value to the constants table.
+                value = traced_mod_state[spec.target]
+                if isinstance(value, torch.nn.Parameter):
+                    value = value.data
                 spec.kind = InputKind.CONSTANT_TENSOR
+                spec.persistent = None
                 constants[spec.target] = value  # type: ignore[arg-type]
 
 
@@ -1721,10 +1736,11 @@ def _strict_export(
 
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
-    # 1. Remove tensor constants that were added as buffers.
+    # 1. Remove tensor constants that were added as parameters/buffers.
     _rewrite_dynamo_tensor_constants(
-        orig_mod_buffers=set(mod.buffers()),
-        traced_mod_buffers=dict(gm_torch_level.named_buffers()),
+        param_buffer_table=param_buffer_table,
+        traced_mod_params=dict(gm_torch_level.named_parameters(remove_duplicate=False)),
+        traced_mod_buffers=dict(gm_torch_level.named_buffers(remove_duplicate=False)),
         graph_signature=export_graph_signature,
         constants=constants,
     )
