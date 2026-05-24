@@ -877,6 +877,34 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_scalar_value_non_leaf_autograd(self, device):
+        if device != "cpu":
+            self.skipTest("CPU regression test")
+
+        torch.manual_seed(42)
+        x0 = torch.randn(64, 64, device=device)
+        t10 = torch.randn(64, 64, device=device)
+        t20 = torch.randn(64, 64, device=device)
+
+        def fn(x, t1, t2):
+            y = x + 0
+            return y.addcmul_(t1, t2, value=0.5).sum()
+
+        def run(fn):
+            x = x0.clone().detach().requires_grad_()
+            t1 = t10.clone().detach().requires_grad_()
+            t2 = t20.clone().detach().requires_grad_()
+            loss = fn(x, t1, t2)
+            loss.backward()
+            return x.grad, t1.grad, t2.grad
+
+        expected_grads = run(fn)
+        actual_grads = run(torch.compile(fn, fullgraph=True))
+        for expected, actual in zip(expected_grads, actual_grads):
+            self.assertEqual(expected, actual, atol=0, rtol=0)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcmul_tensor_value_mixed_complex_autograd(self, device):
         if device != "cpu":
             self.skipTest("CPU regression test")

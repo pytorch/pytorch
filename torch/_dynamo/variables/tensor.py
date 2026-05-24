@@ -1808,10 +1808,20 @@ class TensorVariable(VariableTracker):
             except (RuntimeError, TypeError, ValueError) as exc:
                 unsupported_addcmul_decomposition(f"eager validation failure: {exc}")
 
-            from torch._inductor import inductor_prims
+            if isinstance(value, TensorVariable):
+                from torch._inductor import inductor_prims
 
-            addcmul_var = variables.TorchInGraphFunctionVariable(inductor_prims.addcmul)
-            result = addcmul_var.call_function(tx, [self, tensor1, tensor2, value], {})
+                addcmul_var = variables.TorchInGraphFunctionVariable(
+                    inductor_prims.addcmul
+                )
+                result = addcmul_var.call_function(
+                    tx, [self, tensor1, tensor2, value], {}
+                )
+            else:
+                addcmul_var = variables.TorchInGraphFunctionVariable(torch.addcmul)
+                result = addcmul_var.call_function(
+                    tx, [self, tensor1, tensor2], {"value": value}
+                )
             return self.call_method(tx, "copy_", [result], {})
         return None
 
