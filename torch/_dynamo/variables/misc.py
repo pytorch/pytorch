@@ -2438,6 +2438,11 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    _nonvar_fields = {
+        "weakref_source",
+        *VariableTracker._nonvar_fields,
+    }
+
     def python_type(self) -> type:
         return weakref.ref
 
@@ -2455,17 +2460,25 @@ class WeakRefVariable(VariableTracker):
         callback_source = source and AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)
         referent = weakref_value()
+        weakref_source = source
         source = source and WeakRefCallSource(source)
         referent_vt = VariableTracker.build(tx, referent, source)
         options["source"] = source
-        return WeakRefVariable(referent_vt, callback_vt, **options)
+        return WeakRefVariable(
+            referent_vt, callback_vt, weakref_source=weakref_source, **options
+        )
 
     def __init__(
-        self, referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
+        self,
+        referent_vt: VariableTracker,
+        callback_vt: VariableTracker,
+        weakref_source: Source | None = None,
+        **options: Any,
     ) -> None:
         super().__init__(**options)
         self.referent_vt = referent_vt
         self.callback_vt = callback_vt
+        self.weakref_source = weakref_source
 
     def call_function(
         self,

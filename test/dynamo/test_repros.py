@@ -9103,6 +9103,28 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         result = f(x)
         self.assertEqual(result.item(), 1.0)
 
+    def test_is_with_weakref_source(self):
+        class Holder:
+            pass
+
+        holder = Holder()
+        ref = weakref.ref(holder)
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            if ref is not None:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+        ref = None
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 2.0)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_is_with_mutated_tensor_alias_source(self):
         global _GLOBAL_TENSOR_FOR_IS_TEST
         _GLOBAL_TENSOR_FOR_IS_TEST = torch.tensor(0.0)
