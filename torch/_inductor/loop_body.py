@@ -111,6 +111,7 @@ class LoopBody:
 
     @staticmethod
     def _wrap_int_to_sympy_integer(expr):
+        # Static sizes can enter indexing expressions as Python ints.
         if type(expr) is int:
             return sympy.Integer(expr)
         return expr
@@ -741,6 +742,7 @@ class CaptureIndexing(WrapperHandler):
     def check_bounds(self, index, size, lower, upper):
         index = self._simplify(index)
         index = self._add_index(index, MemoryUsageType.CHECK_BOUNDS)
+        size = self.body._wrap_int_to_sympy_integer(size)
         size = self._add_index(size, MemoryUsageType.CHECK_BOUNDS)
         return self._inner.check_bounds(index, size, lower, upper)
 
