@@ -7,7 +7,7 @@ import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, IO, Protocol, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 
 import torch
@@ -15,7 +15,6 @@ import torch.utils._pytree as pytree
 from torch._export.serde import schema
 from torch._export.serde.serialize import (
     _dataclass_to_dict,
-    _dict_to_dataclass,
     deserialize_device,
     deserialize_scalar_type,
     deserialize_size,
@@ -69,6 +68,24 @@ AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+class _PayloadConfigLike(Protocol):
+    config: dict[str, Any]
+
+
+def _get_cpp_schema_deserializer() -> Any | None:
+    cpp_export = getattr(torch._C, "_export", None)
+    if cpp_export is None:
+        return None
+    if (
+        getattr(cpp_export, "deserialize_exported_program", None) is None
+        or getattr(cpp_export, "deserialize_payload_config", None) is None
+        or not hasattr(getattr(cpp_export, "CppExportedProgram", None), "graph_module")
+        or not hasattr(getattr(cpp_export, "CppPayloadConfig", None), "config")
+    ):
+        return None
+    return cpp_export
 
 
 def is_pt2_package(serialized_model: bytes | str) -> bool:
@@ -819,7 +836,7 @@ def _create_flat_tensor_from_bytes(
 
 def _build_file_map(
     archive_reader: PT2ArchiveReader,
-    config: schema.PayloadConfig,
+    config: _PayloadConfigLike,
     base_dir: str,
 ) -> dict[str, torch.Tensor]:
     """
@@ -848,14 +865,36 @@ def _build_file_map(
 def _load_payload_config(
     archive_reader: PT2ArchiveReader,
     config_file: str,
-) -> schema.PayloadConfig:
+) -> _PayloadConfigLike:
     """
     Load and parse a payload config from the archive.
     """
-    return _dict_to_dataclass(
-        schema.PayloadConfig,
-        json.loads(archive_reader.read_string(config_file)),
-    )
+    serialized_config = archive_reader.read_string(config_file)
+    cpp_export = _get_cpp_schema_deserializer()
+    if cpp_export is not None:
+        return cast(
+            _PayloadConfigLike, cpp_export.deserialize_payload_config(serialized_config)
+        )
+
+    # Keep source checkouts with an older/custom torch._C usable; the generated
+    # C++ binding remains the normal fast path.
+    from torch._export.serde.serialize import _dict_to_dataclass
+
+    return _dict_to_dataclass(schema.PayloadConfig, json.loads(serialized_config))
+
+
+def _deserialize_exported_program(exported_program_bytes: bytes) -> Any:
+    cpp_export = _get_cpp_schema_deserializer()
+    if cpp_export is not None:
+        return cpp_export.deserialize_exported_program(
+            exported_program_bytes.decode("utf-8")
+        )
+
+    # Keep source checkouts with an older/custom torch._C usable; the generated
+    # C++ binding remains the normal fast path.
+    from torch._export.serde.serialize import _bytes_to_dataclass
+
+    return _bytes_to_dataclass(schema.ExportedProgram, exported_program_bytes)
 
 
 def _load_state_dict(
@@ -1002,11 +1041,9 @@ def _load_exported_programs(
         sample_inputs_file = SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name)
         serialized_sample_inputs = archive_reader.read_bytes(sample_inputs_file)
 
-        from torch._export.serde.serialize import _bytes_to_dataclass
-
         exported_program_bytes = archive_reader.read_bytes(file)
-        serialized_exported_program = _bytes_to_dataclass(
-            schema.ExportedProgram, exported_program_bytes
+        serialized_exported_program = _deserialize_exported_program(
+            exported_program_bytes
         )
         state_dict = _load_state_dict(archive_reader, model_name)
         constants = _load_constants(archive_reader, model_name)
