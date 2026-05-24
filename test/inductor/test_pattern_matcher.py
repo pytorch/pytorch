@@ -615,9 +615,9 @@ class TestPatternMatcher(TestCase):
 
         def rewritten_keepdim_dtype(a, b, c):
             s = torch.sigmoid(a[:, 2:, :])
-            return torch.cat(
-                [s * b, c, (1.0 - s) * s * a[:, :2, :] * b], dim=-2
-            ).mean(dim=(-3, -1), keepdim=True, dtype=torch.float64)
+            return torch.cat([s * b, c, (1.0 - s) * s * a[:, :2, :] * b], dim=-2).mean(
+                dim=(-3, -1), keepdim=True, dtype=torch.float64
+            )
 
         def guarded(a, b):
             return torch.cat([a, b], dim=1).mean(dim=(1, 2))
