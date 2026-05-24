@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -209,9 +210,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-        GraphTransformObserver(gm, "fold_ce_backward_one_hot_row_sum").apply_graph_pass(
-            fold_ce_backward_one_hot_row_sum
-        )
+        # The original reduction-fused CE backward can reuse the padded mm output
+        # under donated-buffer shape padding; this fold currently forces a fresh
+        # pointwise output allocation in that case.
+        if not (config.force_shape_pad and functorch_config.donated_buffer):
+            GraphTransformObserver(
+                gm, "fold_ce_backward_one_hot_row_sum"
+            ).apply_graph_pass(fold_ce_backward_one_hot_row_sum)
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
