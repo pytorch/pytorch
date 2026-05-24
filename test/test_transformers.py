@@ -23,9 +23,6 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
-    MI350_ARCH,
-    skipIfRocmArch,
-    MI300_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
