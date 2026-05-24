@@ -211,9 +211,8 @@ def register_opaque_type(
             "with torch._opaque_base.OpaqueBaseMeta "
             "(or use 'py::metaclass(torch._opaque_base.OpaqueBaseMeta)' "
             "for pybind classes). "
-            "This is required so that FakeScriptObject can be registered "
-            "as a virtual subclass, allowing isinstance() checks to work "
-            "during torch.compile tracing. "
+            "This is required so that isinstance() checks can unwrap "
+            "FakeScriptObject during torch.compile tracing. "
         )
 
     if typ not in ["reference", "value"]:

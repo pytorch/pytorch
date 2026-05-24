@@ -1827,6 +1827,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         fake_obj = FakeScriptObject(
             None, get_opaque_type_name(module.WithMetaOpaque), obj
         )
+        self.assertTrue(issubclass(module.WithMetaOpaque, module.WithMetaOpaque))
+        self.assertIsInstance(obj, module.WithMetaOpaque)
         self.assertIsInstance(obj, OpaqueBase)
         self.assertIsInstance(fake_obj, module.WithMetaOpaque)
 
@@ -4174,10 +4176,15 @@ class fn(torch.nn.Module):
 
     def test_generator_metaclass_is_set(self):
         """Generator's metaclass should be OpaqueBaseMeta after import"""
+        from abc import ABCMeta
+
         from torch._opaque_base import OpaqueBaseMeta
 
         self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
         self.assertEqual(torch._C.Generator.__module__, "torch._C")
+        self.assertFalse(issubclass(OpaqueBaseMeta, ABCMeta))
+        self.assertTrue(issubclass(torch._C.Generator, torch._C.Generator))
+        self.assertIsInstance(torch.Generator(), torch._C.Generator)
 
 
 if __name__ == "__main__":

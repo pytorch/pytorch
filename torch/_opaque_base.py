@@ -52,11 +52,8 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
     if getattr(OpaqueBase, "_pybind_backed", False):
         return OpaqueBaseMeta, OpaqueBase
 
-    from abc import ABCMeta
-
     class OpaqueBaseMeta(
         type(_PybindOpaqueBase),  # pyrefly: ignore [invalid-inheritance]
-        ABCMeta,
     ):
         def __call__(cls, *args, **kwargs):
             # pybind11_type.__call__ requires pybind base __init__ to run for
