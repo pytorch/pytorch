@@ -7143,7 +7143,14 @@ class FusedUserTritonKernel(TritonKernel):
     ) -> None:
         assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
         if name == self.scheduler_node.fused_epilogue.node.get_name():
-            self.new_store_cse_var = value
+            store_dtype = self.scheduler_node.fused_epilogue.node.layout.dtype
+            cast_var = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_store_type(store_dtype)})",
+                dtype=store_dtype,
+                shape=value.shape,
+            )
+            self.new_store_cse_var = cast_var
         else:
             super().store(name, index, value, mode)
 
