@@ -9,8 +9,11 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_quantized import _bfloat16_to_float4_e2m1fn_x2
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 log = logging.getLogger(__name__)
@@ -135,6 +138,28 @@ class TestQuantization(TestCase):
         self.assertTrue(
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
+
+    @requires_cuda_and_triton
+    def test_bfloat16_to_float4_pack_fuses(self):
+        def fn(x):
+            return _bfloat16_to_float4_e2m1fn_x2(x)
+
+        x = torch.randn((64, 64), device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = fn(x)
+        actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(actual.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(actual.shape, (64, 32))
+        torch.testing.assert_close(
+            actual.view(torch.uint8),
+            expected.view(torch.uint8),
+            atol=0,
+            rtol=0,
+        )
+
+        code = "\n".join(codes)
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self.assertEqual(code.count("tl.store"), 1)
 
     @requires_gpu()
     @torch._inductor.config.patch(
