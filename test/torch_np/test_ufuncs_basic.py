@@ -260,6 +260,31 @@ class TestNdarrayDunderVsUfunc(TestCase):
         iop(a, a)
         assert_equal(a, op(a0, a0))
 
+    def test_subtract_bool_mixed_numeric(self):
+        bools = np.array([True, False])
+
+        result = 1 - bools
+        assert_equal(result, np.array([0, 1], dtype="int64"))
+        if result.dtype != np.dtype("int64"):
+            raise AssertionError(f"Expected dtype int64, got {result.dtype}")
+
+        result = bools - 1
+        assert_equal(result, np.array([0, -1], dtype="int64"))
+        if result.dtype != np.dtype("int64"):
+            raise AssertionError(f"Expected dtype int64, got {result.dtype}")
+
+        ints = np.array([1, 2], dtype="int8")
+        result = bools - ints
+        assert_equal(result, np.array([0, -2], dtype="int8"))
+        if result.dtype != np.dtype("int8"):
+            raise AssertionError(f"Expected dtype int8, got {result.dtype}")
+
+        with assert_raises(TypeError):
+            bools - bools
+
+        result = np.subtract(bools, bools, dtype="int64")
+        assert_equal(result, np.array([0, 0], dtype="int64"))
+
     @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
     @parametrize("other_dtype", dtypes_numeric)
     def test_other_scalar(self, ufunc, op, iop, other_dtype):

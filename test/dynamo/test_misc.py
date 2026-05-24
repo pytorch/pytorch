@@ -3958,6 +3958,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(r, x >= 3)
 
+    def test_numpy_bool_numeric_subtract(self):
+        x = np.arange(3, dtype=np.float64)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(y):
+            cond = y > 0
+            return (1 - cond) + np.isnan(y)
+
+        self.assertEqual(fn(x), (1 - (x > 0)) + np.isnan(x))
+
     def test_numpy_min(self):
         x = np.arange(10)
 
