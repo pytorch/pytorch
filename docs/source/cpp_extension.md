@@ -23,3 +23,73 @@
 
 .. autofunction:: is_ninja_available
 ```
+
+## CPU-specific header-only code paths
+
+`CppExtension`, `CUDAExtension`, `load`, and `load_inline` set up the minimum
+compiler and linker options needed to build against PyTorch. They do not
+automatically copy the CPU capability flags that PyTorch uses internally when it
+builds specialized ATen kernels, such as `CPU_CAPABILITY_AVX2` or
+`CPU_CAPABILITY_AVX512`.
+
+Some PyTorch header-only implementations use those macros to select optional
+CPU-specific code paths. For example, `torch/headeronly/util/Half.h` uses
+`CPU_CAPABILITY_AVX2` or `CPU_CAPABILITY_AVX512` to enable vectorized half
+conversion helpers. A custom C++ or CUDA operator that includes such headers
+without defining a CPU capability macro will still build and run, but it will
+use the generic implementation for those header-only functions.
+
+If you intentionally compile an extension source file for a specific CPU
+capability, pass both the PyTorch capability macro and the matching compiler ISA
+flags to the compiler that builds that source file. For example:
+
+```python
+CppExtension(
+    name="my_extension",
+    sources=["extension.cpp"],
+    extra_compile_args=[
+        "-O3",
+        "-mavx2",
+        "-mfma",
+        "-mf16c",
+        "-DCPU_CAPABILITY=AVX2",
+        "-DCPU_CAPABILITY_AVX2",
+    ],
+)
+```
+
+For `CUDAExtension` builds with separate C++ and CUDA sources, pass these
+options under the `cxx` entry of `extra_compile_args` for C++ sources. If a CUDA
+source also contains host CPU code that includes one of these headers, pass the
+equivalent defines and host compiler ISA options through the `nvcc` entry as
+well.
+
+For JIT builds, pass the same options through `extra_cflags` for C++ sources:
+
+```python
+load(
+    name="my_extension",
+    sources=["extension.cpp"],
+    extra_cflags=[
+        "-O3",
+        "-mavx2",
+        "-mfma",
+        "-mf16c",
+        "-DCPU_CAPABILITY=AVX2",
+        "-DCPU_CAPABILITY_AVX2",
+    ],
+)
+```
+
+If a JIT-compiled CUDA source also needs these options for host CPU code, pass
+the equivalent options through `extra_cuda_cflags`.
+
+On MSVC, use the corresponding `/arch:AVX2`, `/DCPU_CAPABILITY=AVX2`, and
+`/DCPU_CAPABILITY_AVX2` options. For AVX512 builds, use
+`CPU_CAPABILITY=AVX512`, `CPU_CAPABILITY_AVX512`, and the matching compiler
+AVX512 flags for your compiler.
+
+Only define these macros for translation units that are compiled with the
+matching ISA flags and that will be run only on compatible CPUs, or behind your
+own runtime dispatch. Defining an AVX2 or AVX512 capability for code that may
+execute on unsupported CPUs can produce illegal instructions.
