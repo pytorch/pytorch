@@ -3,6 +3,7 @@ import contextlib
 import functools
 import unittest.mock
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -114,6 +115,45 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_cpp_wrapper_filters_python_only_extern_choices(self):
+        def python_only_choice_for_cpp_wrapper_filter(*args, out=None):
+            return out
+
+        python_only_choice = ExternKernelChoice.lookup(
+            "python_only_choice_for_cpp_wrapper_filter"
+        )
+        if python_only_choice is None:
+            python_only_choice = ExternKernelChoice(
+                python_only_choice_for_cpp_wrapper_filter
+            )
+
+        unsupported_extern = python_only_choice.bind(input_nodes=[], layout=None)
+        supported_extern = self._extern_kernel_caller("mm")
+        non_extern = select_algorithm.ChoiceCaller("not_extern", [], None, "")
+
+        self.assertEqual(
+            select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                [unsupported_extern]
+            ),
+            [unsupported_extern],
+        )
+
+        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
+            self.assertEqual(
+                select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                    [unsupported_extern, supported_extern, non_extern]
+                ),
+                [supported_extern, non_extern],
+            )
+
+        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=False)):
+            self.assertEqual(
+                select_algorithm.filter_cpp_wrapper_unsupported_choices(
+                    [unsupported_extern]
+                ),
+                [unsupported_extern],
+            )
 
 
 class TestSelectAlgorithm(TestCase):

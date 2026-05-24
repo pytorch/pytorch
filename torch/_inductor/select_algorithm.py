@@ -3611,6 +3611,27 @@ def filter_choices_by_desc_regex(choices: list[ChoiceCaller]) -> list[ChoiceCall
     return choices
 
 
+def has_cpp_wrapper_codegen(choice: ChoiceCaller) -> bool:
+    if not isinstance(choice, ExternKernelCaller):
+        return True
+
+    extern_choice = choice.choice
+    return (
+        extern_choice.cpp_kernel_name is not None
+        or isinstance(extern_choice.op_overload, torch._ops.OpOverload)
+        or extern_choice.kernel_creator is not None
+    )
+
+
+def filter_cpp_wrapper_unsupported_choices(
+    choices: list[ChoiceCaller],
+) -> list[ChoiceCaller]:
+    if not V.graph.cpp_wrapper:
+        return choices
+
+    return [c for c in choices if has_cpp_wrapper_codegen(c)]
+
+
 def _classify_kernel_operation(
     name: str, choices: list[ChoiceCaller], input_nodes
 ) -> str:
@@ -3763,6 +3784,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # them (i.e. so we can restore them after clearing user provided ones)
         self.add_preprocessing_fn(filter_choices_by_name_regex)
         self.add_preprocessing_fn(filter_choices_by_desc_regex)
+        self.add_preprocessing_fn(filter_cpp_wrapper_unsupported_choices)
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
