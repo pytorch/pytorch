@@ -141,6 +141,36 @@ bool get_is_in_mode_without_ignore_compile_internals() {
   }                                         \
   self.insert_leaf_guard(name);
 
+std::string py_type_repr(PyTypeObject* pytype) {
+  PyObject* type_str = PyObject_Str(reinterpret_cast<PyObject*>(pytype));
+  if (!type_str) {
+    PyErr_Clear();
+    return "a different type";
+  }
+
+  const char* type_str_utf8 = PyUnicode_AsUTF8(type_str);
+  if (!type_str_utf8) {
+    PyErr_Clear();
+    Py_DECREF(type_str);
+    return "a different type";
+  }
+
+  std::string result(type_str_utf8);
+  Py_DECREF(type_str);
+  return result;
+}
+
+std::string format_tensor_type_mismatch(
+    const std::string& tensor_name,
+    PyTypeObject* expected_type,
+    PyTypeObject* actual_type) {
+  std::stringstream fail_reason;
+  fail_reason << "expected type of '" << tensor_name << "' to be "
+              << py_type_repr(expected_type) << ", but found "
+              << py_type_repr(actual_type);
+  return fail_reason.str();
+}
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
@@ -532,18 +562,9 @@ PyObject* TensorGuards_check_verbose(
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str =
-          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
-      fail_reason << "expected type of '" << tensor_check_names[i]
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-        Py_DECREF(type_str);
-      }
-      return Py_BuildValue("s", fail_reason.str().c_str());
+      std::string fail_reason = format_tensor_type_mismatch(
+          tensor_check_names[i], checks[i].pytype, Py_TYPE(item));
+      return Py_BuildValue("s", fail_reason.c_str());
     }
 
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -5043,18 +5064,11 @@ class TENSOR_MATCH : public LeafGuard {
       PyObject* value) override { // borrowed ref
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str =
-          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
-      fail_reason << "expected type of '" << _tensor_name
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-        Py_DECREF(type_str);
-      }
-      return GuardDebugInfo(false, fail_reason.str(), 0);
+      return GuardDebugInfo(
+          false,
+          format_tensor_type_mismatch(
+              _tensor_name, _tensor_check->pytype, Py_TYPE(value)),
+          0);
     }
 
     std::string fail_reason = _tensor_check->check_verbose(

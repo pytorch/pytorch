@@ -217,7 +217,27 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_func(a, 1)
         self.assert_single_log_contains(
             logs,
-            "expected type of 'b' to be a tensor type, ' but found <class 'int'>",
+            "expected type of 'b' to be <class 'torch.Tensor'>, but found <class 'int'>",
+        )
+
+    def test_mismatched_tensor_type(self):
+        a = torch.rand(3, 4, 5)
+        b_parameter = torch.nn.Parameter(torch.rand(3, 4, 5))
+        b_tensor = torch.rand(3, 4, 5)
+
+        def func(a, b):
+            return a + b
+
+        opt_func = torch.compile(func, backend="eager")
+        # warmup
+        opt_func(a, b_parameter)
+
+        with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+            opt_func = torch.compile(func, backend="eager")
+            opt_func(a, b_tensor)
+        self.assert_single_log_contains(
+            logs,
+            "expected type of 'b' to be <class 'torch.nn.parameter.Parameter'>, but found <class 'torch.Tensor'>",
         )
 
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
