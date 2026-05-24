@@ -364,7 +364,27 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
         return gm
 
 
-def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+def _is_input_output_alias_to_placeholder(
+    gm: torch.fx.GraphModule, input_idx: int, output_idx: int
+) -> bool:
+    placeholders = [
+        n
+        for n in gm.graph.find_nodes(op="placeholder")
+        if isinstance(n, torch.fx.Node) and "val" in n.meta
+    ]
+    if input_idx >= len(placeholders):
+        return False
+
+    output_node = gm.graph.find_nodes(op="output")[0]
+    flat_outputs = pytree.tree_flatten(output_node.args[0])[0]
+    if output_idx >= len(flat_outputs):
+        return False
+    return flat_outputs[output_idx] is placeholders[input_idx]
+
+
+def potential_input_alias_or_mutation(
+    gm, inputs, pre_dispatch=False, allow_input_output_alias_to_inputs=False
+):
     try:
         gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
@@ -383,6 +403,12 @@ def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
         out_out_alias_map,
         inp_mutation,
     ) = check_input_alias_and_mutation(gm, example_inputs)
+    if allow_input_output_alias_to_inputs:
+        inp_out_alias_map = {
+            inp_idx: out_idx
+            for inp_idx, out_idx in inp_out_alias_map.items()
+            if not _is_input_output_alias_to_placeholder(gm, inp_idx, out_idx)
+        }
     return (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map), inp_mutation
 
 
@@ -414,7 +440,9 @@ def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     return len(inp_mutation) > 0
 
 
-def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+def has_potential_input_alias_or_mutation(
+    gm, inputs, pre_dispatch=False, allow_input_output_alias_to_inputs=False
+):
     (
         (
             inp_inp_alias_map,
@@ -422,7 +450,12 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
             out_out_alias_map,
         ),
         inp_mutation,
-    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+    ) = potential_input_alias_or_mutation(
+        gm,
+        inputs,
+        pre_dispatch,
+        allow_input_output_alias_to_inputs=allow_input_output_alias_to_inputs,
+    )
     return (
         any(
             (
@@ -491,9 +524,18 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
-def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
+def _check_alias_and_mutation(
+    graph_module,
+    inputs_fake,
+    name,
+    pre_dispatch,
+    allow_input_output_alias_to_inputs=False,
+):
     aliases, inp_mutation = has_potential_input_alias_or_mutation(
-        graph_module, inputs_fake, pre_dispatch=pre_dispatch
+        graph_module,
+        inputs_fake,
+        pre_dispatch=pre_dispatch,
+        allow_input_output_alias_to_inputs=allow_input_output_alias_to_inputs,
     )
     if aliases:
         raise RuntimeError(f"{name} might be aliasing the input or the output!")
