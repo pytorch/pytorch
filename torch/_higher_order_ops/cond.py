@@ -734,7 +734,11 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
             _check_alias_and_mutation(
-                branch, unwrapped_inputs, branch_name, pre_dispatch
+                branch,
+                unwrapped_inputs,
+                branch_name,
+                pre_dispatch,
+                allow_input_output_alias_to_inputs=True,
             )
 
         cond_return = cond_op(

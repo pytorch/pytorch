@@ -28,7 +28,7 @@ import types
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, NoReturn, Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch.fx
@@ -400,6 +400,7 @@ def _call_function_and_unflatten_output(
     flat_example_value: Any,
     ret_spec: OutputSpec,
     body_r: VariableTracker | None,
+    input_aliases: dict[int, Proxy] | None = None,
 ) -> VariableTracker:
     from .builder import SourcelessBuilder, wrap_fx_proxy
 
@@ -432,6 +433,20 @@ def _call_function_and_unflatten_output(
                     )
                 orig_vt.proxy = subgraph_vt.proxy
 
+    if input_aliases:
+        flat_items = list(flat_variable.items)  # type: ignore[attr-defined]
+        for idx, input_proxy in input_aliases.items():
+            flat_items[idx] = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten.alias.default,
+                    args=(input_proxy,),
+                    kwargs={},
+                ),
+            )
+        flat_variable = SourcelessBuilder.create(tx, tuple(flat_items))
+
     if ret_spec.num_intermediate_nodes_as_outputs:
         # The treespec was computed w/o any extra intermediate outputs. At this
         # point, it is safe to just get rid of the extra outputs
@@ -461,6 +476,38 @@ def _call_function_and_unflatten_output(
         if ret_spec.treespec
         else flat_variable
     )
+
+
+def _output_aliases_to_placeholders(graph: torch.fx.Graph) -> dict[int, int]:
+    def node_value(node: torch.fx.Node) -> Any:
+        return node.meta.get("example_value", node.meta.get("val", None))
+
+    placeholders = [node for node in graph.nodes if node.op == "placeholder"]
+    placeholder_indices = {node: idx for idx, node in enumerate(placeholders)}
+    output_node = graph.find_nodes(op="output")[0]
+    flat_outputs = pytree.tree_leaves(output_node.args[0])
+    return {
+        output_idx: placeholder_indices[out]
+        for output_idx, out in enumerate(flat_outputs)
+        if isinstance(out, torch.fx.Node)
+        and out in placeholder_indices
+        and isinstance(node_value(placeholders[placeholder_indices[out]]), torch.Tensor)
+        and isinstance(node_value(out), torch.Tensor)
+    }
+
+
+def _unimplemented_input_alias(name: str, context: str) -> NoReturn:
+    unimplemented(
+        gb_type="Encountered aliasing during higher order op tracing",
+        context=context,
+        explanation=f"Higher order ops do not support aliasing. Found in {name}",
+        hints=[
+            "Return a clone when outputs are views of inputs or alias other outputs.",
+            "Consider using the debug context to change user code to avoid aliasing.",
+            "Please open an issue.",
+        ],
+    )
+    raise AssertionError("unreachable")
 
 
 def _assert_tensors_nonaliasing(inputs: Any, outputs: Any) -> None:
@@ -822,6 +869,7 @@ def _call_while_loop(
         set_subgraph_inputs="flatten_manual",
         supports_input_mutation=self.supports_input_mutation,
         supports_aliasing=self.supports_aliasing,
+        allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         remove_consts_from_outputs=False,
     )
     cond_nn_modules = dict(tx.output.nn_modules)
@@ -872,11 +920,28 @@ def _call_while_loop(
         should_flatten_outputs=True,
         supports_input_mutation=self.supports_input_mutation,
         supports_aliasing=self.supports_aliasing,
+        allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
     cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
     body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
+    body_input_aliases = _output_aliases_to_placeholders(body_graph)
+    while_loop_input_aliases: dict[int, Proxy] = {}
+    if not stack_output:
+        for output_idx, input_idx in body_input_aliases.items():
+            if (
+                output_idx >= len(operands_seq)
+                or input_idx != output_idx
+                or input_idx >= len(operands_seq)
+            ):
+                _unimplemented_input_alias(
+                    hop_name,
+                    "torch.while_loop body output aliases an input that is not "
+                    "the carried input at the same position, which cannot be "
+                    "represented safely.",
+                )
+            while_loop_input_aliases[output_idx] = operands_seq[input_idx].as_proxy()
 
     def _mutated_tensor_storages(
         graph: torch.fx.Graph, mutated_input_indices: set[int]
@@ -990,6 +1055,7 @@ def _call_while_loop(
         None,
         body_treespec,
         body_r,
+        while_loop_input_aliases,
     )
 
 
@@ -1431,6 +1497,7 @@ def check_aliasing_and_input_mutation(
     supports_input_mutation: bool,
     supports_aliasing: bool,
     source_target: Optional["HigherOrderOperator"],
+    allow_input_output_alias_to_inputs: bool = False,
 ) -> None:
     name = source_target.name if source_target else "<UNKNOWN>"
     if not supports_input_mutation:
@@ -1448,7 +1515,9 @@ def check_aliasing_and_input_mutation(
             )
 
     if not supports_aliasing:
-        aliasing_info = subtracer.has_aliasing()
+        aliasing_info = subtracer.has_aliasing(
+            allow_input_output_alias_to_inputs=allow_input_output_alias_to_inputs
+        )
         if aliasing_info.has_aliasing:
             context = f"{aliasing_info.msg} in\n {graph}"
             unimplemented(
@@ -1456,7 +1525,7 @@ def check_aliasing_and_input_mutation(
                 context=context,
                 explanation=f"Higher order ops do not support aliasing. Found in {name}",
                 hints=[
-                    "Replace `return input` with `return input.clone()` to avoid aliasing.",
+                    "Return a clone when outputs are views of inputs or alias other outputs.",
                     "Consider using the debug context to change user code to avoid aliasing.",
                     "Please open an issue.",
                 ],
@@ -1673,6 +1742,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
+    allow_input_output_alias_to_inputs: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -1938,6 +2008,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 supports_input_mutation,
                 supports_aliasing,
                 source_target,
+                allow_input_output_alias_to_inputs,
             )
             # Return both the output VT and the graph output VTs separately:
             # - `output`: The VT that Dynamo continues tracing with (may be
@@ -2007,6 +2078,7 @@ def speculate_subgraph(
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
+    allow_input_output_alias_to_inputs: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -2146,6 +2218,7 @@ def speculate_subgraph(
                     supports_input_mutation,
                     supports_aliasing,
                     source_target,
+                    allow_input_output_alias_to_inputs,
                 )
                 mutation_info = subtracer.has_input_mutation()
                 graph._dynamo_mutated_input_indices = (  # pyrefly: ignore[missing-attribute]
@@ -2251,6 +2324,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
+    allow_input_output_alias_to_inputs: bool = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -2351,6 +2425,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2482,6 +2557,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 remove_consts_from_outputs=False,
                 supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=self.supports_aliasing,
+                allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
             )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
@@ -2555,6 +2631,27 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "false_branch",
         )
 
+        true_input_aliases = _output_aliases_to_placeholders(true_graph)
+        false_input_aliases = _output_aliases_to_placeholders(false_graph)
+        cond_input_aliases: dict[int, Proxy] = {}
+        if self._HOP_NAME is None:
+            raise AssertionError("_HOP_NAME must be set")
+        for output_idx in true_input_aliases.keys() | false_input_aliases.keys():
+            true_input_idx = true_input_aliases.get(output_idx)
+            false_input_idx = false_input_aliases.get(output_idx)
+            if (
+                true_input_idx is None
+                or false_input_idx is None
+                or true_input_idx != false_input_idx
+                or true_input_idx >= len(operands_seq)
+            ):
+                _unimplemented_input_alias(
+                    self._HOP_NAME,
+                    "torch.cond output aliases an input in only one branch "
+                    "or aliases a non-operand input, which cannot be represented safely.",
+                )
+            cond_input_aliases[output_idx] = operands_seq[true_input_idx].as_proxy()
+
         true_name = tx.output.install_subgraph(
             "cond_true",
             torch.fx.GraphModule(true_nn_modules, true_graph),
@@ -2583,6 +2680,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             None,
             true_spec,
             true_r,
+            cond_input_aliases,
         )
 
 
@@ -2662,6 +2760,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2682,6 +2781,7 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -2944,6 +3044,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
+    allow_input_output_alias_to_inputs = True
 
     def _call_function(
         self,
@@ -3098,6 +3199,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            allow_input_output_alias_to_inputs=self.allow_input_output_alias_to_inputs,
         )
 
         # Ensure that the output of scan is a flattened list of elements,
@@ -3106,6 +3208,19 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         output_node = combine_graph.find_nodes(op="output")[0]
         output_node.args = (pytree.tree_leaves(output_node.args),)
         combine_graph.lint()
+        combine_input_aliases = _output_aliases_to_placeholders(combine_graph)
+        scan_input_aliases: dict[int, Proxy] = {}
+        for output_idx, input_idx in combine_input_aliases.items():
+            if output_idx >= len(init_vars):
+                continue
+            if input_idx != output_idx or input_idx >= len(init_vars):
+                _unimplemented_input_alias(
+                    self._HOP_NAME,
+                    "torch.scan carry output aliases an input that is not the "
+                    "init carry at the same position, which cannot be "
+                    "represented safely.",
+                )
+            scan_input_aliases[output_idx] = init_vars[input_idx].as_proxy()
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
         combine_result_vars = combine_result.unpack_var_sequence(tx)
 
@@ -3183,6 +3298,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             None,
             _combine_spec,
             None,
+            scan_input_aliases,
         )
 
 

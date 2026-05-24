@@ -119,8 +119,9 @@ def scan(
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
 
     Restrictions:
-        - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
-            or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
+        - The combine_fn shouldn't have any aliasing between input-input, output-output, or
+            input-output except for returning an input tensor unchanged. E.g. returning a view
+            of an input is not supported. As a workaround, clone the output to avoid aliasing.
 
         - The combine_fn shouldn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
             if you input mutation support for training is needed.
@@ -884,7 +885,13 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
             )
         )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        _check_alias_and_mutation(combine_fn, sample_inputs, "scan", pre_dispatch)
+        _check_alias_and_mutation(
+            combine_fn,
+            sample_inputs,
+            "scan",
+            pre_dispatch,
+            allow_input_output_alias_to_inputs=True,
+        )
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,
