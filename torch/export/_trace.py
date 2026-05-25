@@ -2186,6 +2186,7 @@ def _non_strict_export(
             dynamic_shapes,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
             propagate_real_tensors=True,
+            copy_real_tensors=torch._functorch.config.fake_tensor_propagate_real_tensors,
         )
         if (
             fake_mode.shape_env is not None

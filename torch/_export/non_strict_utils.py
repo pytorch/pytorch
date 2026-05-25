@@ -11,6 +11,8 @@ from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from typing import Any, TYPE_CHECKING, TypeGuard
 
+import sympy
+
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.source import (
@@ -54,6 +56,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymIntSymbolicContext,
     ValueRanges,
 )
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._pytree import (
     GetAttrKey,
     KeyPath,
@@ -166,6 +169,15 @@ def _is_constant_argument(t):
     return t is None or isinstance(t, (float, bool, str))
 
 
+def _can_seed_real_tensor_for_scalar_specialization(t: torch.Tensor) -> bool:
+    return (
+        type(t) is torch.Tensor
+        and t.layout is torch.strided
+        and not t.is_meta
+        and not t.is_quantized
+    )
+
+
 def fakify(
     mode: FakeTensorMode,
     kp: KeyPath,
@@ -219,6 +231,13 @@ def fakify(
     )
 
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
+    if mode.propagate_real_tensors and _can_seed_real_tensor_for_scalar_specialization(
+        t
+    ):
+        with torch.no_grad(), no_dispatch():
+            real_tensor = t.detach()
+        fake.real_tensor_thunk = lambda real_tensor=real_tensor: real_tensor
+        mode.fake_tensor_converter.add_deferred_real_tensor_storage_mapping(fake)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
 
@@ -403,6 +422,7 @@ def make_fake_inputs(
     dynamic_shapes,
     prefer_deferred_runtime_asserts_over_guards=False,
     propagate_real_tensors: bool | None = None,
+    copy_real_tensors: bool | None = None,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -469,6 +489,7 @@ def make_fake_inputs(
                 allow_non_fake_inputs=True,
                 export=True,
                 propagate_real_tensors=propagate_real_tensors,
+                copy_real_tensors=copy_real_tensors,
             )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
@@ -1091,17 +1112,23 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             if shape_env is not None and not shape_env.allow_real_tensor_prop_evaluate:
 
                 def run():
-                    import sympy
-
                     # Python sequence operations need a real int, so specialize
                     # this scalar and record the same equality as a runtime assert.
                     item = torch.ops.aten.item.default(tensor)
                     if isinstance(item, torch.SymInt):
                         expr = item.node.expr
                         real_tensor = getattr(tensor, "real_tensor", None)
+                        if (
+                            real_tensor is None
+                            and (
+                                real_tensor_thunk := getattr(
+                                    tensor, "real_tensor_thunk", None
+                                )
+                            )
+                            is not None
+                        ):
+                            real_tensor = real_tensor_thunk()
                         if real_tensor is not None:
-                            from torch.utils._mode_utils import no_dispatch
-
                             with torch._C.DisableTorchFunction(), no_dispatch():
                                 value = sympy.sympify(real_tensor.item())
                         else:
