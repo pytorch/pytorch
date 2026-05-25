@@ -46,17 +46,15 @@ _VIEW_OPS = [
 """
 The quantization.py file primarily incorporates passes related to quantization fusion
 in inductor, includes:
-1. Dequant Promotion;
-2. Conv/GEMM weight prepack with oneDNN Library;
-3. Conv/GEMM quantization fusion with output quant node (if have);
-4. Other pointwise operators' quantization fusion like: qmaxpool2d, qcat and more;
+1. Lowering of qconv/qlinear (unary and binary post-op variants) from the
+   `onednn::qconv_pointwise` / `onednn::qlinear_pointwise` ops to Inductor IR.
+2. Pointwise operators' quantization fusion like: qmaxpool2d, qcat, qreshape and more.
+3. Weight-only quantization (WOQ) int8 mm / concat-linear patterns lowered to
+   `aten._weight_int8pack_mm` and the int4 concat-linear pass for
+   `aten._weight_int4pack_mm_for_cpu`.
 
-It also involves int8-mixed-fp32 and int8-mixed-bf16 quantization. The main difference
-of patterns for int8-mixed-bf16, comparing with int8-mixed-fp32, is
-1. There is to(dtype=torch.bfloat16) node at the inputs of activation and weight for Conv/GEMM.
-2. There is to(dtype=torch.float32) node at the outputs of Conv/GEMM before inputs to next quant node.
-Refer to: https://github.com/pytorch/pytorch/issues/111640 for detail design of int8-mixed-bf16
-quantization.
+Note: the dequant promotion, qconv/qlinear weight prepack and qconv/qlinear
+fusion patterns that used to live here have been moved to TorchAO.
 """
 
 

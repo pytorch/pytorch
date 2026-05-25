@@ -3010,6 +3010,13 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape)
         return out
 
+    @register_meta(torch.ops.onednn.qlinear_prepack.default)
+    def meta_qlinear_prepack(weight, x_shape):
+        # qlinear_prepack returns an opaque packed tensor at runtime.
+        # For FakeTensor / export tracing, return a tensor placeholder with
+        # the same shape as the input weight.
+        return weight.new_empty(weight.shape)
+
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )

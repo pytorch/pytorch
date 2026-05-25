@@ -82,24 +82,6 @@ import torch._dynamo as torchdynamo
 from torch.testing import FileCheck
 
 
-def _register_onednn_qlinear_prepack_fake() -> None:
-    if not hasattr(torch.ops, "onednn") or not hasattr(torch.ops.onednn, "qlinear_prepack"):
-        return
-    try:
-        @torch.library.register_fake("onednn::qlinear_prepack")
-        def _fake_onednn_qlinear_prepack(weight, _bias):
-            # qlinear_prepack returns an opaque packed tensor at runtime.
-            # For FakeTensor/export tracing, keep a tensor placeholder.
-            return weight
-
-    except (RuntimeError, ValueError):
-        # Ignore duplicate registrations from repeated imports.
-        pass
-
-
-_register_onednn_qlinear_prepack_fake()
-
-
 class NodeSpec:
     """Used for checking GraphModule Node"""
 
