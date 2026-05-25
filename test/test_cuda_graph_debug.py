@@ -6,7 +6,13 @@ import warnings
 
 import torch
 import torch.nn as nn
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    skipIfRocm,
+    TEST_CUDA,
+    TestCase,
+)
 
 
 if not TEST_CUDA:
@@ -30,6 +36,7 @@ def _capture_graph(op, **graph_kwargs):
     return g, out
 
 
+@skipIfRocm(msg="input liveness checking is only supported on NVIDIA CUDA")
 class TestCUDAGraphDebugInputs(TestCase):
     def test_nothing_dead_ok(self):
         x = torch.randn(100, device="cuda")
@@ -244,6 +251,7 @@ class TestCUDAGraphDebugInputs(TestCase):
         self.assertEqual(y, x * 2)
 
 
+@skipIfRocm(msg="input liveness checking is only supported on NVIDIA CUDA")
 class TestCUDAGraphDebugBacktraces(TestCase):
     def test_error_message_contains_all_tracebacks(self):
         a = torch.randn(100, device="cuda")
@@ -268,6 +276,7 @@ class TestCUDAGraphDebugBacktraces(TestCase):
         self.assertIn("replay traceback (python)", error_msg)
 
 
+@skipIfRocm(msg="input liveness checking is only supported on NVIDIA CUDA")
 class TestCUDAGraphDebugExternalOps(TestCase):
     def test_custom_autograd_function(self):
         from torch.autograd import Function

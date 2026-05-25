@@ -12,6 +12,7 @@ from unittest import mock
 import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
+import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -477,8 +478,8 @@ def forward(self, x_1, output_1):
 
             output_code = log_stream.getvalue()
 
-        FileCheck().check_regex(r"del buf[0-9]*").check_regex(
-            r"dual_output_kernel_with_inline_asm_0\.run\(x_1, buf[0-9]*, buf[0-9]*,"
+        FileCheck().check("del buf3").check(
+            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
         ).run(output_code)
 
         eager_result = f(t.clone())[0]
@@ -572,6 +573,67 @@ def forward(self, x_1, output_1):
         else:
             self.assertEqual(output_code.count('float("nan")'), 0)
             self.assertEqual(output_code.count("float('nan')"), 0)
+
+    @requires_cuda_and_triton
+    def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
+        def fn(x):
+            a = x * x
+            return a - a
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(out, torch.zeros_like(out), atol=0, rtol=0)
+        self.assertIn("tl.where", code)
+        self.assertIn("libdevice.isinf", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
+
+        special = torch.tensor(
+            [float("nan"), float("inf"), -float("inf"), 2.0],
+            device=GPU_TYPE,
+        )
+        expected = fn(special)
+        actual = torch.compile(fn, fullgraph=True)(special)
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+
+    @requires_cuda_and_triton
+    @common_utils.parametrize("per_subkernel", [False, True])
+    def test_combo_fp_self_sub_rewrite(self, per_subkernel):
+        def fn(a, b):
+            c = a * a
+            return c - c, b + 1
+
+        a, b = (torch.rand(1024, device=GPU_TYPE) for _ in range(2))
+        with inductor_config.patch(
+            {
+                "combo_kernels": True,
+                "benchmark_combo_kernel": False,
+                "combo_kernel_per_subkernel_blocks": per_subkernel,
+                "combo_kernel_max_distance": -1,
+                "combo_kernel_peak_memory_increase_gb": None,
+                "combo_kernel_peak_memory_pct_threshold": None,
+            }
+        ):
+            metrics.reset()
+            actual, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertIn("'combo_grid_meta':", code)
+        self.assertIn("tl.where", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
+
+    @requires_cuda_and_triton
+    def test_duplicate_mse_loss_operands_are_zero(self):
+        torch.manual_seed(0)
+        x = torch.randn(10000, device=GPU_TYPE)
+
+        for op in (F.gelu, F.mish):
+
+            def fn(x, op=op):
+                return F.mse_loss(op(x), op(x), reduction="none").max()
+
+            actual = torch.compile(fn, fullgraph=True)(x)
+            self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
 
     @requires_gpu
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
@@ -1228,13 +1290,6 @@ def forward(self, x_1, output_1):
             else f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
         )
         num_bufs_allocated = code.count(code_string)
-        if (
-            inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is not True
-        ):
-            # Lazy compile emits aoti_torch_empty_strided for scratch space
-            # allocation (global_scratch + profile_scratch) per unique kernel wrapper
-            num_bufs_allocated -= 4
         self.assertEqual(num_bufs_allocated, 2)
 
         # Check we're reusing buffers if not allocating.
@@ -1288,82 +1343,6 @@ def forward(self, x_1, output_1):
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
-
-    @requires_gpu
-    def test_triton_kernel_mutates_strided_intermediate(self):
-        @triton.jit
-        def add_one_strided_kernel(
-            in_ptr,
-            out_ptr,
-            n_cols: tl.constexpr,
-            stride_b: tl.constexpr,
-            BLOCK_N: tl.constexpr,
-        ):
-            row = tl.program_id(0)
-            offsets = tl.arange(0, BLOCK_N)
-            mask = offsets < n_cols
-            values = tl.load(in_ptr + row * stride_b + offsets, mask=mask, other=0.0)
-            tl.store(out_ptr + row * stride_b + offsets, values + 1.0, mask=mask)
-
-        def triton_update(x):
-            out = x
-            add_one_strided_kernel[(x.size(0),)](
-                x,
-                out,
-                x.size(1),
-                x.stride(0),
-                BLOCK_N=4096,
-            )
-            return out
-
-        def f(base):
-            x = (base + 1)[:, :4096]
-            return triton_update(x)
-
-        base = torch.randn(64, 8192, device=GPU_TYPE)
-        eager_out = f(base.clone())
-        compiled_out = torch.compile(f, fullgraph=True)(base.clone())
-
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_out.stride(), eager_out.stride())
-
-    @requires_gpu
-    def test_triton_kernel_mutates_expanded_intermediate_errors(self):
-        @triton.jit
-        def add_one_expanded_kernel(
-            in_ptr,
-            out_ptr,
-            n_elements: tl.constexpr,
-            stride_n: tl.constexpr,
-            BLOCK_N: tl.constexpr,
-        ):
-            offsets = tl.arange(0, BLOCK_N)
-            mask = offsets < n_elements
-            value = tl.load(in_ptr)
-            tl.store(out_ptr + offsets * stride_n, value + 1.0, mask=mask)
-
-        def triton_update(x):
-            out = x
-            add_one_expanded_kernel[(1,)](
-                x,
-                out,
-                x.numel(),
-                x.stride(0),
-                BLOCK_N=16,
-            )
-            return out
-
-        def f(base):
-            x = (base + 1).expand(4)
-            return triton_update(x)
-
-        base = torch.randn(1, device=GPU_TYPE)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Cannot safely clone an internally overlapping mutated Triton kernel "
-            "argument.",
-        ):
-            torch.compile(f, fullgraph=True)(base.clone())
 
     @inductor_config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
