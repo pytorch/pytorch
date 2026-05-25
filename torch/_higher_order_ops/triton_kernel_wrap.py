@@ -2375,8 +2375,9 @@ class TraceableTritonKernelWrapper:
         self.output_tile = output_tile
         self.pid_remap = pid_remap
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
-        if self.kernel is None:
+        if self.kernel is None or self.kernel_idx is None:
             raise AssertionError("kernel was not initialized properly")
+
         if output_tile is not None:
             kernel_side_table.set_output_tile(self.kernel_idx, output_tile)
         if pid_remap is not None:
