@@ -1,8 +1,6 @@
 """Spec types for controlling what is dynamic in compiled/exported code.
 Currently only supports unbacked dynamic shapes.
 
-Pure data classes — no dependency on dynamo, compile, or export, so this
-module can be safely consumed by any layer.
 """
 
 from __future__ import annotations
@@ -10,9 +8,15 @@ from __future__ import annotations
 import itertools
 from typing import Any, TYPE_CHECKING, TypeAlias
 
+import sympy
+
+from torch import SymInt
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
 __all__ = [
@@ -24,6 +28,7 @@ __all__ = [
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
+    "LeafIntSpec",
     "IntermediateSpec",
 ]
 
@@ -32,11 +37,93 @@ __all__ = [
 _INDENT = "  "
 
 
-class IntVar:
+# ---------------------------------------------------------------------------
+# Spec ShapeEnv
+#
+# IntVar/ShapeVar wrap a SymNode, which requires a ShapeEnv. We use a singleton
+# global env for shape specs. This shape env is special and only used for
+# expression construction and will fail on any other calls.
+# ---------------------------------------------------------------------------
+
+
+_SPEC_SHAPE_ENV = None  # populated lazily by _get_spec_shape_env()
+
+# Maps each spec sympy.Symbol back to the IntVar that created it.
+_intvar_symbol_registry: dict[sympy.Symbol, IntVar] = {}
+
+
+def _get_spec_shape_env() -> ShapeEnv:
+    """Lazily build the singleton spec ShapeEnv."""
+    global _SPEC_SHAPE_ENV
+    if _SPEC_SHAPE_ENV is None:
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class _SpecShapeEnv(ShapeEnv):
+            """Special ShapeEnv used only at spec-definition time.
+
+            Attribute access is blocked by default via ``__getattribute__``;
+            only private (``_``-prefix) names and the explicit allowlist in
+            ``_ALLOWED_PUBLIC`` pass through. SymInt arithmetic paths read
+            a handful of public fields transparently (via the
+            ``@record_shapeenv_event`` decorator and FX-cache machinery),
+            so those are allowlisted. Everything else — evaluation, guard
+            recording, deferred asserts, etc. — is blocked.
+
+            During ``ShapeEnv.__init__`` itself, access is unrestricted
+            because the base class touches its own public fields while
+            bootstrapping.
+            """
+
+            # Public fields read by internal ShapeEnv infra during arithmetic.
+            # Grow as new accesses are discovered by tests.
+            _ALLOWED_PUBLIC: frozenset[str] = frozenset(
+                {
+                    "should_record_events",
+                    "is_recording",
+                    "fx_node_cache",
+                }
+            )
+
+            def __init__(self) -> None:
+                # Allow everything during super().__init__.
+                object.__setattr__(self, "_init_done", False)
+                super().__init__()
+                object.__setattr__(self, "_sinit_done", True)
+
+            def __getattribute__(self, name: str) -> Any:
+                if name.startswith("_"):
+                    return super().__getattribute__(name)
+                if not super().__getattribute__("_init_done"):
+                    return super().__getattribute__(name)
+                if name in type(self)._ALLOWED_PUBLIC:
+                    return super().__getattribute__(name)
+                raise TypeError(
+                    f"_SpecShapeEnv: '{name}' is not allowed at "
+                    f"spec-definition time. Use IntVar / ShapeVar only "
+                    f"inside TensorSpec / ShapesSpec."
+                )
+
+        _SPEC_SHAPE_ENV = _SpecShapeEnv()
+    return _SPEC_SHAPE_ENV
+
+
+class IntVar(SymInt):
     """Indicates that a scalar integer argument is dynamic (no implicit range).
 
     Unbacked dynamic shapes will represent the underlying value in the
     compiled graph.
+
+    IntVar is a ``SymInt`` subclass backed by ``_SpecShapeEnv``,
+    so arithmetic and comparisons compose naturally::
+
+        A = IntVar("a")
+        B = IntVar("b")
+        A + 1  # SymInt expr=a#0 + 1
+        A * B + 1  # SymInt expr=a#0*b#1 + 1
+        A > 0  # SymBool
+
+    Such derived ``SymInt`` values may be used directly as leaf specs in
+    ``TensorSpec`` / ``ParamsSpec``
 
     Repr always includes a per-instance uid so two IntVars with the same name
     (or two anonymous ones) are distinguishable in logs::
@@ -61,11 +148,22 @@ class IntVar:
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        from torch.fx.experimental.sym_node import _NO_HINT, SymNode
+
         self.name = name if name is not None else "anon"
         self._uid = next(IntVar._uid_counter)
         self.min = min
         self.max = max
         self.optimization_hint = optimization_hint
+        self.sympy_sym = sympy.Symbol(f"{self.name}#{self._uid}")
+        node = SymNode(
+            self.sympy_sym,
+            shape_env=_get_spec_shape_env(),
+            pytype=int,
+            hint=_NO_HINT,
+        )
+        super().__init__(node)
+        _intvar_symbol_registry[self.sympy_sym] = self
 
     def __repr__(self) -> str:
         # Always include uid so two same-named (or anonymous) instances
@@ -79,6 +177,11 @@ class IntVar:
             parts.append(f"optimization_hint={self.optimization_hint}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
+    # Hashable by identity — IntVars are unique per construction, and inheriting
+    # SymInt.__hash__ would route through node hashing which we don't need here.
+    def __hash__(self) -> int:  # type: ignore[override]
+        return id(self)
+
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "type": type(self).__name__,
@@ -87,6 +190,25 @@ class IntVar:
             "max": self.max,
             "optimization_hint": self.optimization_hint,
         }
+
+
+def _validate_spec_value(v: Any, *, where: str) -> None:
+    """Assert a SymInt / SymBool entering a spec originates from spec IntVars.
+
+    Args:
+        v: value being validated.
+        where: description of the spec position (for error messages).
+    """
+    import torch as _torch
+
+    if isinstance(v, (SymInt, _torch.SymBool)):
+        env = v.node.shape_env
+        if env is not _get_spec_shape_env():
+            raise TypeError(
+                f"{where}: SymInt / SymBool spec values must originate from "
+                f"spec IntVar / ShapeVar (built against the singleton spec "
+                f"ShapeEnv). Got {v!r} backed by a different ShapeEnv: {env}."
+            )
 
 
 class ShapeVar(IntVar):
@@ -109,42 +231,40 @@ class ShapeVar(IntVar):
         max: int | None = None,
         optimization_hint: int | None = None,
     ) -> None:
+        if min < 0:
+            raise ValueError(
+                f"ShapeVar requires min >= 0 (a shape dim is non-negative); "
+                f"got min={min}. Use IntVar(...) for unrestricted scalars."
+            )
         super().__init__(name, min=min, max=max, optimization_hint=optimization_hint)
 
 
 class TensorSpec:
     """Per-dimension shape specification for a tensor.
 
-    A list-like container of ``ShapeVar | int | None`` with length equal to the
-    tensor's dim.
-
-    Per-entry semantics:
-    - ``ShapeVar``: unbacked dynamic dimension.
-    - ``int``: static dimension pinned to that concrete value.
-    - ``None``: unspecified; treated as static. Value is inferred from the
-      example input if the consuming API supports it (e.g. ``torch.compile``),
-      otherwise an error will be thrown (e.g. ``torch.export`` requires an
-      explicit value).
+    A list-like container of ``LeafIntSpec`` with length
+    equal to the tensor's dim.
 
     Example::
 
         B = ShapeVar("batch")
         TensorSpec([B, None])  # rank 2, dim 0 dynamic
         TensorSpec([B, 10])  # rank 2, dim 0 dynamic, dim 1 static=10
+        TensorSpec([B * 2 + 1, None])  # rank 2, dim 0 derived from B
     """
 
-    _DimSpec = ShapeVar | int | None
+    def __init__(self, dims: Sequence[LeafIntSpec]) -> None:
+        for i, d in enumerate(dims):
+            _validate_symint_spec(d, where=f"TensorSpec dim {i}")
+        self._specs: list[LeafIntSpec] = list(dims)
 
-    def __init__(self, dims: Sequence[TensorSpec._DimSpec]) -> None:
-        self._specs: list[TensorSpec._DimSpec] = list(dims)
-
-    def __getitem__(self, index: int) -> TensorSpec._DimSpec:
+    def __getitem__(self, index: int) -> LeafIntSpec:
         return self._specs[index]
 
     def __len__(self) -> int:
         return len(self._specs)
 
-    def __iter__(self) -> Iterator[TensorSpec._DimSpec]:
+    def __iter__(self) -> Iterator[LeafIntSpec]:
         return iter(self._specs)
 
     def __repr__(self) -> str:
@@ -278,11 +398,35 @@ class DictSpec:
         }
 
 
-# Type alias for leaf specs (individual argument specifications)
-LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
+# Per-int-leaf spec type: union of valid values that can appear at a slot
+# where the runtime value is an int (tensor dim, scalar arg).
+#
+# Per-entry semantics:
+# - IntVar (or its ShapeVar subclass): unbacked dynamic dimension.
+# - SymInt (derived from spec IntVars via arithmetic, e.g. A * 2 + 1):
+#   the dim must equal this expression at runtime.
+# - int: static dimension pinned to that concrete value.
+# - None: unspecified; treated as static. Value is inferred from the
+#   example input if the consuming API supports it (e.g. torch.compile),
+#   otherwise an error will be thrown.
+LeafIntSpec: TypeAlias = IntVar | SymInt | int | None
+# Leaf specs (individual argument specifications) — ints plus TensorSpec.
+LeafSpec: TypeAlias = LeafIntSpec | TensorSpec
 # Includes containers (``ObjectSpec`` / ``DictSpec``; future ``ListSpec``)
 # for nested specs reachable via dynamo source-chain walks.
 IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
+
+
+def _validate_symint_spec(v: Any, *, where: str) -> None:
+    """If ``v`` is a SymInt, validate it originates from spec IntVars.
+    No-op for any other type."""
+    if not isinstance(v, SymInt):
+        return
+    if v.node.shape_env is not _get_spec_shape_env():
+        raise TypeError(
+            f"{where}: SymInt spec values must originate from spec "
+            f"IntVar / ShapeVar; got {v!r} backed by a different ShapeEnv."
+        )
 
 
 class ParamsSpec:
@@ -330,6 +474,8 @@ class ParamsSpec:
                         f"ParamsSpec {self._VARARGS_KEY!r} value must be a list "
                         f"of leaf specs, got {type(value).__name__}"
                     )
+                for i, v in enumerate(value):
+                    _validate_symint_spec(v, where=f"ParamsSpec '{key}'[{i}]")
                 self._varargs = list(value)
             elif key == self._VARKW_KEY:
                 if not isinstance(value, dict):
@@ -337,6 +483,8 @@ class ParamsSpec:
                         f"ParamsSpec {self._VARKW_KEY!r} value must be a dict "
                         f"of leaf specs, got {type(value).__name__}"
                     )
+                for k, v in value.items():
+                    _validate_symint_spec(v, where=f"ParamsSpec '{key}'[{k!r}]")
                 self._varkw = dict(value)
             elif key.startswith("*"):
                 raise ValueError(
@@ -344,6 +492,7 @@ class ParamsSpec:
                     f"{self._VARARGS_KEY!r} and {self._VARKW_KEY!r} are reserved"
                 )
             else:
+                _validate_symint_spec(value, where=f"ParamsSpec[{key!r}]")
                 self._named_args[key] = value
 
     def __repr__(self) -> str:

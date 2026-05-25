@@ -2543,27 +2543,14 @@ class VariableBuilder:
                         )
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
                     return ConstantVariable.create(value=value, source=self.source)
-                elif isinstance(int_spec, IntVar):
-                    # All IntVar specs are unbacked.
+                elif isinstance(int_spec, (IntVar, torch.SymInt)):
+                    # Always allocate a fresh unbacked symbol for the arg;
+                    # _wire_spec_slot installs the appropriate torch._check
+                    # tying it to the IntVar dedup symbol (for bare IntVar)
+                    # or to the substituted derived expression (for SymInt).
                     result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
                     sym_val = result.sym_num  # type: ignore[attr-defined]
-                    if int_spec.min is not None:
-                        torch._check(sym_val >= int_spec.min)
-                    if int_spec.max is not None:
-                        torch._check(sym_val <= int_spec.max)
-                    if int_spec.optimization_hint is not None:
-                        expr = sym_val.node.expr
-                        sym_val.node.shape_env.var_to_hint_override[expr] = (
-                            int_spec.optimization_hint
-                        )
-                    # Dedup multiple uses of the same IntVar via runtime
-                    # equality check. `_uid` distinguishes IntVars with
-                    # the same name (including default `anon`). The
-                    # `__intvar__:` prefix keeps these from colliding
-                    # with user-supplied `shape_id` strings.
-                    sym_val.node.shape_env._add_shape_id_eq_check(
-                        sym_val, f"__intvar__:{int_spec._uid}"
-                    )
+                    _wire_spec_slot(int_spec, sym_val)
                     return result
                 else:
                     raise ValueError(
@@ -4276,14 +4263,14 @@ def _symbolic_context_from_shapes_spec(
                         f"{dim_spec}, but got {actual_size}"
                     )
                 dynamic_sizes.append(DimDynamic.STATIC)
-            elif isinstance(dim_spec, IntVar):
+            elif isinstance(dim_spec, torch.SymInt):
                 dynamic_sizes.append(DimDynamic.UNBACKED)
             elif dim_spec is None:
                 dynamic_sizes.append(DimDynamic.STATIC)
             else:
                 raise ValueError(
                     f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
-                    f"(expected int, IntVar, or None)"
+                    f"(expected LeafIntSpec)"
                 )
 
     return StatefulSymbolicContext(
@@ -4292,6 +4279,135 @@ def _symbolic_context_from_shapes_spec(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+    )
+
+
+def _wire_spec_slot(
+    spec: IntVar | SymInt,
+    size_sym: torch.SymInt,
+) -> None:
+    """Wire an IntVar or SymInt spec leaf into the real shape env.
+
+    A spec leaf may be:
+      - IntVar:  bare spec variable. Records
+        ``_int_var_to_symbol[A.sympy_sym] = u_new`` so future bare/derived
+        uses can resolve A; emits a runtime eq-check on repeat occurrences
+        (dedup).
+      - SymInt:  derived expression (e.g. ``A * 2 + 1``) backed by the spec
+        ShapeEnv. Emits
+        ``torch._check(u_new == expr.xreplace(_int_var_to_symbol))``, or
+        defers to ``_shape_spec_pending_assumptions`` if any free spec symbol isn't
+        bound yet (drained on the next bare-IntVar binding).
+
+    ``_int_var_to_symbol`` only ever holds IntVar sympy.Symbol entries.
+
+    ``size_sym`` is the freshly allocated unbacked SymInt for this leaf's
+    input (tensor dim or scalar arg).
+    """
+    from torch.fx.experimental.dynamic_spec import (
+        _get_spec_shape_env,
+        IntVar as _IntVar,
+    )
+
+    shape_env = size_sym.node.shape_env
+
+    if isinstance(spec, _IntVar):
+        # Bare IntVar — first occurrence binds the spec sym to this input;
+        # subsequent occurrences dedup via runtime eq-check.
+        spec_sym = spec.sympy_sym
+        u_new_expr = size_sym.node.expr
+        if spec_sym not in shape_env._int_var_to_symbol:
+            shape_env._int_var_to_symbol[spec_sym] = u_new_expr
+            # Apply bounds + optimization hint on the canonical (first) symbol.
+            # Subsequent occurrences are tied to this one via the eq-check
+            # below, so the shape env propagates bounds via equivalence.
+            if spec.min is not None:
+                torch._check(size_sym >= spec.min)
+            if spec.max is not None:
+                torch._check(size_sym <= spec.max)
+            if spec.optimization_hint is not None:
+                shape_env.var_to_hint_override[u_new_expr] = spec.optimization_hint
+            _drain_shape_spec_pending_assumptions(shape_env)
+        else:
+            existing_expr = shape_env._int_var_to_symbol[spec_sym]
+            shape_env.guard_or_defer_runtime_assert(
+                sympy.Eq(u_new_expr, existing_expr),
+                f"IntVar({spec.name}) dedup eq-check",
+            )
+    elif isinstance(spec, torch.SymInt):
+        # Derived SymInt spec (e.g., A * 2 + 1)
+        if spec.node.shape_env is not _get_spec_shape_env():
+            raise ValueError(
+                f"SymInt spec leaf must originate from spec IntVars; got "
+                f"{spec!r} backed by a different ShapeEnv"
+            )
+        spec_expr = spec.node.expr
+        free = spec_expr.free_symbols
+        deferred_bool = sympy.Eq(size_sym.node.expr, spec_expr)
+        if free.issubset(shape_env._int_var_to_symbol):
+            _emit_pending_bool(shape_env, deferred_bool)
+        else:
+            shape_env._shape_spec_pending_assumptions.append((free, deferred_bool))
+    else:
+        raise TypeError(
+            f"_wire_spec_slot: expected IntVar or SymInt, got {type(spec).__name__}"
+        )
+
+
+def _emit_pending_bool(shape_env: Any, bool_expr: Any) -> None:
+    """Substitute spec symbols and defer the resulting boolean as a runtime
+    assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
+    spec symbols must already be present in ``_int_var_to_symbol``."""
+    substituted = bool_expr.xreplace(shape_env._int_var_to_symbol)
+    shape_env.guard_or_defer_runtime_assert(substituted, "shapes_spec deferred check")
+
+
+def _drain_shape_spec_pending_assumptions(shape_env: Any) -> None:
+    """Re-scan pending derived/assumption checks; emit any whose deps are now bound.
+
+    TODO: optimize with an inverted index (sym → pending entries) if the
+    pending list grows large. Inductor uses this pattern in
+    ``graph.py:ras_by_symbol``. Spec wiring typically has < 10 entries so
+    the linear scan here is fine; revisit if profiling shows otherwise.
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+    subst_keys = shape_env._int_var_to_symbol.keys()
+    keep = []
+    for free, bool_expr in pending:
+        if free.issubset(subst_keys):
+            _emit_pending_bool(shape_env, bool_expr)
+        else:
+            keep.append((free, bool_expr))
+    shape_env._shape_spec_pending_assumptions[:] = keep
+
+
+def _finalize_spec_wiring(shape_env: Any) -> None:
+    """Verify all pending spec assumptions/derived-dim checks have been
+    emitted (i.e. every spec IntVar referenced by a derived expression or
+    user assumption has been bound by some bare-IntVar input slot).
+
+    Raises if any pending entry's free spec symbols aren't all bound — the
+    spec is unresolvable because some IntVar has no runtime value path.
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+    from torch.fx.experimental.dynamic_spec import _intvar_symbol_registry
+
+    subst_keys = shape_env._int_var_to_symbol.keys()
+    unbound: set[Any] = set()
+    for free, _ in pending:
+        unbound |= free - subst_keys
+    names = sorted(
+        _intvar_symbol_registry[s].name for s in unbound if s in _intvar_symbol_registry
+    )
+    raise ValueError(
+        f"shapes_spec: {len(pending)} pending check(s) reference unbound "
+        f"IntVar(s) {names}. Every IntVar used in a derived expression or "
+        f"assumption must also appear as a bare-IntVar slot somewhere in "
+        f"the spec."
     )
 
 
@@ -4714,27 +4830,12 @@ def _wrap_to_fake_tensor_and_record_impl(
                 dim_spec = tensor_spec[dim_i]
                 if dim_spec is None or isinstance(dim_spec, int):
                     continue
-                if not isinstance(dim_spec, IntVar):
-                    continue
                 size_sym = fake_e.size(dim_i)
                 if not isinstance(size_sym, torch.SymInt):
                     continue
-                # Dedup multiple uses of the same IntVar via runtime equality
-                # check. `_uid` distinguishes IntVars with the same name
-                # (including default `anon`). The `__intvar__:` prefix keeps
-                # these from colliding with user-supplied `shape_id` strings.
-                size_sym.node.shape_env._add_shape_id_eq_check(
-                    size_sym, f"__intvar__:{dim_spec._uid}"
-                )
-                if dim_spec.min is not None:
-                    torch._check(size_sym >= dim_spec.min)
-                if dim_spec.max is not None:
-                    torch._check(size_sym <= dim_spec.max)
-                # Set var_to_hint_override (included in FX cache key)
-                hint = dim_spec.optimization_hint
-                if hint is not None:
-                    expr = size_sym.node.expr
-                    size_sym.node.shape_env.var_to_hint_override[expr] = hint
+                # Wire IntVar (bare slot) or SymInt (derived expression) into
+                # the real shape env: dedup, emit eq-check, apply bounds/hint.
+                _wire_spec_slot(dim_spec, size_sym)
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
