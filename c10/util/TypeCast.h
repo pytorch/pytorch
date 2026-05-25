@@ -57,22 +57,15 @@ struct maybe_bool<true, src_t> {
   }
 };
 
-// Casts a non-integral (floating-point or fancy float like Half / BFloat16 /
-// Float8 / complex) value to an integer type. This is the only path through
-// static_cast_with_inter_type that can invoke undefined behavior at the C++
-// level (out-of-range or NaN float -> integer). PyTorch deliberately keeps the
-// platform-defined result for NumPy compatibility, so suppress UBSan only on
-// this narrow helper instead of the whole conversion template.
+// Float -> integer is UB on out-of-range/NaN values; we keep the
+// platform-defined result for NumPy compatibility and suppress UBSan only
+// here, so the dispatching template below stays UBSan-clean.
 template <typename dest_t, typename src_t>
 C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
 unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
 }
 
-// Note: deliberately ignores undefined behavior, consistent with NumPy.
-// PyTorch's type conversions can cause a variety of undefined behavior,
-// including float to integral overflow and signed to unsigned integer overflow.
-// Some of this undefined behavior is addressed below.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE static inline dest_t apply(src_t src) {
@@ -98,15 +91,8 @@ struct static_cast_with_inter_type<bool, src_t> {
   }
 };
 
-// Partial template instantiation for casting to uint8.
-// Note: Converting from negative float values to unsigned integer types is
-// undefined behavior in C++, and current CPU and GPU compilers exhibit
-// divergent behavior. Casting from negative float values to signed
-// integer types and then to unsigned integer types is not undefined,
-// however, so this cast improves the consistency of type conversions
-// to uint8 across compilers.
-// Further note: Type conversions across compilers still have other undefined
-// and divergent behavior.
+// Route float -> uint8 via int64 to get consistent results across CPU/GPU
+// compilers; float -> unsigned directly is UB and platform-divergent.
 template <typename src_t>
 struct static_cast_with_inter_type<uint8_t, src_t> {
   C10_HOST_DEVICE static inline uint8_t apply(src_t src) {
