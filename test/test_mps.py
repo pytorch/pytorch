@@ -8318,6 +8318,18 @@ class TestMPS(TestCaseMPS):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
+    def test_mps_generator_clone_state(self):
+        # clone_state() must copy the full engine state, not just the seed.
+        # Regression test: previously only the seed was cloned, so the clone
+        # restarted the sequence from offset 0 instead of continuing.
+        g = torch.Generator(device='mps').manual_seed(0)
+        torch.rand(4, device='mps', generator=g)  # advance the engine
+        g_clone = g.clone_state()
+        self.assertEqual(g.get_offset(), g_clone.get_offset())
+        a = torch.rand(4, device='mps', generator=g)
+        b = torch.rand(4, device='mps', generator=g_clone)
+        self.assertEqual(a, b)
+
     @serialTest()
     def test_default_mps_generator(self):
         # manual seeding on the "default" MPS generator using
