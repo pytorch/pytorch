@@ -249,6 +249,99 @@ dev = [
     "wheel",
 ]
 
+# Runtime ("rt-") dependency groups: the published wheel's runtime deps, by
+# accelerator variant. rt-base holds what every build needs; each rt-<variant>
+# includes rt-base and adds that accelerator's pins. These groups serve a DUAL
+# role: (1) tools/metadata/dependencies.py reads the selected group to populate
+# the wheel's dynamic [project.dependencies] / Requires-Dist; (2) declared
+# conflicting under [tool.uv] below, they give uv a single uv.lock with one
+# internally-consistent resolution fork per variant. PEP 735 groups are normally
+# dev-only; this reuse as the runtime source of truth is deliberate.
+rt-base = [
+    "filelock",
+    "typing-extensions>=4.10.0",
+    "setuptools<82",
+    "sympy>=1.13.3",
+    "networkx>=2.5.1",
+    "jinja2",
+    "fsspec>=0.8.5",
+]
+# cpu and rocm builds inject no extra runtime pip deps (a CPU wheel has none;
+# ROCm wheels bundle / system-provide their runtime libs), so they are base-only.
+# Declared explicitly for symmetry and a uniform CI handle (uv sync --group rt-cpu).
+rt-cpu = [{ include-group = "rt-base" }]
+rt-rocm = [{ include-group = "rt-base" }]
+rt-cu126 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux'",
+    "cuda-bindings>=12.9.4,<13; platform_system == 'Linux'",
+    "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'",
+]
+rt-cu130 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux'",
+    "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux'",
+    "cuda-bindings>=13.0.3,<14; platform_system == 'Linux'",
+    "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'",
+]
+rt-cu132 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux'",
+    "cuda-bindings>=13.0.3,<14; platform_system == 'Linux'",
+    "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'",
+]
+rt-xpu = [
+    { include-group = "rt-base" },
+    "intel-cmplr-lib-rt==2026.0.0",
+    "intel-cmplr-lib-ur==2026.0.0",
+    "intel-cmplr-lic-rt==2026.0.0",
+    "intel-sycl-rt==2026.0.0",
+    "oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "onemkl-license==2026.0.0",
+    "onemkl-sycl-blas==2026.0.0",
+    "onemkl-sycl-dft==2026.0.0",
+    "onemkl-sycl-lapack==2026.0.0",
+    "onemkl-sycl-rng==2026.0.0",
+    "onemkl-sycl-sparse==2026.0.0",
+    "dpcpp-cpp-rt==2026.0.0",
+    "intel-opencl-rt==2026.0.0",
+    "mkl==2026.0.0",
+    "intel-openmp==2026.0.0",
+    "tbb==2023.0.0",
+    "tcmlib==1.5.0",
+    "umf==1.1.0",
+    "intel-pti==0.17.0",
+]
+
+[tool.uv]
+# The rt-<variant> groups are mutually exclusive (a build targets exactly one
+# accelerator). Declaring them conflicting lets `uv lock` emit a single lockfile
+# with one internally-consistent fork per variant -- an otherwise unsatisfiable
+# mix of cu12/cu13 pins. Lock and `uv lock --check` must run with PYTORCH_VARIANT
+# unset, so the root project resolves to rt-base and the matrix is carried by
+# these (env-independent) conflicting groups.
+conflicts = [
+    [
+        { group = "rt-cpu" },
+        { group = "rt-rocm" },
+        { group = "rt-cu126" },
+        { group = "rt-cu130" },
+        { group = "rt-cu132" },
+        { group = "rt-xpu" },
+    ],
+]
+
 [project]
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
