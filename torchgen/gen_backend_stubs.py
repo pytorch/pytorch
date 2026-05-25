@@ -39,6 +39,11 @@ ParsedExternalYaml = namedtuple(
     ["backend_key", "autograd_key", "class_name", "cpp_namespace", "backend_indices"],
 )
 
+# Per-op keys in a supported-op dict entry; every other key is the operator name.
+_SUPPORTED_OP_OPTION_KEYS = frozenset(
+    {"structured", "ext_structured_meta", "device_guard"}
+)
+
 
 def parse_backend_yaml(
     backend_yaml_path: str,
@@ -149,12 +154,11 @@ def parse_backend_yaml(
             ext_structured_meta = False
             device_guard = use_device_guard
             if isinstance(op, dict):
-                names = [
-                    k
-                    for k in op
-                    if k not in {"structured", "ext_structured_meta", "device_guard"}
-                ]
-                assert len(names) == 1, f"Expected one op name in {op.keys()}"
+                names = [k for k in op if k not in _SUPPORTED_OP_OPTION_KEYS]
+                assert len(names) == 1, (
+                    f"Expected exactly one operator name per entry, but got {names} in "
+                    f"{sorted(op)}. Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
+                )
                 _op = names[0]
                 structured = op.get("structured", False)
                 ext_structured_meta = op.get("ext_structured_meta", False)
