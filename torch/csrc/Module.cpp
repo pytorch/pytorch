@@ -786,7 +786,9 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::dlDeviceToTorchDevice(
                   prototype->device.device_type,
-                  static_cast<c10::DeviceIndex>(prototype->device.device_id)));
+                  static_cast<c10::DeviceIndex>(prototype->device.device_id),
+                  prototype->data));
+
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
