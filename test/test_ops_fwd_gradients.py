@@ -68,7 +68,11 @@ class TestFwdGradients(TestGradients):
             skip("cov"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
-            xfail("as_strided", variant_name="partial_views", dtypes=(torch.complex64, torch.complex128)),
+            xfail(
+                "as_strided",
+                variant_name="partial_views",
+                dtypes=(torch.complex64, torch.complex128),
+            ),
             skip("as_strided_scatter"),
             xfail("triangular_solve"),
             skip("svd_lowrank", dtypes=(torch.complex128,)),
