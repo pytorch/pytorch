@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    Max,
+    Min,
     OpaqueUnaryFn_cos,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
@@ -956,6 +958,19 @@ class TestSympyFunctions(TestCase):
         x = BitwiseFn_bitwise_and(sympy.Symbol("a"), sympy.Symbol("b"))
         r = pickle.loads(pickle.dumps(x))
         self.assertEqual(x, r)
+
+    def test_min_max_scaled_known_sign_term(self):
+        s = sympy.Symbol("s", positive=True, integer=True)
+        self.assertEqual(Min(128 * s, 512 * s), 128 * s)
+        self.assertEqual(Max(128 * s, 512 * s), 512 * s)
+
+        z = sympy.Symbol("z", nonpositive=True, integer=True)
+        self.assertEqual(Min(128 * z, 512 * z), 512 * z)
+        self.assertEqual(Max(128 * z, 512 * z), 128 * z)
+
+        x = sympy.Symbol("x", integer=True)
+        self.assertIsInstance(Min(128 * x, 512 * x), Min)
+        self.assertIsInstance(Max(128 * x, 512 * x), Max)
 
 
 class TestSingletonInt(TestCase):
