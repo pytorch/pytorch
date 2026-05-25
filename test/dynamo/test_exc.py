@@ -311,6 +311,20 @@ ReluCompileError:""",
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
+    def test_z3op_sym_not(self):
+        import z3
+
+        from torch.fx.experimental.validator import TranslationValidator, z3op
+
+        validator = TranslationValidator()
+        b = z3.Bool("b")
+
+        self.assertTrue(z3op(torch.sym_not, validator)(b).eq(z3.Not(b)))
+        self.assertTrue(
+            z3.simplify(z3op(torch.sym_not, validator)(1)).eq(z3.BoolVal(False))
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
     @torch._dynamo.config.patch(
         assume_static_by_default=False,
         suppress_errors=False,
