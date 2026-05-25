@@ -1531,10 +1531,17 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
+    torch._check(
+        split_size >= 0,
+        lambda: f"split expects split_size be non-negative, but got split_size={split_size}",
+    )
     if dim_size == 0:
         return (self.detach(),)
-    if split_size == 0:
-        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
+    torch._check(
+        split_size > 0,
+        lambda: "split_size can only be 0 if dimension size is 0, "
+        f"but got dimension size of {dim_size}",
+    )
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -1672,7 +1679,6 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
 
 
 @register_decomposition(aten.native_group_norm_backward)
-@out_wrapper("out0", "out1", "out2")
 @pw_cast_for_opmath
 def native_group_norm_backward(
     grad_output: Tensor | None,
@@ -1688,9 +1694,14 @@ def native_group_norm_backward(
     *,
     grad_mean: Tensor | None = None,
     grad_rstd: Tensor | None = None,
-) -> tuple[Tensor, Tensor, Tensor]:
+    out0: Tensor | None = None,
+    out1: Tensor | None = None,
+    out2: Tensor | None = None,
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     optional_tensors_present = tuple(
-        t for t in (grad_output, gamma, grad_mean, grad_rstd) if t is not None
+        t
+        for t in (grad_output, gamma, grad_mean, grad_rstd, out0, out1, out2)
+        if t is not None
     )
     utils.check_same_device(
         input, mean, rstd, *optional_tensors_present, allow_cpu_scalar_tensors=False
@@ -1714,6 +1725,13 @@ def native_group_norm_backward(
         utils.check_same_shape(mean, grad_mean, allow_cpu_scalar_tensors=False)
     if grad_rstd is not None:
         utils.check_same_shape(rstd, grad_rstd, allow_cpu_scalar_tensors=False)
+
+    possible_outputs = (out0, out1, out2)
+    if do_output := any(o is not None for o in possible_outputs):
+        torch._check(
+            all(o is not None for o in possible_outputs),
+            "Please supply arguments for all output tensors or none!",
+        )
 
     cpg = C // group
     torch._check(
@@ -1751,9 +1769,9 @@ def native_group_norm_backward(
         ds = torch.mul(grad_output_cast, input_cast).view(N, C, HxW).sum(2)
         db = grad_output_cast.view(N, C, HxW).sum(2)
 
-    d_input: Tensor = torch.Tensor()
-    d_gamma: Tensor = torch.Tensor()
-    d_bias: Tensor = torch.Tensor()
+    d_input: Tensor | None = None
+    d_gamma: Tensor | None = None
+    d_bias: Tensor | None = None
 
     param_output_dtype = gamma.dtype if gamma is not None else input.dtype
     param_device = gamma.device if gamma is not None else input.device
@@ -1830,6 +1848,18 @@ def native_group_norm_backward(
     d_input = _maybe_convert_to_dtype(d_input, input.dtype)
     d_gamma = _maybe_convert_to_dtype(d_gamma, param_output_dtype)
     d_bias = _maybe_convert_to_dtype(d_bias, param_output_dtype)
+
+    # This can't handle the outputs via out_wrapper, because it can return None.
+    # Normally we would have a separate decomp for this, but due to forwards compat for
+    # the multiple_grads overload they're combined into one.
+    if do_output:
+        for d, o in zip((d_input, d_gamma, d_bias), possible_outputs):
+            # we've already checked that o is not None, but this silences typing
+            if d is not None and o is not None:
+                _maybe_resize_out(o, d.shape)
+                _safe_copy_out(copy_from=d, copy_to=o, exact_dtype=True)
+
+        return possible_outputs
 
     return d_input, d_gamma, d_bias
 
@@ -4851,6 +4881,16 @@ def _grid_sampler_2d(
             f"grid last dimension must be 2 (for x,y coords), got {two}"
         )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    int32_max = torch.iinfo(torch.int32).max
+    # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
+    # the historical int64 path, and dynamic shapes fall back if we cannot guard.
+    use_32bit_indices = a.device.type in ("cuda", "xpu") and guard_or_false(
+        sym_and(iH <= int32_max, iW <= int32_max)
+    )
+    index_dtype = torch.int32 if use_32bit_indices else torch.int64
+
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
         # This allows to generate a single triton cuda kernel instead of two kernels.
@@ -4876,7 +4916,7 @@ def _grid_sampler_2d(
         c = C if _expand_grid else 1
         return tuple(
             torch.where(cond, t, 0).view(N, c, oH, oW)
-            for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
+            for t in (xs.to(dtype=index_dtype), ys.to(dtype=index_dtype), ws)
         )
 
     def get_summand(ix: Tensor, iy: Tensor, w) -> Tensor:
