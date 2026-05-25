@@ -1815,12 +1815,12 @@ def native_group_norm_backward(
 
         if grad_output_cast is not None:
             d_input = (
-                grad_output_cast.reshape(N, group, cpg, HxW) * c1
-                + input_cast.reshape(N, group, cpg, HxW) * c2
+                c1 * grad_output_cast.reshape(N, group, cpg, HxW)
+                + c2 * input_cast.reshape(N, group, cpg, HxW)
                 + c3
             )
         else:
-            d_input = input_cast.reshape(N, group, cpg, HxW) * c2 + c3
+            d_input = c2 * input_cast.reshape(N, group, cpg, HxW) + c3
         d_input = d_input.reshape(input.shape)
 
     if output_mask[1]:
