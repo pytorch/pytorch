@@ -6401,6 +6401,93 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.assertEqual(out, fn(x))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=2)
 
+    # -------------------------------------------------------------------------
+    # wrap_triton argument validation
+    # -------------------------------------------------------------------------
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_wrong_type(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(
+            TypeError, "output_tile must be a tuple of strings"
+        ):
+            wrap_triton(k, output_tile=["BLOCK"])
+        with self.assertRaisesRegex(
+            TypeError, "output_tile must be a tuple of strings"
+        ):
+            wrap_triton(k, output_tile=("BLOCK", 42))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_empty(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(ValueError, "output_tile must be non-empty"):
+            wrap_triton(k, output_tile=())
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_without_output_tile(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(ValueError, "pid_remap requires output_tile"):
+            wrap_triton(k, pid_remap=("pid",))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_wrong_type(self):
+        @triton.jit
+        def k(out_ptr, BLOCK: tl.constexpr):
+            tl.store(
+                out_ptr + tl.arange(0, BLOCK), tl.zeros((BLOCK,), dtype=tl.float32)
+            )
+
+        with self.assertRaisesRegex(TypeError, "pid_remap must be a tuple of strings"):
+            wrap_triton(k, output_tile=("BLOCK",), pid_remap=["pid"])
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_pid_remap_length_mismatch(self):
+        @triton.jit
+        def k(out_ptr, BM: tl.constexpr, BN: tl.constexpr):
+            tl.store(out_ptr + tl.arange(0, BM), tl.zeros((BM,), dtype=tl.float32))
+
+        with self.assertRaisesRegex(
+            ValueError, "pid_remap length.*must match.*output_tile length"
+        ):
+            wrap_triton(k, output_tile=("BM", "BN"), pid_remap=("pid_m",))
+
+    @requires_cuda_and_triton
+    def test_wrap_triton_output_tile_not_in_kwargs(self):
+        @triton.jit
+        def copy_kernel(src_ptr, dst_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(dst_ptr + offs, tl.load(src_ptr + offs, mask=mask), mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            grid = (triton.cdiv(x.numel(), 16),)
+            wrap_triton(copy_kernel, output_tile=("WRONG",))[grid](
+                x, out, x.numel(), BLOCK=16
+            )
+            return out + 1
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "output_tile name 'WRONG' is not a kernel argument",
+        ):
+            torch.compile(fn)(torch.randn(128, device="cuda"))
+
 
 if HAS_CUDA_AND_TRITON:
 

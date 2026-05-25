@@ -8173,6 +8173,14 @@ class UserDefinedTritonKernel(ExternKernel):
             MutationOutput(NoneLayout(device=self.device), buf, self)
             for buf in self.mutable_args
         ]
+
+        if output_tile is not None:
+            for name in output_tile:
+                if name not in kernel_args:
+                    raise ValueError(
+                        f"output_tile name '{name}' is not a kernel argument. "
+                        f"Available arguments: {list(kernel_args.keys())}"
+                    )
         V.graph.register_operation(self)
 
     @override
