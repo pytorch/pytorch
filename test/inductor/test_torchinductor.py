@@ -14337,6 +14337,69 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_backward_fake_preserves_requires_grad(self):
+        op_namespace = f"_test_163716_inductor_{type(self).__name__}"
+        seen_fake_requires_grad = []
+
+        @torch.library.custom_op(f"{op_namespace}::mm_fwd", mutates_args=())
+        def mm_fwd(input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return input @ weight
+
+        @mm_fwd.register_fake
+        def mm_fwd_fake(input, weight):
+            return input @ weight
+
+        @torch.library.custom_op(
+            f"{op_namespace}::mm_bwd",
+            mutates_args=(),
+            schema="(Tensor grad_output, Tensor input, Tensor weight) -> (Tensor, Tensor?)",
+        )
+        def mm_bwd(
+            grad_output: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor | None]:
+            grad_input = grad_output @ weight.mT
+            grad_weight = input.mT @ grad_output if weight.requires_grad else None
+            return grad_input, grad_weight
+
+        @mm_bwd.register_fake
+        def mm_bwd_fake(grad_output, input, weight):
+            seen_fake_requires_grad.append(weight.requires_grad)
+            grad_input = grad_output @ weight.mT
+            grad_weight = input.mT @ grad_output if weight.requires_grad else None
+            return grad_input, grad_weight
+
+        def backward(ctx, grad_output):
+            input, weight = ctx.saved_tensors
+            return mm_bwd(grad_output, input, weight)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        mm_fwd.register_autograd(backward, setup_context=setup_context)
+
+        device = self.device
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3, device=device))
+
+            def forward(self, input):
+                return mm_fwd(input, self.weight)
+
+        torch._dynamo.reset()
+        input = torch.randn(5, 4, device=device)
+        mlp = MLP()
+        out = torch.compile(mlp, backend="inductor")(input)
+        out.backward(torch.ones_like(out))
+
+        self.assertTrue(seen_fake_requires_grad)
+        self.assertTrue(all(seen_fake_requires_grad))
+        self.assertEqual(mlp.weight.grad, input.mT @ torch.ones_like(out))
+
     @requires_gpu()
     @skip_if_not_triton
     @config.patch(implicit_fallbacks=True)

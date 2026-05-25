@@ -136,6 +136,7 @@ def _create_graph(
         )(*args)
 
         if args_descs is not None:
+            flat_args, _ = pytree.tree_flatten(args)
             flat_args_descs, _ = pytree.tree_flatten(args_descs)
             flat_out_descs, _ = pytree.tree_flatten(out_descs)
 
@@ -175,6 +176,7 @@ def _create_graph(
                                 f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
                             )
                         n.meta["desc"] = flat_args_descs[i]
+                        _copy_requires_grad_to_placeholder_meta(n, flat_args[i])
                         i += 1
                 elif n.op == "output":
                     n.meta["desc"] = flat_out_descs
@@ -208,6 +210,14 @@ def _detach_traced_inputs(flat_args: Any) -> Any:
             return t.detach()
 
     return pytree.tree_map_only(torch.Tensor, detach_tensor, flat_args)
+
+
+def _copy_requires_grad_to_placeholder_meta(node: torch.fx.Node, arg: Any) -> None:
+    if not isinstance(arg, torch.Tensor):
+        return
+    val = node.meta.get("val")
+    if isinstance(val, torch.Tensor):
+        val.requires_grad_(arg.requires_grad)
 
 
 def _prepare_graph_capture_tracing(

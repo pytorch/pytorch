@@ -420,6 +420,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
+        self.graph_input_requires_grad: dict[str, bool] = {}
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
@@ -1290,6 +1291,7 @@ class GraphLowering(torch.fx.Interpreter):
             return opaque_obj
 
         assert isinstance(example, torch.Tensor), example
+        self.graph_input_requires_grad[target] = example.requires_grad
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
