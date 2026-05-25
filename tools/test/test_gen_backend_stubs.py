@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from pathlib import Path
 
 import expecttest
 
-from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE
-from torchgen.gen_backend_stubs import run
+from torchgen import dest
+from torchgen.gen import (
+    _GLOBAL_PARSE_NATIVE_YAML_CACHE,
+    get_grouped_native_functions,
+    parse_native_yaml,
+)
+from torchgen.gen_backend_stubs import parse_backend_yaml, run
+from torchgen.model import NativeFunctionsGroup
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import concatMap, Target
 
 
 # gen_backend_stubs.py is an integration point that is called directly by external backends.
@@ -427,6 +436,180 @@ supported:
             output_error,
             """Expected exactly one operator name per entry, but got ['mul.out', 'structred'] in ['mul.out', 'structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",
         )
+
+
+# Golden tests for the generated C++ of the PrivateUse1 out-as-primary /
+# structured-kernel feature, mirroring the PR case study (sub.out / mul.out /
+# div.out under cpp_namespace at::priv1::native). Following tools/test/test_codegen.py,
+# these call the codegen helpers directly and assertExpectedInline the full returned
+# string (regenerate with EXPECTTEST_ACCEPT=1) -- no file writing, so no churn from
+# the dynamic @generated header.
+class TestGenBackendStubsCodegen(expecttest.TestCase):
+    def setUp(self) -> None:
+        global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+
+    _PRIV1_HEADER = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+"""
+
+    def _parse(self, supported: str):
+        # Parse the in-tree native_functions.yaml plus the given PrivateUse1
+        # backend stub, and return (groups the backend registers a kernel for,
+        # its BackendIndex, the backend class name). This is enough to invoke the
+        # codegen helpers directly. The parse cache is cleared each call so the
+        # mutated backend_indices does not leak into a later call in the same test.
+        global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+        native = Path(__file__).absolute().parents[2] / "aten/src/ATen/native"
+        parsed = parse_native_yaml(
+            str(native / "native_functions.yaml"), str(native / "tags.yaml")
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
+            fp.write(self._PRIV1_HEADER + supported)
+            fp.flush()
+            backend_yaml = parse_backend_yaml(
+                fp.name, grouped, parsed.backend_indices
+            )
+        backend_index = backend_yaml.backend_indices[backend_yaml.backend_key]
+        class_name = (
+            backend_yaml.class_name or backend_index.native_function_class_name()
+        )
+        groups = [
+            g
+            for g in grouped
+            if isinstance(g, NativeFunctionsGroup) and backend_index.has_kernel(g.out)
+        ]
+        return groups, backend_index, class_name
+
+    def anonymous_definitions(self, supported: str) -> str:
+        groups, backend_index, class_name = self._parse(supported)
+        gen = dest.RegisterDispatchKey(
+            backend_index,
+            Target.ANONYMOUS_DEFINITION,
+            SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=class_name,
+            skip_dispatcher_op_registration=False,
+        )
+        return "\n".join(concatMap(gen, groups))
+
+    def native_function_declaration(self, supported: str) -> str:
+        groups, backend_index, _ = self._parse(supported)
+        return "\n".join(
+            concatMap(
+                lambda g: dest.compute_native_function_declaration(g, backend_index),
+                groups,
+            )
+        )
+
+    # use_out_as_primary: a non-structured op (div.out) generates an out wrapper
+    # that returns the impl _out call directly (note the at::priv1::native 3-level
+    # namespace), a functional wrapper that allocates an empty out and reuses it,
+    # and an inplace wrapper that feeds self into the out slot -- the old
+    # at::_copy_from_and_resize temp-copy is gone.
+    def test_out_as_primary_wrappers(self) -> None:
+        anon = self.anonymous_definitions("- div.out")
+        self.assertNotIn("at::_copy_from_and_resize", anon)
+        self.assertExpectedInline(anon, """\
+at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
+  auto out = at::empty({0}, self.options());
+
+  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
+  return out;
+}
+
+namespace {
+
+at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
+    // No device check
+
+
+  const OptionalDeviceGuard device_guard(device_of(self));
+  return at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
+}
+
+} // anonymous namespace
+
+at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
+
+  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
+  return self;
+}
+""")
+
+    # structured: true reuses the native meta -- the backend struct inherits the
+    # native meta parent and declares only impl().
+    def test_structured_native_meta_declaration(self) -> None:
+        self.assertExpectedInline(
+            self.native_function_declaration("- mul.out:\n  structured: true"),
+            """\
+struct structured_mul_out : public at::meta::structured_mul_Tensor {
+void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & out);
+};
+""",
+        )
+
+    # ext_structured_meta: true additionally emits `using base` and a custom
+    # `void meta(...)` declaration in the struct; without it, neither appears.
+    def test_structured_custom_meta_declaration(self) -> None:
+        self.assertExpectedInline(
+            self.native_function_declaration(
+                "- sub.out:\n  structured: true\n  ext_structured_meta: true"
+            ),
+            """\
+struct structured_sub_out : public at::meta::structured_sub_Tensor {
+// Alias to the base meta class for easy access to native meta logic
+using base = at::meta::structured_sub_Tensor;
+void meta(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha);
+void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha, const at::Tensor & out);
+};
+""",
+        )
+        native = self.native_function_declaration("- sub.out:\n  structured: true")
+        self.assertNotIn("using base", native)
+        self.assertNotIn("void meta(", native)
+
+    # device_guard is active only when the backend-level and per-op guards are
+    # both true; a per-op device_guard: false omits the DeviceGuard the op would
+    # otherwise inherit from the backend-level device_guard: true.
+    def test_per_op_device_guard_override(self) -> None:
+        guard = "const OptionalDeviceGuard device_guard(device_of(self));"
+        self.assertIn(guard, self.anonymous_definitions("- div.out"))
+        off = self.anonymous_definitions("- div.out:\n  device_guard: false")
+        self.assertNotIn(guard, off)
+        self.assertExpectedInline(off, """\
+at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
+  auto out = at::empty({0}, self.options());
+
+  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
+  return out;
+}
+
+namespace {
+
+at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
+    // No device check
+
+
+  // DeviceGuard omitted
+  return at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, out);
+}
+
+} // anonymous namespace
+
+at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
+
+  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
+  return self;
+}
+""")
 
 
 if __name__ == "__main__":
