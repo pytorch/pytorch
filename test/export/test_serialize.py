@@ -2191,6 +2191,23 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_load_rejects_exported_program_input(self):
+        ep = export(torch.nn.ReLU(), (torch.randn(2, 3),), strict=True)
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "`f` must be a path-like object or a readable and seekable "
+            "file-like object.*ExportedProgram",
+        ):
+            load(ep)  # type: ignore[arg-type]
+
+    def test_load_closed_file_like_propagates_io_error(self):
+        buffer = io.BytesIO()
+        buffer.close()
+
+        with self.assertRaisesRegex(ValueError, "I/O operation on closed file"):
+            load(buffer)
+
     def test_save_extra(self):
         inp = (torch.tensor([0.1, 0.1]),)
 
