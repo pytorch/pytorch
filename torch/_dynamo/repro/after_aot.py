@@ -32,9 +32,11 @@ import sys
 import textwrap
 import typing
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, IO, Literal, Protocol, TYPE_CHECKING
 from typing_extensions import Unpack
 
 import sympy
@@ -133,8 +135,6 @@ def _find_repeat_interleave_constraints(
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
-
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
@@ -144,6 +144,69 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+ReproCommand = Literal["minify", "analyze", "minifier-query", "run", "get_args"]
+ReproAccuracy = Literal["", "accuracy", "strict_accuracy"]
+ReproInputReader = InputReader | NopInputReader
+
+
+class ReproLoadArgs(Protocol):
+    def __call__(self, reader: ReproInputReader) -> None:
+        ...
+
+
+class ModuleFails(Protocol):
+    def __call__(
+        self,
+        fx_g: torch.fx.GraphModule,
+        args: Sequence[Any],
+        check_str: str | None = None,
+    ) -> bool:
+        ...
+
+
+@dataclass(frozen=True)
+class ReproOptions:
+    command: ReproCommand
+    accuracy: ReproAccuracy
+    save_dir: str | None
+    tracing_mode: str | None
+    check_str: str | None
+    isolate: bool
+    offload_to_disk: bool
+    skip_saving_eager_intermediates: bool
+    skip_sanity: bool
+    max_granularity: int | None
+    stable_hash: bool
+    skip_saving_inductor_intermediates: bool
+    skip_saving_float64_intermediates: bool
+    skip_check_deterministic: bool
+
+    @classmethod
+    def from_namespace(cls, options: argparse.Namespace) -> ReproOptions:
+        return cls(
+            command=typing.cast(ReproCommand, options.command),
+            accuracy=typing.cast(ReproAccuracy, options.accuracy),
+            save_dir=options.save_dir,
+            tracing_mode=options.tracing_mode,
+            check_str=getattr(options, "check_str", None),
+            isolate=getattr(options, "isolate", False),
+            offload_to_disk=getattr(options, "offload_to_disk", False),
+            skip_saving_eager_intermediates=getattr(
+                options, "skip_saving_eager_intermediates", False
+            ),
+            skip_sanity=getattr(options, "skip_sanity", False),
+            max_granularity=getattr(options, "max_granularity", None),
+            stable_hash=getattr(options, "stable_hash", False),
+            skip_saving_inductor_intermediates=getattr(
+                options, "skip_saving_inductor_intermediates", False
+            ),
+            skip_saving_float64_intermediates=getattr(
+                options, "skip_saving_float64_intermediates", False
+            ),
+            skip_check_deterministic=getattr(options, "skip_check_deterministic", False),
+        )
 
 
 def _extract_distributed_info(
@@ -1133,7 +1196,7 @@ def _build_symbolic_wrapper(
 
 
 def repro_common(
-    options: Any, mod: nn.Module, load_args: Any
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
     if any(mod.named_parameters()):
@@ -1147,18 +1210,19 @@ def repro_common(
                 n,
             )
 
-    if not hasattr(load_args, "_version"):
+    load_args_version = getattr(load_args, "_version", None)
+    if load_args_version is None:
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
             "and describe how you generate this repro script"
         )
     else:
-        if load_args._version > 0:
+        if load_args_version > 0:
             log.warning(
                 "load_args is version %s, but this version of PyTorch only supports "
                 "version 0.  We will try to run it anyway but there may be an incompatibility; "
                 "if so, try upgrading your version of PyTorch.",
-                load_args._version,
+                load_args_version,
             )
 
     nop_reader = NopInputReader()
@@ -1211,7 +1275,7 @@ def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequenc
     return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
-ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
+ACCURACY_FAILS: dict[ReproAccuracy, ModuleFails] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more
@@ -1224,7 +1288,9 @@ ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
 }
 
 
-def repro_minifier_query(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_minifier_query(
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
+) -> None:
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy],
@@ -1236,7 +1302,9 @@ def repro_minifier_query(options: Any, mod: nn.Module, load_args: Any) -> None:
         sys.exit(0)
 
 
-def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_minify(
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
+) -> None:
     from functorch.compile import minifier
 
     mod, args = repro_common(options, mod, load_args)
@@ -1245,7 +1313,7 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
     env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
 
-    module_fails: Any
+    module_fails: ModuleFails
     if options.isolate:
         module_fails = functools.partial(
             isolate_fails,
@@ -1274,7 +1342,9 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
         )
 
 
-def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_analyze(
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
+) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
     from torch._inductor.hooks import intermediate_hook
 
@@ -1422,13 +1492,15 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
 
 
 def repro_get_args(
-    options: Any, mod: nn.Module, load_args: Any
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
     return mod, args
 
 
-def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_run(
+    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
+) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
 
     mod, args = repro_common(options, mod, load_args)
@@ -1468,7 +1540,7 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 # TODO: lazily load the inputs or something, rather than cloning them
 def run_repro(
     mod: nn.Module,
-    load_args: Any,
+    load_args: ReproLoadArgs,
     *,
     command: str = "run",
     accuracy: bool | str = "",
@@ -1681,7 +1753,7 @@ divergences--you just might not end up with a useful repro in the end.""",
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    options = parser.parse_args(args)
+    options = ReproOptions.from_namespace(parser.parse_args(args))
     COMMAND_FNS = {
         "minify": repro_minify,
         "analyze": repro_analyze,
