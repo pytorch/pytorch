@@ -5,7 +5,6 @@ import itertools
 import math
 import operator
 import sys
-import warnings
 from functools import reduce
 from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -96,6 +95,9 @@ _TO_DENSE_SPARSE_LAYOUTS = frozenset(
         torch.sparse_bsr,
         torch.sparse_bsc,
     }
+)
+_PYTHON_TLS_SNAPSHOT_KEYSET = torch._C.DispatchKeySet(
+    torch._C.DispatchKey.PythonTLSSnapshot
 )
 
 
@@ -519,6 +521,13 @@ def meta_select(
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
@@ -1531,37 +1540,33 @@ _to_dense_functorch_lib = torch.library.Library(
 _to_dense_functorch_lib.impl("to_dense", to_dense_functorch_frontmode_impl)
 
 
-# Register through torch.library so direct aten.to_dense dispatch is intercepted
-# before the native composite sees a fake MKLDNN tensor as strided.  Refuse to
-# silently replace an existing Python override; only the native C++ override
-# warning is expected here.
-_to_dense_composite_lib = torch.library.Library(
-    "aten", "IMPL", "CompositeImplicitAutograd"
+def to_dense_python_tls_impl(
+    self: torch.Tensor,
+    dtype: torch.dtype | None = None,
+    *,
+    masked_grad: bool | None = None,
+) -> torch.Tensor:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(self, (FakeTensor, FunctionalTensor)):
+        return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
+
+    with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
+        return aten.to_dense.default(self, dtype=dtype, masked_grad=masked_grad)
+
+
+# Intercept fake/functional tensor calls before the native composite sees their
+# strided wrapper metadata, but keep ordinary eager CPU/CUDA to_dense on the C++
+# dispatcher path.
+_to_dense_python_tls_lib = torch.library.Library("aten", "IMPL", "PythonTLSSnapshot")
+_to_dense_python_tls_lib.impl("to_dense", to_dense_python_tls_impl)
+
+
+# Keep this as a Python decomposition for FakeTensorMode fallback paths without
+# replacing the eager dispatcher entry for every ordinary to_dense() call.
+aten.to_dense.default.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
+    to_dense_composite_impl
 )
-with warnings.catch_warnings(record=True) as _caught_warnings:
-    warnings.simplefilter("always")
-    _to_dense_composite_lib.impl(
-        "to_dense",
-        to_dense_composite_impl,
-        allow_override=False,
-    )
-for _warning in _caught_warnings:
-    _message = str(_warning.message)
-    if (
-        issubclass(_warning.category, UserWarning)
-        and _message.startswith(
-            "Warning only once for all operators,  other operators may also be overridden."
-        )
-        and "operator: aten::to_dense(" in _message
-        and "dispatch key: CompositeImplicitAutograd" in _message
-    ):
-        continue
-    warnings.warn_explicit(
-        _warning.message,
-        _warning.category,
-        _warning.filename,
-        _warning.lineno,
-    )
 
 
 @register_op_impl(aten.to_mkldnn.default)
@@ -1786,8 +1791,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(
