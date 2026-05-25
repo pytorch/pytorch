@@ -28,11 +28,19 @@ void init_THPCaches() {}
 
 #if IS_PYTHON_3_11_PLUS
 
-// Rename opcode table symbols to avoid multiple definition conflict
-// with the identical tables in libpython at link time.
+// Rename opcode table/metadata symbols to avoid multiple definition conflict
+// with the identical definitions in libpython at link time.
 #define _PyOpcode_Caches _torch_PyOpcode_Caches
 #define _PyOpcode_Jump _torch_PyOpcode_Jump
 #define _PyOpcode_Deopt _torch_PyOpcode_Deopt
+#if IS_PYTHON_3_13_PLUS
+#define _PyOpcode_num_popped _torch_PyOpcode_num_popped
+#define _PyOpcode_num_pushed _torch_PyOpcode_num_pushed
+#define _PyOpcode_opcode_metadata _torch_PyOpcode_opcode_metadata
+#define _PyOpcode_macro_expansion _torch_PyOpcode_macro_expansion
+#define _PyOpcode_OpName _torch_PyOpcode_OpName
+#define _PyOpcode_PseudoTargets _torch_PyOpcode_PseudoTargets
+#endif
 
 #define Py_BUILD_CORE
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
@@ -48,6 +56,14 @@ void init_THPCaches() {}
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#if IS_PYTHON_3_13_PLUS
+#undef _PyOpcode_PseudoTargets
+#undef _PyOpcode_OpName
+#undef _PyOpcode_macro_expansion
+#undef _PyOpcode_opcode_metadata
+#undef _PyOpcode_num_pushed
+#undef _PyOpcode_num_popped
+#endif
 #undef _PyOpcode_Deopt
 #undef _PyOpcode_Jump
 #undef _PyOpcode_Caches
