@@ -2,8 +2,10 @@
 
 import importlib.util
 import unittest
+from unittest.mock import patch
 
 from sympy import I, Max, Min, Symbol, sympify
+from sympy.functions.elementary.miscellaneous import MinMaxBase
 
 import torch
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
@@ -91,6 +93,45 @@ class TestUtils(TestCase):
         expr = Min(2, Max(0, Identity(q0)))
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
+
+    def testSympySubsSympyMinMaxSkipsExpensiveSymbolicSimplification(self):
+        x = Symbol("x", integer=True, positive=True)
+        y = Symbol("y", integer=True, positive=True)
+        z = Symbol("z", integer=True, positive=True)
+        expr = Min(Max(x + y, y + z), x + z)
+
+        with (
+            patch.object(
+                MinMaxBase,
+                "_collapse_arguments",
+                side_effect=AssertionError("_collapse_arguments called"),
+            ),
+            patch.object(
+                MinMaxBase,
+                "_find_localzeros",
+                side_effect=AssertionError("_find_localzeros called"),
+            ),
+        ):
+            result = sympy_subs(expr, {x: x + 1})
+
+        self.assertIs(result.func, Min)
+        max_arg = next(arg for arg in result.args if arg.func is Max)
+        self.assertEqual(set(result.args), {x + z + 1, max_arg})
+        self.assertEqual(set(max_arg.args), {x + y + 1, y + z})
+
+    def testSympySubsSympyMinMaxEvaluatesConcreteSubstitution(self):
+        x = Symbol("x", integer=True)
+        y = Symbol("y", integer=True, positive=True)
+        r = Symbol("r", positive=True)
+
+        self.assertEqual(sympy_subs(Max(x, 0), {x: -1}), 0)
+        self.assertEqual(sympy_subs(Min(x, 0), {x: -1}), -1)
+        self.assertEqual(sympy_subs(Max(x, 0), {x: y}), y)
+        self.assertEqual(sympy_subs(Min(x, 0), {x: y}), 0)
+        self.assertEqual(sympy_subs(Max(x, 1), {x: y}), y)
+        self.assertEqual(sympy_subs(Min(x, 1), {x: y}), 1)
+        self.assertEqual(sympy_subs(Max(x, 1), {x: r}), Max(1, r))
+        self.assertEqual(sympy_subs(Min(x, 1), {x: r}), Min(1, r))
 
     def testIdentityComparisonNoRecursion(self):
         self.assertTrue(Identity(sympify("0")) >= 0)

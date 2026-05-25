@@ -17,6 +17,7 @@ import sys
 from typing import Any, TYPE_CHECKING
 
 import sympy
+from sympy.core.operations import ShortCircuit
 
 from torch.utils._sympy.numbers import int_oo
 
@@ -30,6 +31,88 @@ SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+
+def _rebuild_sympy_min_max(cls: type[sympy.Expr], args: tuple[Any, ...]) -> sympy.Basic:
+    min_max_args = tuple(sympy.sympify(arg) for arg in args)
+    if not any(getattr(arg, "free_symbols", ()) for arg in min_max_args):
+        return cls(*min_max_args)
+
+    try:
+        # Keep SymPy's inexpensive validation, identity removal, and flattening,
+        # but skip _collapse_arguments and _find_localzeros.  Those two
+        # optimizations dominate sympy_subs on symbolic Min/Max expressions.
+        filtered_args = frozenset(
+            cls._new_args_filter(min_max_args)  # type: ignore[attr-defined]
+        )
+    except ShortCircuit:
+        return cls.zero  # type: ignore[attr-defined]
+
+    if not filtered_args:
+        return cls.identity  # type: ignore[attr-defined]
+    filtered_args = _collapse_sympy_min_max_numeric(cls, filtered_args)
+    if not filtered_args:
+        return cls.identity  # type: ignore[attr-defined]
+    if len(filtered_args) == 1:
+        return next(iter(filtered_args))
+    return cls(*filtered_args, evaluate=False)
+
+
+def _collapse_sympy_min_max_numeric(
+    cls: type[sympy.Expr], values: frozenset[sympy.Expr]
+) -> set[sympy.Expr]:
+    other_values: set[sympy.Expr] = set()
+    num_value: sympy.Expr | None = None
+    for arg in values:
+        if arg.is_Number:
+            if num_value is None:
+                num_value = arg
+            elif cls is sympy.Max:
+                num_value = max(num_value, arg)
+            elif cls is sympy.Min:
+                num_value = min(num_value, arg)
+            else:
+                raise AssertionError(f"impossible {cls}")
+        else:
+            other_values.add(arg)
+
+    if num_value is None:
+        return other_values
+    if len(other_values) == 0:
+        return {num_value}
+    if len(other_values) == 1:
+        other_value = next(iter(other_values))
+        if num_value in (0.0, 0) and other_value.is_nonnegative:
+            return other_values if cls is sympy.Max else {num_value}
+        if num_value == 1 and other_value.is_integer and other_value.is_positive:
+            return other_values if cls is sympy.Max else {num_value}
+
+    other_values.add(num_value)
+    return other_values
+
+
+def _xreplace_sympy_min_max(
+    expr: sympy.Basic, rule: dict[sympy.Expr, sympy.Expr]
+) -> tuple[sympy.Basic, bool]:
+    if expr in rule:
+        return rule[expr], True
+    if rule:
+        args: list[Any] = []
+        changed = False
+        for arg in expr.args:
+            _xreplace = getattr(arg, "_xreplace", None)
+            if _xreplace is not None:
+                new_arg, arg_changed = _xreplace_sympy_min_max(arg, rule)
+                args.append(new_arg)
+                changed |= arg_changed
+            else:
+                args.append(arg)
+        if changed:
+            new_args = tuple(args)
+            if expr.func in (sympy.Min, sympy.Max):
+                return _rebuild_sympy_min_max(expr.func, new_args), True
+            return expr.func(*new_args), True
+    return expr, False
 
 
 def _sympy_subs(expr: sympy.Basic, replacements: dict[sympy.Expr, Any]) -> sympy.Basic:
@@ -53,9 +136,9 @@ def _sympy_subs(expr: sympy.Basic, replacements: dict[sympy.Expr, Any]) -> sympy
             return replacement
 
     # xreplace is faster than subs, but is way more picky
-    return sympy.sympify(expr).xreplace(
-        {k: to_symbol(k, v) for k, v in replacements.items()}
-    )
+    expr = sympy.sympify(expr)
+    replacements = {k: to_symbol(k, v) for k, v in replacements.items()}
+    return _xreplace_sympy_min_max(expr, replacements)[0]
 
 
 def _maybe_realize_expr(
