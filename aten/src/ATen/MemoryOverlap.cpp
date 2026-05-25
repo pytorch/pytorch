@@ -62,6 +62,20 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
   }
+  // Even when the views are not non-overlapping-and-dense, two aliases that
+  // start at the same address overlap in at least their first element.  If the
+  // logical layouts differ, this is a partial overlap and in-place TensorIterator
+  // ops cannot safely pick an execution order.
+  if (a->layout() == kStrided && b->layout() == kStrided) {
+    const auto& a_storage = a->unsafe_storage();
+    if (a_storage && a_storage.is_alias_of(b->unsafe_storage()) &&
+        a->data() == b->data()) {
+      return (a->sizes() == b->sizes() && a->strides() == b->strides() &&
+              a->itemsize() == b->itemsize())
+          ? MemOverlapStatus::Full
+          : MemOverlapStatus::Partial;
+    }
+  }
   if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
     return MemOverlapStatus::TooHard;
   }
