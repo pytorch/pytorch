@@ -685,8 +685,8 @@ def jacobian(
         )
     if strategy == "forward-mode" and not vectorize:
         raise ValueError(
-            'torch.autograd.functional.jacobian: strategy="forward-mode" requires vectorize=True. '
-            "Please set vectorize=True or use strategy=\"reverse-mode\"."
+            'strategy="forward-mode" requires vectorize=True. '
+            'Please set vectorize=True or use strategy="reverse-mode".'
         )
     if strategy == "forward-mode":
         if create_graph:
