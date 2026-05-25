@@ -4425,8 +4425,11 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     all_unbound: set[Any] = set()
     for free, bool_expr in pending:
         missing = free - subst_keys
-        if not missing:
-            continue
+        assert missing, (
+            f"_finalize_spec_wiring: pending entry has all symbols bound "
+            f"({bool_expr}); _drain_shape_spec_pending_assumptions should "
+            f"have removed it before finalize."
+        )
         all_unbound |= missing
         rename = {s: sympy.Symbol(_name(s)) for s in free}
         pretty_expr = bool_expr.xreplace(rename)
