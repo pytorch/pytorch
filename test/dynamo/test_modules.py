@@ -2271,6 +2271,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 y = x
+                # Keep the call inside a loop to match the original nested compile repro.
                 for _ in range(1):
                     y = self.foo(x)
                 return y
