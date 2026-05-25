@@ -56,6 +56,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/TensorIterator.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -777,20 +778,21 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+  // Get current CUDA/ROCm or XPU work stream
   static int CurrentWorkStream(
       DLDeviceType device_type,
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+      *out_stream = nullptr;
+      const auto acc_type = at::accelerator::getAccelerator(false);
+      if (!acc_type) {
         return 0;
       }
-#endif
-      // For CPU and other devices, return NULL (no stream concept)
-      *out_stream = nullptr;
+      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
+        *out_stream =
+            at::accelerator::getCurrentStream(device_id).native_handle();
+      }
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -2526,6 +2528,8 @@ PyObject* initModule() {
 #endif
 
   torch::distributed::initPlacementBindings(module);
+
+  torch::initTensorIteratorBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
