@@ -1139,9 +1139,25 @@ def _padded_dense_to_jagged_forward(
 
 
 def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType | None:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+        sym_and,
+    )
 
-    if guard_or_false(sym_and(index >= 0, index <= size)):
+    if statically_known_true(sym_and(index >= 0, index <= size)):
+        return index
+    elif statically_known_true(sym_and(index < 0, index >= -size)):
+        return index + size
+    elif statically_known_true(index < -size):
+        return 0
+    elif statically_known_true(index > size):
+        return size
+    elif not isinstance(index, torch.SymInt) and index >= 0:
+        return torch.sym_min(index, size)
+    elif not isinstance(index, torch.SymInt) and index < 0:
+        return torch.sym_max(index + size, 0)
+    elif guard_or_false(sym_and(index >= 0, index <= size)):
         return index
     elif guard_or_false(sym_and(index < 0, index >= -size)):
         return index + size
@@ -1167,10 +1183,7 @@ def slice_forward(
     end: int | None = None,
     step: int = 1,
 ) -> FakeTensor:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        statically_known_true,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     shape_env = fake_mode.shape_env
     ndim = self.dim()
@@ -1194,9 +1207,9 @@ def slice_forward(
     # size
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
-        if guard_or_false(end_index >= start_index):
+        if statically_known_true(end_index >= start_index):
             new_size = (end_index - start_index + step - 1) // step
-        elif guard_or_false(start_index >= end_index):
+        elif statically_known_true(start_index >= end_index):
             new_size = 0
         else:
             # Both indices are resolved but we can't statically determine their

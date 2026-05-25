@@ -364,6 +364,33 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_export_slice_static_bound_crosses_dynamic_dim(self):
+        dynamic_shapes = {"x": {1: Dim("len", min=0, max=13)}}
+        for index in (
+            slice(None, 5),
+            slice(5, None),
+            slice(None, -5),
+            slice(-5, None),
+        ):
+            with self.subTest(index=index):
+
+                class Slice(torch.nn.Module):
+                    def forward(self, x):
+                        return x[:, index]
+
+                for width in (3, 8):
+                    x = torch.randn(4, width)
+                    ep = export(
+                        Slice(),
+                        (x,),
+                        dynamic_shapes=dynamic_shapes,
+                        strict=False,
+                    )
+                    self.assertEqual(len(ep.range_constraints), 1)
+                    for new_width in (0, 3, 5, 8, 13):
+                        y = torch.randn(4, new_width)
+                        self.assertEqual(ep.module()(y), y[:, index])
+
     def test_no_grad_param_inplace(self):
         class Foo(torch.nn.Module):
             def __init__(self):
