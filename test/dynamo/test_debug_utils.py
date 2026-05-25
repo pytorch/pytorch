@@ -68,6 +68,8 @@ def forward(self, x_1):
             "TEST_ENV": "1",
             "TORCHINDUCTOR_ENV_SINGLE_QUOTES": "inductor_'env'",
             "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
+            "TORCHDYNAMO_REPRO_AFTER": "aot",
+            "TORCHDYNAMO_REPRO_LEVEL": "4",
         },
     )
     def test_generate_env_vars_string(self):
@@ -97,6 +99,10 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_AFTER']", env_strings)
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_LEVEL']", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
 
 
 class TestDebugUtilsDevice(TestCase):
