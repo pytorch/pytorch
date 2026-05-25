@@ -149,8 +149,8 @@ dtensor_fails = {
     # weighted cross_entropy mean reduction over a sharded batch:
     # DTensor averages per-rank means instead of computing a global
     # weighted mean, so any per-rank ``sum(weight[target])`` imbalance
-    # produces drift (compiled DTensor handles it; see
-    # dtensor_numeric_only_fails).
+    # produces drift. Compiled DTensor handles it; see
+    # dtensor_numeric_only_fails for the subtraction.
     xfail("nn.functional.linear_cross_entropy"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("logsumexp"),
