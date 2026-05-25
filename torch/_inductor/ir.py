@@ -8098,7 +8098,8 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -8365,12 +8366,13 @@ class DeviceCopy(ExternKernelOut):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         args = self.codegen_args()
         assert len(args) == 2
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
-        else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            if self.output_view:
+                wrapper.codegen_device_copy(
+                    args[0], self.output_view.codegen_reference(), args[1]
+                )
+            else:
+                wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
 
 
 class DynamicSelectStorageOffset(ExternKernel):

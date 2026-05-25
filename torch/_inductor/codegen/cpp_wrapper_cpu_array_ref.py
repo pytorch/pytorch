@@ -1006,7 +1006,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.writeline("}")
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        input_handles: list[str] | None = None,
+        num_scalars: int = 0,
+        output_handle: str | None = None,
+        **_,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -1028,7 +1036,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             wrapped_args.append(arg)
 
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            kernel,
+            wrapped_args,
+            device,
+            debug_args=args,
+            input_handles=input_handles,
+            num_scalars=num_scalars,
+            output_handle=output_handle,
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
@@ -1074,6 +1088,19 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 )
         line += ");"
         self.writeline(line)
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        input_handles: list[str] | None = None,
+    ):
+        # ArrayRef tensors are not AtenTensorHandle, so we cannot call
+        # aoti_torch_tensor_to_ivalue on them.  Emit RAIIAtenRecordFunctionHandle
+        # without input metadata instead.
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        self.writeline(
+            f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+        )
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

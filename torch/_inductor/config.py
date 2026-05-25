@@ -1016,6 +1016,11 @@ min_num_split = int(os.environ.get("TORCHINDUCTOR_MIN_NUM_SPLIT", 0))
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
+# In single-pass AOT mode (autotune_at_compile_time=True), also generate the
+# Python compiled module (.py) via an extra codegen pass. The .py is written to
+# PyCodeCache for debugging/profiling but is not used for compilation.
+dump_python_module = os.environ.get("TORCHINDUCTOR_DUMP_PYTHON_MODULE", "0") == "1"
+
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 

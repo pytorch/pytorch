@@ -362,6 +362,8 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
+    """FX graph interpreter that lowers a TorchDynamo FX graph into Inductor IR and drives codegen."""
+
     graph_outputs: list[ir.IRNode]
 
     def __init__(
@@ -2551,6 +2553,13 @@ class GraphLowering(torch.fx.Interpreter):
                         real_inputs = extract_real_inputs()
                         self.extract_autotune_inputs(real_inputs)
                         save_triton_kernel_perf_artifact(self)
+
+                if (
+                    config.dump_python_module
+                    and self.aot_mode
+                    and not self.is_const_graph
+                ):
+                    self._dump_python_module()
                 return self.codegen()
             else:
                 if not self.aot_mode:
@@ -2591,6 +2600,76 @@ class GraphLowering(torch.fx.Interpreter):
 
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
+
+    def _dump_python_module(self) -> None:
+        """Generate a Python compiled module (.py) for debugging/profiling.
+
+        Called before codegen() so that both this dump pass and the real C++
+        pass create their schedulers from the same operations list. The
+        scheduler's finalize_multi_template_buffers may mutate the operations
+        list via _replace_operation_buffer; we snapshot and restore it so the
+        real pass sees identical input and produces matching kernel names.
+        """
+        from .codecache import PyCodeCache
+
+        # Save the const_module's name iterator so the dump pass
+        # doesn't advance it for the subsequent real C++ codegen pass.
+        saved_names_iter = None
+        if self.const_module:
+            pos = next(self.const_module.wrapper_code._names_iter)
+            saved_names_iter = itertools.count(pos)
+            self.const_module.wrapper_code._names_iter = itertools.count(pos)
+
+        # Snapshot the operations graph state.  _replace_operation_buffer
+        # (called during Scheduler.__init__) mutates these in-place; we
+        # restore them afterwards so the real codegen pass sees the same
+        # unmutated state and produces identical kernel names.
+        saved_operations = list(self.operations)
+        saved_buffers = list(self.buffers)
+        saved_name_to_buffer = dict(self.name_to_buffer)
+        saved_name_to_op = dict(self.name_to_op)
+
+        # Step 1: Create Python wrapper (needs cpp_wrapper=False so
+        # init_wrapper_code selects PythonWrapperCodegen).
+        self.cpp_wrapper = False
+        self.init_wrapper_code()
+
+        # Step 2: Create scheduler with cpp_wrapper=True so fusion
+        # decisions match the real C++ pass.
+        self.cpp_wrapper = True
+        self._update_scheduler()
+
+        # Step 3: Generate code through the Python wrapper.
+        self.cpp_wrapper = False
+        with config.patch({"triton.autotune_at_compile_time": False}):
+            self.wrapper_code.push_codegened_graph(self)
+            self.scheduler.codegen()
+            result = self.wrapper_code.generate(self.is_inference)
+            self.wrapper_code.pop_codegened_graph()
+
+        # Write the .py to PyCodeCache for debugging/profiling.
+        wrapper_code = result[0]
+        output_code_log.debug("Output code: \n%s", wrapper_code.value)
+        key, path = PyCodeCache.write(wrapper_code.value)
+        log.info("Compiled module path: %s", path)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {path}", file=sys.stderr)
+
+        # Restore all state for the real C++ codegen pass.
+        self.cpp_wrapper = True
+        if saved_names_iter is not None:
+            # pyrefly: ignore [missing-attribute]
+            self.const_module.wrapper_code._names_iter = saved_names_iter
+        self.operations = saved_operations
+        self.buffers = saved_buffers
+        self.name_to_buffer = saved_name_to_buffer
+        self.name_to_op = saved_name_to_op
+        self.removed_buffers.clear()
+        self.removed_operations.clear()
+        self.inplaced_to_remove.clear()
+        V.graph.sizevars.precomputed_replacements.clear()
+        V.graph.sizevars.inv_precomputed_replacements.clear()
+        metrics.reset()
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
