@@ -1280,6 +1280,34 @@ class TestPatternMatcher(TestCase):
     @inductor_config.patch(
         {
             "fx_graph_remote_cache": False,
+            "keep_addmm_fused_for_half_dtypes": True,
+        }
+    )
+    def test_addmm_relu_half_dtypes_use_addmm_activation(self, dtype):
+        args = [
+            torch.randn(20, device=GPU_TYPE, dtype=dtype),
+            torch.randn(10, 15, device=GPU_TYPE, dtype=dtype),
+            torch.randn(15, 20, device=GPU_TYPE, dtype=dtype),
+        ]
+
+        def eager_fn(inp, a, b):
+            return torch.nn.functional.relu(torch.ops.aten.addmm(inp, a, b))
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.relu(torch.ops.aten.addmm(inp, a, b))
+
+        expected = eager_fn(*args)
+        actual, (code) = run_and_get_code(fn, *args)
+        torch.testing.assert_close(actual, expected)
+        FileCheck().check("torch.ops.aten._addmm_activation.default").check_not(
+            "extern_kernels.addmm("
+        ).run(code[0])
+
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @inductor_config.patch(
+        {
+            "fx_graph_remote_cache": False,
             "keep_addmm_fused_for_half_dtypes": False,
         }
     )
@@ -1296,6 +1324,31 @@ class TestPatternMatcher(TestCase):
 
         _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @inductor_config.patch(
+        {
+            "fx_graph_remote_cache": False,
+            "keep_addmm_fused_for_half_dtypes": False,
+        }
+    )
+    def test_addmm_relu_half_dtypes_without_keep_fused_does_not_use_addmm_activation(
+        self, dtype
+    ):
+        args = [
+            torch.randn(20, device=GPU_TYPE, dtype=dtype),
+            torch.randn(10, 15, device=GPU_TYPE, dtype=dtype),
+            torch.randn(15, 20, device=GPU_TYPE, dtype=dtype),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.relu(torch.ops.aten.addmm(inp, a, b))
+
+        _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        FileCheck().check_not("torch.ops.aten._addmm_activation.default").check_not(
+            "extern_kernels.addmm("
+        ).run(code[0])
 
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops

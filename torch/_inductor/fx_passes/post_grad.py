@@ -1627,6 +1627,48 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def should_fold_addmm_relu_to_activation(match):
+    inp = match.kwargs["inp"]
+    if not (
+        config.keep_addmm_fused_for_half_dtypes
+        and isinstance(inp, torch.fx.Node)
+        and isinstance(inp.meta["val"], torch.Tensor)
+    ):
+        return False
+
+    val = inp.meta["val"]
+    return is_gpu(val.device.type) and val.dtype in (torch.bfloat16, torch.float16)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.relu.default,
+        CallFunction(
+            aten.addmm,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+            _users=1,
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=should_fold_addmm_relu_to_activation,
+)
+def fold_addmm_relu(match: Match, mat1, mat2, *, inp, alpha, beta):
+    # We intentionally keep half/bfloat16 addmm fused, so fold a trailing relu
+    # into the native fused op instead of paying for a separate pointwise kernel.
+    def repl(inp, x1, x2, alpha, beta):
+        return aten._addmm_activation.default(
+            inp, x1, x2, beta=beta, alpha=alpha, use_gelu=False
+        )
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
