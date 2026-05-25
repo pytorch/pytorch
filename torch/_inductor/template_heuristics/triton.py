@@ -2403,7 +2403,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fnuz,
+            torch.float8_e4m3fn,
+        ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
@@ -2430,6 +2435,37 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
     def __init__(self) -> None:
         super().__init__()
         self.should_scale_configs = False
+
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        configs = [
+            c for c in configs if V.graph.sizevars.statically_known_lt(c.block_k, k)
+        ]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
 
     def _get_template_configs_impl(
         self,
