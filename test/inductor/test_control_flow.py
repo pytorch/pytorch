@@ -1305,7 +1305,6 @@ class WhileLoopTests(TestCase):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
-    @torch._inductor.config.patch({"triton.cudagraphs": True})
     def test_while_loop_cuda_tensor_predicate_cudagraph_no_sync(self):
         class Mod(torch.nn.Module):
             def forward(self, x, iters):

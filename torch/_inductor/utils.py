@@ -4240,6 +4240,8 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     from . import ir
 
+    # Conditional CUDA graph nodes are captured through the control-flow HOP
+    # dispatch mode, not through this generated while-loop wrapper path.
     if isinstance(node, ir.Conditional):
         return True
     if isinstance(node, ir.WhileLoop):

@@ -247,18 +247,23 @@ def while_loop_node(
         raise RuntimeError("CUDA graph while_loop does not support mutated inputs yet")
 
     state = _clone_loop_state(carried_inputs)
-    operands = (*state, *additional_inputs)
-    pred = cond_fn(*operands)
+
+    def operands():
+        # _copy_loop_state mutates the cloned state tensors in-place, so each
+        # condition/body call observes the latest loop-carried values.
+        return (*state, *additional_inputs)
+
+    pred = cond_fn(*operands())
     _validate_cuda_bool_pred(pred)
 
     with _while_body(pred):
-        body_out = body_fn(*operands)
+        body_out = body_fn(*operands())
         if not isinstance(body_out, tuple):
             raise RuntimeError(
                 f"body_fn should return a tuple but got {type(body_out)}"
             )
         _copy_loop_state(state, body_out)
-        pred = cond_fn(*operands)
+        pred = cond_fn(*operands())
         _validate_cuda_bool_pred(pred)
         current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
         current_cuda_graph.set_current_conditional_node_condition(pred)
@@ -270,7 +275,6 @@ def inductor_while_loop_use_cuda_graph(inputs, stack_output: bool) -> bool:
     return (
         not stack_output
         and cuda_graph_conditional_nodes_supported()
-        and torch.backends.cuda.is_built()
         and torch.cuda.is_available()
         and torch.cuda.is_current_stream_capturing()
         and all(not isinstance(inp, torch.Tensor) or inp.is_cuda for inp in inputs)

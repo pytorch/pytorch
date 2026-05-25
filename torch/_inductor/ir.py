@@ -10316,6 +10316,15 @@ class WhileLoop(ExternKernel):
             subgraphs.append(self.body_subgraph)
         return subgraphs
 
+    @staticmethod
+    def _subgraph_can_codegen_cuda_graph(subgraph: Subgraph) -> bool:
+        if subgraph.graph is None:
+            return False
+
+        from .utils import is_cudagraph_unsafe_op
+
+        return not any(is_cudagraph_unsafe_op(op) for op in subgraph.graph.operations)
+
     def can_codegen_cuda_graph(self) -> bool:
         if not cuda_graph_conditional_nodes_supported():
             return False
@@ -10335,8 +10344,16 @@ class WhileLoop(ExternKernel):
             inp_device = inp.get_device()
             if inp_device is None or inp_device.type != "cuda":
                 return False
-        if self.cond_subgraph is None or self.cond_subgraph.graph is None:
+        if (
+            self.cond_subgraph is None
+            or self.cond_subgraph.graph is None
+            or self.body_subgraph is None
+            or self.body_subgraph.graph is None
+        ):
             return False
+        for subgraph in (self.cond_subgraph, self.body_subgraph):
+            if not self._subgraph_can_codegen_cuda_graph(subgraph):
+                return False
 
         cond_outputs = self.cond_subgraph.graph.graph_outputs
         if len(cond_outputs) != 1:

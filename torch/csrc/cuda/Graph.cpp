@@ -18,6 +18,7 @@
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void THCPGraph_init(PyObject* module) {
   // Pybind11 patch notes say "py::module_" is more up-to-date syntax,
   // but CI linter and some builds prefer "module".

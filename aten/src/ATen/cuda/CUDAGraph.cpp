@@ -62,6 +62,7 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CUDAGraph::CUDAGraph(bool keep_graph)
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()),
@@ -365,6 +366,7 @@ MempoolId_t CUDAGraph::pool() {
   return mempool_id_;
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 CUDAGraph::~CUDAGraph() {
   reset();
 
@@ -396,18 +398,18 @@ CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
 void CUDAGraph::begin_capture_to_if_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
   begin_capture_to_conditional_node(
-      scalar_cuda_pred_tensor, /*cudaGraphCondTypeIf=*/0);
+      scalar_cuda_pred_tensor, ConditionalNodeType::If);
 }
 
 void CUDAGraph::begin_capture_to_while_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
   begin_capture_to_conditional_node(
-      scalar_cuda_pred_tensor, /*cudaGraphCondTypeWhile=*/1);
+      scalar_cuda_pred_tensor, ConditionalNodeType::While);
 }
 
 void CUDAGraph::begin_capture_to_conditional_node(
     const at::Tensor& scalar_cuda_pred_tensor,
-    int conditional_node_type) {
+    ConditionalNodeType conditional_node_type) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   TORCH_CHECK(
       !has_graph_exec_,
@@ -457,7 +459,8 @@ void CUDAGraph::begin_capture_to_conditional_node(
   params.type = cudaGraphNodeTypeConditional;
   params.conditional.handle = handle;
   params.conditional.type =
-      static_cast<cudaGraphConditionalNodeType>(conditional_node_type);
+      static_cast<cudaGraphConditionalNodeType>(
+          static_cast<int>(conditional_node_type));
   params.conditional.size = 1;
 
   cudaGraphNode_t cond_node{};
@@ -555,7 +558,8 @@ void CUDAGraph::end_capture_to_conditional_node() {
       !conditional_node_handles_.empty(),
       "Missing handle for conditional node.");
 
-  CaptureId_t child_capture_id = conditional_graph_capture_ids_.top();
+  CaptureId_t child_capture_id{};
+  child_capture_id = conditional_graph_capture_ids_.top();
   bool rng_or_generators_changed = false;
   for (const auto& [generator_state, wholegraph_increment] :
        captured_generator_states_) {

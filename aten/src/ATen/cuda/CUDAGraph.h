@@ -91,9 +91,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
+  enum class ConditionalNodeType : int {
+    If = 0,
+    While = 1,
+  };
+
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
-      int conditional_node_type);
+      ConditionalNodeType conditional_node_type);
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
@@ -151,9 +156,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
-  std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
-  std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
+  std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_{};
+  std::stack<CaptureId_t> conditional_graph_capture_ids_{};
+  std::stack<cudaGraphConditionalHandle> conditional_node_handles_{};
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 

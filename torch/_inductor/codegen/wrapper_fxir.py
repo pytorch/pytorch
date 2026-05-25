@@ -53,8 +53,10 @@ from .wrapper import (
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
+    EnterBlockLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
+    ExitBlockLine,
     ExitDeviceContextManagerLine,
     ExitSubgraphLine,
     ExternKernelAllocLine,
@@ -729,6 +731,14 @@ class FxConverter:
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
+
+    def _generate_enter_block(self, line: WrapperLine) -> None:
+        assert isinstance(line, EnterBlockLine)
+        # Python indentation has no representation in FX IR.
+
+    def _generate_exit_block(self, line: WrapperLine) -> None:
+        assert isinstance(line, ExitBlockLine)
+        # Python indentation has no representation in FX IR.
 
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         assert isinstance(line, DynamicScalarLine)
