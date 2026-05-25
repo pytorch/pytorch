@@ -276,12 +276,11 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
-    ):
-        ...
+    ): ...
 
     @overload  # collate_fn not provided
     def __init__(
-        self: "DataLoader[_T_co, Any]",
+        self: "DataLoader[_T_co, Any]",  # noqa: UP037
         dataset: Dataset[_T_co],
         batch_size: int | None = 1,
         shuffle: bool | None = None,
@@ -300,8 +299,7 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
-    ):
-        ...
+    ): ...
 
     # implementation
     def __init__(
@@ -806,7 +804,9 @@ class _BaseDataLoaderIter(Generic[_T_Collated_co]):
         raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
 
 
-class _SingleProcessDataLoaderIter(_BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]):
+class _SingleProcessDataLoaderIter(
+    _BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]
+):
     def __init__(self, loader) -> None:
         super().__init__(loader)
         if self._timeout != 0:
@@ -840,7 +840,9 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter[_T_Collated_co], Generic[
         return data
 
 
-class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]):
+class _MultiProcessingDataLoaderIter(
+    _BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]
+):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
