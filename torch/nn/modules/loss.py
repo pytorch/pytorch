@@ -1418,11 +1418,16 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             :math:`(d_1, d_2, ..., d_K)` for K-dimensional loss.
             Default: ``()``.
         bias (bool, optional): If ``True``, the internal :class:`Linear`
-            adds a learnable bias of shape ``(C, *out_features)`` to the
-            logits. Currently supported only on the reference path
-            (``options=None``); with a non-``None`` ``options`` the
-            forward warns and falls back to the reference path. Default:
-            ``False``.
+            adds a learnable bias to the logits. Logical shape is
+            ``(C, *out_features)``; storage is flat
+            (``self.linear.bias.shape == (C * prod(out_features),)``)
+            for the same reason as ``self.linear.weight`` -- reshaping
+            happens in :meth:`forward` before passing through to
+            :func:`~torch.nn.functional.linear_cross_entropy` as
+            ``linear_bias``. Currently supported only on the reference
+            path (``options=None``); with a non-``None`` ``options``
+            the forward warns and falls back to the reference path.
+            Default: ``False``.
         device (:class:`torch.device`, optional): the desired device
             of linear weight.  Default: ``None``.
         dtype (:class:`torch.dtype`, optional): the desired dtype of

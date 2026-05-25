@@ -7532,15 +7532,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target = torch.randint(0, 5, (4,))
         options = nn.LinearCrossEntropyOptions()
         with self.assertWarnsRegex(UserWarning, "linear_bias"):
-            chunked = nn.functional.linear_cross_entropy(
+            actual = nn.functional.linear_cross_entropy(
                 inp, linear_weight, target,
                 linear_bias=linear_bias, options=options,
             )
-        reference = nn.functional.linear_cross_entropy(
-            inp, linear_weight, target,
-            linear_bias=linear_bias, options=None,
+        # Independent reference via linear + cross_entropy directly,
+        # not another F.linear_cross_entropy(options=None) call -- both
+        # would hit the same internal reference path and the assertion
+        # would be ref-against-ref.
+        expected = nn.functional.cross_entropy(
+            nn.functional.linear(inp, linear_weight, linear_bias),
+            target, reduction="mean",
         )
-        self.assertEqual(chunked, reference)
+        self.assertEqual(expected, actual)
 
     def test_linear_cross_entropy_options_auto_defaults(self):
         """``LinearCrossEntropyOptions()`` keeps the auto sentinels at
@@ -15015,13 +15019,9 @@ if __name__ == '__main__':
         """
         torch.manual_seed(0)
         N, F, C = 5, 7, 4
-        inp = torch.randn(N, F, device=device, dtype=torch.float64)
-        linear_weight = torch.randn(
-            C, *out_features, F, device=device, dtype=torch.float64,
-        )
-        linear_bias = torch.randn(
-            C, *out_features, device=device, dtype=torch.float64,
-        )
+        inp = torch.randn(N, F, device=device)
+        linear_weight = torch.randn(C, *out_features, F, device=device)
+        linear_bias = torch.randn(C, *out_features, device=device)
         target = torch.randint(0, C, (N, *out_features), device=device)
         expected = nn.functional.cross_entropy(
             nn.functional.linear(
@@ -15035,6 +15035,30 @@ if __name__ == '__main__':
         )
         self.assertEqual(expected, actual)
 
+    def test_linear_cross_entropy_linear_bias_gradcheck(self, device):
+        """``torch.autograd.gradcheck`` against ``linear_bias`` on the
+        reference path. Also indirectly covered by OpInfo's
+        ``TestBwdGradients.test_fn_grad`` via a ``linear_bias`` sample
+        in ``sample_inputs_linear_cross_entropy`` (with
+        ``requires_grad=True``); kept here as a discoverable test that
+        does not depend on OpInfo machinery.
+        """
+        if "mps" in device:
+            self.skipTest("MPS does not support fp64")
+        torch.manual_seed(0)
+        N, F_, C = 3, 4, 5
+        inp = torch.randn(N, F_, device=device, dtype=torch.float64, requires_grad=True)
+        linear_weight = torch.randn(C, F_, device=device, dtype=torch.float64, requires_grad=True)
+        linear_bias = torch.randn(C, device=device, dtype=torch.float64, requires_grad=True)
+        target = torch.randint(0, C, (N,), device=device)
+
+        def f(i, w, b):
+            return nn.functional.linear_cross_entropy(
+                i, w, target, linear_bias=b, reduction="mean",
+            )
+
+        torch.autograd.gradcheck(f, (inp, linear_weight, linear_bias))
+
     @parametrize_test("out_features", [(), (3,), (3, 2)])
     def test_linear_cross_entropy_loss_bias(self, device, out_features):
         """``LinearCrossEntropyLoss(bias=True)`` forwards module.linear.bias
@@ -15044,15 +15068,14 @@ if __name__ == '__main__':
         torch.manual_seed(0)
         N, F_, C = 5, 7, 4
         loss = nn.LinearCrossEntropyLoss(
-            F_, C, out_features=out_features, bias=True,
-            device=device, dtype=torch.float64,
+            F_, C, out_features=out_features, bias=True, device=device,
         )
         self.assertIsNotNone(loss.linear.bias)
         self.assertEqual(
             loss.linear.bias.shape, (math.prod(out_features, start=C),),
         )
         self.assertIn("bias=True", repr(loss))
-        inp = torch.randn(N, F_, device=device, dtype=torch.float64)
+        inp = torch.randn(N, F_, device=device)
         target = torch.randint(0, C, (N, *out_features), device=device)
         expected = nn.functional.cross_entropy(
             nn.functional.linear(

@@ -3853,7 +3853,8 @@ def linear_cross_entropy(
             " == int64, out_features == (), linear_bias is None. Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
-            f", linear_bias={'set' if linear_bias is not None else None}.",
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
             stacklevel=2,
         )
 
