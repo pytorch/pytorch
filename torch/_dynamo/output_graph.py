@@ -3114,8 +3114,12 @@ class OutputGraph(OutputGraphCommon):
                 context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
                 explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
-                    "Report an issue to the backend compiler repo.",
+                    "Set `fullgraph=False` to allow this backend fallback to run eagerly.",
                 ],
+                # These exceptions are allowed backend fallbacks, not hard
+                # backend failures. Keep graph-break debug artifacts without
+                # warning users for every fallback graph.
+                log_warning=False,
             )
         except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of

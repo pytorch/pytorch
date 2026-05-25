@@ -3062,7 +3062,7 @@
       "Context": "Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
       "Explanation": "Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
       "Hints": [
-        "Report an issue to the backend compiler repo."
+        "Set `fullgraph=False` to allow this backend fallback to run eagerly."
       ]
     }
   ],
