@@ -91,6 +91,23 @@ __all__ = [
 ]
 
 
+_SERIALIZED_GRAPH_MODULE_NODE_META_KEY = "_serialized_graph_module_node_meta"
+_SERIALIZED_GRAPH_MODULE_NODE_META_KEYS = frozenset(
+    {
+        "nn_module_stack",
+        "stack_trace",
+        "tensor_meta",
+        "torch_fn",
+        "unbacked_bindings",
+        "val",
+    }
+)
+
+
+def _exported_program_node_metadata_key_filter(key: str) -> bool:
+    return key in _SERIALIZED_GRAPH_MODULE_NODE_META_KEYS
+
+
 PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 
@@ -1139,6 +1156,81 @@ class ExportedProgram:
         self.validate()
 
         self._guards_code = _convert_guards_to_code(self._graph_module)
+
+    def __copy__(self):
+        ep = self.__class__.__new__(self.__class__)
+        ep.__dict__.update(self.__dict__)
+        return ep
+
+    def __deepcopy__(self, memo):
+        ep = self.__class__.__new__(self.__class__)
+        memo[id(self)] = ep
+        ep.__dict__.update(copy.deepcopy(self.__dict__, memo))
+        return ep
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+
+        # GraphModule's default pickle path reconstructs the graph from Python
+        # source. Strip the export-only tracer, which cannot be reconstructed
+        # without scope_root, and separately preserve node metadata that
+        # ExportedProgram.module() needs.
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        state[_SERIALIZED_GRAPH_MODULE_NODE_META_KEY] = GraphPickler.dumps(
+            [
+                {
+                    key: value
+                    for key, value in node.meta.items()
+                    if _exported_program_node_metadata_key_filter(key)
+                }
+                for node in self.graph.nodes
+            ],
+            Options(
+                ops_filter=None,
+                node_metadata_key_filter=_exported_program_node_metadata_key_filter,
+            ),
+        )
+        # Shallow-clone the GraphModule so parameters and buffers stay visible
+        # to the outer torch.save storage handling and map_location.
+        graph_module_cls = self.graph_module.__class__
+        graph_module = graph_module_cls.__new__(graph_module_cls)
+        graph_module.__dict__ = self.graph_module.__dict__.copy()
+        graph_module.graph = copy.deepcopy(self.graph)
+        graph_module._tracer_cls = None
+        graph_module.graph._tracer_cls = None
+        state["_graph_module"] = graph_module
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        serialized_node_meta = state.pop(_SERIALIZED_GRAPH_MODULE_NODE_META_KEY, None)
+        if serialized_node_meta is None:
+            self.__dict__.update(state)
+            return
+
+        from torch.fx._graph_pickler import GraphPickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        node_meta = GraphPickler.loads(
+            serialized_node_meta,
+            FakeTensorMode(shape_env=ShapeEnv()),
+        )
+        if not isinstance(node_meta, list):
+            raise TypeError(
+                f"Expected list of node metadata, got {type(node_meta).__name__}"
+            )
+        self.__dict__.update(state)
+        nodes = list(self.graph.nodes)
+        if len(nodes) != len(node_meta):
+            raise RuntimeError(
+                f"Expected {len(nodes)} metadata entries, got {len(node_meta)}"
+            )
+        for node, meta in zip(nodes, node_meta):
+            if not isinstance(meta, dict):
+                raise TypeError(
+                    f"Expected node metadata dict, got {type(meta).__name__}"
+                )
+            node.meta = meta
 
     @property
     @compatibility(is_backward_compatible=False)

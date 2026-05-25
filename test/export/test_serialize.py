@@ -2146,6 +2146,45 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_torch_save_exported_program_with_call_module(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        inp = (torch.randn(3, 2),)
+        ep = export(Module(), inp, dynamic_shapes={"x": {0: Dim("batch")}})
+
+        add_node = next(node for node in ep.graph.nodes if node.op == "call_function")
+        scale_after_add = torch.nn.Linear(2, 2, bias=False)
+        with torch.no_grad():
+            scale_after_add.weight.copy_(2 * torch.eye(2))
+        ep.graph_module.add_submodule("scale_after_add", scale_after_add)
+        with ep.graph.inserting_after(add_node):
+            scale_node = ep.graph.call_module("scale_after_add")
+            add_node.replace_all_uses_with(scale_node)
+            scale_node.args = (add_node,)
+        ep.graph_module.recompile()
+        add_node.meta["unpickleable_debug_metadata"] = lambda value: value
+
+        runtime_inp = (torch.randn(5, 2),)
+        expected = ep.module()(*runtime_inp)
+
+        buffer = io.BytesIO()
+        torch.save(ep, buffer)
+        serialized = buffer.getvalue()
+        buffer.seek(0)
+        # weights_only=False because this test intentionally verifies the
+        # ExportedProgram pickle path, not the safe weights-only loader.
+        loaded_ep = torch.load(buffer, weights_only=False)
+        loaded_ep_meta = torch.load(
+            io.BytesIO(serialized), weights_only=False, map_location="meta"
+        )
+
+        self.assertEqual(loaded_ep.module()(*runtime_inp), expected)
+        self.assertEqual(
+            loaded_ep_meta.graph_module.scale_after_add.weight.device.type, "meta"
+        )
+
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
         buf = io.BytesIO()
