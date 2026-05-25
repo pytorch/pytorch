@@ -16,6 +16,7 @@ from torch.distributed.flight_recorder.components.types import (
     Collective,
     Database,
     EntryState,
+    FlightRecorderEntry,
     Group,
     MatchStateRecord,
     Membership,
@@ -139,7 +140,7 @@ def build_groups_memberships(
 
 
 def build_collectives(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     _groups: dict[str, Group],
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -206,9 +207,9 @@ def build_collectives(
         # collective is also the first one on those ranks within that group
         entries = all_entries[first_rank]
         current_entry = entries[0]
-        desc = current_entry["process_group"][1]
+        desc = current_entry.process_group[1]
         # For db build and logs printing, we want to use the original pg_name, not the hash one.
-        original_pg_name = current_entry["process_group"][0]
+        original_pg_name = current_entry.process_group[0]
         pg_name = _pg_guids[(original_pg_name, first_rank)]
         expected_ranks = set(_memberships[pg_name])
         entry_state = EntryState(current_entry, expected_ranks)
@@ -418,7 +419,12 @@ def build_db(
     version_by_ranks = {}
     for dump in details.values():
         rank = dump["rank"]
-        entries[rank] = dump["entries"]
+        entries[rank] = [
+            entry
+            if isinstance(entry, FlightRecorderEntry)
+            else FlightRecorderEntry.from_dict(entry)
+            for entry in dump["entries"]
+        ]
         version_by_ranks[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
 
