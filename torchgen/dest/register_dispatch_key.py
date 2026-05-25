@@ -44,6 +44,19 @@ if TYPE_CHECKING:
     from torchgen.selective_build.selector import SelectiveBuilder
 
 
+# Backends whose structured-kernel class uses a generic OptionalDeviceGuard
+# field (CUDA uses its own OptionalCUDAGuard, handled separately).
+_OPTIONAL_DEVICE_GUARD_KEYS = frozenset(
+    {
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.MPS,  # TODO: Move to OptionalMPSGuard.
+        DispatchKey.XPU,
+        DispatchKey.MTIA,
+        DispatchKey.PrivateUse1,
+    }
+)
+
+
 def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
@@ -862,19 +875,7 @@ resize_out(out, sizes, strides, options);
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif (
-            self.backend_index.dispatch_key
-            == DispatchKey.CompositeExplicitAutogradNonFunctional
-        ):
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            # TODO: Move to OptionalMPSGuard.
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.XPU:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.PrivateUse1:
+        elif self.backend_index.dispatch_key in _OPTIONAL_DEVICE_GUARD_KEYS:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -977,7 +978,10 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
             context: list[Binding | Expr] = list(sig.arguments())
 
             # Initialize the class corresponding to this structured
-            # operator; feeding it the output argument(s) if it is known
+            # operator; feeding it the output argument(s) if it is known.
+            # Fetched once up front; stays None for the Meta and
+            # CompositeExplicitAutogradNonFunctional dispatch keys.
+            metadata = self.backend_index.get_kernel(self.g)
             if self.backend_index.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
@@ -989,12 +993,10 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif self.backend_index.external and self.class_method_name is not None:
-                metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::{self.class_method_name}::structured_{metadata.kernel}"
             else:
-                metadata = self.backend_index.get_kernel(self.g)
                 if metadata is None:
                     raise AssertionError(
                         f"No kernel metadata found for {self.g.functional.func.name}"
@@ -1002,7 +1004,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
-            if self.backend_index.device_guard and metadata.device_guard:
+            if (
+                self.backend_index.device_guard
+                and metadata is not None
+                and metadata.device_guard
+            ):
                 device_check_args = itertools.chain(
                     f.func.arguments.out, f.func.arguments.flat_positional
                 )
