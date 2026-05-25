@@ -254,6 +254,34 @@ endif()
 
 # cufile
 if(CAFFE2_USE_CUFILE)
+  # Fallback registration for CUDA::cuFile{,_static}. find_package(CUDAToolkit)
+  # registers these natively since CMake 3.25, but some toolkit packagings ship
+  # the lowercase libcufile.so and a few CMake/CUDA combinations have been seen
+  # to miss the alias. See pytorch/pytorch#154595 for the regression this guards
+  # against.
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.4)
+    foreach(_cufile_target cuFile cuFile_static)
+      if(NOT TARGET CUDA::${_cufile_target})
+        string(TOLOWER "${_cufile_target}" _cufile_alt)
+        find_library(CUDA_${_cufile_target}_LIBRARY
+          NAMES ${_cufile_target} ${_cufile_alt}
+          HINTS ${CUDAToolkit_LIBRARY_DIR} ENV CUDA_PATH
+          PATH_SUFFIXES nvidia/current lib64 lib/x64 lib)
+        mark_as_advanced(CUDA_${_cufile_target}_LIBRARY)
+        if(CUDA_${_cufile_target}_LIBRARY)
+          add_library(CUDA::${_cufile_target} UNKNOWN IMPORTED)
+          set_target_properties(CUDA::${_cufile_target} PROPERTIES
+            IMPORTED_LOCATION "${CUDA_${_cufile_target}_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+          if(TARGET CUDA::culibos)
+            set_property(TARGET CUDA::${_cufile_target} APPEND PROPERTY
+              INTERFACE_LINK_LIBRARIES CUDA::culibos)
+          endif()
+        endif()
+      endif()
+    endforeach()
+  endif()
+
   add_library(torch::cufile INTERFACE IMPORTED)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
       set_property(
