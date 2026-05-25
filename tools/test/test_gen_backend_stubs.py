@@ -304,6 +304,130 @@ at::Tensor abs(const at::Tensor & self)
 """,
         )
 
+    # The per-op dict form (PrivateUse1 out-of-tree structured/out-as-primary
+    # feature) lets an op opt into a structured kernel. The op name and its
+    # options (structured/ext_structured_meta/device_guard) are siblings, so the
+    # options must sit at the same indentation as the "- op:" key.
+
+    # structured: true reuses the native structured kernel for the op.
+    def test_valid_per_op_structured(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- mul.out:
+  structured: true"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
+    # ext_structured_meta: true (with structured: true) opts into a custom meta.
+    def test_valid_per_op_ext_structured_meta(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- sub.out:
+  structured: true
+  ext_structured_meta: true"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
+    # An op may use the out-as-primary redirection without a structured kernel,
+    # and override the backend-level device_guard per op.
+    def test_valid_per_op_out_as_primary_only(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- div.out:
+  device_guard: false"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
+    # Per-op dict entries may be mixed with plain string entries in one list.
+    def test_valid_per_op_mixed_with_plain(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- abs
+- mul.out:
+  structured: true"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
+    # The full case study from the PR description: structured + custom meta,
+    # structured + native meta, and out-as-primary-only with a device_guard override.
+    def test_valid_per_op_full_case_study(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- sub.out:
+  structured: true
+  ext_structured_meta: true
+- mul.out:
+  structured: true
+  ext_structured_meta: false
+- div.out:
+  device_guard: false"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
+    # ext_structured_meta: true requires structured: true.
+    def test_ext_structured_meta_without_structured(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- mul.out:
+  ext_structured_meta: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'mul.out' has 'ext_structured_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
+        )
+
+    # structured: true is only valid on ops that are structured in native_functions.yaml.
+    def test_structured_true_on_non_structured_op(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- abs:
+  structured: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'abs' is marked as 'structured: true' in the backend YAML, but it is not defined as a structured operator in native_functions.yaml.""",
+        )
+
+    # An unrecognized per-op option key (typo) is treated as a second operator
+    # name and rejected, listing the supported option keys.
+    def test_per_op_typo_option_key(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- mul.out:
+  structred: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Expected exactly one operator name per entry, but got ['mul.out', 'structred'] in ['mul.out', 'structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
