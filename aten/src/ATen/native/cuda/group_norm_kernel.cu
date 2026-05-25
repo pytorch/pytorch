@@ -63,7 +63,9 @@ __global__ void RowwiseMomentsCUDAKernel(
   } else {
     // Use a byte array with alignas instead of a __shared__ WelfordType array
     // directly, because nvcc warns on non-trivial constructors in __shared__.
-    __shared__ alignas(WelfordType)
+    // alignas must precede __shared__; HIP's clang rejects it placed between
+    // __shared__ and the type.
+    alignas(WelfordType) __shared__
         char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
     WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
     val = cuda_utils::BlockReduce(
