@@ -3,6 +3,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Embedding.h>
 #include <ATen/native/mps/kernels/Indexing.h>
 
 #include <ATen/AccumulateType.h>
@@ -13,9 +14,11 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
@@ -873,74 +876,86 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
                                     int64_t num_weights,
                                     int64_t padding_idx,
                                     bool scale_grad_by_freq) {
-  // TODO: implement padding_idx & scale_grad_by_freq.
   using namespace at::native::mps;
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* incomingGradTensor_ = nil;
-    MPSGraphTensor* indicesTensor_ = nil;
-    MPSGraphTensor* outgoingGradTensor_ = nil;
-  };
 
-  IntArrayRef incoming_gradient_shape = grad_.sizes();
-  int64_t num_incoming_gradient_dims = incoming_gradient_shape.size();
+  auto indices_arg = TensorArg(indices, "indices", 2);
+  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
+  auto grad_arg = TensorArg(grad_, "grad", 1);
+  checkScalarTypes("embedding_backward", grad_arg, {kFloat, kHalf, kBFloat16});
 
-  IntArrayRef indices_shape = indices.sizes();
-  int64_t num_indices_dims = indices_shape.size();
+  auto D = grad_.size(-1);
+  auto grad_weight = at::zeros({num_weights, D}, grad_.options());
 
-  int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
-  c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
-  Tensor outgoing_gradient = at::empty(
-      IntArrayRef(outgoing_gradient_shape), grad_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  auto num_indices = indices.numel();
+  if (num_indices == 0 || D == 0 || num_weights == 0) {
+    return grad_weight;
+  }
 
-  if (outgoing_gradient.numel() == 0) {
-    return outgoing_gradient;
+  auto outer_ndim = indices.dim();
+  TORCH_CHECK(grad_.dim() == outer_ndim + 1,
+              "embedding_dense_backward_mps: grad dim (",
+              grad_.dim(),
+              ") must equal indices dim + 1 (",
+              outer_ndim + 1,
+              ")");
+  TORCH_CHECK(outer_ndim < static_cast<int64_t>(c10::metal::max_ndim),
+              "embedding_dense_backward_mps: indices ndim ",
+              outer_ndim,
+              " exceeds metal max_ndim ",
+              c10::metal::max_ndim);
+  TORCH_CHECK(num_indices <= std::numeric_limits<int32_t>::max() &&
+                  num_indices * D <= std::numeric_limits<int32_t>::max() &&
+                  num_weights * D <= std::numeric_limits<int32_t>::max(),
+              "embedding_dense_backward_mps: tensor is larger than INT32_MAX");
+
+  EmbeddingDenseBackwardParams<uint32_t> params{};
+  params.outer_ndim = static_cast<uint32_t>(outer_ndim);
+  for (auto d = 0; d < outer_ndim; ++d) {
+    params.outer_sizes[d] = safe_downcast<uint32_t, int64_t>(indices.size(d));
+    params.indices_strides[d] = safe_downcast<uint32_t, int64_t>(indices.stride(d));
+    params.grad_outer_strides[d] = safe_downcast<uint32_t, int64_t>(grad_.stride(d));
+  }
+  params.grad_feature_stride = safe_downcast<uint32_t, int64_t>(grad_.stride(-1));
+  params.feature_size = static_cast<uint32_t>(D);
+  params.padding_idx = padding_idx;
+  params.scale_grad_by_freq = scale_grad_by_freq;
+
+  const auto use_32bit_offsets = at::native::canUse32BitIndexMath(grad_) && at::native::canUse32BitIndexMath(indices);
+  const auto offset_suffix = use_32bit_offsets ? "32" : "64";
+
+  Tensor counts;
+  if (scale_grad_by_freq) {
+    counts = at::zeros({num_weights}, indices.options().dtype(kUInt32));
   }
 
   auto stream = at::mps::getCurrentMPSStream();
+  const auto idx_type_str = scalarToMetalTypeString(indices);
+  const auto grad_type_str = scalarToMetalTypeString(grad_);
 
-  @autoreleasepool {
-    std::string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" +
-        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
-        std::to_string(scale_grad_by_freq);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
 
-      MPSGraphTensor* indicesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(indices));
-
-      MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
-
-      MPSGraphTensor* castGradTensor = incomingGradTensor;
-      MPSDataType dataType = mps::getMPSDataType(grad_);
-      // issue 105486100, scatterNDWithUpdatesTensor produces wrong result for float16
-      if (dataType == MPSDataTypeFloat16) {
-        castGradTensor = [mpsGraph castTensor:incomingGradTensor toType:MPSDataTypeFloat32 name:@"castGradTensor"];
-      }
-      if (num_indices_dims != 0) {
-        reshapedIndicesTensor = [mpsGraph expandDimsOfTensor:indicesTensor axes:@[ @-1 ] name:nil];
+      if (scale_grad_by_freq) {
+        auto count_pso = lib.getPipelineStateForFunc(
+            fmt::format("embedding_dense_backward_count_{}_{}", idx_type_str, offset_suffix));
+        [computeEncoder setComputePipelineState:count_pso];
+        mtl_setArgs(computeEncoder, indices, counts, params);
+        mtl_dispatch1DJob(computeEncoder, count_pso, num_indices);
       }
 
-      auto outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:castGradTensor
-                                                       indicesTensor:reshapedIndicesTensor
-                                                               shape:getMPSShape(IntArrayRef(outgoing_gradient_shape))
-                                                     batchDimensions:0
-                                                                mode:MPSGraphScatterModeAdd
-                                                                name:@"edb"];
-      if (dataType == MPSDataTypeFloat16) {
-        outgoingGradTensor = [mpsGraph castTensor:outgoingGradTensor toType:MPSDataTypeFloat16 name:@"castGradTensor"];
-      }
-      newCachedGraph->incomingGradTensor_ = incomingGradTensor;
-      newCachedGraph->indicesTensor_ = indicesTensor;
-      newCachedGraph->outgoingGradTensor_ = outgoingGradTensor;
-    });
-    auto incomingGradPlaceholder = Placeholder(cachedGraph->incomingGradTensor_, grad_);
-    auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices);
-    auto outgoingGradPlaceholder = Placeholder(cachedGraph->outgoingGradTensor_, outgoing_gradient);
+      auto bwd_pso = lib.getPipelineStateForFunc(
+          fmt::format("embedding_dense_backward_{}_{}_{}", grad_type_str, idx_type_str, offset_suffix));
+      [computeEncoder setComputePipelineState:bwd_pso];
+      // When scale_grad_by_freq is false, counts is undefined, so bind grad_weight
+      // as a harmless placeholder buffer so the kernel signature is satisfied
+      const auto counts_buf = scale_grad_by_freq ? counts : grad_weight;
+      mtl_setArgs(computeEncoder, grad_, indices, counts_buf, grad_weight, params);
+      mtl_dispatch1DJob(computeEncoder, bwd_pso, num_indices * D);
+    }
+  });
 
-    auto feeds = dictionaryFromPlaceholders(incomingGradPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outgoingGradPlaceholder);
-  }
-  return outgoing_gradient;
+  return grad_weight;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Tensor& value) {

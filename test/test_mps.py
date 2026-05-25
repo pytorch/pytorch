@@ -7673,37 +7673,61 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
-    def test_embedding_dense_backward(self):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("idx_dtype", [torch.int32, torch.int64])
+    @parametrize("padding_idx", [None, 0, 2])
+    @parametrize("scale_grad_by_freq", [False, True])
+    def test_embedding_dense_backward(self, dtype, idx_dtype, padding_idx, scale_grad_by_freq):
         def helper(n, d, m, idx):
-            embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
+            kw = dict(max_norm=True, padding_idx=padding_idx, scale_grad_by_freq=scale_grad_by_freq)
+            embeddingMPS = nn.Embedding(n, d, device='mps', dtype=dtype, **kw)
             embedding_weight = embeddingMPS.weight.detach().cpu()
-            W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
-            idx_MPS = torch.tensor(idx, device='mps')
+            W_MPS = torch.randn((m, d), requires_grad=True, device='mps', dtype=dtype)
+            idx_MPS = torch.tensor(idx, device='mps', dtype=idx_dtype)
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
             a_MPS.retain_grad()
             b_MPS = embeddingMPS(idx_MPS) @ W_MPS.t()  # modifies weight in-place
             b_MPS.retain_grad()
-            out_MPS = (a_MPS.unsqueeze(0) + b_MPS)
-            loss_MPS = out_MPS.sigmoid().prod()
+            loss_MPS = (a_MPS.unsqueeze(0) + b_MPS).sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=embedding_weight)
+            embeddingCPU = nn.Embedding(n, d, _weight=embedding_weight, **kw)
             W_CPU = W_MPS.to('cpu')
-            idx_CPU = torch.tensor(idx)
-            a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
+            idx_CPU = idx_MPS.cpu()
+            a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()
             a_CPU.retain_grad()
-            b_CPU = embeddingCPU(idx_CPU) @ W_CPU.t()  # modifies weight in-place
+            b_CPU = embeddingCPU(idx_CPU) @ W_CPU.t()
             b_CPU.retain_grad()
-            out_CPU = (a_CPU.unsqueeze(0) + b_CPU)
-            loss_CPU = out_CPU.sigmoid().prod()
+            loss_CPU = (a_CPU.unsqueeze(0) + b_CPU).sigmoid().prod()
             loss_CPU.backward()
 
-            self.assertEqual(b_CPU.grad, b_MPS.grad)
-            self.assertEqual(a_CPU.grad, a_MPS.grad)
+            atol = {torch.float32: 1e-5, torch.bfloat16: 5e-3}[dtype]
+            self.assertEqual(b_CPU.grad, b_MPS.grad, atol=atol, rtol=atol)
+            self.assertEqual(a_CPU.grad, a_MPS.grad, atol=atol, rtol=atol)
+            self.assertEqual(embeddingCPU.weight.grad, embeddingMPS.weight.grad, atol=atol, rtol=atol)
 
         helper(3, 5, 7, [0, 1, 2])
         helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
+
+    def test_embedding_dense_backward_strided(self):
+        torch.manual_seed(0)
+        weight = torch.randn(8, 5)
+        ids0 = torch.randint(0, 8, (3, 4))
+        grad0 = torch.randn(3, 4, 5)
+        layouts = {
+            "grad permuted": lambda i, g: (i, g.permute(1, 0, 2).contiguous().permute(1, 0, 2)),
+            "grad sliced": lambda i, g: (i, torch.cat([g, g], dim=1)[:, ::2, :]),
+            "ids permuted": lambda i, g: (i.t().contiguous().t(), g),
+            "ids sliced": lambda i, g: (torch.cat([i, i], dim=1)[:, ::2], g),
+        }
+        for name, layout in layouts.items():
+            def run(device):
+                w = weight.to(device).detach().clone().requires_grad_()
+                ids, g = layout(ids0.to(device), grad0.to(device))
+                nn.functional.embedding(ids, w, padding_idx=0, scale_grad_by_freq=True).backward(g)
+                return w.grad.cpu()
+            self.assertEqual(run("mps"), run("cpu"), msg=name)
 
     # Test pytorch gather
     def test_gather(self):
