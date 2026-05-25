@@ -50,8 +50,6 @@ void GroupNormKernelImplInternal(
   T* Y_data = Y.data_ptr<T>();
   PT* mean_data = mean.data_ptr<PT>();
   PT* rstd_data = rstd.data_ptr<PT>();
-  const bool gamma_null = (gamma_data == nullptr);
-  const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
   using opmath_t = at::opmath_type<T>;
@@ -61,7 +59,7 @@ void GroupNormKernelImplInternal(
       const T* X_ptr = X_data + i * inner_size;
       auto [mean_val, rstd_val] = RowwiseMoments(X_ptr, inner_size);
       rstd_val = opmath_t(1) / std::sqrt(std::max(rstd_val, opmath_t(0)) + eps);
-      if (gamma_null && beta_null) {
+      if (!gamma_data && !beta_data) {
         T* Y_ptr = Y_data + i * inner_size;
         for (const auto j : c10::irange(inner_size)) {
           Y_ptr[j] = (X_ptr[j] - mean_val) * rstd_val;
@@ -70,8 +68,8 @@ void GroupNormKernelImplInternal(
         const int64_t g = i % G;
         for (const auto j : c10::irange(D)) {
           const int64_t c = g * D + j;
-          const opmath_t scale = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          const opmath_t bias = -scale * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          const opmath_t scale = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          const opmath_t bias = -scale * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
           X_ptr = X_data + (i * D + j) * HxW;
           T* Y_ptr = Y_data + (i * D + j) * HxW;
           for (const auto k : c10::irange(HxW)) {
@@ -307,10 +305,7 @@ void GroupNormKernelImplChannelsLastInternal(
   PT* rstd_data = rstd.data_ptr<PT>();
 
   using opmath_t = at::opmath_type<T>;
-
   const opmath_t s = opmath_t(1) / static_cast<opmath_t>(D * HxW);
-  const bool gamma_null = (gamma_data == nullptr);
-  const bool beta_null = beta_data == nullptr;
 
   // NB: About algorithm chosen:
   //
@@ -363,8 +358,8 @@ void GroupNormKernelImplChannelsLastInternal(
         opmath_t* bias_ptr = scale_ptr + D;
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[d] = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          scale_ptr[d] = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
         }
 
         // step-3: apply scale and bias
@@ -456,8 +451,8 @@ void GroupNormKernelImplChannelsLastInternal(
 
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[c] = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          scale_ptr[c] = rstd_val * (gamma_data ? opmath_t(gamma_data[c]) : opmath_t(1));
+          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_data ? opmath_t(beta_data[c]) : opmath_t(0));
         }
       }
     }
