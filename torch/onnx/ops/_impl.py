@@ -60,6 +60,11 @@ def _rotary_embedding_23_fake_impl(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
+    if x.dim() == 4:
+        # Match concrete kernel layout behavior:
+        # concrete op permutes to [B, S, N, H], materializes rotated values, then permutes back.
+        # Returning with the same output strides avoids fake-vs-real metadata mismatch in opcheck.
+        return x.permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3)
     return x.clone()
 
 
