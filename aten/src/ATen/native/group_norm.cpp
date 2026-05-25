@@ -152,21 +152,23 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     }
   }
 
+  auto dparam_options{
+    (gamma.defined() ? gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (N != 0) {
-      dgamma = at::empty({C});
+      dgamma = at::empty({C}, dparam_options);
     } else {
-      dgamma = at::zeros({C});
+      dgamma = at::zeros({C}, dparam_options);
     }
   }
 
   Tensor dbeta;
   if (grad_input_mask[2]) {
     if (N != 0) {
-      dbeta = at::empty({C});
+      dbeta = at::empty({C}, dparam_options);
     } else {
-      dbeta = at::zeros({C});
+      dbeta = at::zeros({C}, dparam_options);
     }
   }
 
@@ -255,22 +257,24 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
     }
   }
 
-  bool dgamma_dbeta_output_defined{N != 0 && dY.defined()};
+  bool dparam_output_defined{N != 0 && dY.defined()};
+  auto dparam_options{
+    (gamma.defined() ? gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
   Tensor dgamma;
   if (grad_input_mask[1]) {
-    if (dgamma_dbeta_output_defined) {
-        dgamma = at::empty({C});
+    if (dparam_output_defined) {
+        dgamma = at::empty({C}, dparam_options);
     } else {
-        dgamma = at::zeros({C});
+        dgamma = at::zeros({C}, dparam_options);
     }
   }
 
   Tensor dbeta;
   if (grad_input_mask[2]) {
-    if (dgamma_dbeta_output_defined) {
-      dbeta = at::empty({C});
+    if (dparam_output_defined) {
+      dbeta = at::empty({C}, dparam_options);
     } else {
-      dbeta = at::zeros({C});
+      dbeta = at::zeros({C}, dparam_options);
     }
   }
 
