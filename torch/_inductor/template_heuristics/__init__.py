@@ -13,4 +13,4 @@ warnings.warn(
     stacklevel=2,
 )
 
-from torch._inductor.heuristics.registry import get_template_heuristic
+from torch._inductor.heuristics.template.registry import get_template_heuristic
