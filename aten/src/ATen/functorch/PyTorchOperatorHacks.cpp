@@ -11,6 +11,8 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
+#include <utility>
+
 namespace at::functorch {
 
 // NOTE: [functorch's PyTorch Operator Hacks]
@@ -119,7 +121,7 @@ Tensor trace_backward_decomp(const Tensor& grad, c10::SymIntArrayRef sizes) {
   auto step = sizes[1] + 1;
   auto indices = at::arange(0, diag_size * step, step, grad.options().dtype(at::kLong));
   // Workaround using index_put instead of yet unsupported index_fill_
-  grad_input = grad_input.index_put({indices}, grad);
+  grad_input = grad_input.index_put({std::move(indices)}, grad);
   return grad_input.view_symint(sizes);
 }
 }
