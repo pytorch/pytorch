@@ -7015,7 +7015,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
@@ -7036,8 +7036,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional": lambda: a.addcmul(beta, b, c),
             "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
             "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
-            # Z3 translation validation doesn't support unbacked symbols from
-            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
             "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
         }
 
