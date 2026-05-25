@@ -7050,7 +7050,15 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         if name == self.scheduler_node.fused_epilogue.node.get_name():
             # when the fused epilogue nodes tries to store to its destination buffer
             # we remember this expr and then later replace it into the `tl.store` call of the original kernel
-            self.new_store_cse_var = value
+            layout = self.scheduler_node.fused_epilogue.node.layout
+            assert isinstance(layout, ir.Layout)
+            store_dtype = layout.dtype
+            self.new_store_cse_var = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_store_type(store_dtype)})",
+                dtype=store_dtype,
+                shape=value.shape,
+            )
         else:
             super().store(name, index, value, mode)
 

@@ -7453,7 +7453,14 @@ class Scheduler:
 
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
-            if node1.node.mutable_args[0].layout != node2.node.layout:
+            layout1 = node1.node.mutable_args[0].layout
+            layout2 = node2.node.layout
+            assert isinstance(layout1, ir.Layout) and isinstance(layout2, ir.Layout)
+            if (
+                layout1.size != layout2.size
+                or layout1.stride != layout2.stride
+                or layout1.device != layout2.device
+            ):
                 why("node1 and node2 uses different buf layouts")
                 return False
 
