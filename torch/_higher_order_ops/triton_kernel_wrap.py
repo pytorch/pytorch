@@ -152,6 +152,7 @@ class KernelSideTable:
     kernel_to_id: dict["TritonKernelType", int] = {}
     constant_args: dict[int, dict[str, Any]] = {}
     output_tiles: dict[int, tuple[str, ...]] = {}
+    pid_remaps: dict[int, tuple[str, ...]] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -196,6 +197,13 @@ class KernelSideTable:
     def get_output_tile(self, kernel_idx: int) -> "tuple[str, ...] | None":
         return self.output_tiles.get(kernel_idx)
 
+    def set_pid_remap(self, kernel_idx: int, pid_remap: tuple[str, ...]) -> None:
+        with self.lock:
+            self.pid_remaps[kernel_idx] = pid_remap
+
+    def get_pid_remap(self, kernel_idx: int) -> "tuple[str, ...] | None":
+        return self.pid_remaps.get(kernel_idx)
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
@@ -203,6 +211,7 @@ class KernelSideTable:
         self.kernel_to_id = {}
         self.constant_args = {}
         self.output_tiles = {}
+        self.pid_remaps = {}
 
 
 kernel_side_table = KernelSideTable()
@@ -2349,6 +2358,7 @@ class TraceableTritonKernelWrapper:
     grid: Optional["TritonGridType"]
     kernel_source: "Source | None"
     output_tile: tuple[str, ...] | None
+    pid_remap: tuple[str, ...] | None
 
     def __init__(
         self,
@@ -2357,16 +2367,20 @@ class TraceableTritonKernelWrapper:
         grid: Optional["TritonGridType"],
         kernel_source: "Source | None" = None,
         output_tile: tuple[str, ...] | None = None,
+        pid_remap: tuple[str, ...] | None = None,
     ) -> None:
         self.kernel = None
         self.grid = None
         self.kernel_source = kernel_source
         self.output_tile = output_tile
+        self.pid_remap = pid_remap
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         if self.kernel is None:
             raise AssertionError("kernel was not initialized properly")
         if output_tile is not None:
             kernel_side_table.set_output_tile(self.kernel_idx, output_tile)
+        if pid_remap is not None:
+            kernel_side_table.set_pid_remap(self.kernel_idx, pid_remap)
 
     def __getitem__(self, *args: Sequence[Any]) -> "TraceableTritonKernelWrapper":
         return tracing_triton_hopifier_singleton.call_getitem(self, args)  # type: ignore[return-value]

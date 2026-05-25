@@ -8106,6 +8106,7 @@ class UserDefinedTritonKernel(ExternKernel):
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
         output_tile: tuple[str, ...] | None = None,
+        pid_remap: tuple[str, ...] | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8136,6 +8137,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
         self.output_tile = output_tile
+        self.pid_remap = pid_remap
 
         kernel, configs, _, _ = self.get_kernel_and_metadata()
 

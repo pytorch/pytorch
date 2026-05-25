@@ -6051,6 +6051,106 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     @requires_cuda_and_triton
+    def test_wrap_fusion_grouped_matmul(self):
+        # https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html
+        @triton.jit
+        def matmul_kernel(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+            stride_cm,
+            stride_cn,
+            BLOCK_SIZE_M: tl.constexpr,
+            BLOCK_SIZE_N: tl.constexpr,
+            BLOCK_SIZE_K: tl.constexpr,  #
+            GROUP_SIZE_M: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            group_id = pid // num_pid_in_group
+            first_pid_m = group_id * GROUP_SIZE_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+            pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+            pid_n = (pid % num_pid_in_group) // group_size_m
+
+            offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+            offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+            offs_k = tl.arange(0, BLOCK_SIZE_K)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+            )
+            b_ptrs = b_ptr + (
+                offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+            )
+
+            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+            for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
+                a = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                b = tl.load(
+                    b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                accumulator = tl.dot(a, b, accumulator)
+                a_ptrs += BLOCK_SIZE_K * stride_ak
+                b_ptrs += BLOCK_SIZE_K * stride_bk
+
+            c = accumulator.to(tl.float16)
+
+            offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+            c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+            tl.store(c_ptrs, c, mask=c_mask)
+
+        def fn(A, B, b):
+            M, K = A.shape
+            K, N = B.shape
+            C = torch.empty((M, N), device=A.device, dtype=torch.float16)
+            BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
+            GROUP_SIZE_M = 8
+            grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
+            torch.library.wrap_triton(
+                matmul_kernel,
+                output_tile=("BLOCK_SIZE_M", "BLOCK_SIZE_N"),
+                pid_remap=("pid_m", "pid_n"),
+            )[grid](
+                A,
+                B,
+                C,
+                M,
+                N,
+                K,
+                A.stride(0),
+                A.stride(1),
+                B.stride(0),
+                B.stride(1),
+                C.stride(0),
+                C.stride(1),
+                BLOCK_SIZE_M=BLOCK_M,
+                BLOCK_SIZE_N=BLOCK_N,
+                BLOCK_SIZE_K=BLOCK_K,
+                GROUP_SIZE_M=GROUP_SIZE_M,
+            )
+            return (C + b).relu()
+
+        A = torch.randn(1024, 512, device="cuda")
+        B = torch.randn(512, 2048, device="cuda")
+        b = torch.randn(2048, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), A, B, b)
+        self.assertEqual(out, fn(A, B, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
     def test_wrap_fusion_2d_matmul(self):
         @triton.jit
         def naive_matmul_kernel(
@@ -6102,7 +6202,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             grid = (triton.cdiv(N, BLOCK_N), triton.cdiv(M, BLOCK_M))
 
             torch.library.wrap_triton(
-                naive_matmul_kernel, output_tile=("BLOCK_N", "BLOCK_M")
+                naive_matmul_kernel, output_tile=("BLOCK_M", "BLOCK_N")
             )[grid](
                 A,
                 B,
@@ -6121,7 +6221,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
                 BLOCK_K=BLOCK_K,
             )
 
-            return C + b
+            return (C + b).relu()
 
         A = torch.randn(1024, 512, device="cuda")
         B = torch.randn(512, 2048, device="cuda")

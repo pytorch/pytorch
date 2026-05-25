@@ -3053,6 +3053,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         self.formal_reads = self.node.formal_accesses.read_writes.reads
         self.formal_writes = self.node.formal_accesses.read_writes.writes
         self.output_tile = self.node.output_tile
+        self.pid_remap = self.node.pid_remap
 
         numel = math.prod(node.mutable_args[0].shape)
         rnumel = 1
@@ -3358,8 +3359,10 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             tiling = SIMDScheduling.create_tiling([numel_ep], [rnumel])
         elif ir_node.output_tile:
             k = len(ir_node.output_tile)
+            # output_tile is specified in tensor dimension order (outermost first),
+            # but Inductor's x/y convention is innermost-first.
             block_aliases = dict(
-                zip(["XBLOCK", "YBLOCK", "ZBLOCK"][:k], ir_node.output_tile)
+                zip(["XBLOCK", "YBLOCK", "ZBLOCK"][:k], reversed(ir_node.output_tile))
             )
             if k == 1:
                 tiling = SIMDScheduling.create_tiling([numel_ep], [sympy.S.One])
@@ -3374,13 +3377,23 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         pass_aliases = (
             block_aliases if (epilogue_needs_indexing or is_reduction_ep) else None
         )
+        # pid_remap is also in tensor dimension order (outermost first), reverse
+        # to match Inductor's grid dim ordering (dim 0 = x = innermost).
+        pid_cache = (
+            {
+                f"tl.program_id({i})": name
+                for i, name in enumerate(reversed(ir_node.pid_remap))
+            }
+            if ir_node.pid_remap
+            else {}
+        )
         fused_user_kernel = FusedUserTritonKernel(
             tiling,
             kernel_features,
             self,
             additional_args,
             block_aliases=pass_aliases,
-            pid_cache={},
+            pid_cache=pid_cache,
         )
         new_kernel_src = fused_user_kernel.codegen()
         return self.kernel_node.node.codegen_with_epilogue_fusion(

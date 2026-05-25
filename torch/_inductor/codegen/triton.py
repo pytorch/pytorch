@@ -7148,6 +7148,12 @@ class FusedUserTritonKernel(TritonKernel):
             line = (
                 f"tl.load({param_name} + ({indexing.index_str}), {indexing.mask_str})"
             )
+            if (
+                dtype in (torch.float16, torch.bfloat16)
+                and config.triton.codegen_upcast_to_fp32
+            ):
+                line += ".to(tl.float32)"
+                dtype = torch.float32
             return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
         else:
             raise AssertionError(
