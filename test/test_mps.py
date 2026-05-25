@@ -15273,6 +15273,56 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+
+class TestMPSGraphCachePolicy(TestCaseMPS):
+    """Tests for torch.mps.set_graph_cache_policy and freeze_graph_cache."""
+
+    def setUp(self):
+        super().setUp()
+        # Always reset to default at the start of each test.
+        torch.mps.set_graph_cache_policy("always")
+
+    def tearDown(self):
+        torch.mps.set_graph_cache_policy("always")
+        super().tearDown()
+
+    def test_set_get_policy_always(self):
+        torch.mps.set_graph_cache_policy("always")
+        policy = torch._C._mps_getGraphCachePolicy()
+        self.assertEqual(policy, "always")
+
+    def test_set_get_policy_never(self):
+        torch.mps.set_graph_cache_policy("never")
+        policy = torch._C._mps_getGraphCachePolicy()
+        self.assertEqual(policy, "never")
+
+    def test_invalid_policy_raises(self):
+        with self.assertRaises(RuntimeError):
+            torch.mps.set_graph_cache_policy("invalid_policy")
+
+    def test_ops_still_correct_under_never_policy(self):
+        torch.mps.set_graph_cache_policy("never")
+        x = torch.randn(32, 32, device="mps")
+        y = torch.randn(32, 32, device="mps")
+        result = (x @ y).cpu()
+        expected = x.cpu() @ y.cpu()
+        self.assertTrue(torch.allclose(result, expected, atol=1e-3))
+
+    def test_freeze_graph_cache_does_not_crash(self):
+        x = torch.randn(8, 8, device="mps")
+        _ = x + x  # populate cache
+        torch.mps.freeze_graph_cache()
+        _ = (x * 2).cpu()  # ops still work after freeze
+
+    def test_freeze_then_different_shape_still_correct(self):
+        x8 = torch.ones(8, device="mps")
+        _ = x8 + 1  # warm cache for shape=8
+        torch.mps.freeze_graph_cache()
+        x16 = torch.ones(16, device="mps")
+        result = (x16 + 1).cpu()
+        self.assertTrue(torch.all(result == 2))
+
+
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)

@@ -53,6 +53,13 @@ ignore-missing-imports = [
     "torch._C._xpu_XPUAllocator",
     "torch._C._XPUMemPool",
     "torch._C._StaticXpuLauncher",
+    # MPS graph cache symbols not present for builds without MPS support
+    "torch._C._mps_setGraphCachePolicy",
+    "torch._C._mps_getGraphCachePolicy",
+    "torch._C._mps_clearGraphCache",
+    "torch._C._mps_freezeGraphCache",
+    "torch._C._mps_markPermanentGraphCache",
+    "torch._C._mps_clearTransientGraphCache",
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",

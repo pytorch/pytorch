@@ -15,6 +15,8 @@
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <unordered_map>
+#include <vector>
+#include <c10/util/env.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -314,6 +316,18 @@ inline T* LookUpOrCreateCachedKernel(const std::string& key, std::function<MPSKe
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
+
+// Cache policy for MPSGraphCache.
+// - kAlways: cache every compiled graph (default, original behavior)
+// - kNever: never cache (always recompile); use for workloads with
+//   highly dynamic tensor shapes (e.g., graph neural networks) where
+//   cached graphs are never reused and waste memory
+enum class MPSGraphCachePolicy : uint8_t {
+  kAlways = 0,
+  kNever = 1,
+  kFrozen = 2,  // serve cache hits, discard new entries
+};
+
 // Cache holding various keys mapped to graphs
 struct MPSGraphCache {
   typedef MPSCachedGraph* (^CreateCachedGraphBlock)();
@@ -338,6 +352,9 @@ struct MPSGraphCache {
     for (const auto& i : cache_) {
       delete i.second.cachedGraph_;
     }
+    for (auto* g : uncached_graphs_) {
+      delete g;
+    }
   }
 
   // Disallow the copy constructor and operator= functions
@@ -350,6 +367,12 @@ struct MPSGraphCache {
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync_with_rethrow(serialQueue_, ^() {
+      // Clean up graphs from previous calls that were not cached
+      for (auto* g : uncached_graphs_) {
+        delete g;
+      }
+      uncached_graphs_.clear();
+
       // verify the cached entry doesn't already exist
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
@@ -357,9 +380,14 @@ struct MPSGraphCache {
         cachedGraph = entry.cachedGraph_;
       } else {
         cachedGraph = createCacheBlock();
-        CacheEntry entry(key, cachedGraph);
-        cache_.emplace(hash, entry);
-        profileCachedGraph(entry);
+        if (policy_ == MPSGraphCachePolicy::kAlways) {
+          CacheEntry entry(key, cachedGraph);
+          cache_.emplace(hash, entry);
+          profileCachedGraph(entry);
+        } else {
+          // kNever: never cache; kFrozen: cache is read-only, discard new entries
+          uncached_graphs_.push_back(cachedGraph);
+        }
       }
     });
     return cachedGraph;
@@ -397,12 +425,36 @@ struct MPSGraphCache {
         delete i.second.cachedGraph_;
       }
       cache_.clear();
+      for (auto* g : uncached_graphs_) {
+        delete g;
+      }
+      uncached_graphs_.clear();
     });
   }
 
+  void setCachePolicy(MPSGraphCachePolicy policy) {
+    dispatch_sync(serialQueue_, ^() {
+      policy_ = policy;
+    });
+  }
+
+  void freeze() {
+    dispatch_sync(serialQueue_, ^() {
+      policy_ = MPSGraphCachePolicy::kFrozen;
+    });
+  }
+
+  MPSGraphCachePolicy getCachePolicy() const {
+    return policy_;
+  }
+
  private:
-  MPSGraphCache() {
+  MPSGraphCache() : policy_(MPSGraphCachePolicy::kAlways) {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
+    auto const val = c10::utils::get_env("PYTORCH_MPS_GRAPH_CACHE_POLICY");
+    if (val.has_value() && val.value() == "never") {
+      policy_ = MPSGraphCachePolicy::kNever;
+    }
   }
   // this is defined in OperationUtils.mm to not include
   // MPSProfiler.h in header OperationUtils.h
@@ -410,6 +462,8 @@ struct MPSGraphCache {
 
   static MPSGraphCache* _instance_cache;
   std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  std::vector<MPSCachedGraph*> uncached_graphs_;
+  MPSGraphCachePolicy policy_;
   dispatch_queue_t serialQueue_ = nullptr;
 };
 

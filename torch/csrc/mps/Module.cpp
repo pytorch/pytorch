@@ -81,6 +81,44 @@ static PyObject* MPSModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+static PyObject* MPSModule_setGraphCachePolicy(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkString(args), "invalid argument to setGraphCachePolicy()");
+  std::string policy = THPUtils_unpackString(args);
+  at::detail::getMPSHooks().setGraphCachePolicy(policy);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_clearGraphCache(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::detail::getMPSHooks().clearGraphCache();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_freezeGraphCache(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::detail::getMPSHooks().freezeGraphCache();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getGraphCachePolicy(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  std::string policy = at::detail::getMPSHooks().getGraphCachePolicy();
+  return THPUtils_packString(policy);
+  END_HANDLE_TH_ERRORS
+}
+
 
 static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
@@ -237,6 +275,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_mps_emptyCache", MPSModule_emptyCache, METH_NOARGS, nullptr},
+    {"_mps_setGraphCachePolicy", MPSModule_setGraphCachePolicy, METH_O, nullptr},
+    {"_mps_getGraphCachePolicy", MPSModule_getGraphCachePolicy, METH_NOARGS, nullptr},
+    {"_mps_clearGraphCache", MPSModule_clearGraphCache, METH_NOARGS, nullptr},
+    {"_mps_freezeGraphCache", MPSModule_freezeGraphCache, METH_NOARGS, nullptr},
     {"_mps_setMemoryFraction", MPSModule_setMemoryFraction, METH_O, nullptr},
     {"_mps_currentAllocatedMemory",
      MPSModule_currentAllocatedMemory,
