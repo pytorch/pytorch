@@ -132,6 +132,46 @@ def new_token_tensor() -> torch.Tensor:
     return torch.tensor([])
 
 
+def _get_or_create_token(
+    allow_token_discovery: bool,
+    tokens: dict[_EffectType, torch.Tensor],
+    key: _EffectType,
+    source: Any,
+) -> torch.Tensor:
+    if key in tokens:
+        return tokens[key]
+    if not allow_token_discovery:
+        raise AssertionError(
+            f"Could not find a token for effect {key} which came from the function {source}"
+        )
+    proxy_tensor_mode = torch._C._get_dispatch_mode(
+        torch._C._TorchDispatchModeKey.PROXY
+    )
+    if proxy_tensor_mode is not None:
+        # If we discovered a new token during tracing, we are in backward.
+        # Then we patch the graph, adding additional tangents_token as input
+        # to the joint graph.
+        tracer = proxy_tensor_mode.tracer
+
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            track_tensor_tree,
+        )
+
+        with disable_proxy_modes_tracing():
+            token_tensor = new_token_tensor()
+
+        token_proxy = proxy_tensor_mode.tracer.create_proxy(
+            "placeholder", "tangents_token", (), {}, name="tangents_token"
+        )
+        track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
+
+        tokens[key] = token_tensor
+    else:
+        tokens[key] = new_token_tensor()
+    return tokens[key]
+
+
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
@@ -258,37 +298,7 @@ def handle_effects(
     key = _get_effect(op)
     if key is None:
         raise AssertionError(f"effect key must not be None for op {op}")
-    if key not in tokens:
-        if not allow_token_discovery:
-            raise AssertionError(
-                f"Could not find a token for effect {key} which came from the function {op}"
-            )
-        proxy_tensor_mode = torch._C._get_dispatch_mode(
-            torch._C._TorchDispatchModeKey.PROXY
-        )
-        if proxy_tensor_mode is not None:
-            # If we discovered a new token during tracing, we are in backward.
-            # Then we patch the graph, adding additional tangents_token as input to the joint graph.
-            tracer = proxy_tensor_mode.tracer
-
-            from torch.fx.experimental.proxy_tensor import (
-                disable_proxy_modes_tracing,
-                track_tensor_tree,
-            )
-
-            with disable_proxy_modes_tracing():
-                token_tensor = new_token_tensor()
-
-            token_proxy = proxy_tensor_mode.tracer.create_proxy(
-                "placeholder", "tangents_token", (), {}, name="tangents_token"
-            )
-            track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
-
-            tokens[key] = token_tensor
-        else:
-            tokens[key] = new_token_tensor()
-
-    token = tokens[key]
+    token = _get_or_create_token(allow_token_discovery, tokens, key, op)
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 

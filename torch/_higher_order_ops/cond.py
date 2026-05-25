@@ -3,6 +3,7 @@
 import contextlib
 import functools
 import logging
+import operator
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -377,6 +378,8 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        _remove_forward_only_effects_from_bw_gm(true_bw_gm)
+        _remove_forward_only_effects_from_bw_gm(false_bw_gm)
         grads = cond_op(
             ctx._pred,
             true_bw_gm,
@@ -707,12 +710,190 @@ def _merge_output(
         )
 
 
+def _remove_forward_only_effects_from_bw_gm(gm: torch.fx.GraphModule) -> None:
+    from torch._higher_order_ops.effects import _get_effect
+
+    def removable_effect_from_token_getitem(
+        token: torch.fx.Node,
+    ) -> torch.fx.Node | None:
+        if (
+            token.op != "call_function"
+            or token.target is not operator.getitem
+            or len(token.args) < 2
+            or token.args[1] != 0
+            or not isinstance(token.args[0], torch.fx.Node)
+        ):
+            return None
+
+        effect_node = token.args[0]
+        if (
+            effect_node.op != "call_function"
+            or effect_node.target is not torch.ops.higher_order.with_effects
+        ):
+            return None
+
+        for user in effect_node.users:
+            if user is token:
+                continue
+            if user.users:
+                return None
+        return effect_node
+
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+
+        for node in list(module.graph.nodes):
+            if (
+                node.op != "call_function"
+                or node.target is not torch.ops.prims._sink_tokens.default
+            ):
+                continue
+            tokens = node.args[0]
+            if not isinstance(tokens, (list, tuple)):
+                continue
+
+            kept_tokens = []
+            removable_effects = []
+            removable_tokens = []
+            for token in tokens:
+                if not isinstance(token, torch.fx.Node):
+                    kept_tokens.append(token)
+                    continue
+                effect_node = removable_effect_from_token_getitem(token)
+                if effect_node is None:
+                    kept_tokens.append(token)
+                    continue
+                removable_tokens.append(token)
+                removable_effects.append(effect_node)
+
+            if not removable_tokens:
+                continue
+
+            if kept_tokens:
+                node.args = (list(kept_tokens),)
+            else:
+                module.graph.erase_node(node)
+
+            for token in removable_tokens:
+                if not token.users:
+                    module.graph.erase_node(token)
+
+            for effect_node in removable_effects:
+                for user in list(effect_node.users):
+                    if not user.users:
+                        module.graph.erase_node(user)
+                if not effect_node.users:
+                    module.graph.erase_node(effect_node)
+
+        for node in reversed(module.graph.nodes):
+            if (
+                node.op == "call_function"
+                and not node.users
+                and isinstance(
+                    node.target, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)
+                )
+                and _get_effect(node.target) is not None
+            ):
+                module.graph.erase_node(node)
+
+        module.graph.eliminate_dead_code()
+        module.recompile()
+
+
+def _collect_effects_from_graph_module(
+    gm: torch.fx.GraphModule,
+) -> list[torch._library.effects.EffectType]:
+    from torch._guards import InvokeSubgraphCache, TracingContext
+    from torch._higher_order_ops.effects import _get_effect
+
+    effects = []
+
+    def add_effect(effect):
+        if effect is not None and effect not in effects:
+            effects.append(effect)
+
+    def add_invoke_subgraph_effects(identifier):
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx is None:
+            return
+        invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+            torch.ops.higher_order.invoke_subgraph
+        )
+        if invoke_subgraph_cache is None:
+            return
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            raise AssertionError(
+                f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+            )
+        cached_effects = invoke_subgraph_cache.get_effects(identifier)
+        if cached_effects is not None:
+            for effect in cached_effects:
+                add_effect(effect)
+
+    def add_effect_for_op(op):
+        if isinstance(op, torch._ops.OpOverloadPacket):
+            default = getattr(op, "default", None)
+            if default is not None:
+                add_effect_for_op(default)
+            return
+        if isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)):
+            add_effect(_get_effect(op))
+
+    def submodule_from_node(node):
+        if (
+            isinstance(node, torch.fx.Node)
+            and node.op == "get_attr"
+            and isinstance(node.target, str)
+        ):
+            return gm.get_submodule(node.target)
+        return node if isinstance(node, torch.fx.GraphModule) else None
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+
+        target = node.target
+        if target is torch.ops.higher_order.with_effects:
+            if len(node.args) > 1:
+                wrapped_op = node.args[1]
+                if wrapped_op is torch.ops.higher_order.invoke_subgraph:
+                    add_invoke_subgraph_effects(node.args[3])
+                else:
+                    add_effect_for_op(wrapped_op)
+            continue
+
+        if target is torch.ops.higher_order.cond:
+            for branch_node in node.args[1:3]:
+                submodule = submodule_from_node(branch_node)
+                if submodule is not None:
+                    for effect in _collect_effects_from_graph_module(submodule):
+                        add_effect(effect)
+            continue
+
+        if target is torch.ops.higher_order.invoke_subgraph:
+            add_invoke_subgraph_effects(node.args[1])
+        else:
+            add_effect_for_op(target)
+
+    return effects
+
+
+def _collect_effects_from_callable(
+    fn: Callable,
+) -> list[torch._library.effects.EffectType]:
+    if isinstance(fn, torch.fx.GraphModule):
+        return _collect_effects_from_graph_module(fn)
+    return []
+
+
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     from torch._higher_order_ops.auto_functionalize import (
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
+    from torch._higher_order_ops.effects import _get_or_create_token
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
@@ -737,9 +918,72 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 branch, unwrapped_inputs, branch_name, pre_dispatch
             )
 
+        branch_effects = []
+        for branch in (true_fn, false_fn):
+            for effect in _collect_effects_from_callable(branch):
+                if effect not in branch_effects:
+                    branch_effects.append(effect)
+
+        token_keys = ()
+        output_spec = None
+        if branch_effects:
+            tokens = ctx.mode._tokens
+            for effect in branch_effects:
+                _get_or_create_token(
+                    ctx.mode._allow_token_discovery, tokens, effect, cond_op
+                )
+            token_keys = tuple(key for key in tokens if key in branch_effects)
+
+            def add_effect_tokens_to_branch(branch):
+                @functools.wraps(branch)
+                def wrapped(*args):
+                    nonlocal output_spec
+
+                    token_args = args[: len(token_keys)]
+                    branch_args = args[len(token_keys) :]
+                    old_tokens = dict(ctx.mode._tokens)
+                    try:
+                        for key, token in zip(token_keys, token_args):
+                            ctx.mode._tokens[key] = ctx.wrap_tensors(token)
+                        branch_out = branch(*branch_args)
+                        token_outs = tuple(
+                            ctx.unwrap_tensors(ctx.mode._tokens[key])
+                            for key in token_keys
+                        )
+                    finally:
+                        ctx.mode._tokens.clear()
+                        ctx.mode._tokens.update(old_tokens)
+
+                    flat_branch_out, branch_out_spec = pytree.tree_flatten(branch_out)
+                    if output_spec is None:
+                        output_spec = branch_out_spec
+                    return (*token_outs, *flat_branch_out)
+
+                return wrapped
+
+            functional_true = add_effect_tokens_to_branch(functional_true)
+            functional_false = add_effect_tokens_to_branch(functional_false)
+            unwrapped_inputs = (
+                *ctx.unwrap_tensors([ctx.mode._tokens[key] for key in token_keys]),
+                *unwrapped_inputs,
+            )
+
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
+        if token_keys:
+            if output_spec is None:
+                raise AssertionError("cond branch output spec was not captured")
+            if not isinstance(cond_return, tuple):
+                raise AssertionError(
+                    f"expected tokenized cond output to be a tuple, got {type(cond_return)}"
+                )
+            flat_cond_return = list(cond_return)
+            token_outs = flat_cond_return[: len(token_keys)]
+            user_outs = flat_cond_return[len(token_keys) :]
+            for key, token in zip(token_keys, token_outs):
+                ctx.mode._tokens[key] = ctx.wrap_tensors(token)
+            cond_return = pytree.tree_unflatten(user_outs, output_spec)
         return ctx.wrap_tensors(cond_return)
 
 

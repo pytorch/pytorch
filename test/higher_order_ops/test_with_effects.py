@@ -1060,6 +1060,342 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
+    @xfailIfNoAcceleratorTriton
+    @unittest.skipIf(not TEST_CUDA, "cuda")
+    def test_compile_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library("mylib_cond_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op("mylib_cond_effect::record", mutates_args=())
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_cond_effect.record.default)
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(5, 5)
+
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_cond_effect.record(x.mean(), "true")
+                        return x.clone()
+
+                    def false_fn(x):
+                        return x.clone()
+
+                    x = torch.relu(self.linear(x))
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            x = torch.randn(5, 5, device="cuda")
+            mod = torch.compile(M().cuda())
+
+            recorded.clear()
+            self.assertEqual(
+                mod(x, torch.tensor([True], device="cuda")).shape, torch.Size([5, 5])
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["true"])
+
+            recorded.clear()
+            self.assertEqual(
+                mod(x, torch.tensor([False], device="cuda")).shape, torch.Size([5, 5])
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, [])
+
+            class NoGradM(M):
+                def forward(self, x, pred):
+                    with torch.no_grad():
+                        return super().forward(x, pred)
+
+            no_grad_mod = torch.compile(NoGradM().cuda())
+
+            recorded.clear()
+            self.assertEqual(
+                no_grad_mod(x, torch.tensor([True], device="cuda")).shape,
+                torch.Size([5, 5]),
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["true"])
+
+            recorded.clear()
+            self.assertEqual(
+                no_grad_mod(x, torch.tensor([False], device="cuda")).shape,
+                torch.Size([5, 5]),
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, [])
+
+            class GradM(torch.nn.Module):
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_cond_effect.record(x.mean(), "true")
+                        return x.sin() * x.cos()
+
+                    def false_fn(x):
+                        return x.sin() * x.cos()
+
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            grad_mod = torch.compile(GradM().cuda())
+
+            x_grad = torch.randn(5, 5, device="cuda", requires_grad=True)
+            recorded.clear()
+            grad_mod(x_grad, torch.tensor([True], device="cuda")).sum().backward()
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["true"])
+
+            x_grad = torch.randn(5, 5, device="cuda", requires_grad=True)
+            recorded.clear()
+            grad_mod(x_grad, torch.tensor([False], device="cuda")).sum().backward()
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, [])
+
+    @xfailIfNoAcceleratorTriton
+    @unittest.skipIf(not TEST_CUDA, "cuda")
+    def test_compile_nested_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library("mylib_nested_cond_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_nested_cond_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_nested_cond_effect.record.default)
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(5, 5)
+
+                def forward(self, x, pred, pred2):
+                    def true_outer(pred2, x):
+                        def true_inner(x):
+                            torch.ops.mylib_nested_cond_effect.record(x.mean(), "inner")
+                            return x.clone()
+
+                        def false_inner(x):
+                            return x.clone()
+
+                        return torch.cond(pred2, true_inner, false_inner, (x,))
+
+                    def false_outer(pred2, x):
+                        return x.clone()
+
+                    x = torch.relu(self.linear(x))
+                    return torch.cond(pred, true_outer, false_outer, (pred2, x))
+
+            x = torch.randn(5, 5, device="cuda")
+            mod = torch.compile(M().cuda())
+
+            recorded.clear()
+            self.assertEqual(
+                mod(
+                    x,
+                    torch.tensor([True], device="cuda"),
+                    torch.tensor([True], device="cuda"),
+                ).shape,
+                torch.Size([5, 5]),
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["inner"])
+
+            recorded.clear()
+            self.assertEqual(
+                mod(
+                    x,
+                    torch.tensor([True], device="cuda"),
+                    torch.tensor([False], device="cuda"),
+                ).shape,
+                torch.Size([5, 5]),
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, [])
+
+    @xfailIfNoAcceleratorTriton
+    @unittest.skipIf(not TEST_CUDA, "cuda")
+    def test_compile_cond_with_effect_before_and_in_branch(self):
+        with torch.library._scoped_library("mylib_cond_prior_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op("mylib_cond_prior_effect::record", mutates_args=())
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_cond_prior_effect.record.default)
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(5, 5)
+
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_cond_prior_effect.record(x.mean(), "inside")
+                        return x.clone()
+
+                    def false_fn(x):
+                        return x.clone()
+
+                    x = torch.relu(self.linear(x))
+                    torch.ops.mylib_cond_prior_effect.record(x.mean(), "before")
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            x = torch.randn(5, 5, device="cuda")
+            mod = torch.compile(M().cuda())
+
+            recorded.clear()
+            self.assertEqual(
+                mod(x, torch.tensor([True], device="cuda")).shape, torch.Size([5, 5])
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["before", "inside"])
+
+            recorded.clear()
+            self.assertEqual(
+                mod(x, torch.tensor([False], device="cuda")).shape, torch.Size([5, 5])
+            )
+            torch.cuda.synchronize()
+            self.assertEqual(recorded, ["before"])
+
+    def test_export_run_decompositions_cond_with_effect_in_branch(self):
+        with torch.library._scoped_library("mylib_export_cond_effect", "FRAGMENT"):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_export_cond_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+                return
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_export_cond_effect.record.default)
+
+            class M(torch.nn.Module):
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_export_cond_effect.record(x.mean(), "true")
+                        return x.clone()
+
+                    def false_fn(x):
+                        return x.clone()
+
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            ep = torch.export.export(M(), (torch.randn(2, 2), torch.tensor(True)))
+            decomp = ep.run_decompositions()
+            self.assertIn("torch.ops.higher_order.cond", decomp.graph_module.code)
+            self.assertIn(
+                "torch.ops.higher_order.with_effects",
+                decomp.graph_module.true_graph_0.code,
+            )
+
+            x = torch.randn(2, 2)
+            mod = decomp.module()
+            recorded.clear()
+            mod(x, torch.tensor(True))
+            self.assertEqual(recorded, ["true"])
+            recorded.clear()
+            mod(x, torch.tensor(False))
+            self.assertEqual(recorded, [])
+
+            class PriorEffectM(torch.nn.Module):
+                def forward(self, x, pred):
+                    def true_fn(x):
+                        torch.ops.mylib_export_cond_effect.record(x.mean(), "inside")
+                        return x.clone()
+
+                    def false_fn(x):
+                        return x.clone()
+
+                    torch.ops.mylib_export_cond_effect.record(x.mean(), "before")
+                    return torch.cond(pred, true_fn, false_fn, (x,))
+
+            ep = torch.export.export(
+                PriorEffectM(), (torch.randn(2, 2), torch.tensor(True))
+            )
+            decomp = ep.run_decompositions()
+            mod = decomp.module()
+            recorded.clear()
+            mod(x, torch.tensor(True))
+            self.assertEqual(recorded, ["before", "inside"])
+            recorded.clear()
+            mod(x, torch.tensor(False))
+            self.assertEqual(recorded, ["before"])
+
+    def test_export_run_decompositions_cond_with_empty_tensor_operand(self):
+        with torch.library._scoped_library(
+            "mylib_export_cond_empty_effect", "FRAGMENT"
+        ):
+            recorded = []
+
+            @torch.library.custom_op(
+                "mylib_export_cond_empty_effect::record", mutates_args=()
+            )
+            def record(x: torch.Tensor, prefix: str) -> None:
+                recorded.append(prefix)
+                return
+
+            @record.register_fake
+            def record_fake(x, prefix):
+                return
+
+            record.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib_export_cond_empty_effect.record.default)
+
+            class M(torch.nn.Module):
+                def forward(self, empty, x, pred):
+                    def true_fn(empty, x):
+                        torch.ops.mylib_export_cond_empty_effect.record(
+                            x.mean(), "true"
+                        )
+                        return x + empty.sum() + 1
+
+                    def false_fn(empty, x):
+                        return x - empty.sum() - 1
+
+                    return torch.cond(pred, true_fn, false_fn, (empty, x))
+
+            empty = torch.empty(0)
+            x = torch.randn(2, 2)
+            ep = torch.export.export(M(), (empty, x, torch.tensor(True)))
+            decomp = ep.run_decompositions()
+            mod = decomp.module()
+
+            recorded.clear()
+            true_out = mod(empty, x, torch.tensor(True))
+            self.assertEqual(recorded, ["true"])
+            self.assertTrue(torch.allclose(true_out, x + 1))
+
+            recorded.clear()
+            false_out = mod(empty, x, torch.tensor(False))
+            self.assertEqual(recorded, [])
+            self.assertTrue(torch.allclose(false_out, x - 1))
+
     @skipIfTorchDynamo()
     def test_effect_autograd_function(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
