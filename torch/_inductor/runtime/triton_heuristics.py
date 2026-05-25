@@ -554,8 +554,7 @@ class CachingAutotuner(KernelInterface):
             and not self.dump_launch_tensors
         )
         # Tracks which launchers (by id) have already passed
-        # _check_launcher_call_args so the check only runs once per launcher.
-        self._launcher_arg_count_checked: OrderedSet[int] = OrderedSet()
+        # _check_launcher_call_args can validate without inspect.signature().
 
         self._plugins = get_caching_autotuner_plugins(self)
 
@@ -900,14 +899,12 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         self._cached_launcher = None
-        self._launcher_arg_count_checked = OrderedSet()
         self.benchmark_failure_reasons = {}
         self.fn._hash_lock = None
         return old_values
 
     def restore_after_unpickle(self, old_values: tuple[Any, ...] | None) -> None:
         self._cached_launcher = None
-        self._launcher_arg_count_checked = OrderedSet()
         if old_values:
             (
                 self.fn.fn,
@@ -1197,7 +1194,6 @@ class CachingAutotuner(KernelInterface):
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
-            self._check_launcher_call_args(launcher, cloned_args)
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -1211,7 +1207,9 @@ class CachingAutotuner(KernelInterface):
                             **cloned_kwargs,
                             stream=stream,
                         )
-                    except Exception:
+                    except Exception as e:
+                        if isinstance(e, TypeError):
+                            self._check_launcher_call_args(launcher, cloned_args)
                         log.error(
                             "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                             kernel_name,
@@ -1229,7 +1227,9 @@ class CachingAutotuner(KernelInterface):
                         **cloned_kwargs,
                         stream=stream,
                     )
-                except Exception:
+                except Exception as e:
+                    if isinstance(e, TypeError):
+                        self._check_launcher_call_args(launcher, cloned_args)
                     log.error(
                         "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                         kernel_name,
@@ -2049,8 +2049,12 @@ class CachingAutotuner(KernelInterface):
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
-            self._check_launcher_call_args(launcher, args)
-            result = launcher(*args, **kwargs, stream=stream)
+            try:
+                result = launcher(*args, **kwargs, stream=stream)
+            except Exception as e:
+                if isinstance(e, TypeError):
+                    self._check_launcher_call_args(launcher, args)
+                raise
         finally:
             self._post_launch()
 
@@ -2074,18 +2078,8 @@ class CachingAutotuner(KernelInterface):
         args: tuple[Any, ...],
     ) -> None:
         """Raise TypeError with a helpful message when stream is passed positionally."""
-        # Fast path: this launcher has already passed validation.
-        # Cache successful validations on self (keyed by launcher id) so we
-        # never mutate the launcher function object.
-        if id(launcher) in self._launcher_arg_count_checked:
-            return
-
-        # _expected_positional_count is stashed by _gen_launcher_code at
-        # code-generation time, so no inspect.signature() call is needed.
         expected = getattr(launcher, "_expected_positional_count", None)
         if expected is None:
-            # Launcher was not produced by _gen_launcher_code (e.g. a test
-            # double).  Skip the check rather than falling back to inspection.
             return
 
         if len(args) > expected:
@@ -2095,7 +2089,6 @@ class CachingAutotuner(KernelInterface):
                 f"expected {expected}, got {len(args)}. "
                 "'stream' must be passed as a keyword argument."
             )
-        self._launcher_arg_count_checked.add(id(launcher))
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
