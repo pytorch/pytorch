@@ -2,13 +2,11 @@
 
 [build-system]
 requires = [
-    # 70.1.0: min version for integrated bdist_wheel command from wheel package
-    # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0,<82",
+    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
@@ -22,11 +20,11 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
-    "setuptools>=70.1.0,<80.0",  # setuptools develop deprecated on 80.0
+    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
@@ -54,11 +52,17 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.10"
-# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
-# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
-# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
-# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
-license = { text = "BSD-3-Clause" }
+# License info:
+#   - The main Pytorch project license is BSD-3-Clause.
+#   - The SPDX license expression below reflects installed pytorch packages.
+license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT"
+license-files = [
+    "LICENSE",
+    "third_party/**/LICENSE",
+    "third_party/**/LICENSE.txt",
+    "third_party/**/LICENSE.rst",
+    "third_party/**/COPYING.BSD",
+]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
 classifiers = [
