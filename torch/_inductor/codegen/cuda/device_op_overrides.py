@@ -50,6 +50,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         return source_codes
 
     def kernel_driver(self) -> str:
+        """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
+        embedded in AOTI-generated wrapper code."""
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -72,7 +74,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
@@ -82,6 +85,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(
@@ -93,10 +99,17 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 return func;
             }
 
-            static inline CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+            static inline CUfunction loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<CUmodule>* loaded_modules = nullptr) {
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(

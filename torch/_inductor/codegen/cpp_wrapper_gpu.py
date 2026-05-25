@@ -637,6 +637,14 @@ class DeferredTritonCallWrapper:
                     "cubin_dir_",
                 ]
 
+            # In AOTI mode on CUDA/HIP, pass the loaded_modules_ vector so
+            # CUmodule handles are tracked and can be unloaded on destruction,
+            # preventing GPU code object leaks. XPU is excluded because its
+            # loadKernel returns std::unique_ptr<sycl::kernel> and manages
+            # cleanup via RAII.
+            if V.graph.aot_mode and V.graph.device_type != "xpu":
+                load_kernel_args = load_kernel_args + ["&kernels_.loaded_modules_"]
+
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
