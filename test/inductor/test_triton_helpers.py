@@ -100,13 +100,17 @@ if HAS_GPU:
         tl.store(helper_result_ptr + offsets, helper)
 
     @triton.jit
-    def test_kernel_rand4x_distribution(
+    def test_kernel_random_4x_distribution(
         seed,
         result_ptr,
         BLOCK_SIZE: tl.constexpr,
+        NORMAL: tl.constexpr,
     ):
         offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-        result = rand4x(seed, offsets, BLOCK_SIZE)
+        if NORMAL:
+            result = randn4x(seed, offsets, BLOCK_SIZE)
+        else:
+            result = rand4x(seed, offsets, BLOCK_SIZE)
         tl.store(result_ptr + offsets, result)
 
 
@@ -256,10 +260,11 @@ class Random4xTest(TestCase):
         sample_count = block_size * num_blocks
         result = torch.empty(sample_count, dtype=torch.float32, device=device)
 
-        test_kernel_rand4x_distribution[(num_blocks,)](
+        test_kernel_random_4x_distribution[(num_blocks,)](
             1234,
             result,
             BLOCK_SIZE=block_size,
+            NORMAL=False,
         )
 
         self.assertGreaterEqual(result.min().item(), 0.0)
@@ -270,6 +275,30 @@ class Random4xTest(TestCase):
         bins = torch.histc(result, bins=10, min=0.0, max=1.0)
         max_bucket_error = (bins - sample_count / 10).abs().max().item()
         self.assertLess(max_bucket_error / (sample_count / 10), 0.08)
+
+    @requires_gpu()
+    def test_randn4x_distribution(self) -> None:
+        device = torch.device(GPU_TYPE)
+        block_size = 1024
+        num_blocks = 128
+        sample_count = block_size * num_blocks
+        result = torch.empty(sample_count, dtype=torch.float32, device=device)
+
+        test_kernel_random_4x_distribution[(num_blocks,)](
+            1234,
+            result,
+            BLOCK_SIZE=block_size,
+            NORMAL=True,
+        )
+
+        mean = result.mean().item()
+        centered = result - mean
+        variance = centered.square().mean().item()
+        skewness = (centered.pow(3).mean() / (variance**1.5)).item()
+
+        self.assertLess(abs(mean), 0.02)
+        self.assertLess(abs(variance - 1.0), 0.05)
+        self.assertLess(abs(skewness), 0.05)
 
 
 if __name__ == "__main__":
