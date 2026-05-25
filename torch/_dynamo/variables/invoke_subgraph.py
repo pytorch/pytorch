@@ -23,6 +23,7 @@ from torch._dynamo.guards import (
     UnsupportedGuardCheckSpec,
 )
 from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.utils import _make_inlined, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -249,19 +250,18 @@ def build_fingerprint_with_pytree(
 ) -> InputFingerprint:
     """Build fingerprint via pytree flatten for nested/kwargs cases."""
     from torch._dynamo.variables.builder import SourcelessBuilder
-    from torch._dynamo.variables.higher_order_ops import _make_inlined
 
     container_vt = SourcelessBuilder.create(tx, (list(fn_args_vt), kwargs))
-    flat_list_vt, treespec_vt = _make_inlined(tx, pytree.tree_flatten)(
-        container_vt
-    ).unpack_var_sequence(tx)
+    flat_list_vt, treespec_vt = unpack_iterable(
+        tx, _make_inlined(tx, pytree.tree_flatten)(container_vt)
+    )
     treespec = treespec_vt.as_python_constant()
 
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     has_unknown = False
 
-    for vt in flat_list_vt.unpack_var_sequence(tx):
+    for vt in unpack_iterable(tx, flat_list_vt):
         tag = classify_vt(vt)
         if tag is not None:
             flat_vts.append((tag, vt))
@@ -884,7 +884,6 @@ def trace_reuse_hash_fn(
     key itself is the reuse condition, not the guards.
     """
     from torch._dynamo.exc import Unsupported
-    from torch._dynamo.utils import _make_inlined
 
     with tx.output.tracing_context.guards_context.skip_guard_install():
         try:
