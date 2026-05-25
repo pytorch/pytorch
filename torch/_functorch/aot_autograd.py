@@ -1509,7 +1509,9 @@ def aot_compile_joint_with_descriptors(
     else:
         tracing_ctx = nullcontext()
 
-    with cache_ctx, tracing_ctx:
+    # The descriptor export path exposes partitioned graphs to user compilers,
+    # but graphsafe RNG adds internal Generator inputs without descriptors.
+    with cache_ctx, tracing_ctx, config.patch(graphsafe_rng_functionalization=False):
         compiled_fn, _ = aot_stage2_compile(
             jd._aot_state,
             jd._aot_graph_capture,
