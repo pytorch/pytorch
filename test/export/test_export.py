@@ -7326,6 +7326,61 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         after = list(ep.state_dict.keys())
         self.assertEqual(before, after)
 
+    def test_run_decompositions_prims_views(self):
+        class BroadcastInDim(torch.nn.Module):
+            def forward(self, x):
+                x = x.clone()
+                return torch.ops.prims.broadcast_in_dim(
+                    x, (2, 3, 4, 5), (0, 1, 2)
+                ).clone()
+
+        class Squeeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.squeeze(x, (1,)).clone()
+
+        class Transpose(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.transpose(x, (1, 0)).clone()
+
+        class ViewOf(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.view_of(x).clone()
+
+        class SplitDim(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.split_dim(x, 1, 3).clone()
+
+        class AsStrided(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.as_strided(x, (2, 2), (3, 1), 0).clone()
+
+        test_cases = [
+            (BroadcastInDim(), torch.randn(2, 3, 4)),
+            (Squeeze(), torch.randn(2, 1, 3)),
+            (Transpose(), torch.randn(2, 3)),
+            (ViewOf(), torch.randn(2, 3)),
+            (SplitDim(), torch.randn(2, 6)),
+            (AsStrided(), torch.randn(3, 3)),
+        ]
+
+        prim_view_ops = {
+            torch.ops.prims.broadcast_in_dim.default,
+            torch.ops.prims.squeeze.default,
+            torch.ops.prims.transpose.default,
+            torch.ops.prims.view_of.default,
+            torch.ops.prims.split_dim.default,
+            torch.ops.prims.as_strided.default,
+        }
+
+        for mod, x in test_cases:
+            ep = export(mod, (x,)).run_decompositions()
+
+            self.assertEqual(ep.module()(x), mod(x))
+            targets = {
+                node.target for node in ep.graph.nodes if node.op == "call_function"
+            }
+            self.assertTrue(targets.isdisjoint(prim_view_ops))
+
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):

@@ -38,6 +38,7 @@ prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
+prim_functionalize_impl = torch.library.Library("prims", "IMPL", "Functionalize")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
@@ -307,6 +308,33 @@ def _make_prim(
     def _autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
 
+    def _functionalize_impl(*args, **kwargs):
+        flat_args, _ = tree_flatten((args, kwargs))
+
+        def _hook_tensor(arg):
+            if not isinstance(arg, torch.Tensor):
+                return None
+            if torch._is_functional_tensor(arg):
+                return torch._from_functional_tensor(arg)
+            return arg
+
+        def _requires_grad(arg):
+            t = _hook_tensor(arg)
+            return t is not None and t.requires_grad
+
+        out = _prim_impl(*args, **kwargs)
+        if torch.is_grad_enabled() and any(_requires_grad(a) for a in flat_args):
+            flat_out, _ = tree_flatten(out)
+
+            def _raise_backward_not_supported(grad_input, grad_output):
+                raise RuntimeError("backwards not supported on prim")
+
+            for t in flat_out:
+                inner = _hook_tensor(t)
+                if inner is not None and inner.grad_fn is not None:
+                    inner.grad_fn.register_hook(_raise_backward_not_supported)
+        return out
+
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
             return meta(*args, **kwargs)
@@ -343,6 +371,9 @@ def _make_prim(
         if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
+
+    if return_type == RETURN_TYPE.VIEW:
+        prim_functionalize_impl.impl(name, _functionalize_impl)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -1267,7 +1298,7 @@ _as_strided_doc = """
 """
 
 as_strided = _make_prim(
-    schema="as_strided(Tensor(a!) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a!)",
+    schema="as_strided(Tensor(a) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a)",
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,

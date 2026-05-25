@@ -352,6 +352,97 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
         meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
         self.assertEqual(tensor.contiguous().stride(), meta_clone.stride())
 
+    def test_broadcast_in_dim_functionalize_validates_args(self):
+        def fn(x):
+            return prims.broadcast_in_dim(x, (2,), (-1,))
+
+        x = torch.randn(2)
+        msg = "broadcast_dimensions must be strictly ascending"
+        with self.assertRaisesRegex(AssertionError, msg):
+            fn(x)
+        with self.assertRaisesRegex(AssertionError, msg):
+            torch.func.functionalize(fn)(x)
+
+    def test_as_strided_functionalize_validates_args(self):
+        def fn(x):
+            return prims.as_strided(x, (2, 2), (1,), 0)
+
+        x = torch.randn(3, 3)
+        msg = r"len\(size\)=2 != len\(stride\)=1"
+        with self.assertRaisesRegex(AssertionError, msg):
+            fn(x)
+        with self.assertRaisesRegex(AssertionError, msg):
+            torch.func.functionalize(fn)(x)
+
+    def test_view_prims_functionalize(self):
+        test_cases = [
+            (
+                lambda x: prims.broadcast_in_dim(x, (2, 3, 4, 5), (0, 1, 2)),
+                torch.randn(2, 3, 4),
+            ),
+            (lambda x: prims.squeeze(x, (1,)), torch.randn(2, 1, 3)),
+            (lambda x: prims.transpose(x, (1, 0)), torch.randn(2, 3)),
+            (lambda x: prims.view_of(x), torch.randn(2, 3)),
+            (lambda x: prims.split_dim(x, 1, 3), torch.randn(2, 6)),
+            (lambda x: prims.as_strided(x, (2, 2), (3, 1), 0), torch.randn(3, 3)),
+        ]
+
+        for fn, x in test_cases:
+            self.assertEqual(torch.func.functionalize(fn)(x), fn(x))
+
+    def test_view_prims_functionalize_backward_not_supported(self):
+        test_cases = [
+            (
+                lambda x: prims.broadcast_in_dim(x, (2, 3, 4, 5), (0, 1, 2)),
+                torch.randn(2, 3, 4),
+            ),
+            (lambda x: prims.squeeze(x, (1,)), torch.randn(2, 1, 3)),
+            (lambda x: prims.transpose(x, (1, 0)), torch.randn(2, 3)),
+            (lambda x: prims.view_of(x), torch.randn(2, 3)),
+            (lambda x: prims.split_dim(x, 1, 3), torch.randn(2, 6)),
+            (lambda x: prims.as_strided(x, (2, 2), (3, 1), 0), torch.randn(3, 3)),
+        ]
+
+        for fn, x in test_cases:
+            expected = fn(x)
+            x = x.detach().clone().requires_grad_()
+            y = fn(x)
+            self.assertTrue(y.requires_grad)
+            self.assertEqual(y.detach(), expected)
+            with self.assertRaisesRegex(RuntimeError, "backwards not supported on prim"):
+                y.sum().backward()
+
+            x = x.detach().clone().requires_grad_()
+            y = torch.func.functionalize(fn)(x)
+            self.assertTrue(y.requires_grad)
+            self.assertEqual(y.detach(), expected)
+            with self.assertRaisesRegex(RuntimeError, "backwards not supported on prim"):
+                y.sum().backward()
+
+    def test_view_prims_functionalize_user_hook_before_backward_error(self):
+        def fn(x):
+            return prims.view_of(x)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.func.functionalize(fn)(x)
+        seen = []
+        y.register_hook(lambda grad: seen.append("user") or grad)
+
+        with self.assertRaisesRegex(RuntimeError, "backwards not supported on prim"):
+            y.sum().backward()
+        self.assertEqual(seen, ["user"])
+
+    def test_view_prims_functionalize_closed_over_tensor_backward_not_supported(self):
+        x = torch.randn(2, 3, requires_grad=True)
+
+        def fn():
+            return prims.view_of(x)
+
+        y = torch.func.functionalize(fn)()
+        self.assertTrue(y.requires_grad)
+        with self.assertRaisesRegex(RuntimeError, "backwards not supported on prim"):
+            y.sum().backward()
+
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
