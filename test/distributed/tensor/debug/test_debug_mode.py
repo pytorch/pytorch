@@ -54,6 +54,24 @@ class TestDebugModeLogSerialization(TestCase):
             x.sin().sum()
         return debug_mode.logs
 
+    def test_save_load_empty_logs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "empty.json")
+            DebugMode.save_logs([], path)
+            self.assertEqual(DebugMode.load_logs(path), [])
+
+    def test_save_load_redistribute_outer_call(self):
+        call = _RedistributeCall(1, "S(0)", "R", None, 0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "redistribute.json")
+            DebugMode.save_logs([call], path)
+            loaded_call = DebugMode.load_logs(path)[0]
+
+        self.assertIsInstance(loaded_call, _RedistributeCall)
+        self.assertTrue(loaded_call.is_outer_call)
+        self.assertEqual(loaded_call.render([]), call.render([]))
+
     def test_save_load_logs_for_hash_mismatch(self):
         x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
         x_different = x + 1

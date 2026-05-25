@@ -584,15 +584,18 @@ def _deserialize_debug_call(data: Any) -> _DebugCall:
         call.args_str = _serialized_str(data, "args_str")
         call.kwargs_str = _serialized_str(data, "kwargs_str")
     elif call_type == "redistribute":
+        arg_str = _serialized_str(data, "arg_str")
         call = _RedistributeCall(
-            _serialized_str(data, "arg_str"),
+            arg_str,
             _serialized_str(data, "src_placement_str"),
             _serialized_str(data, "dst_placement_str"),
             _serialized_optional_str(data, "transform_info_str"),
             call_depth,
             is_explicit=bool(data.get("is_explicit")),
         )
-        call.arg_str = _serialized_str(data, "arg_str")
+        call.arg_str = arg_str
+        # Serialized redistribute calls only keep rendered args, so restore the
+        # outer-call classification instead of relying on __init__'s arg type.
         call.is_outer_call = bool(data.get("is_outer_call"))
     elif call_type == "output_placement":
         call = _OutputPlacementCall(_serialized_str(data, "placements_str"), call_depth)
