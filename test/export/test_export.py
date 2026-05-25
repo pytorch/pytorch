@@ -1800,6 +1800,60 @@ def forward(self, primals, tangents):
     return pytree.tree_unflatten([addmm_1, t_9, view_1, t_5, view, mm_2], self._out_spec)""",
             )
 
+    def test_non_strict_reentrant_checkpoint_joint_export(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear2(self.relu(self.linear1(x)))
+
+        class CheckpointedBlock(torch.nn.Module):
+            def __init__(self, num_checkpoints):
+                super().__init__()
+                self.block = Block()
+                self.num_checkpoints = num_checkpoints
+
+            def forward(self, x):
+                for _ in range(self.num_checkpoints):
+                    x = torch.utils.checkpoint.checkpoint(
+                        self.block, x, use_reentrant=True
+                    )
+                return x
+
+        for num_checkpoints in (1, 2):
+            with self.subTest(num_checkpoints=num_checkpoints):
+                x = torch.randn(2, 4, requires_grad=True)
+                ep = torch.export.export(
+                    CheckpointedBlock(num_checkpoints), (x,), strict=False
+                )
+                FileCheck().check_count(
+                    "torch.ops.higher_order.tag_activation_checkpoint",
+                    num_checkpoints,
+                    exactly=True,
+                ).run(str(ep.graph))
+
+                with contextlib.ExitStack() as stack:
+                    jwd = aot_export_joint_with_descriptors(stack, ep.module(), (x,))
+
+                FileCheck().check("tangents").check("threshold_backward").run(
+                    str(jwd.graph_module.code)
+                )
+                recompute_nodes = [
+                    node
+                    for node in jwd.graph_module.graph.nodes
+                    if "recompute" in node.meta
+                ]
+                self.assertTrue(recompute_nodes)
+                for node in recompute_nodes:
+                    self.assertEqual(
+                        node.meta["recompute"],
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE,
+                    )
+
     def test_inline_script_class_method_recursive(self):
         f = 0.4
         i = 2
