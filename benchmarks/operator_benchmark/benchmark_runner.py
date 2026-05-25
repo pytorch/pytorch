@@ -200,9 +200,6 @@ def parse_args(args=None):
 
     args, _ = parser.parse_known_args(args)
 
-    if args.force_device:
-        benchmark_utils._supported_devices.add(args.force_device)
-
     if args.omp_num_threads:
         # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS
         # which doesn't have any impact as C2 init logic has already been called
