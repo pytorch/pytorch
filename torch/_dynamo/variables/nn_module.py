@@ -472,6 +472,10 @@ class NNModuleVariable(VariableTracker):
                     source=source,
                 )
             elif istype(subobj, types.FunctionType):
+                if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
+                    return variables.WrapperUserMethodVariable(
+                        subobj, "_torchdynamo_inline", self, source=source
+                    )
                 return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
