@@ -1333,7 +1333,6 @@ default](args = (%x, %b_state), kwargs = {})
 
         ep = torch.export.export(M(), (torch.ones(3),))
         ep = move_to_device_pass(ep, "cuda")
-        ep.graph_module.recompile()
         self.assertExpectedInline(
             ep.graph_module.code.strip("\n"),
             """\
@@ -1355,7 +1354,6 @@ def forward(self, x):
 
         ep = torch.export.export(M(), (torch.ones(3),))
         ep = move_to_device_pass(ep, "cuda")
-        ep.graph_module.submod_1.recompile()
         self.assertExpectedInline(
             ep.graph_module.submod_1.code.strip("\n"),
             """\
@@ -1366,6 +1364,60 @@ def forward(self, arg0_1):
     return (add,)
     """,
         )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_graph_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.long().sum()
+
+        ep = torch.export.export(M(), (torch.zeros(4, dtype=torch.float32),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIn("cuda:0", ep.graph_module.code)
+        (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
+        self.assertEqual(out.device, torch.device("cuda:0"))
+
+    def test_move_to_device_pass_parameter_to_meta(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x + self.weight
+
+        ep = torch.export.export(M(), (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+        ep = move_to_device_pass(ep, "meta")
+
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertEqual(ep.state_dict["weight"].device, torch.device("meta"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_preserves_parameter_identity(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x + self.weight
+
+        ep = torch.export.export(M(), (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+        param.grad = torch.ones_like(param)
+        optim = torch.optim.SGD([param], lr=0.1)
+
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIs(ep.state_dict["weight"], param)
+        self.assertIs(optim.param_groups[0]["params"][0], param)
+        self.assertEqual(param.device, torch.device("cuda:0"))
+        self.assertEqual(param.grad.device, torch.device("cuda:0"))
+
+        out = ep.module()(torch.ones(3, device="cuda:0"))
+        self.assertEqual(out.device, torch.device("cuda:0"))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass(self):
