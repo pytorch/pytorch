@@ -10,6 +10,7 @@ It does so by:
 4. dispatching subclasses
 """
 
+import builtins
 import operator
 import typing
 import warnings
@@ -135,6 +136,60 @@ def _is_functionalization_inference_error(e: RuntimeError) -> bool:
     return e.args == (_FUNCTIONALIZATION_INFERENCE_ERROR,)
 
 
+# Deliberately excludes maybe-copy aliases such as reshape, flatten, and
+# contiguous, because their copy path must keep inference tensor semantics.
+_PURE_TENSOR_VIEW_NAMES = frozenset(
+    {
+        "_conj",
+        "_neg_view",
+        "_reshape_alias",
+        "adjoint",
+        "alias",
+        "as_strided",
+        "chunk",
+        "detach",
+        "diagonal",
+        "dsplit",
+        "expand",
+        "expand_as",
+        "hsplit",
+        "imag",
+        "movedim",
+        "narrow",
+        "permute",
+        "real",
+        "select",
+        "split",
+        "split_with_sizes",
+        "squeeze",
+        "swapaxes",
+        "swapdims",
+        "t",
+        "tensor_split",
+        "transpose",
+        "unflatten",
+        "unfold",
+        "unbind",
+        "unsqueeze",
+        "view",
+        "view_as",
+        "view_as_complex",
+        "view_as_real",
+        "vsplit",
+    }
+)
+
+_PURE_TENSOR_VIEW_FUNCTIONS = frozenset(
+    target
+    for name in _PURE_TENSOR_VIEW_NAMES
+    if (target := getattr(torch, name, None)) is not None
+)
+
+_PURE_TENSOR_VIEW_PROPERTIES = frozenset({"H", "T", "imag", "mH", "mT", "real"})
+
+_MAYBE_COPY_VIEW_NAMES = frozenset({"contiguous", "flatten", "reshape", "reshape_as"})
+
+
 def _is_functional_getitem_view_candidate(
     target: object, args: tuple[Any, ...]
 ) -> bool:
@@ -146,25 +201,89 @@ def _is_functional_getitem_view_candidate(
     )
 
 
+def _is_pure_view_function_target(target: object) -> bool:
+    if isinstance(target, torch._ops.OpOverload):
+        name = target._schema.name.removeprefix("aten::")
+        return target.is_view and name not in _MAYBE_COPY_VIEW_NAMES
+    if target in _PURE_TENSOR_VIEW_FUNCTIONS:
+        return True
+    return False
+
+
+def _has_functional_tensor_receiver(args: tuple[Any, ...]) -> bool:
+    return len(args) >= 1 and is_fun(args[0])
+
+
+def _is_functional_view_function_candidate(
+    target: object, args: tuple[Any, ...]
+) -> bool:
+    return _has_functional_tensor_receiver(args) and _is_pure_view_function_target(
+        target
+    )
+
+
+def _is_functional_view_property_candidate(
+    target: object, args: tuple[Any, ...]
+) -> bool:
+    return (
+        target is builtins.getattr
+        and len(args) >= 2
+        and is_fun(args[0])
+        and isinstance(args[1], str)
+        and args[1] in _PURE_TENSOR_VIEW_PROPERTIES
+    )
+
+
+def _is_functional_view_method_candidate(target: object, args: tuple[Any, ...]) -> bool:
+    return (
+        isinstance(target, str)
+        and target in _PURE_TENSOR_VIEW_NAMES
+        and _has_functional_tensor_receiver(args)
+    )
+
+
+def _retry_without_inference_mode_on_functionalization_error(
+    fn: Callable[[], Any],
+) -> Any:
+    try:
+        return fn()
+    except RuntimeError as e:
+        if not _is_functionalization_inference_error(e):
+            raise
+    with _disable_inference_mode_preserving_grad_mode():
+        return fn()
+
+
 # AOT replays Dynamo FX graphs under functionalization. If that graph has a
-# captured inference-mode context, basic getitem view replay can try to attach
-# version-counter state to inference tensors. Run replay normally first and
-# retry without inference mode only for that exact functionalization failure.
+# captured inference-mode context, pure view replay can try to attach version
+# counter state to inference tensors. Run replay normally first and retry
+# without inference mode only for that exact functionalization failure.
 class AOTDispatchPropagateUnbackedSymInts(PropagateUnbackedSymInts):
     def call_function(
         self, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
-        if torch.is_inference_mode_enabled() and _is_functional_getitem_view_candidate(
+        super_call_function = super().call_function
+        if torch.is_inference_mode_enabled() and (
+            _is_functional_getitem_view_candidate(target, args)
+            or _is_functional_view_function_candidate(target, args)
+            or _is_functional_view_property_candidate(target, args)
+        ):
+            return _retry_without_inference_mode_on_functionalization_error(
+                lambda: super_call_function(target, args, kwargs)
+            )
+        return super_call_function(target, args, kwargs)
+
+    def call_method(
+        self, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        super_call_method = super().call_method
+        if torch.is_inference_mode_enabled() and _is_functional_view_method_candidate(
             target, args
         ):
-            try:
-                return super().call_function(target, args, kwargs)
-            except RuntimeError as e:
-                if not _is_functionalization_inference_error(e):
-                    raise
-            with _disable_inference_mode_preserving_grad_mode():
-                return super().call_function(target, args, kwargs)
-        return super().call_function(target, args, kwargs)
+            return _retry_without_inference_mode_on_functionalization_error(
+                lambda: super_call_method(target, args, kwargs)
+            )
+        return super_call_method(target, args, kwargs)
 
 
 # This function returns a new function that returns mutated inputs as outputs.
