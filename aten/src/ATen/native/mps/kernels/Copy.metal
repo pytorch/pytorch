@@ -7,8 +7,10 @@ using namespace c10::metal;
 // Castout: input is loaded at compile-time Tin (the registered input dtype) and
 // the result is cast to the user-supplied output dtype on store (runtime
 // ScalarType switch in store_at_offs handles all dtype combinations, including
-// real<->complex packing). One kernel per input dtype covers every output
-// dtype.
+// real<->complex packing). REGISTER_UNARY_OP(NAME, DTYPE, DTYPE) registers both
+// the direct same-dtype kernel and the castout variant keyed on the input
+// dtype; exec_unary_kernel auto-falls back to castout when the direct
+// per-(out,in) kernel isn't registered.
 
 struct copy_identity_functor {
   template <typename T>
@@ -35,10 +37,10 @@ struct copy_neg_functor {
   }
 };
 
-#define REGISTER_COPY_CASTOUT(DTYPE)               \
-  REGISTER_UNARY_OP_CASTOUT(copy_identity, DTYPE); \
-  REGISTER_UNARY_OP_CASTOUT(copy_conj, DTYPE);     \
-  REGISTER_UNARY_OP_CASTOUT(copy_neg, DTYPE)
+#define REGISTER_COPY_CASTOUT(DTYPE)              \
+  REGISTER_UNARY_OP(copy_identity, DTYPE, DTYPE); \
+  REGISTER_UNARY_OP(copy_conj, DTYPE, DTYPE);     \
+  REGISTER_UNARY_OP(copy_neg, DTYPE, DTYPE)
 
 REGISTER_COPY_CASTOUT(bool);
 REGISTER_COPY_CASTOUT(uchar);

@@ -15,7 +15,7 @@
 
 namespace at::native {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& copyLib = mps::MetalShaderLibrary::getBundledLibrary();
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Copy_metallib.h>
 #endif
@@ -50,7 +50,7 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 
   if (needs_conj && needs_neg) {
     auto iter = build_iter(dst_view);
-    copyLib.exec_unary_kernel(iter, "copy_conj");
+    lib.exec_unary_kernel(iter, "copy_conj");
     // Second pass: in-place neg over dst.
     auto neg_iter = at::TensorIteratorConfig()
                         .check_all_same_dtype(false)
@@ -59,13 +59,13 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
                         .add_output(dst_view)
                         .add_input(dst_view)
                         .build();
-    copyLib.exec_unary_kernel(neg_iter, "copy_neg");
+    lib.exec_unary_kernel(neg_iter, "copy_neg");
     return;
   }
 
   const std::string_view name = needs_conj ? "copy_conj" : (needs_neg ? "copy_neg" : "copy_identity");
   auto iter = build_iter(dst_view);
-  copyLib.exec_unary_kernel(iter, std::string(name));
+  lib.exec_unary_kernel(iter, std::string(name));
 }
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
