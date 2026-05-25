@@ -3157,6 +3157,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             _is_other_node_that_references_mutation_buffer(node)
             for node in self.scheduler.nodes
         ):
+            why("epilogue has other references")
             return False
 
         return self.scheduler.can_fuse_vertical(self, node2)
@@ -3169,14 +3170,14 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         self,
         scheduler: Scheduler,
         kernel_node: UserTritonSchedulerNode,
-        fused_epilogue: SchedulerNode,
+        epilogue: SchedulerNode,
     ) -> None:
-        snodes = typing.cast(list[BaseSchedulerNode], [kernel_node, fused_epilogue])
+        snodes = typing.cast(list[BaseSchedulerNode], [kernel_node, epilogue])
         super().__init__(scheduler, snodes)
         self.kernel_node = kernel_node
-        self.fused_epilogue = fused_epilogue
+        self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
-        self.outputs = fused_epilogue.outputs
+        self.outputs = epilogue.outputs
 
     @classmethod
     def epilogue_fuse(
@@ -3197,7 +3198,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
+        assert isinstance(self.epilogue.node, ir.ComputedBuffer)
         from torch._inductor.codegen.simd import SIMDScheduling
         from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
         from torch._inductor.codegen.triton import FusedUserTritonKernel
@@ -3207,13 +3208,13 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
 
         # Epilogue fusion is gated on pointwise operations, thus 1D tiling, with no reduction.
         tiling = SIMDScheduling.create_tiling([numel], [sympy.S.One])
-        kernel_features = SIMDKernelFeatures([self.fused_epilogue], numel)
+        kernel_features = SIMDKernelFeatures([self.epilogue], numel)
 
         fused_user_kernel = FusedUserTritonKernel(tiling, kernel_features, self)
         new_kernel_src = fused_user_kernel.codegen()
 
         return self.kernel_node.node.codegen_with_epilogue_fusion(
-            wrapper, (self.fused_epilogue.node, new_kernel_src)
+            wrapper, (self.epilogue.node, new_kernel_src)
         )
 
     def is_extern(self) -> bool:
