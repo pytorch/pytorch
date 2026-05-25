@@ -6157,6 +6157,30 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     @requires_cuda_and_triton
+    def test_wrap_fusion_reduction_epilogue(self):
+        @triton.jit
+        def row_scale_kernel(x_ptr, out_ptr, row_stride, BLOCK_SIZE: tl.constexpr):
+            row = tl.program_id(0)
+            cols = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(x_ptr + row * row_stride + cols)
+            tl.store(out_ptr + row * row_stride + cols, x * 2.0)
+
+        def fn(x):
+            B, N = x.shape
+            out = torch.empty_like(x)
+            BLOCK_SIZE = N
+            wrap_triton(row_scale_kernel, output_tile=("BLOCK_SIZE",))[(B,)](
+                x, out, x.stride(0), BLOCK_SIZE=BLOCK_SIZE
+            )
+            row_max = out.abs().amax(dim=-1, keepdim=True)
+            return out / row_max
+
+        x = torch.randn(4, 128, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(out, fn(x))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @requires_cuda_and_triton
     def test_wrap_fusion_cumsum(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -6243,6 +6267,39 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_wrap_fusion_2d_tile_reduction_no_fuse(self):
+        @triton.jit
+        def tile2d_kernel(
+            x_ptr,
+            out_ptr,
+            stride_m,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid_m = tl.program_id(1)
+            pid_n = tl.program_id(0)
+            rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+            rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            x = tl.load(x_ptr + rm[:, None] * stride_m + rn[None, :])
+            tl.store(out_ptr + rm[:, None] * stride_m + rn[None, :], x * 2.0)
+
+        def fn(x):
+            M, N = x.shape
+            out = torch.empty_like(x)
+            BLOCK_M, BLOCK_N = 32, 32
+            grid = (triton.cdiv(N, BLOCK_N), triton.cdiv(M, BLOCK_M))
+            wrap_triton(tile2d_kernel, output_tile=("BLOCK_N", "BLOCK_M"))[grid](
+                x, out, x.stride(0), BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N
+            )
+            row_max = out.abs().amax(dim=-1, keepdim=True)
+            return out / row_max
+
+        x = torch.randn(64, 64, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(out, fn(x))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=2)
 
 
 if HAS_CUDA_AND_TRITON:
