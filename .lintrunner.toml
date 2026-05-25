@@ -188,7 +188,6 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
-    '**/generated/**',
     '**/*pb.h',
     '**/*inl.h',
     'aten/src/ATen/cpu/FlushDenormal.cpp',
@@ -215,7 +214,6 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
-    'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -223,7 +221,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
 ]

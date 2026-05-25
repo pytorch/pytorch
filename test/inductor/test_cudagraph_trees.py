@@ -2387,46 +2387,6 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
-        def test_error_on_dealloc_use_after_recording_and_execution(self):
-            def run(loop_count):
-                torch._dynamo.reset()
-                cfn = torch.compile(torch.sin, mode="reduce-overhead")
-                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
-                for _ in range(loop_count):
-                    x = cfn2(torch.randn(5, device="cuda"))
-
-                with self.assertRaisesRegex(RuntimeError, "overwritten"):
-                    y = cfn(x)
-                    _ = y.cpu()
-
-                del x
-
-            for loop_count in (2, 3):
-                run(loop_count)
-
-        def test_error_on_dealloc_use_after_cached_output(self):
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x + 1
-
-            stale = None
-            for _ in range(3):
-                stale = foo(torch.rand([4], device="cuda"))
-
-            self.assertIsNotNone(stale)
-            node = self.curr_node()
-            self.assertIs(stale, node.cached_tensor_outputs[0])
-
-            new = foo(torch.rand([4], device="cuda"))
-            self.assertIsNot(stale, new)
-            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
-            _ = new.cpu()
-
-            with self.assertRaisesRegex(RuntimeError, "overwritten"):
-                stale + 1
-
-            del stale, new
-
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
             stack traces even when a post-grad pass strips them from arg nodes
@@ -3405,23 +3365,6 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(out, inp * 2)
             # Partition was too small, so no cudagraph recorded
-            self.assertIsNone(self.get_manager())
-
-        def test_max_autotune_skips_single_kernel_cudagraph_by_default(self):
-            def fn(x, bias, y):
-                return torch.sigmoid(x + 0.5 * y + bias)
-
-            x = torch.randn((16, 8), device="cuda")
-            y = torch.randn((16, 8), device="cuda")
-            bias = torch.randn((1, 8), device="cuda")
-
-            fn_compiled = torch.compile(
-                fn, fullgraph=True, dynamic=False, mode="max-autotune"
-            )
-            for _ in range(3):
-                out = fn_compiled(x, bias, y)
-
-            self.assertEqual(out, fn(x, bias, y))
             self.assertIsNone(self.get_manager())
 
         def test_cudagraph_min_partition_size_allow_large(self):

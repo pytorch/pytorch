@@ -119,6 +119,22 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_non_finite(self):
+        def fn(x):
+            return torch.frexp(x)
+
+        x = torch.tensor(
+            [float("inf"), float("-inf"), float("nan")], device=device_type
+        )
+        expected_mantissa, expected_exponent = fn(x)
+        actual_mantissa, actual_exponent = torch.compile(
+            fn, backend="inductor", fullgraph=True
+        )(x)
+
+        self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
+        self.assertEqual(actual_exponent, expected_exponent)
+
     def test_index_put_issue(self):
         def forward(
             self,
