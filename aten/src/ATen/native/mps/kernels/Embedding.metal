@@ -49,7 +49,7 @@ kernel void embedding_dense_backward(
     constant T* grad [[buffer(0)]],
     constant I* indices [[buffer(1)]],
     constant uint* counts [[buffer(2)]],
-    device AtomicType_t<T>* grad_weight [[buffer(3)]],
+    device AtomicType_t<float>* grad_weight [[buffer(3)]],
     constant EmbeddingDenseBackwardParams<uint32_t>& params [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint feature_size = params.feature_size;
@@ -68,19 +68,19 @@ kernel void embedding_dense_backward(
 
   O grad_offset = grad_outer_offset +
       static_cast<O>(feature_idx) * static_cast<O>(params.grad_feature_stride);
-  auto grad_val = static_cast<opmath_t<T>>(grad[grad_offset]);
+  float grad_val = static_cast<float>(grad[grad_offset]);
   if (params.scale_grad_by_freq) {
     uint c = counts[weight_idx];
     if (c == 0) {
       return;
     }
-    grad_val /= static_cast<opmath_t<T>>(c);
+    grad_val /= static_cast<float>(c);
   }
 
-  AtomicType<T>::atomic_add(
+  AtomicType<float>::atomic_add(
       grad_weight,
       static_cast<long>(weight_idx) * feature_size + feature_idx,
-      static_cast<T>(grad_val));
+      grad_val);
 }
 
 #define REGISTER_EMBEDDING_DENSE_BACKWARD_COUNT(I, O, OSUFFIX)                \
@@ -97,7 +97,7 @@ kernel void embedding_dense_backward(
       constant T * grad [[buffer(0)]],                                        \
       constant I * indices [[buffer(1)]],                                     \
       constant uint * counts [[buffer(2)]],                                   \
-      device AtomicType_t<T> * grad_weight [[buffer(3)]],                     \
+      device AtomicType_t<float> * grad_weight [[buffer(3)]],                 \
       constant EmbeddingDenseBackwardParams<uint32_t> & params [[buffer(4)]], \
       uint tid [[thread_position_in_grid]])
 
