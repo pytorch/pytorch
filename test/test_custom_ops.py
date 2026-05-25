@@ -4567,6 +4567,43 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called_impl)
         self.assertTrue(called_abstract)
 
+    @skipIfTorchDynamo("recursive dynamo")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
+    def test_compile_autograd_list_output_default_args(self):
+        @torch.library.custom_op(
+            "_torch_testing::list_output_default_args",
+            mutates_args=(),
+        )
+        def f(
+            x: Tensor,
+            a: Optional[float] = None,
+            b: bool = False,
+            c: bool = True,
+        ) -> list[Tensor]:
+            return [x.clone()]
+
+        @f.register_fake
+        def _(x, a=None, b=False, c=True):
+            return [torch.empty_like(x)]
+
+        def backward(ctx, grads):
+            return (grads[0], None, None, None)
+
+        def setup_context(ctx, inputs, output):
+            self.assertEqual(len(inputs), 4)
+            self.assertEqual(inputs[1:], (None, False, True))
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def compiled(x):
+            return f(x, None, False, True)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        (out,) = compiled(x)
+        (grad,) = torch.autograd.grad(out.sum(), x)
+        self.assertEqual(grad, torch.ones_like(x))
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_error_cases(self):
         @torch.library.custom_op("_torch_testing::g", mutates_args=())
