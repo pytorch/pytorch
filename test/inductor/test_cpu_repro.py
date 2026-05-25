@@ -158,6 +158,22 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    def test_prims_broadcast_in_dim_clone(self):
+        def fn(x):
+            x_cloned = x.clone()
+            return torch.ops.prims.broadcast_in_dim.default(
+                x_cloned,
+                [x_cloned.shape[0], x_cloned.shape[1]],
+                [0, 1],
+            ).clone()
+
+        x = torch.randn(4, 10)
+        compiled = torch.compile(fn, backend="inductor")
+
+        expected = fn(x)
+        actual = compiled(x)
+        torch.testing.assert_close(actual, expected)
+
     def _check_conv_stride_constraints(self, formats):
         for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason

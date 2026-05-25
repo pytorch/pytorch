@@ -1619,6 +1619,20 @@ def forward(self, arg0_1):
     """,
         )
 
+    def test_prims_broadcast_in_dim(self):
+        def f(x):
+            return torch.ops.prims.broadcast_in_dim.default(x, [2, 5, 3], [0, 2])
+
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+
+    def test_prims_broadcast_in_dim_mutated_input(self):
+        def f(x):
+            y = torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
+            x.add_(1)
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+
     def test_fill_(self):
         def f(x):
             y = x + x

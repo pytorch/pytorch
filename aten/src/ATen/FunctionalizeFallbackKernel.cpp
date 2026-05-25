@@ -9,6 +9,7 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -22,6 +23,8 @@
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/expand_ops.h>
+#include <ATen/ops/unsqueeze_ops.h>
 
 #include <utility>
 #endif
@@ -406,6 +409,51 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   return self;
 }
 
+static at::Tensor prims_broadcast_in_dim_functionalize(
+    c10::DispatchKeySet dispatchKeySet [[maybe_unused]],
+    const at::Tensor& self,
+    c10::SymIntArrayRef shape,
+    at::IntArrayRef broadcast_dimensions) {
+  const auto output_rank = static_cast<int64_t>(shape.size());
+  const auto input_rank = self.dim();
+
+  TORCH_CHECK(
+      output_rank >= input_rank,
+      "prims.broadcast_in_dim: output rank must be greater than or equal to input rank");
+  TORCH_CHECK(
+      static_cast<int64_t>(broadcast_dimensions.size()) == input_rank,
+      "prims.broadcast_in_dim: broadcast_dimensions must have length equal to self.dim()");
+
+  std::vector<bool> is_broadcast_dimension(output_rank, false);
+  int64_t previous_dim = -1;
+  for (const auto dim : broadcast_dimensions) {
+    TORCH_CHECK(
+        dim >= 0 && dim < output_rank,
+        "prims.broadcast_in_dim: invalid broadcast dimension");
+    TORCH_CHECK(
+        dim > previous_dim,
+        "prims.broadcast_in_dim: broadcast dimensions must be in increasing order");
+    is_broadcast_dimension[dim] = true;
+    previous_dim = dim;
+  }
+
+  const auto broadcast = [&](const at::Tensor& tensor) {
+    auto out = tensor;
+    for (const auto idx : c10::irange(output_rank)) {
+      if (!is_broadcast_dimension[idx]) {
+        out = at::_ops::unsqueeze::call(out, static_cast<int64_t>(idx));
+      }
+    }
+    return at::_ops::expand::call(out, shape, /*implicit=*/false);
+  };
+
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    at::AutoDispatchSkipFunctionalize guard;
+    return broadcast(self);
+  }
+  return broadcast(self);
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -420,4 +468,8 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   // The overloads of set_() that take in a storage should never
   // appear with torch.compile, because dynamo graph breaks
   m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
+}
+
+TORCH_LIBRARY_IMPL(prims, Functionalize, m) {
+  m.impl("broadcast_in_dim", TORCH_FN(prims_broadcast_in_dim_functionalize));
 }
