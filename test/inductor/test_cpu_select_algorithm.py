@@ -3125,7 +3125,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             if code.count("AMXState amx_state") != 2:
                 raise AssertionError
 
-
     @skipIfNoONEDNN
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
