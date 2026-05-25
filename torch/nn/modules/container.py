@@ -332,7 +332,7 @@ class Sequential(Module):
         return self
 
 
-class ModuleList(Module, container_abcs.Iterable[Module]):
+class ModuleList(Module):
     r"""Holds submodules in a list.
 
     :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
