@@ -3188,7 +3188,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 )
                 return False
         else:
-            if self.epilogue_requires_new_store(writing_node):
+            if self.epilogue_requires_indexing(writing_node):
                 why(
                     "epilogue requires expressions not available in user's Triton kernel"
                 )
@@ -3237,7 +3237,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         return self.scheduler.can_fuse_vertical(self, node2)
 
-    def epilogue_requires_new_store(self, node2: SchedulerNode) -> bool:
+    def epilogue_requires_indexing(self, node2: SchedulerNode) -> bool:
         # The epilogue can only read from the output buffer.
         # Any other tensor/s would require additional load expressions.
         written_buffer_name = self.node.mutation_outputs[0].name
@@ -3351,7 +3351,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         writing_node = self.writing_node
 
         epilogue_needs_indexing = any(
-            self.kernel_node.epilogue_requires_new_store(sn) for sn in epilogue_nodes
+            self.kernel_node.epilogue_requires_indexing(sn) for sn in epilogue_nodes
         )
         if is_reduction_ep:
             # Only 1D-grid reductions are supported: XBLOCK=1, no tile alias needed.
