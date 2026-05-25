@@ -691,9 +691,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
-        return self.ndim > 0
-
     def unpack_var_sequence(
         self, tx: "InstructionTranslator", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:

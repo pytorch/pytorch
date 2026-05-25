@@ -473,9 +473,6 @@ class MapVariable(IteratorVariable):
     def python_type(self) -> type:
         return map
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
-        return False
-
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
         if not self.is_mutable():
