@@ -316,7 +316,7 @@ static C10_ALWAYS_INLINE void _check_group_norm_inputs(
     std::optional<int64_t> weight_bdim,
     const Tensor& bias,
     std::optional<int64_t> bias_bdim,
-    c10::SymInt C) {
+    const c10::SymInt& C) {
   TORCH_CHECK(has_same_shape(weight, weight_bdim, {C}),
     "Expected weight to be of shape {", C, "}, but got {", weight.sizes(), '}');
   TORCH_CHECK(has_same_shape(bias, bias_bdim, {C}),
@@ -331,9 +331,9 @@ native_group_norm_batch_rule(
     std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt,
     std::optional<int64_t> bias_bdim,
-    c10::SymInt N,
-    c10::SymInt C,
-    c10::SymInt HxW,
+    const c10::SymInt& N,
+    const c10::SymInt& C,
+    const c10::SymInt& HxW,
     int64_t group,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
