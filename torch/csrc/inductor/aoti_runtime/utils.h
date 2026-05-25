@@ -407,6 +407,32 @@ inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
   return RAIIAtenTensorHandle(handle);
 }
 
+template <typename DevicePtr>
+inline DevicePtr allocate_scratch_tensor(
+    int64_t numel,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    RAIIAtenTensorHandle& scratch_tensor) {
+  DevicePtr scratch_ptr = 0;
+  if (numel > 0) {
+    int64_t scratch_size[] = {numel};
+    int64_t scratch_stride[] = {1};
+    AtenTensorHandle scratch_handle;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+        1,
+        scratch_size,
+        scratch_stride,
+        dtype,
+        device_type,
+        device_index,
+        &scratch_handle));
+    scratch_tensor = RAIIAtenTensorHandle(scratch_handle);
+    scratch_ptr = reinterpret_cast<DevicePtr>(scratch_tensor.data_ptr());
+  }
+  return scratch_ptr;
+}
+
 class ConstantHandle {
  public:
   ConstantHandle() = default;
