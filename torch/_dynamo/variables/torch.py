@@ -1195,12 +1195,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ],
                 )
             kernel_var = args[0]
+            from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
             output_tile_var = kwargs.get("output_tile")
             if output_tile_var is not None:
-                from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-
                 output_tile = output_tile_var.as_python_constant()
                 kernel_side_table.set_output_tile(kernel_var.kernel_idx, output_tile)
+            pid_remap_var = kwargs.get("pid_remap")
+            if pid_remap_var is not None:
+                pid_remap = pid_remap_var.as_python_constant()
+                kernel_side_table.set_pid_remap(kernel_var.kernel_idx, pid_remap)
             # wrap_triton / capture_triton is a no-op in dynamo
             return kernel_var
 
