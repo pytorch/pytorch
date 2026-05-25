@@ -4992,6 +4992,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             "Compile with inductor backend should have stride (1, 4)",
         )
 
+    # https://github.com/pytorch/pytorch/issues/162151
+    def test_compile_errors_on_overlapping_copy_with_different_strides(self):
+        def foo(x):
+            x = x.permute(2, 1, 0)
+            x[0] += 1
+            x[0] = x[0].t()
+            return x
+
+        for backend in ("aot_eager", "inductor"):
+            x = torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]])
+            ctx = fresh_cache() if backend == "inductor" else contextlib.nullcontext()
+            with ctx:
+                compiled = torch.compile(foo, backend=backend)
+                with self.assertRaisesRegex(
+                    (
+                        RuntimeError,
+                        torch._dynamo.exc.BackendCompilerFailed,
+                    ),
+                    "some elements of the input tensor and the written-to tensor",
+                ):
+                    compiled(x)
+
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
     def test_lru_cache_tracing(self):

@@ -6,6 +6,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
@@ -312,6 +313,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor copy_meta(const Tensor& self, const Tensor& src, bool non_blocking) {
+  at::assert_no_partial_overlap(self, src);
   // Must directly use self(), so we can dispatch properly is self is a subclass
   auto r = clone_preserve_strides(self);
   r.copy_(src, non_blocking);
@@ -323,6 +325,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
   // (1) It isn't exposed to the frontend (no python bindings)
   // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+  at::assert_no_partial_overlap(self, src);
   auto self_storage = self.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
   // If self has no real storage, we can't actually clone it.
   // Instead, generate an empty tensor with the right sizes/strides, since we should be able to assume
