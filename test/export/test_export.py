@@ -6633,6 +6633,16 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_export_rejects_param_with_invalid_storage(self):
+        m = torch.nn.Linear(4, 4)
+        x = torch.ones(1, 4)
+        m.weight.data.untyped_storage().resize_(0)
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            r"are out of bounds for storage of size 0",
+        ):
+            export(m, (x,))
+
     def test_unbacked_infer_size(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

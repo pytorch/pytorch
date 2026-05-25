@@ -1369,6 +1369,28 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     return example_inputs, example_kwarg_inputs
 
 
+def _validate_param_buffer_storage(state_dict: dict[str, Any]) -> None:
+    from torch._prims_common import compute_required_storage_length
+
+    for name, tensor in state_dict.items():
+        if not isinstance(tensor, torch.Tensor):
+            continue
+        storage_size = tensor.untyped_storage().nbytes() // tensor.element_size()
+        required_size = compute_required_storage_length(
+            tensor.shape, tensor.stride(), int(tensor.storage_offset())
+        )
+        if required_size > 0 and storage_size < required_size:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"Parameter/buffer '{name}': sizes {list(tensor.shape)}, "
+                f"strides {list(tensor.stride())}, storage offset "
+                f"{tensor.storage_offset()}, and itemsize "
+                f"{tensor.element_size()} requiring a storage size of "
+                f"{required_size * tensor.element_size()} are out of bounds "
+                f"for storage of size {tensor.untyped_storage().nbytes()}",
+            )
+
+
 def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
     # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
     # but the running module state so we can always match by id() the entries here with the graph inputs
@@ -1380,6 +1402,7 @@ def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
 
+    _validate_param_buffer_storage(original_state_dict)
     return original_state_dict
 
 
