@@ -112,7 +112,7 @@ def get_symm_mem_workspace(
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
-        if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+        if torch.accelerator.is_available() and torch.accelerator.current_stream().is_capturing():
             curr_size = 0 if tensor is None else tensor.numel() * tensor.element_size()
             raise RuntimeError(
                 f"get_symm_mem_workspace(): the requested size ({min_size} bytes) "
@@ -422,8 +422,8 @@ def _pipelined_produce_and_all2all(
             # scheduled first. Once the first chunk_producer is scheduled in
             # the correct order, there's very little room for the scheduling
             # order of subsequent kernels to be inconsistent across ranks.
-            if step == 2:
-                torch.accelerator._sleep(100)
+            if step == 2 and torch.cuda.is_available():
+                torch.cuda._sleep(100)
             chunk_producer((rank + step) % group_size, p2p_buf)
             symm_mem.barrier(channel=step % 2)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
@@ -432,8 +432,8 @@ def _pipelined_produce_and_all2all(
             symm_mem.barrier(channel=step % 2)
 
     # If the sleep wasn't issued in the above loop, do it now.
-    if group_size == 2:
-        torch.accelerator._sleep(100)
+    if group_size == 2 and torch.cuda.is_available():
+        torch.cuda._sleep(100)
 
     chunk_producer(rank, out_chunks[rank])
     torch.accelerator.current_stream().wait_stream(backend_stream)
@@ -915,6 +915,7 @@ def _should_use_fused_all_gather_matmul_native(
     return (
         "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
         and torch.cuda.is_available()
+        and A_shard.device.type == "cuda"
         and A_shard.is_contiguous()
         and gather_dim == 0
         # _async_input_mm requires local_M to be divisible by world_size.
