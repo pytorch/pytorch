@@ -91,6 +91,19 @@ struct GetScalarType<at::vec::VectorizedN<T, N>> {
 };
 #endif
 
+inline uint64_t ceil_log2_u64(uint64_t n) {
+  if (n <= 1) {
+    return 0;
+  }
+  n -= 1;
+  uint64_t result = 0;
+  while (n > 0) {
+    n >>= 1;
+    result += 1;
+  }
+  return result;
+}
+
 template <typename T, uint64_t kChunkSize>
 struct CascadeSumHelper {
   // A data struct to help cascade summation:
@@ -100,17 +113,9 @@ struct CascadeSumHelper {
   uint64_t index{0}; // index of the current data.
   CascadeSumHelper() = default;
   CascadeSumHelper(uint64_t N) {
-    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
-    depth = m > 0
-        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
-        : 0;
-    if constexpr (IsVecType<T>::value) {
-      sum_stk.assign(
-          std::max(depth, static_cast<uint64_t>(1)),
-          T(typename T::value_type(0)));
-    } else {
-      sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
-    }
+    const uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = ceil_log2_u64(m);
+    sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
   }
 };
 
@@ -162,10 +167,8 @@ struct WelfordHelper {
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
   WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
-    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
-    depth = m > 0
-        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
-        : 0;
+    const uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = ceil_log2_u64(m);
     welford_stk.assign(depth, Welford<T>());
   }
 };
@@ -1330,8 +1333,8 @@ void _mm_get_cache_blocking(
     Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
   }
 
-  float min_Mc_ratio = 2;
-  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  constexpr int64_t min_Mc_ratio = 2;
+  const int64_t min_Mc_blocks = (min_Mc_ratio * Mr + Nr - 1) / Nr;
   auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
   if (min_Mc_blocks * Mr * Kt_bytes < L2) {
     Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
