@@ -1150,10 +1150,11 @@ class TestDebugModeUtils(TestCase):
         if dist.is_initialized():
             self.skipTest("requires no existing process group")
 
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            init_file = os.path.join(tmpdir, "debug_mode_collective_init")
             dist.init_process_group(
                 "gloo",
-                init_method=f"file://{f.name}",
+                init_method=f"file://{init_file}",
                 rank=0,
                 world_size=1,
             )
