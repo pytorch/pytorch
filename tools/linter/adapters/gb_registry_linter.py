@@ -13,11 +13,32 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 
-# Patch ast._splitlines_no_ff with caching to avoid O(n²) re-splitting.
-# get_source_segment() calls _splitlines_no_ff() for every keyword argument,
-# but the same source string is passed repeatedly for the same file.
-if hasattr(ast, "_splitlines_no_ff"):
-    ast._splitlines_no_ff = functools.lru_cache(maxsize=128)(ast._splitlines_no_ff)
+def _patch_ast_splitlines_no_ff() -> None:
+    # Patch ast._splitlines_no_ff with caching to avoid O(n^2) re-splitting.
+    # get_source_segment() passes a different maxlines value for each node, so
+    # cache the full split by source and slice it per call.
+    if not hasattr(ast, "_splitlines_no_ff") or getattr(
+        ast._splitlines_no_ff, "_gb_registry_cached", False
+    ):
+        return
+
+    original_splitlines_no_ff = ast._splitlines_no_ff
+
+    @functools.lru_cache(maxsize=128)
+    def cached_full_splitlines(source: str) -> tuple[str, ...]:
+        return tuple(original_splitlines_no_ff(source, None))
+
+    def splitlines_no_ff(source: str, maxlines: int | None = None) -> list[str]:
+        lines = cached_full_splitlines(source)
+        if maxlines is not None:
+            lines = lines[:maxlines]
+        return list(lines)
+
+    splitlines_no_ff._gb_registry_cached = True  # type: ignore[attr-defined]
+    ast._splitlines_no_ff = splitlines_no_ff
+
+
+_patch_ast_splitlines_no_ff()
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +46,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 
 from tools.dynamo.gb_id_mapping import (
-    find_unimplemented_calls,
+    extract_unimplemented_call_info,
     load_registry,
     next_gb_id,
 )
@@ -73,13 +94,17 @@ def _is_forbidden_raise(node: ast.Raise) -> bool:
     return False
 
 
-def _collect_forbidden_unsupported_raises(
+def _collect_registry_inputs(
     dynamo_dir: Path,
-) -> list[tuple[Path, int, int]]:
+) -> tuple[list[tuple[Path, int, int]], dict[str, list[tuple[dict[str, Any], Path]]]]:
     forbidden_raises: list[tuple[Path, int, int]] = []
+    gb_type_calls: dict[str, list[tuple[dict[str, Any], Path]]] = {}
 
     for py_file in dynamo_dir.rglob("*.py"):
         source = py_file.read_text(encoding="utf-8")
+        if "unimplemented" not in source and "Unsupported" not in source:
+            continue
+
         source_lines = source.splitlines()
         try:
             tree = ast.parse(source, filename=str(py_file))
@@ -87,29 +112,18 @@ def _collect_forbidden_unsupported_raises(
             continue
 
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Raise) or not _is_forbidden_raise(node):
-                continue
-            if _is_noqa_suppressed(source_lines, node.lineno):
-                continue
-            forbidden_raises.append((py_file, node.lineno, node.col_offset + 1))
+            if isinstance(node, ast.Raise) and _is_forbidden_raise(node):
+                if not _is_noqa_suppressed(source_lines, node.lineno):
+                    forbidden_raises.append((py_file, node.lineno, node.col_offset + 1))
 
-    return forbidden_raises
+            call = extract_unimplemented_call_info(source, node, dynamo_dir)
+            if call is not None:
+                gb_type = call["gb_type"]
+                if gb_type not in gb_type_calls:
+                    gb_type_calls[gb_type] = []
+                gb_type_calls[gb_type].append((call, py_file))
 
-
-def _collect_all_calls(
-    dynamo_dir: Path,
-) -> dict[str, list[tuple[dict[str, Any], Path]]]:
-    """Return mapping *gb_type → list[(call_info, file_path)]* for all occurrences."""
-    gb_type_calls: dict[str, list[tuple[dict[str, Any], Path]]] = {}
-
-    for py_file in dynamo_dir.rglob("*.py"):
-        for call in find_unimplemented_calls(py_file, dynamo_dir):
-            gb_type = call["gb_type"]
-            if gb_type not in gb_type_calls:
-                gb_type_calls[gb_type] = []
-            gb_type_calls[gb_type].append((call, py_file))
-
-    return gb_type_calls
+    return forbidden_raises, gb_type_calls
 
 
 def _create_registry_entry(
@@ -218,7 +232,7 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
     """Check registry sync and return lint messages."""
     lint_messages = []
 
-    forbidden_raises = _collect_forbidden_unsupported_raises(dynamo_dir)
+    forbidden_raises, all_calls = _collect_registry_inputs(dynamo_dir)
     for path, line, char in forbidden_raises:
         lint_messages.append(
             LintMessage(
@@ -237,8 +251,6 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
                 ),
             )
         )
-
-    all_calls = _collect_all_calls(dynamo_dir)
 
     duplicates = []
     for gb_type, call_list in all_calls.items():
