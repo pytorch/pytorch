@@ -32,7 +32,6 @@ import sys
 import textwrap
 import typing
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import import_module
 from tempfile import TemporaryFile
@@ -135,6 +134,8 @@ def _find_repeat_interleave_constraints(
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
@@ -148,12 +149,12 @@ inductor_config = import_module("torch._inductor.config")
 
 ReproCommand = Literal["minify", "analyze", "minifier-query", "run", "get_args"]
 ReproAccuracy = Literal["", "accuracy", "strict_accuracy"]
+ReproTracingMode = Literal["fake", "real", "symbolic"]
 ReproInputReader = InputReader | NopInputReader
 
 
 class ReproLoadArgs(Protocol):
-    def __call__(self, reader: ReproInputReader) -> None:
-        ...
+    def __call__(self, reader: ReproInputReader) -> None: ...
 
 
 class ModuleFails(Protocol):
@@ -162,8 +163,7 @@ class ModuleFails(Protocol):
         fx_g: torch.fx.GraphModule,
         args: Sequence[Any],
         check_str: str | None = None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -171,7 +171,7 @@ class ReproOptions:
     command: ReproCommand
     accuracy: ReproAccuracy
     save_dir: str | None
-    tracing_mode: str | None
+    tracing_mode: ReproTracingMode
     check_str: str | None
     isolate: bool
     offload_to_disk: bool
@@ -189,7 +189,7 @@ class ReproOptions:
             command=typing.cast(ReproCommand, options.command),
             accuracy=typing.cast(ReproAccuracy, options.accuracy),
             save_dir=options.save_dir,
-            tracing_mode=options.tracing_mode,
+            tracing_mode=typing.cast(ReproTracingMode, options.tracing_mode or "real"),
             check_str=getattr(options, "check_str", None),
             isolate=getattr(options, "isolate", False),
             offload_to_disk=getattr(options, "offload_to_disk", False),
@@ -1369,6 +1369,8 @@ def repro_analyze(
             writer.write_tensor(os.path.join("inductor", name), val)
         pbar.update(1)  # type: ignore[has-type]
 
+    if options.save_dir is None:
+        raise RuntimeError("repro analyze requires a save_dir")
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
     )
@@ -1542,10 +1544,10 @@ def run_repro(
     mod: nn.Module,
     load_args: ReproLoadArgs,
     *,
-    command: str = "run",
+    command: ReproCommand = "run",
     accuracy: bool | str = "",
     save_dir: str | None = None,
-    tracing_mode: str | None = None,
+    tracing_mode: ReproTracingMode | None = None,
     patch_code: str | None = None,
     check_str: str | None = None,
     **kwargs: Any,
