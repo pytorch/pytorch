@@ -25,8 +25,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
-     make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
+     make_fullrank_matrices_with_distinct_singular_values, skipIfMeta,
+     freeze_rng_state, IS_ARM64, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      with_ieee_matmul_precision, MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
@@ -3494,7 +3494,7 @@ class TestLinalg(TestCase):
             run_test_singular_input(*params)
 
     @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
+    @skipIfMeta("Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
@@ -4827,7 +4827,7 @@ class TestLinalg(TestCase):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @slowTest
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
+    @skipIfMeta("Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @dtypes(*floating_and_complex_types())
