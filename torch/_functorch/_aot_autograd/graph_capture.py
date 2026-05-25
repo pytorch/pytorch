@@ -338,9 +338,11 @@ def aot_dispatch_base_graph(
         named_buffers = dict(
             mod_when_exporting_non_strict.named_buffers(remove_duplicate=False)
         )
-        tracked_buffer_names = set(mod_when_exporting_non_strict._buffers) & set(
-            named_buffers
-        )
+        tracked_buffer_names = {
+            name
+            for name, buffer in mod_when_exporting_non_strict._buffers.items()
+            if buffer is not None
+        }
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.
         assigned_buffers: dict[str, str] = {}
