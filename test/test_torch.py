@@ -4218,6 +4218,10 @@ class TestTorchDeviceType(TestCase):
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
+        x = torch.arange(8, dtype=dtype, device=device).reshape(2, 2, 2)
+        x = x.permute(2, 1, 0)
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
+            x[0].copy_(x[0].t())
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
