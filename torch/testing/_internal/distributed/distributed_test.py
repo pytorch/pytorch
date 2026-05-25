@@ -6106,7 +6106,7 @@ class DistributedTest:
 
             all_input_var = torch.cat(
                 [
-                    x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1)
+                    x.permute(1, 0, 2).reshape(ONLY_SBN_NET.num_features, -1)
                     for x in input_var
                 ],
                 dim=1,
