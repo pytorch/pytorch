@@ -6359,7 +6359,7 @@ def alloc_with_matching_layout(
     query: Tensor,
     res_shape: tuple[int, ...],
 ):
-    if tuple(query.shape) == res_shape:
+    if query.shape == res_shape:
         res = torch.empty_like(query)
     else:
         dim_order = sorted(
