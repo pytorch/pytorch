@@ -59,9 +59,11 @@ _T_co = TypeVar("_T_co", covariant=True)
 # An additional covariant TypeVariable that is only used as the datatype returned by the collator
 # Since dataloaders need two covariant types to be properly defined (dataset sample & training batch),
 #  a second typevar had to be defined.
-_T_Collated_co = TypeVar("_T_Collated_co", covariant=True)
+_TCollated = TypeVar("_TCollated", covariant=True)
+# Another covariant type variable that is only used for type-hinting init overloads
+_TSample = TypeVar("_TSample", covariant=True)
 _worker_init_fn_t = Callable[[int], None]
-_collate_fn_t = Callable[[list[_T]], _T_Collated_co]
+_collate_fn_t = Callable[[list[_T]], _TCollated]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -141,7 +143,7 @@ def _share_dist_seed(generator, pg):
     return _shared_seed.item()
 
 
-class DataLoader(Generic[_T_co, _T_Collated_co]):
+class DataLoader(Generic[_T_co, _TCollated]):
     r"""
     Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
@@ -244,7 +246,7 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
     sampler: Sampler | Iterable
     pin_memory_device: str
     prefetch_factor: int | None
-    _iterator: _BaseDataLoaderIter[_T_Collated_co] | None
+    _iterator: _BaseDataLoaderIter[_TCollated] | None
     __initialized = False
 
     # __init__ is defined with two extras:
@@ -255,16 +257,16 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
     #  depending on known common dataset types, but that would make this file unreadable. If the need arises, a dataloader.pyi would be more suitable,
     #  as it would not worsen the logic's maintenance.
 
-    @overload  # collate_fn provided
+    @overload  # collate_fn not provided
     def __init__(
-        self,
-        dataset: Dataset[_T_co],
+        self: "DataLoader[_TSample, Any]",  # noqa: UP037
+        dataset: Dataset[_TSample],
         batch_size: int | None = 1,
         shuffle: bool | None = None,
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: _collate_fn_t[_T_co, _T_Collated_co] = ...,
+        collate_fn: None = None,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
@@ -278,16 +280,16 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
         in_order: bool = True,
     ): ...
 
-    @overload  # collate_fn not provided
+    @overload  # collate_fn provided
     def __init__(
-        self: "DataLoader[_T_co, Any]",  # noqa: UP037
+        self,
         dataset: Dataset[_T_co],
         batch_size: int | None = 1,
         shuffle: bool | None = None,
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: None = None,
+        collate_fn: _collate_fn_t[_T_co, _TCollated] | None = ...,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
@@ -310,7 +312,7 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: _collate_fn_t[_T_co, _T_Collated_co] | None = None,
+        collate_fn: _collate_fn_t[_T_co, _TCollated] | None = None,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
@@ -480,7 +482,7 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
 
         self.check_worker_number_rationality()
 
-    def _get_iterator(self) -> _BaseDataLoaderIter[_T_Collated_co]:
+    def _get_iterator(self) -> _BaseDataLoaderIter[_TCollated]:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -539,7 +541,7 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
 
         super().__setattr__(attr, val)
 
-    def __iter__(self) -> _BaseDataLoaderIter[_T_Collated_co]:
+    def __iter__(self) -> _BaseDataLoaderIter[_TCollated]:
         # When using a single worker the returned iterator should be
         # created every time to avoid resetting its state
         # However, in the case of a multiple workers iterator
@@ -673,8 +675,8 @@ class DataLoader(Generic[_T_co, _T_Collated_co]):
             )
 
 
-class _BaseDataLoaderIter(Generic[_T_Collated_co]):
-    def __init__(self, loader: DataLoader[Any, _T_Collated_co]) -> None:
+class _BaseDataLoaderIter(Generic[_TCollated]):
+    def __init__(self, loader: DataLoader[Any, _TCollated]) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
         self._pg = None
@@ -767,7 +769,7 @@ class _BaseDataLoaderIter(Generic[_T_Collated_co]):
     def _next_data(self) -> NoReturn:
         raise NotImplementedError
 
-    def __next__(self) -> _T_Collated_co:
+    def __next__(self) -> _TCollated:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
                 # TODO(https://github.com/pytorch/pytorch/issues/76750)
@@ -805,7 +807,7 @@ class _BaseDataLoaderIter(Generic[_T_Collated_co]):
 
 
 class _SingleProcessDataLoaderIter(
-    _BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]
+    _BaseDataLoaderIter[_TCollated], Generic[_TCollated]
 ):
     def __init__(self, loader) -> None:
         super().__init__(loader)
@@ -841,7 +843,7 @@ class _SingleProcessDataLoaderIter(
 
 
 class _MultiProcessingDataLoaderIter(
-    _BaseDataLoaderIter[_T_Collated_co], Generic[_T_Collated_co]
+    _BaseDataLoaderIter[_TCollated], Generic[_TCollated]
 ):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
