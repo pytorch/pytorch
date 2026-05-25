@@ -1473,6 +1473,29 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x, y)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_inference_mode_contiguous_copy(self):
+        @nested_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            z = torch.cos(x)
+            with torch.inference_mode():
+                maybe_copy = z.reshape(2, 4).t().contiguous()
+                return gn(maybe_copy, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(4, 2, requires_grad=False)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Inplace update to inference tensor outside InferenceMode is not allowed",
+        ):
+            opt_fn(x, y)
+
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 

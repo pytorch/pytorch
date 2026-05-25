@@ -1917,6 +1917,95 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         result = torch.compile(f)(x, w)
         self.assertIsInstance(result, torch.Tensor)
 
+    def test_inference_mode_decorator_getitem_view(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32)
+
+            @torch.inference_mode()
+            def forward(self, start_pos: int):
+                return self.range[start_pos : start_pos + 3]
+
+        mod = Repro()
+        expected = mod(1)
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)(1)
+        self.assertEqual(result, expected)
+
+    def test_inference_mode_decorator_view_methods(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32)
+
+            @torch.inference_mode()
+            def forward(self, start_pos: int):
+                return self.range.view(2, 4).detach().narrow(1, start_pos, 2)
+
+        mod = Repro()
+        expected = mod(1)
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)(1)
+        self.assertEqual(result, expected)
+
+    def test_inference_mode_decorator_tuple_view_methods(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32)
+
+            @torch.inference_mode()
+            def forward(self, start_pos: int):
+                return self.range.view(2, 4).unbind(0)[start_pos]
+
+        mod = Repro()
+        expected = mod(1)
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)(1)
+        self.assertEqual(result, expected)
+
+    def test_inference_mode_decorator_view_functions(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32).view(2, 4)
+
+            @torch.inference_mode()
+            def forward(self):
+                transposed = torch.transpose(self.range, 0, 1)
+                return torch.split(transposed, 2, dim=0)[0]
+
+        mod = Repro()
+        expected = mod()
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)()
+        self.assertEqual(result, expected)
+
+    def test_inference_mode_decorator_view_properties_and_aten_overloads(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.range = torch.arange(1, 9, dtype=torch.float32)
+                self.complex_range = self.range.to(torch.complex64)
+
+            @torch.inference_mode()
+            def forward(self):
+                real_view = self.complex_range.real
+                aten_slice = torch.ops.aten.slice.Tensor(self.range, 0, 1, 4, 1)
+                return real_view, aten_slice
+
+        mod = Repro()
+        expected = mod()
+
+        torch._dynamo.reset()
+        result = torch.compile(mod)()
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
