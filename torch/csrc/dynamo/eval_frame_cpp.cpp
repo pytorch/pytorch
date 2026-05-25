@@ -26,18 +26,28 @@ namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 
+// -1 means inactive, >= 0 means active with that many compiled frames.
+thread_local int fullgraph_compiled_frame_count = -1;
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+thread_local bool fullgraph_error_on_nested_compile = false;
+
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
   py::object ctx;
 
-  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+  explicit DebugContextGuard(const py::object& c) : ctx(c) {
     ctx.attr("__enter__")();
   }
 
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
@@ -52,11 +62,39 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+extern "C" bool increment_fullgraph_compiled_frame_count_if_active(void) {
+  if (fullgraph_compiled_frame_count < 0) {
+    return false;
+  }
+  fullgraph_compiled_frame_count++;
+  return true;
+}
+
+extern "C" int set_fullgraph_compiled_frame_count(int val) {
+  int old = fullgraph_compiled_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_compiled_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" bool get_fullgraph_error_on_nested_compile(void) {
+  return fullgraph_error_on_nested_compile;
+}
+
+extern "C" bool set_fullgraph_error_on_nested_compile(bool val) {
+  bool old = fullgraph_error_on_nested_compile;
+  fullgraph_error_on_nested_compile = val;
+  return old;
+}
+
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -72,7 +110,7 @@ py::object get_bytecode_debugger_callback() {
       py::handle(bytecode_debugger_callback_obj));
 }
 
-void register_breakpoint_code(py::object code) {
+void register_breakpoint_code(const py::object& code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
@@ -307,7 +345,7 @@ int32_t dynamo_get_c_recursion_limit() {
 
 struct CRecursionLimitRAII {
   PyThreadState* tstate;
-  int32_t old_recursion_remaining;
+  int32_t old_recursion_remaining = 0;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
     auto limit = dynamo_get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
@@ -328,6 +366,10 @@ struct CRecursionLimitRAII {
   ~CRecursionLimitRAII() {
     this->tstate->c_recursion_remaining = this->old_recursion_remaining;
   }
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
 };
 
 #else
@@ -430,15 +472,14 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    if (fullgraph_compiled_frame_count >= 0) {
-      fullgraph_compiled_frame_count++;
+    if (increment_fullgraph_compiled_frame_count_if_active()) {
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
       // callback to None to skip sub-frames entirely.
       if (!recursive_callback.is_none() &&
           !recursive_callback.is(py::bool_(false))) {
-        if (fullgraph_error_on_nested_compile) {
+        if (get_fullgraph_error_on_nested_compile()) {
           if (!convert_frame_get_fail_callback) {
             convert_frame_get_fail_callback =
                 py::module_::import("torch._dynamo.convert_frame")

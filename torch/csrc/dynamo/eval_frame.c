@@ -756,14 +756,6 @@ static int clear_state(PyObject* module) {
 
 bool is_skip_guard_eval_unsafe = false;
 
-// -1 means inactive, >= 0 means active with that many compiled frames.
-int fullgraph_compiled_frame_count = -1;
-
-// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
-// compilation will error (via get_fail_callback) instead of being silently
-// skipped.
-bool fullgraph_error_on_nested_compile = false;
-
 // Set the fullgraph compiled frame counter and return the old value.
 // If setting to >= 0 (activating) and already active, no-op.
 static PyObject* set_fullgraph_compiled_frame_count_py(
@@ -773,12 +765,7 @@ static PyObject* set_fullgraph_compiled_frame_count_py(
   if (val == -1 && PyErr_Occurred()) {
     return NULL;
   }
-  int old = fullgraph_compiled_frame_count;
-  if (val >= 0 && old >= 0) {
-    // Already active, no-op.
-  } else {
-    fullgraph_compiled_frame_count = (int)val;
-  }
+  int old = set_fullgraph_compiled_frame_count((int)val);
   return PyLong_FromLong(old);
 }
 
@@ -790,8 +777,7 @@ static PyObject* set_fullgraph_error_on_nested_compile_py(
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
-  bool old = fullgraph_error_on_nested_compile;
-  fullgraph_error_on_nested_compile = Py_IsTrue(arg);
+  bool old = set_fullgraph_error_on_nested_compile(Py_IsTrue(arg));
   if (old) {
     Py_RETURN_TRUE;
   }
