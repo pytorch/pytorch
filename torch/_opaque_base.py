@@ -5,10 +5,12 @@ _FakeScriptObject_cls: type | None = None
 
 def _is_opaque_base_instance(cls, instance, base_instancecheck):
     # When checking against OpaqueBase itself (not a concrete subclass),
-    # delegate to the registration system which correctly covers all
-    # opaque types (value types, metaclass-only reference types, and
-    # FakeScriptObject wrappers).
+    # use normal inheritance first, then delegate to the registration system
+    # which also covers value types and FakeScriptObject wrappers.
     if cls is OpaqueBase:
+        if base_instancecheck(instance):
+            return True
+
         from torch._library.opaque_object import is_opaque_value
 
         return is_opaque_value(instance)
@@ -55,16 +57,85 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
     class OpaqueBaseMeta(
         type(_PybindOpaqueBase),  # pyrefly: ignore [invalid-inheritance]
     ):
-        def __call__(cls, *args, **kwargs):
-            # pybind11_type.__call__ requires pybind base __init__ to run for
-            # Python subclasses.  OpaqueBase is only a marker for those classes.
-            return type.__call__(cls, *args, **kwargs)
+        def __call__(cls: type, *args, **kwargs):
+            if _needs_pybind_meta_call(cls):
+                return super().__call__(*args, **kwargs)
+
+            instance = cls.__new__(cls, *args, **kwargs)
+            if not isinstance(instance, cls):
+                return instance
+
+            init = _find_python_init(cls)
+            if init is not None:
+                init(instance, *args, **kwargs)
+            _ensure_opaque_base_initialized(instance)
+            return instance
 
         def __instancecheck__(cls, instance):
             return _is_opaque_base_instance(cls, instance, super().__instancecheck__)
 
     class OpaqueBase(_PybindOpaqueBase, metaclass=OpaqueBaseMeta):
-        pass
+        def __init__(self, *args, **kwargs):
+            _ensure_opaque_base_initialized(self)
+
+            init = _find_python_init_after_opaque_base(type(self))
+            if init is not None:
+                init(self, *args, **kwargs)
+
+    def _needs_pybind_meta_call(cls):
+        if OpaqueBase not in cls.__mro__:
+            return True
+        for base in cls.__mro__:
+            if base is OpaqueBase:
+                return False
+            if _is_pybind_init(base.__dict__.get("__init__")):
+                return True
+        return False
+
+    def _find_python_init(cls):
+        for base in cls.__mro__:
+            if (
+                base in {OpaqueBase, _PybindOpaqueBase, object}
+                or base.__module__ == "pybind11_builtins"
+            ):
+                continue
+            init = base.__dict__.get("__init__")
+            if init is None or init is object.__init__ or _is_pybind_init(init):
+                continue
+            return init
+        return None
+
+    def _find_python_init_after_opaque_base(cls):
+        after_opaque_base = False
+        for base in cls.__mro__:
+            if base is OpaqueBase:
+                after_opaque_base = True
+                continue
+            if not after_opaque_base:
+                continue
+            if (
+                base in {_PybindOpaqueBase, object}
+                or base.__module__ == "pybind11_builtins"
+            ):
+                continue
+            init = base.__dict__.get("__init__")
+            if init is None or init is object.__init__ or _is_pybind_init(init):
+                continue
+            return init
+        return None
+
+    def _is_pybind_init(init):
+        return type(init).__name__ == "instancemethod"
+
+    def _ensure_opaque_base_initialized(instance):
+        try:
+            initialized = object.__getattribute__(instance, "_opaque_base_initialized")
+        except AttributeError:
+            initialized = False
+        if initialized:
+            return
+        _PybindOpaqueBase.__init__(instance)
+        object.__setattr__(instance, "_opaque_base_initialized", True)
 
     OpaqueBase._pybind_backed = True
     OpaqueBaseMeta.__qualname__ = "OpaqueBaseMeta"

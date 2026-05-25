@@ -25,6 +25,14 @@ class PlacementTypesTestCase(TestCase):
         self.assertIsInstance(Replicate(), OpaqueBase)
         self.assertIsInstance(Partial(), OpaqueBase)
 
+    def test_placement_python_subclass_must_initialize_pybind_base(self):
+        class BadPlacement(Placement):
+            def __init__(self):
+                pass
+
+        with self.assertRaisesRegex(TypeError, "must be called"):
+            BadPlacement()
+
     def test_type_identification(self):
         shard = Shard(3)
         strided_shard = _StridedShard(dim=3, split_factor=7)

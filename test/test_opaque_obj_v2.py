@@ -4173,6 +4173,52 @@ class fn(torch.nn.Module):
                 self.value = value
 
         self.assertEqual(PyOpaque(3).value, 3)
+        self.assertIsInstance(PyOpaque(3), torch._C._OpaqueBase)
+        self.assertIsInstance(PyOpaque(3), OpaqueBase)
+
+        class ChildPyOpaque(PyOpaque):
+            def __init__(self, value):
+                self.value = value
+
+        self.assertEqual(ChildPyOpaque(4).value, 4)
+        self.assertIsInstance(ChildPyOpaque(4), torch._C._OpaqueBase)
+        self.assertIsInstance(ChildPyOpaque(4), OpaqueBase)
+
+        @dataclass
+        class DataOpaque(OpaqueBase):
+            value: int
+
+        self.assertEqual(DataOpaque(5).value, 5)
+        self.assertIsInstance(DataOpaque(5), torch._C._OpaqueBase)
+        self.assertIsInstance(DataOpaque(5), OpaqueBase)
+
+        @dataclass(frozen=True)
+        class FrozenDataOpaque(OpaqueBase):
+            value: int
+
+        self.assertEqual(FrozenDataOpaque(6).value, 6)
+        self.assertIsInstance(FrozenDataOpaque(6), torch._C._OpaqueBase)
+        self.assertIsInstance(FrozenDataOpaque(6), OpaqueBase)
+
+        class ModuleOpaque(OpaqueBase, torch.nn.Module):
+            pass
+
+        module = ModuleOpaque()
+        self.assertIsInstance(module, torch.nn.Module)
+        self.assertEqual(dict(module.named_parameters()), {})
+        self.assertIsInstance(module, torch._C._OpaqueBase)
+        self.assertIsInstance(module, OpaqueBase)
+
+        class ModuleOpaqueWithInit(OpaqueBase, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(()))
+
+        module_with_init = ModuleOpaqueWithInit()
+        self.assertIsInstance(module_with_init, torch.nn.Module)
+        self.assertEqual(next(iter(module_with_init.named_parameters()))[0], "param")
+        self.assertIsInstance(module_with_init, torch._C._OpaqueBase)
+        self.assertIsInstance(module_with_init, OpaqueBase)
 
     def test_generator_metaclass_is_set(self):
         """Generator's metaclass should be OpaqueBaseMeta after import"""
