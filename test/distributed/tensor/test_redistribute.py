@@ -644,6 +644,40 @@ class RedistributeTest(DTensorContinuousTestBase):
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
 
+    def test_shard_to_replicate_local_tensor_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173041.
+        # When the sharded dim is not evenly divisible by world_size the unpad
+        # step in Shard._to_replicate_tensor uses narrow(), which on a non-leading
+        # dim produces a non-contiguous view. The resulting local tensor then
+        # breaks downstream view ops (e.g. inside parallelized nn.Linear).
+        device_mesh = self.build_device_mesh()
+
+        # world_size=4 here, so sizes like 13/14/15/31 are uneven on the sharded dim.
+        test_cases = [
+            # (shape, shard_dim)
+            ((4, 13, 8), 1),
+            ((4, 14, 8), 1),
+            ((4, 15, 8), 1),
+            ((3, 31, 10), 1),  # shape from the original issue repro
+            ((4, 8, 13), 2),
+            ((13, 8), 0),
+            ((8, 13), 1),
+        ]
+
+        for shape, shard_dim in test_cases:
+            full_tensor = torch.randn(shape, device=self.device_type)
+            dt_rep = distribute_tensor(full_tensor, device_mesh, [Replicate()])
+            dt_shard = dt_rep.redistribute(device_mesh, [Shard(shard_dim)])
+            dt_back_rep = dt_shard.redistribute(device_mesh, [Replicate()])
+
+            self.assertTrue(
+                dt_back_rep._local_tensor.is_contiguous(),
+                f"Local tensor should be contiguous after Shard({shard_dim})->Replicate "
+                f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
+            )
+            self.assertTrue(dt_back_rep.is_contiguous())
+            self.assertEqual(dt_back_rep.to_local(), full_tensor)
+
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
         data_to_test = [
