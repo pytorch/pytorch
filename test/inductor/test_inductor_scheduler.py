@@ -11,6 +11,8 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.ir import GraphPartitionSignature
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -263,6 +265,151 @@ class TestScheduler(TestCase):
                     group_size=16,
                 )
             )
+
+    def test_nested_reduction_axis_from_loop_body(self):
+        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
+        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
+            "grouped_x0 grouped_x1 grouped_r"
+        )
+
+        def make_body(index, iter_vars, reduce_vars):
+            body = Mock()
+            body.iter_vars = iter_vars
+            body.reduce_vars = reduce_vars
+            body.indexing_exprs = {"load": index}
+            body.memory_usage = {
+                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
+            }
+            return body
+
+        def make_reduction(index, iter_vars, reduce_vars):
+            node = Mock()
+            node.is_reduction.return_value = True
+            node.get_ranges.return_value = ([16, 16], [16])
+            node._body = make_body(index, iter_vars, reduce_vars)
+            return node
+
+        def classify(outer_index, grouped_index):
+            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
+            grouped = make_reduction(
+                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            )
+            outer_node = Mock()
+            outer_node.get_nodes.return_value = [outer]
+            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
+
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + 256 * outer_r,
+                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.X,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + outer_r,
+                grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            None,
+        )
+
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
