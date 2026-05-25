@@ -46,10 +46,13 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import (
     cache_dir,
@@ -783,15 +786,30 @@ class CachingAutotuner(KernelInterface):
             self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
         self._make_launchers()
 
-    def compile_by_disabling_pipelining(self, config):
+    def _can_disable_pipelining_for_launcher_error(
+        self, config: Config, exc: Exception | None
+    ) -> bool:
+        return (
+            isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+            and (config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1)
+            and self.inductor_meta.get("dynamic_disable_pipelining", True)
+        )
+
+    def _compile_config_with_disabled_pipelining(
+        self, config: Config
+    ) -> tuple[CompileResult[_KernelType], LauncherType]:
         self._ensure_kernel_loaded()
         cfg = copy.deepcopy(config)
         cfg.num_stages = 1
         if "NUM_STAGES" in cfg.kwargs:
             cfg.kwargs["NUM_STAGES"] = 1
         result = self._precompile_config(cfg)
+        return result, result.make_launcher()
+
+    def compile_by_disabling_pipelining(self, config):
+        result, launcher = self._compile_config_with_disabled_pipelining(config)
         self.compile_results = [result]
-        return result.make_launcher()
+        return launcher
 
     def _make_launcher(
         self, compile_result: CompileResult[_KernelType]
@@ -819,22 +837,40 @@ class CachingAutotuner(KernelInterface):
 
         device_interface = self.get_device_interface()
         launchers = []
+        compile_results = []
         exc = None
+        disabled_pipelining_failed = False
         # DeviceGuard ensures each launcher's binary loads onto the right device.
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             for result in self.compile_results:
                 launcher, exc = self._make_launcher(result)
                 if launcher is not None:
                     launchers.append(launcher)
+                    compile_results.append(result)
+                    continue
+                if self._can_disable_pipelining_for_launcher_error(result.config, exc):
+                    try:
+                        (
+                            fallback_result,
+                            fallback_launcher,
+                        ) = self._compile_config_with_disabled_pipelining(result.config)
+                        launchers.append(fallback_launcher)
+                        compile_results.append(fallback_result)
+                        continue
+                    except (
+                        OutOfResources,
+                        PTXASError,
+                        torch.cuda.OutOfMemoryError,
+                        IntelGPUError,
+                    ) as e:
+                        exc = e
+                        disabled_pipelining_failed = True
             if len(launchers) == 0:
                 result = self.compile_results[-1]
                 config = result.config
                 if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
-                    )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    not disabled_pipelining_failed
+                    and self._can_disable_pipelining_for_launcher_error(config, exc)
                 ):
                     self.launchers = [self.compile_by_disabling_pipelining(config)]
                     return
@@ -842,6 +878,7 @@ class CachingAutotuner(KernelInterface):
                     f"No valid triton configs. {type(exc).__name__}: {exc}"
                 )
         self.launchers = launchers
+        self.compile_results = compile_results
 
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
@@ -2983,6 +3020,45 @@ def check_max_block(cfg: dict[str, int]):
             )
 
 
+def _check_native_matmul_block_numel(
+    kwargs: dict[str, int], r0_block: int | None = None
+) -> None:
+    block_numel = native_matmul_block_numel(kwargs, r0_block=r0_block)
+    if block_numel > TRITON_MAX_TENSOR_NUMEL:
+        raise AssertionError(
+            f"Block numel {block_numel} exceeds Triton maximum "
+            f"{TRITON_MAX_TENSOR_NUMEL}"
+        )
+
+
+def _native_matmul_config_under_numel_limit(
+    cfg: Config, r0_block: int | None = None
+) -> bool:
+    return (
+        native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        <= TRITON_MAX_TENSOR_NUMEL
+    )
+
+
+def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Config]:
+    capped_configs: list[Config] = []
+    for cfg in configs:
+        cfg = copy.deepcopy(cfg)
+        while not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            shrinkable_fields = [
+                field for field in ("XBLOCK", "YBLOCK") if cfg.kwargs.get(field, 1) > 16
+            ]
+            if not shrinkable_fields:
+                break
+            field = max(shrinkable_fields, key=lambda field: cfg.kwargs[field])
+            cfg.kwargs[field] //= 2
+
+        if _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            capped_configs.append(cfg)
+
+    return unique_configs(capped_configs)
+
+
 def _enforce_reduction_config_block_minimums(
     configs: list[Config],
     size_hints: dict[str, int],
@@ -3828,6 +3904,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     }
     # Remove keys with None values (i.e., missing in sizes)
     config = {k: v for k, v in config.items() if v is not None}
+    _check_native_matmul_block_numel(config)
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -4421,12 +4498,13 @@ def _persistent_reduction_configs(
     inductor_meta=None,
     triton_meta=None,
 ):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
     # Under deterministic mode, canonicalize the batch-dim hint so the
     # candidate-config branching below (e.g. xnumel // 8 < 128) doesn't pick
     # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
     # change the bf16 reduction order and break batch invariance in
     # persistent reductions like LayerNorm.
-    if inductor_meta and inductor_meta.get("batch_invariant"):
+    if inductor_meta.get("batch_invariant"):
         size_hints = dict(size_hints)
         if "x" in size_hints:
             size_hints["x"] = max(size_hints["x"], 4096)
@@ -4437,16 +4515,22 @@ def _persistent_reduction_configs(
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
     if triton_meta.get("native_matmul"):
+        native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
+        if native_matmul_rblock is None:
+            native_matmul_rblock = native_matmul_persistent_rblock(rnumel)
+
         if len(size_hints) == 3:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         elif len(size_hints) == 4:
-            return [
+            configs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
             ]
+            return _cap_native_matmul_configs(configs, native_matmul_rblock)
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
