@@ -1344,11 +1344,18 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
 
-    def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
+    def call_vars(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "vars() takes no keyword arguments")
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
         if len(args) != 1:
-            raise AssertionError(f"vars() expected 1 argument, got {len(args)}")
+            raise_type_error(tx, f"vars expected at most 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
             return args[0].var_getattr(tx, "__dict__")
