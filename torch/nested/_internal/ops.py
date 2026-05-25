@@ -1934,6 +1934,11 @@ def index_select_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
+    if inp._lengths is not None or inp._ragged_idx != 1:
+        raise ValueError(
+            "expected self to be a contiguous jagged layout NestedTensor"
+        )
+
     new_kwargs["dim"], operating_on_batch = _wrap_jagged_dim(
         inp.dim(),
         new_kwargs["dim"],
