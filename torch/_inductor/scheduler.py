@@ -3152,7 +3152,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
             node_schedule = node2.get_nodes()
             _, (numel_ep, rnumel_ep) = node2.group
-            # TODO(jjvraw): Do we need to be explicit here about reductions? Or is it implied via 
+            # TODO(jjvraw): Do we need to be explicit here about reductions? Or is it implied via
             # FusedSchedulerNode.
             if isinstance(node2, FusedSchedulerNode) and any(
                 isinstance(sn, SchedulerNode)
@@ -3182,7 +3182,9 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
             if not SIMDScheduling.tiling_is_compatible(
                 node_schedule, numel_ep, rnumel_ep, tiling
             ):
-                why("epilogue iteration space is incompatible with output_tile dimensions")
+                why(
+                    "epilogue iteration space is incompatible with output_tile dimensions"
+                )
                 return False
         else:
             if self.epilogue_requires_new_store(writing_node):
@@ -3206,7 +3208,9 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
         real_written_buffer_name = self.scheduler.mutation_real_name.get(
             written_buffer_name, written_buffer_name
         )
-        mutation_buffer_names = OrderedSet([written_buffer_name, real_written_buffer_name])
+        mutation_buffer_names = OrderedSet(
+            [written_buffer_name, real_written_buffer_name]
+        )
 
         # Exclude nodes that are part of this fusion attempt.
         # For a FusedSchedulerNode epilogue, also exclude its constituent snodes since
@@ -3329,9 +3333,10 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             epilogue_nodes, numel_ep, reduction_numel=rnumel
         )
 
-        excluded_names = OrderedSet([
-            ir_node.mutation_outputs[0].name
-        ]) | self.epilogue.get_buffer_names()
+        excluded_names = (
+            OrderedSet([ir_node.mutation_outputs[0].name])
+            | self.epilogue.get_buffer_names()
+        )
         external_reads = OrderedSet(
             d.name
             for sn in epilogue_nodes
