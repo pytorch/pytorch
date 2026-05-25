@@ -205,11 +205,24 @@ def supports_tensorlist(cls: Any) -> Any:
             grad_inputs, not_list_of_optional_tensor
         )
         if grad_inputs_spec != metadata.input_spec:
-            raise RuntimeError(
-                f"Expected the return from backward to be of the same structure "
-                f"as the inputs. Got: {grad_inputs_spec} (return from backward), "
-                f"{metadata.input_spec} (inputs)"
-            )
+            # The dispatcher may omit trailing arguments that are equal to their
+            # defaults. setup_context still sees the default-filled schema
+            # inputs, so custom-op backward formulas may return trailing None
+            # gradients for those omitted non-Tensor defaults. They are not
+            # Autograd Function inputs, so drop them before returning to
+            # autograd.
+            metadata_leaf_idx = metadata.input_spec.num_leaves - 1
+            if is_same_structure_with_trailing_none_leaves(
+                grad_inputs_spec,
+                metadata.input_spec,
+            ) and all(grad is None for grad in flat_grad_inputs[metadata_leaf_idx:]):
+                flat_grad_inputs = flat_grad_inputs[:metadata_leaf_idx] + [None]
+            else:
+                raise RuntimeError(
+                    f"Expected the return from backward to be of the same structure "
+                    f"as the inputs. Got: {grad_inputs_spec} (return from backward), "
+                    f"{metadata.input_spec} (inputs)"
+                )
         return tuple(flat_grad_inputs + [None])
 
     def new_apply(*args):
@@ -249,3 +262,21 @@ def not_list_of_optional_tensor(tree):
     if isinstance(tree, list):
         return any(l is not None and not isinstance(l, Tensor) for l in tree)
     return True
+
+
+def is_same_structure_with_trailing_none_leaves(
+    grad_inputs_spec: Any,
+    input_spec: Any,
+) -> bool:
+    if grad_inputs_spec.type is not tuple or input_spec.type is not tuple:
+        return False
+    if grad_inputs_spec.context != input_spec.context:
+        return False
+
+    grad_input_children = grad_inputs_spec.children()
+    input_children = input_spec.children()
+    if len(grad_input_children) <= len(input_children):
+        return False
+    if grad_input_children[: len(input_children)] != input_children:
+        return False
+    return all(child.is_leaf() for child in grad_input_children[len(input_children) :])
