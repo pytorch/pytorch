@@ -54,13 +54,30 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
-def _to_fake_cute_tensor(shape, dtype, assumed_align=16):
+def _to_fake_cute_tensor(shape, dtype, assumed_align=16, static_dims=()):
     ndim = len(shape)
-    dyn_shape = tuple(cute.sym_int64() for _ in range(ndim))
+    dyn_shape = tuple(
+        int(s) if i in static_dims else cute.sym_int64() for i, s in enumerate(shape)
+    )
     stride_order = tuple(range(ndim - 1, -1, -1))
     return cute.runtime.make_fake_compact_tensor(
         _TORCH_TO_CUTLASS_DTYPE[dtype], dyn_shape,
         stride_order=stride_order, assumed_align=assumed_align,
+    )
+
+
+def _to_fake_cute_tensor_like(t, assumed_align=16):
+    # Preserve static singleton modes so the artificial grouped GEMM L mode
+    # is not selected as the matrix leading dimension.
+    fake_shape = tuple(1 if int(s) == 1 else cute.sym_int64() for s in t.shape)
+    fake_stride = tuple(
+        int(s) if int(s) in (0, 1) else cute.sym_int64() for s in t.stride()
+    )
+    return cute.runtime.make_fake_tensor(
+        _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+        fake_shape,
+        fake_stride,
+        assumed_align=assumed_align,
     )
 
 
@@ -243,8 +260,12 @@ def launch_build_group_ptrs_from_bases(
             stride_C_m_elems=sC_m,
             stride_C_n_elems=sC_n,
             out_ptrs=_to_fake_cute_tensor(ptrs_t.shape, ptrs_t.dtype),
-            out_problem=_to_fake_cute_tensor(probs_t.shape, probs_t.dtype, assumed_align=4),
-            out_strides_abc=_to_fake_cute_tensor(strides_t.shape, strides_t.dtype, assumed_align=4),
+            out_problem=_to_fake_cute_tensor(
+                probs_t.shape, probs_t.dtype, assumed_align=4, static_dims=(1,)
+            ),
+            out_strides_abc=_to_fake_cute_tensor(
+                strides_t.shape, strides_t.dtype, assumed_align=4, static_dims=(1, 2)
+            ),
             stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
             options="--enable-tvm-ffi",
         )
@@ -314,12 +335,16 @@ def launch_build_group_ptrs_from_bases(
         c_unsq = {{get_output()}}.unsqueeze(-1)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_cute_tensor(a_unsq.shape, a_unsq.dtype),
-            _to_fake_cute_tensor(b_unsq.shape, b_unsq.dtype),
-            _to_fake_cute_tensor(c_unsq.shape, c_unsq.dtype),
+            _to_fake_cute_tensor_like(a_unsq),
+            _to_fake_cute_tensor_like(b_unsq),
+            _to_fake_cute_tensor_like(c_unsq),
             G,
-            _to_fake_cute_tensor(probs_t.shape, probs_t.dtype, assumed_align=4),
-            _to_fake_cute_tensor(strides_t.shape, strides_t.dtype, assumed_align=4),
+            _to_fake_cute_tensor(
+                probs_t.shape, probs_t.dtype, assumed_align=4, static_dims=(1,)
+            ),
+            _to_fake_cute_tensor(
+                strides_t.shape, strides_t.dtype, assumed_align=4, static_dims=(1, 2)
+            ),
             _to_fake_cute_tensor(ptrs_t.shape, ptrs_t.dtype),
             total_num_clusters,
             _to_fake_cute_tensor(tensormap_workspace_t.shape, tensormap_workspace_t.dtype),
