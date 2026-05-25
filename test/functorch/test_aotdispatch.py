@@ -2997,6 +2997,77 @@ def forward(self, add, tangents_1):
             torch.autograd.grad(loss, inp_x, create_graph=True)
         # Not checking equality of ref and x as Exception is expected
 
+    def test_custom_op_backward_compiler_preserves_requires_grad(self):
+        op_namespace = f"_test_163716_{type(self).__name__}"
+
+        @torch.library.custom_op(f"{op_namespace}::mm_fwd", mutates_args=())
+        def mm_fwd(input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return input @ weight
+
+        @mm_fwd.register_fake
+        def mm_fwd_fake(input, weight):
+            return input @ weight
+
+        @torch.library.custom_op(
+            f"{op_namespace}::mm_bwd",
+            mutates_args=(),
+            schema="(Tensor grad_output, Tensor input, Tensor weight) -> (Tensor, Tensor?)",
+        )
+        def mm_bwd(
+            grad_output: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor | None]:
+            grad_input = grad_output @ weight.mT
+            grad_weight = input.mT @ grad_output if weight.requires_grad else None
+            return grad_input, grad_weight
+
+        @mm_bwd.register_fake
+        def mm_bwd_fake(grad_output, input, weight):
+            grad_input = grad_output @ weight.mT
+            grad_weight = input.mT @ grad_output if weight.requires_grad else None
+            return grad_input, grad_weight
+
+        def backward(ctx, grad_output):
+            input, weight = ctx.saved_tensors
+            return mm_bwd(grad_output, input, weight)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        mm_fwd.register_autograd(backward, setup_context=setup_context)
+
+        seen_bw_requires_grad = None
+        saw_none_grad_weight = None
+
+        def bw_compiler(gm, example_inputs):
+            nonlocal seen_bw_requires_grad, saw_none_grad_weight
+            (saved_weight,) = [
+                example_input
+                for example_input in example_inputs
+                if isinstance(example_input, torch.Tensor)
+                and tuple(example_input.shape) == (3, 5)
+            ]
+            seen_bw_requires_grad = saved_weight.requires_grad
+            saw_none_grad_weight = gm(*example_inputs)[1] is None
+            return make_boxed_func(gm.forward)
+
+        def fn(input, weight):
+            return mm_fwd(input, weight)
+
+        compiled_fn = aot_function(fn, nop, bw_compiler=bw_compiler)
+
+        input = torch.randn(2, 3)
+        weight = torch.randn(3, 5, requires_grad=True)
+        ref_weight = weight.detach().clone().requires_grad_(True)
+
+        compiled_fn(input, weight).sum().backward()
+        fn(input, ref_weight).sum().backward()
+
+        self.assertIs(seen_bw_requires_grad, True)
+        self.assertIs(saw_none_grad_weight, False)
+        self.assertEqual(weight.grad, ref_weight.grad)
+
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
         def f(a, b):

@@ -391,6 +391,9 @@ def ir_node_to_tensor(
         t = torch.empty_strided(
             size=size, stride=stride, dtype=dtype, device=device
         ).zero_()
+    name = x.maybe_get_name()
+    if name is not None and V.graph.graph_input_requires_grad.get(name, False):
+        t.requires_grad_(True)
     return t
 
 
