@@ -514,7 +514,8 @@ Tensor maybeCopyTensor(
   if (optional_dl_device.has_value()) {
     auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
-        static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
+        static_cast<c10::DeviceIndex>(optional_dl_device->device_id),
+        data.data_ptr());
 
     if (device != data.device()) {
       TORCH_CHECK_VALUE(
