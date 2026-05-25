@@ -667,7 +667,9 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
 
 
 def register_buffer_assignment_hook(
-    mod: torch.nn.Module, assigned_buffers: dict[str, str]
+    mod: torch.nn.Module,
+    assigned_buffers: dict[str, str],
+    tracked_buffer_names: set[str] | None = None,
 ) -> Any:
     """
     Register a hook that intercepts buffer assignments.
@@ -680,6 +682,8 @@ def register_buffer_assignment_hook(
     ) -> Any:
         # We intercept buffer assignments on the root module through this hook.
         if _mod._buffers is mod._buffers:
+            if tracked_buffer_names is not None and name not in tracked_buffer_names:
+                return buffer
             # either buffer is a functional tensor, which wraps a fake tensor
             if isinstance(buffer, FunctionalTensor):
                 buffer = buffer.from_functional()
