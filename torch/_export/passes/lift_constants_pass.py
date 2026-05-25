@@ -181,6 +181,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
+    param_buffer_attrs: ConstantAttrMap | None = None,
 ) -> dict[str, _ConstantAttributeType]:
     """
     Takes a graph module, graph signature, and modifies them inplace to lift any
@@ -195,6 +196,10 @@ def lift_constants_pass(
             fully-qualified path in `gm`. This is used to maintain consistent
             location of constants between the original module and the exported
             version.
+        param_buffer_attrs (ConstantAttr): A mapping from a parameter/buffer value to
+            its fully-qualified path in the original module. This is used to
+            recognize stale aliases to registered state and reuse the existing
+            parameter/buffer input instead of lifting another constant.
 
     Returns:
         A dictionary of fqn => constant value.
@@ -221,12 +226,27 @@ def lift_constants_pass(
         raise AssertionError(
             f"input nodes count {len(input_nodes)} != input specs count {len(input_specs)}"
         )
+    state_input_placeholders: dict[str, torch.fx.Node] = {}
+    found_first_user_input = False
     for i, (node, input_spec) in enumerate(zip(input_nodes, input_specs)):
         used_target_names.add(input_spec.target)
-        if input_spec.kind == InputKind.USER_INPUT:
+        if input_spec.kind in (InputKind.PARAMETER, InputKind.BUFFER):
+            if input_spec.target is not None:
+                state_input_placeholders[input_spec.target] = node
+        if input_spec.kind == InputKind.USER_INPUT and not found_first_user_input:
             first_user_input = node
             first_user_input_loc = i
-            break
+            found_first_user_input = True
+
+    def _get_state_input_placeholder(
+        constant_val: torch.Tensor,
+    ) -> torch.fx.Node | None:
+        if param_buffer_attrs is None or constant_val not in param_buffer_attrs:
+            return None
+        for fqn in param_buffer_attrs[constant_val]:
+            if fqn in state_input_placeholders:
+                return state_input_placeholders[fqn]
+        return None
 
     lifted_objs = ConstantAttrMap()
     renamed_targets = {}
@@ -285,6 +305,14 @@ def lift_constants_pass(
                         constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
+                if (
+                    state_input_node := _get_state_input_placeholder(constant_val)
+                ) is not None:
+                    node.replace_all_uses_with(state_input_node)
+                    gm.graph.erase_node(node)
+                    renamed_targets[node.name] = state_input_node.name
+                    continue
+
                 # Remove the parameterness of constant_val
                 if isinstance(constant_val, torch.nn.Parameter):
                     log.debug(
@@ -443,7 +471,15 @@ def _materialize_and_lift_constants(
     gm: torch.fx.GraphModule,
     export_graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
+    param_buffer_attrs: ConstantAttrMap | None = None,
 ) -> dict[str, _ConstantAttributeType]:
     constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+    constants.update(
+        lift_constants_pass(
+            gm,
+            export_graph_signature,
+            constant_attrs,
+            param_buffer_attrs=param_buffer_attrs,
+        )
+    )
     return constants

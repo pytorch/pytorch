@@ -548,6 +548,15 @@ def _remap_constants(
                 constants[target] = constant
 
 
+def _gather_param_buffer_attrs(m: torch.nn.Module) -> ConstantAttrMap:
+    params_buffers = ConstantAttrMap()
+    for name, param in m.named_parameters(remove_duplicate=False):
+        params_buffers.add(param, name)
+    for name, buffer in m.named_buffers(remove_duplicate=False):
+        params_buffers.add(buffer, name)
+    return params_buffers
+
+
 def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     """
     When we run an interpreter-based pass over a GraphModule, execution of data-dependent operators
@@ -598,6 +607,7 @@ def _produce_aten_artifact(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
+    param_buffer_attrs: ConstantAttrMap | None = None,
     _prettify_placeholder_names=True,
 ) -> ATenExportArtifact:
     """
@@ -638,7 +648,10 @@ def _produce_aten_artifact(
     # script objects are always stored in constants no matter whether they're initial inputs or
     # they're lifted in aot" before rewrite_script_object_meta
     constants = _materialize_and_lift_constants(
-        gm, export_graph_signature, constant_attrs
+        gm,
+        export_graph_signature,
+        constant_attrs,
+        param_buffer_attrs=param_buffer_attrs,
     )
 
     if pre_dispatch:
@@ -1021,6 +1034,7 @@ def _export_to_aten_ir(
         if decompose_custom_triton_ops
         else _disable_custom_triton_op_functional_decomposition
     )
+    param_buffer_attrs = _gather_param_buffer_attrs(mod)
     # This _reparameterize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -1090,6 +1104,7 @@ def _export_to_aten_ir(
         fake_args=fake_args,
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
+        param_buffer_attrs=param_buffer_attrs,
         _prettify_placeholder_names=_prettify_placeholder_names,
     )
 
@@ -1988,6 +2003,7 @@ def _export_to_aten_ir_make_fx(
         )
         return gm, sig
 
+    param_buffer_attrs = _gather_param_buffer_attrs(mod)
     # This _reparameterize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -2045,6 +2061,7 @@ def _export_to_aten_ir_make_fx(
         fake_args=fake_args,
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
+        param_buffer_attrs=param_buffer_attrs,
     )
 
 

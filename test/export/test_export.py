@@ -17435,6 +17435,70 @@ def forward(self, x):
                 # Verify no tensor constants in graph signature
                 self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
 
+    def test_export_parameter_alias_in_container(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+                self._flat_weights = [self.p1]
+
+            def forward(self, x):
+                return x + self._flat_weights[0]
+
+        m = Module()
+        sample_inputs = (torch.ones(2, 2),)
+
+        ep = torch.export.export(m, sample_inputs, strict=False)
+
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        param_inputs = ep.graph_signature.inputs_to_parameters
+        self.assertEqual(list(param_inputs.values()), ["p1"])
+        param_input_name = next(
+            name for name, target in param_inputs.items() if target == "p1"
+        )
+
+        add_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 1)
+        self.assertEqual(add_nodes[0].args[1].name, param_input_name)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
+        self.assertIs(m._flat_weights[0], m.p1)
+
+    def test_export_buffer_alias_in_container(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b1", torch.ones(2, 2))
+                self.buffers_list = [self.b1]
+
+            def forward(self, x):
+                return x + self.buffers_list[0]
+
+        m = Module()
+        sample_inputs = (torch.ones(2, 2),)
+
+        ep = torch.export.export(m, sample_inputs, strict=False)
+
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        buffer_inputs = ep.graph_signature.inputs_to_buffers
+        self.assertEqual(list(buffer_inputs.values()), ["b1"])
+        buffer_input_name = next(
+            name for name, target in buffer_inputs.items() if target == "b1"
+        )
+
+        add_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 1)
+        self.assertEqual(add_nodes[0].args[1].name, buffer_input_name)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
+        self.assertIs(m.buffers_list[0], m.b1)
+
     @contextmanager
     def distributed_env(self, world_size):
         try:
