@@ -1500,9 +1500,7 @@ def repro_get_args(
     return mod, args
 
 
-def repro_run(
-    options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs
-) -> None:
+def repro_run(options: ReproOptions, mod: nn.Module, load_args: ReproLoadArgs) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
 
     mod, args = repro_common(options, mod, load_args)
