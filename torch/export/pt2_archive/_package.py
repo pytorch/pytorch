@@ -71,6 +71,31 @@ AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _invalid_load_input_type_error(f: Any) -> TypeError:
+    return TypeError(
+        "Unable to load package. `f` must be a path-like object or a "
+        "readable and seekable file-like object. "
+        f"Instead got {type(f).__name__}."
+    )
+
+
+def _is_readable_seekable_file_like(f: Any) -> bool:
+    required_methods = ("read", "seek", "tell")
+    if not all(callable(getattr(f, method, None)) for method in required_methods):
+        return False
+
+    readable = getattr(f, "readable", None)
+    seekable = getattr(f, "seekable", None)
+    if callable(readable) and callable(seekable):
+        return bool(readable() and seekable())
+
+    try:
+        f.seek(f.tell())
+        return True
+    except (AttributeError, io.UnsupportedOperation):
+        return False
+
+
 def is_pt2_package(serialized_model: bytes | str) -> bool:
     """
     Check if the serialized model is a PT2 Archive package.
@@ -1112,19 +1137,12 @@ def load_pt2(
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    if not (
-        (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
-        or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
-    ):
-        # TODO: turn this into an error in 2.9
-        logger.warning(
-            "Unable to load package. f must be a buffer or a file ending in "
-            ".pt2. Instead got {%s}",
-            f,
-        )
-
     if isinstance(f, (str, os.PathLike)):
+        if not os.fspath(f).endswith(".pt2"):
+            logger.warning("Path does not end with .pt2; proceeding anyway: {%s}", f)
         f = os.fspath(f)
+    elif not _is_readable_seekable_file_like(f):
+        raise _invalid_load_input_type_error(f)
 
     weights = {}
     weight_maps = {}
