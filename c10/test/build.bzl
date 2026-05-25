@@ -42,7 +42,6 @@ def define_targets(rules):
             ["util/*.cpp"],
             exclude = [
                 "util/bit_cast_test.cpp",
-                "util/ssize_test.cpp",
                 "util/typeid_test.cpp",
             ],
         ),
@@ -71,15 +70,6 @@ def define_targets(rules):
         srcs = ["util/nofatal_test.cpp"],
         deps = [
             "//c10/util:base",
-            "@com_google_googletest//:gtest_main",
-        ],
-    )
-
-    rules.cc_test(
-        name = "util/ssize_test",
-        srcs = ["util/ssize_test.cpp"],
-        deps = [
-            "//c10/util:ssize",
             "@com_google_googletest//:gtest_main",
         ],
     )
