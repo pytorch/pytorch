@@ -347,7 +347,7 @@ class ShapesSpec:
 
     def __init__(
         self,
-        params: ParamsSpec | None = None,
+        params: ParamsSpec | dict[str, Any] | None = None,
         *,
         globals: Any = None,
         assumptions: Any = None,
@@ -356,6 +356,16 @@ class ShapesSpec:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
         if assumptions is not None:
             raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
+        # Auto-wrap a bare dict so callers can write
+        # ``ShapesSpec({"x": ...})`` instead of
+        # ``ShapesSpec(params=ParamsSpec({"x": ...}))``.
+        if isinstance(params, dict):
+            params = ParamsSpec(params)
+        elif params is not None and not isinstance(params, ParamsSpec):
+            raise TypeError(
+                f"shapes_spec must be ParamsSpec, dict, or None, "
+                f"got {type(params).__name__}"
+            )
         self._params = params
 
     def __repr__(self) -> str:
