@@ -6985,19 +6985,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
 
 @dataclasses.dataclass
-class TritonStore:
+class UserTritonStore:
     store_node: ast.Call
     store_pointer_node: ast.Expr
     store_value_node: ast.Expr
 
 
 @dataclasses.dataclass
-class TritonStores:
-    stores: list[TritonStore]
+class UserTritonStores:
+    stores: list[UserTritonStore]
 
 
 @functools.cache
-def identify_triton_stores(source_code: str) -> TritonStores:
+def identify_triton_stores(source_code: str) -> UserTritonStores:
     """
     Parse Python source code of the Triton kernel and find all tl.store calls.
     Returns a TritonStores object containing information about pointer, value, and mask.
@@ -7007,7 +7007,7 @@ def identify_triton_stores(source_code: str) -> TritonStores:
     return identify_triton_stores_from_ast(ast.parse(source_code))
 
 
-def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
+def identify_triton_stores_from_ast(tree: ast.Module) -> UserTritonStores:
     stores = []
 
     def _extract_arg(node, arg_name, positional_index):
@@ -7042,9 +7042,9 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
                 if pointer_node is None or value_node is None:
                     continue
 
-                stores.append(TritonStore(node, pointer_node, value_node))
+                stores.append(UserTritonStore(node, pointer_node, value_node))
 
-    return TritonStores(stores=stores)
+    return UserTritonStores(stores=stores)
 
 
 class FusedUserTritonKernel(TritonKernel):
@@ -7110,8 +7110,8 @@ class FusedUserTritonKernel(TritonKernel):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        assert isinstance(self.scheduler_node.fused_epilogue.node, ir.ComputedBuffer)
-        if name == self.scheduler_node.fused_epilogue.node.get_name():
+        assert isinstance(self.scheduler_node.epilogue.node, ir.ComputedBuffer)
+        if name == self.scheduler_node.epilogue.node.get_name():
             # when the fused epilogue nodes tries to store to its destination buffer
             # we remember this expr and then later replace it into the `tl.store` call of the original kernel
             self.new_store_cse_var = value
@@ -7122,9 +7122,9 @@ class FusedUserTritonKernel(TritonKernel):
     def codegen(self) -> str:
         with self:
             index_vars = self.split_and_set_ranges(
-                self.scheduler_node.fused_epilogue.get_ranges()
+                self.scheduler_node.epilogue.get_ranges()
             )
-            self.scheduler_node.fused_epilogue.codegen(index_vars)
+            self.scheduler_node.epilogue.codegen(index_vars)
 
         new_store_value_node = ast.Name(self.new_store_cse_var.name)
 
