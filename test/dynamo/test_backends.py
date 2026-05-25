@@ -261,6 +261,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         )
         scalar_input = runtime_module.set_inputs[0][1]
         self.assertEqual(0, scalar_input.dim())
+        self.assertEqual(3.0, scalar_input.item())
         self.assertFalse(scalar_input.requires_grad)
 
     @onlyHPU
@@ -485,6 +486,29 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
                 fn, backend="inductor", options={"_raise_error_for_testing": True}
             )
             opt_fn(input)
+
+    def test_cudagraphs_backend_accepts_extra_kwargs(self):
+        # Issue #169939: torch.compile(backend="cudagraphs", options=...) used
+        # to raise TypeError because CudagraphsBackend.__call__ did not accept
+        # extra kwargs. The backend should ignore unknown kwargs with a warning,
+        # matching eager and other compiler-fn-style backends.
+        from torch._dynamo.backends.cudagraphs import CudagraphsBackend
+
+        backend = CudagraphsBackend()
+        gm = MagicMock()
+        sentinel = object()
+        with patch(
+            "torch._dynamo.backends.cudagraphs.cudagraphs", return_value=sentinel
+        ) as mock_cudagraphs:
+            with self.assertLogs(
+                "torch._dynamo.backends.cudagraphs", level="WARNING"
+            ) as cm:
+                result = backend(gm, [], options={"trace.enabled": True})
+
+        self.assertIs(result, sentinel)
+        # Extra kwargs are dropped, not forwarded to the inner compiler.
+        mock_cudagraphs.assert_called_once_with(gm, [])
+        self.assertTrue(any("ignoring extra kwargs" in m for m in cm.output))
 
     def test_backend_graph_freeze(self):
         from functorch.compile import make_boxed_func
