@@ -3713,9 +3713,6 @@ class TestUnbacked(TestCase):
             x = a.item()
             y = b.item()
             torch._check(x == y)
-            # TODO we should not need those torch checks.
-            torch._check(x // y == 1)
-            torch._check(2 * x // y == 2)
             if x // y == 1:
                 a = a * 10
             if 2 * x // y == 2:
@@ -3724,7 +3721,62 @@ class TestUnbacked(TestCase):
 
         a = torch.tensor([1])
         b = torch.tensor([1])
-        func(a, b)
+        self.assertEqual(func(a, b), torch.tensor([200]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_div_unbacked_eq_item_zero_divisor(self):
+        @torch.compile(fullgraph=True)
+        def div_func(a, b, payload):
+            x = a.item()
+            y = b.item()
+            torch._check(x == y)
+            if x // y == 1:
+                payload = payload * 10
+            if 2 * x // y == 2:
+                payload = payload * 20
+            return payload
+
+        @torch.compile(fullgraph=True)
+        def mod_func(a, b, payload):
+            x = a.item()
+            y = b.item()
+            torch._check(x == y)
+            if x % y == 0:
+                payload = payload * 10
+            if (2 * x) % y == 0:
+                payload = payload * 20
+            return payload
+
+        self.assertEqual(
+            div_func(torch.tensor([1]), torch.tensor([1]), torch.ones(1)),
+            torch.tensor([200.0]),
+        )
+        with self.assertRaisesRegex(RuntimeError, r"Ne\(u\d+, 0\)"):
+            div_func(torch.tensor([0]), torch.tensor([0]), torch.ones(1))
+
+        self.assertEqual(
+            mod_func(torch.tensor([1]), torch.tensor([1]), torch.ones(1)),
+            torch.tensor([200.0]),
+        )
+        with self.assertRaisesRegex(RuntimeError, r"Ne\(u\d+, 0\)"):
+            mod_func(torch.tensor([0]), torch.tensor([0]), torch.ones(1))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_div_unbacked_eq_item_substituted_zero_divisor(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b, c):
+            x = a.item()
+            y = b.item()
+            z = c.item()
+            torch._check(x == y)
+            if z // (x - y) == 0:
+                c = c * 10
+            return c
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Could not guard on data-dependent expression"
+        ):
+            func(torch.tensor([1]), torch.tensor([1]), torch.tensor([1]))
 
     def test_ignorable_fresh_unbacked_symbols(self):
         # Test that symbols created during fake tensor tracing but not returned

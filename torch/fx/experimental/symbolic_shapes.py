@@ -7016,6 +7016,159 @@ class ShapeEnv:
             return out.lower
         return fallback
 
+    def _apply_static_evaluate_unbacked_equalities(
+        self,
+        expr: sympy.Basic,
+        subst: dict[sympy.Expr, sympy.Expr],
+        var_ranges: dict[sympy.Symbol, ValueRanges[sympy.Expr]],
+    ) -> tuple[sympy.Basic, dict[sympy.Symbol, ValueRanges[sympy.Expr]]]:
+        """
+        Apply unbacked symbol equalities from known axioms only for static
+        evaluation.  These replacements are deliberately not committed to
+        self.replacements, because doing so can move data-dependent bindings
+        across their runtime definition points.
+        """
+        relevant = expr.free_symbols
+        if not relevant:
+            return expr, var_ranges
+
+        parent: dict[sympy.Symbol, sympy.Symbol] = {}
+
+        def eligible_symbol(s: sympy.Basic) -> TypeGuard[sympy.Symbol]:
+            return isinstance(s, sympy.Symbol) and symbol_is_type(s, SymT.UNBACKED_INT)
+
+        def find(s: sympy.Symbol) -> sympy.Symbol:
+            parent.setdefault(s, s)
+            if parent[s] != s:
+                parent[s] = find(parent[s])
+            return parent[s]
+
+        def union(a: sympy.Symbol, b: sympy.Symbol) -> None:
+            pa = find(a)
+            pb = find(b)
+            if pa == pb:
+                return
+            if str(pa) <= str(pb):
+                parent[pb] = pa
+            else:
+                parent[pa] = pb
+
+        for pred, result in subst.items():
+            if result is not sympy.true or not isinstance(pred, sympy.Eq):
+                continue
+            lhs, rhs = pred.lhs, pred.rhs
+            if eligible_symbol(lhs) and eligible_symbol(rhs):
+                union(lhs, rhs)
+
+        if not parent:
+            return expr, var_ranges
+
+        replacements: dict[sympy.Symbol, sympy.Symbol] = {}
+        local_var_ranges = dict(var_ranges)
+        components: dict[sympy.Symbol, list[sympy.Symbol]] = collections.defaultdict(
+            list
+        )
+        for s in parent:
+            components[find(s)].append(s)
+
+        for canonical, symbols in components.items():
+            combined_range = local_var_ranges.get(canonical)
+            for s in symbols:
+                if s != canonical:
+                    replacements[s] = canonical
+                if (vr := local_var_ranges.get(s)) is not None:
+                    combined_range = (
+                        vr if combined_range is None else combined_range & vr
+                    )
+            if combined_range is not None:
+                local_var_ranges[canonical] = combined_range
+
+        relevant_replacements = {
+            s: r for s, r in replacements.items() if s in relevant and s != r
+        }
+        if not relevant_replacements:
+            return expr, local_var_ranges
+
+        # Rewriting equal symbols through division/modulo can erase Python's
+        # division-by-zero behavior, so require a nonzero divisor proof first.
+        replacement_symbols = set(relevant_replacements)
+        for atom in expr.atoms(FloorDiv).union(expr.atoms(Mod), expr.atoms(PythonMod)):
+            if not (atom.free_symbols & replacement_symbols):
+                continue
+            divisor = atom.divisor if isinstance(atom, FloorDiv) else atom.args[1]
+            if not self._statically_known_nonzero_from_subst(
+                divisor, subst, local_var_ranges
+            ):
+                return expr, local_var_ranges
+            try:
+                new_divisor = divisor.xreplace(relevant_replacements)
+            except ZeroDivisionError:
+                return expr, local_var_ranges
+            if new_divisor.is_zero:
+                return expr, local_var_ranges
+
+        return expr.xreplace(relevant_replacements), local_var_ranges
+
+    def _statically_known_nonzero_from_subst(
+        self,
+        expr: sympy.Basic,
+        subst: dict[sympy.Expr, sympy.Expr],
+        var_ranges: dict[sympy.Symbol, ValueRanges[sympy.Expr]],
+    ) -> bool:
+        if 0 not in bound_sympy(expr, var_ranges):  # type: ignore[arg-type]
+            return True
+
+        ne_expr = canonicalize_bool_expr(sympy.Ne(expr, 0, evaluate=False))
+        eq_expr = canonicalize_bool_expr(sympy.Eq(expr, 0, evaluate=False))
+        return subst.get(ne_expr) is sympy.true or subst.get(eq_expr) is sympy.false
+
+    def _division_divisor_guards(self, expr: sympy.Basic) -> tuple[SympyBoolean, ...]:
+        guards: list[SympyBoolean] = []
+        for atom in sorted(
+            expr.atoms(FloorDiv).union(expr.atoms(Mod), expr.atoms(PythonMod)),
+            key=str,
+        ):
+            divisor = atom.divisor if isinstance(atom, FloorDiv) else atom.args[1]
+            if not self._statically_known_nonzero_from_subst(
+                divisor, self.axioms, self.var_to_range
+            ):
+                guards.append(
+                    cast(
+                        SympyBoolean,
+                        canonicalize_bool_expr(sympy.Ne(divisor, 0, evaluate=False)),
+                    )
+                )
+        return tuple(dict.fromkeys(guards))
+
+    def _maybe_evaluate_static_with_divisor_guards(
+        self,
+        expr: sympy.Basic,
+        *,
+        size_oblivious: bool = False,
+    ) -> sympy.Basic | None:
+        static_expr = self._maybe_evaluate_static(expr, size_oblivious=size_oblivious)
+        if static_expr is not None:
+            return static_expr
+
+        divisor_guards = self._division_divisor_guards(expr)
+        if not divisor_guards:
+            return None
+
+        true_axioms = tuple(k for k, v in self.axioms.items() if v is sympy.true)
+        static_expr = self._maybe_evaluate_static(
+            expr,
+            size_oblivious=size_oblivious,
+            axioms=true_axioms + divisor_guards,
+        )
+        if static_expr is None:
+            return None
+
+        for guard in divisor_guards:
+            self.guard_or_defer_runtime_assert(
+                guard, f"nonzero divisor for static evaluation: {expr}"
+            )
+        return static_expr
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -7082,15 +7235,20 @@ class ShapeEnv:
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
 
-        fs = expr.free_symbols
-
-        if not fs and (expr.is_number or expr.is_Boolean):
-            return expr
-
         if var_to_range is None:
             var_ranges = self.var_to_range
         else:
             var_ranges = dict(var_to_range)
+
+        expr, var_ranges = self._apply_static_evaluate_unbacked_equalities(
+            expr, subst, var_ranges
+        )
+        expr = canonicalize_bool_expr(expr)
+
+        fs = expr.free_symbols
+
+        if not fs and (expr.is_number or expr.is_Boolean):
+            return expr
 
         symbol_info = tuple(
             _SymbolInfo(
@@ -8305,7 +8463,7 @@ class ShapeEnv:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                     return range_result
 
-            static_expr = self._maybe_evaluate_static(
+            static_expr = self._maybe_evaluate_static_with_divisor_guards(
                 expr, size_oblivious=size_oblivious
             )
             if static_expr is not None:
@@ -8527,7 +8685,7 @@ class ShapeEnv:
         if self._should_skip_static_eval(expr):
             new_expr = expr
         else:
-            static_expr = self._maybe_evaluate_static(expr)
+            static_expr = self._maybe_evaluate_static_with_divisor_guards(expr)
             if static_expr is not None:
                 self.log.debug(
                     "runtime_assert %s == %s [statically known]", orig_expr, static_expr
