@@ -906,7 +906,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
     functionNames.insert(names.begin(), names.end());
     functionNamesPopulated = true;
   }
-  return functionNames.count(fname) > 0;
+  return functionNames.contains(fname);
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
@@ -1053,21 +1053,17 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
-  // Cast-fallback path: if the direct per-(out,in) kernel isn't registered, swap to the `_dense_cast_<out>_<out>` /
-  // `_strided_cast_<out>_<out>` variant. The cast kernel is templated on the output dtype; the input dtype is
-  // runtime-switched on load via val_at_offs<T>(ptr, offs, ScalarType), so one kernel per output dtype covers every
-  // input dtype. Cast variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
+  // Castout-fallback path: if the direct per-(out,in) kernel isn't registered, swap to the `_dense_castout_<in>` /
+  // `_strided_castout_<in>` variant. The castout kernel computes the functor in the input dtype and casts the result to
+  // the user's output dtype on store (via store_at_offs), matching CPU's "compute in input precision, cast on store"
+  // semantics. Castout variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
   // TORCH_CHECK still fires for missing direct kernel).
   bool cast_needed = false;
   if (!alpha.has_value() && !hasFunction(kernel_name)) {
     cast_needed = true;
-    dense_suffix = is_contiguous ? "dense_cast" : "strided_cast";
+    dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
     dense_ilp = false;
-    kernel_name = fmt::format("{}_{}_{}_{}",
-                              name,
-                              dense_suffix,
-                              scalarToMetalTypeString(outputTensor),
-                              scalarToMetalTypeString(outputTensor));
+    kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
   }
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
@@ -1081,15 +1077,16 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
       if (cast_needed) {
-        // {dense,strided}_cast take the input dtype at runtime via the ScalarType in the trailing constant buffer.
-        const auto in_type = static_cast<uint32_t>(inputTensor.scalar_type());
+        // {dense,strided}_castout take the output dtype at runtime via the ScalarType in the trailing constant buffer;
+        // input is read at compile-time Tin.
+        const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
         if (is_contiguous) {
-          std::array<uint32_t, 2> size_type = {static_cast<uint32_t>(c10::elementSize(inputTensor.scalar_type())),
-                                               in_type};
-          mtl_setBytes(computeEncoder, size_type, 2);
+          std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
+                                                  out_type};
+          mtl_setBytes(computeEncoder, size_outtype, 2);
         } else {
-          std::array<uint32_t, 2> ndim_type = {static_cast<uint32_t>(iter.ndim()), in_type};
-          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_type);
+          std::array<uint32_t, 2> ndim_outtype = {static_cast<uint32_t>(iter.ndim()), out_type};
+          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_outtype);
         }
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       } else if (dense_ilp) {

@@ -4,10 +4,11 @@
 using namespace metal;
 using namespace c10::metal;
 
-// Templated on output dtype Out. Input dtype is runtime-dispatched on load via
-// val_at_offs<Out>(ptr, offs, ScalarType), which performs the cross-dtype cast
-// (including real<->complex packing) before the functor sees the value. One
-// kernel per Out covers every input dtype the runtime switch recognises.
+// Castout: input is loaded at compile-time Tin (the registered input dtype) and
+// the result is cast to the user-supplied output dtype on store (runtime
+// ScalarType switch in store_at_offs handles all dtype combinations, including
+// real<->complex packing). One kernel per input dtype covers every output
+// dtype.
 
 struct copy_identity_functor {
   template <typename T>
@@ -34,19 +35,19 @@ struct copy_neg_functor {
   }
 };
 
-#define REGISTER_COPY_CAST(DTYPE)               \
-  REGISTER_UNARY_OP_CAST(copy_identity, DTYPE); \
-  REGISTER_UNARY_OP_CAST(copy_conj, DTYPE);     \
-  REGISTER_UNARY_OP_CAST(copy_neg, DTYPE)
+#define REGISTER_COPY_CASTOUT(DTYPE)               \
+  REGISTER_UNARY_OP_CASTOUT(copy_identity, DTYPE); \
+  REGISTER_UNARY_OP_CASTOUT(copy_conj, DTYPE);     \
+  REGISTER_UNARY_OP_CASTOUT(copy_neg, DTYPE)
 
-REGISTER_COPY_CAST(bool);
-REGISTER_COPY_CAST(uchar);
-REGISTER_COPY_CAST(char);
-REGISTER_COPY_CAST(short);
-REGISTER_COPY_CAST(int);
-REGISTER_COPY_CAST(long);
-REGISTER_COPY_CAST(half);
-REGISTER_COPY_CAST(bfloat);
-REGISTER_COPY_CAST(float);
-REGISTER_COPY_CAST(float2);
-REGISTER_COPY_CAST(half2);
+REGISTER_COPY_CASTOUT(bool);
+REGISTER_COPY_CASTOUT(uchar);
+REGISTER_COPY_CASTOUT(char);
+REGISTER_COPY_CASTOUT(short);
+REGISTER_COPY_CASTOUT(int);
+REGISTER_COPY_CASTOUT(long);
+REGISTER_COPY_CASTOUT(half);
+REGISTER_COPY_CASTOUT(bfloat);
+REGISTER_COPY_CASTOUT(float);
+REGISTER_COPY_CASTOUT(float2);
+REGISTER_COPY_CASTOUT(half2);
