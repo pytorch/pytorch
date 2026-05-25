@@ -6462,9 +6462,7 @@ def meta__scaled_dot_product_efficient_attention(
     # presents it as [B, H, M, Kv] via a transpose. MPS kernels write
     # [B, H, M, Kv]-contiguous natively
     if device_hint(query) == "mps":
-        res = torch.empty(
-            B, num_heads, M, Kv, dtype=query.dtype, device=query.device
-        )
+        res = torch.empty(B, num_heads, M, Kv, dtype=query.dtype, device=query.device)
     else:
         res = torch.empty(
             B, M, num_heads, Kv, dtype=query.dtype, device=query.device
