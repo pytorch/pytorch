@@ -1993,9 +1993,63 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                 if not isinstance(user.meta.get("val"), (tuple, list)):
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
+    def submodule_from_node(
+        module: fx.GraphModule, node: fx.Node
+    ) -> fx.GraphModule | None:
+        if node.op == "get_attr" and isinstance(node.target, str):
+            submodule = module.get_submodule(node.target)
+            if isinstance(submodule, fx.GraphModule):
+                return submodule
+        return None
+
+    def module_has_effectful_ops(
+        module: fx.GraphModule, seen: OrderedSet[int] | None = None
+    ) -> bool:
+        if seen is None:
+            seen = OrderedSet()
+        if id(module) in seen:
+            return False
+        seen.add(id(module))
+
+        for node in module.graph.nodes:
+            if is_with_effects(node):
+                return True
+            if node.target is torch.ops.higher_order.cond:
+                for branch_node in node.args[1:3]:
+                    if not isinstance(branch_node, fx.Node):
+                        continue
+                    branch = submodule_from_node(module, branch_node)
+                    if branch is not None and module_has_effectful_ops(branch, seen):
+                        return True
+            elif node.target is torch.ops.higher_order.invoke_subgraph:
+                subgraph_node = node.args[0]
+                if isinstance(subgraph_node, fx.Node):
+                    subgraph = submodule_from_node(module, subgraph_node)
+                    if subgraph is not None and module_has_effectful_ops(
+                        subgraph, seen
+                    ):
+                        return True
+        return False
+
+    def cond_has_effectful_branch(module: fx.GraphModule, node: fx.Node) -> bool:
+        for branch_node in node.args[1:3]:
+            if not isinstance(branch_node, fx.Node):
+                continue
+            branch = submodule_from_node(module, branch_node)
+            if branch is not None and module_has_effectful_ops(branch):
+                return True
+        return False
+
     for node in joint_module.graph.nodes:
         if (
             is_with_effects(node)
+            and not must_recompute(node)
+            and not _has_tag_is_backward(node)
+        ):
+            mark_getitem_outputs(node)
+        elif (
+            node.target is torch.ops.higher_order.cond
+            and cond_has_effectful_branch(joint_module, node)
             and not must_recompute(node)
             and not _has_tag_is_backward(node)
         ):

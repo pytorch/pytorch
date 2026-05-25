@@ -358,15 +358,143 @@ def unlift_tokens(
             node.replace_all_uses_with(new_token_node)
             module.graph.erase_node(node)
 
-    def get_output_tokens(node: torch.fx.Node) -> set[torch.fx.Node]:
+    def get_output_node(module: torch.fx.GraphModule) -> torch.fx.Node:
+        output_node = next(reversed(module.graph.find_nodes(op="output")))
+        if output_node is None:
+            raise AssertionError("output node not found in graph")
+        return output_node
+
+    def get_output_args(module: torch.fx.GraphModule) -> tuple[Any, ...]:
+        output_node = get_output_node(module)
+        outs = output_node.args[0]
+        if not isinstance(outs, tuple):
+            raise AssertionError(f"expected output tuple, got {type(outs)}")
+        return outs
+
+    def getitem_source_and_index(
+        node: torch.fx.Node,
+    ) -> tuple[torch.fx.Node, int] | None:
+        if (
+            node.op == "call_function"
+            and node.target is operator.getitem
+            and len(node.args) > 1
+            and isinstance(node.args[0], torch.fx.Node)
+            and isinstance(node.args[1], int)
+        ):
+            return node.args[0], node.args[1]
+        return None
+
+    def get_invoke_subgraph_effects(identifier) -> Any:
+        from torch._guards import InvokeSubgraphCache, TracingContext
+
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx is None:
+            return None
+        invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+            torch.ops.higher_order.invoke_subgraph
+        )
+        if invoke_subgraph_cache is None:
+            return None
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            raise AssertionError(
+                f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+            )
+        return invoke_subgraph_cache.get_effects(identifier)
+
+    def get_cond_token_count(
+        module: torch.fx.GraphModule,
+        node: torch.fx.Node,
+        cond_token_counts: dict[torch.fx.Node, int],
+    ) -> int:
+        cached = cond_token_counts.get(node)
+        if cached is not None:
+            return cached
+
+        if (
+            len(node.args) < 4
+            or not isinstance(node.args[1], torch.fx.Node)
+            or not isinstance(node.args[2], torch.fx.Node)
+            or node.args[1].op != "get_attr"
+            or node.args[2].op != "get_attr"
+            or not isinstance(node.args[1].target, str)
+            or not isinstance(node.args[2].target, str)
+        ):
+            raise AssertionError(f"malformed cond node: {node}")
+
+        definite_token_indices: set[int] = set()
+        for branch_node in node.args[1:3]:
+            if not isinstance(branch_node, torch.fx.Node):
+                raise AssertionError(f"expected cond branch node, got {branch_node}")
+            if not isinstance(branch_node.target, str):
+                raise AssertionError(
+                    f"expected cond branch target string, got {branch_node.target}"
+                )
+            branch = module.get_submodule(branch_node.target)
+            if not isinstance(branch, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"expected cond branch to be a GraphModule, got {type(branch)}"
+                )
+            for index, out in enumerate(get_output_args(branch)):
+                if isinstance(out, torch.fx.Node) and is_definite_token_output(
+                    branch, out, cond_token_counts
+                ):
+                    definite_token_indices.add(index)
+
+        num_tokens = 0
+        while num_tokens in definite_token_indices:
+            num_tokens += 1
+        cond_token_counts[node] = num_tokens
+        return num_tokens
+
+    def producer_num_token_outputs(
+        module: torch.fx.GraphModule,
+        producer: torch.fx.Node,
+        cond_token_counts: dict[torch.fx.Node, int],
+    ) -> int:
+        if producer.op != "call_function":
+            return 0
+        if producer.target is torch.ops.higher_order.with_effects:
+            return 1
+        if producer.target is torch.ops.higher_order.invoke_subgraph:
+            effects = get_invoke_subgraph_effects(producer.args[1])
+            return len(effects) if effects is not None else 0
+        if producer.target is torch.ops.higher_order.cond:
+            return get_cond_token_count(module, producer, cond_token_counts)
+        return 0
+
+    def is_definite_token_output(
+        module: torch.fx.GraphModule,
+        node: torch.fx.Node,
+        cond_token_counts: dict[torch.fx.Node, int],
+    ) -> bool:
+        getitem = getitem_source_and_index(node)
+        if getitem is None:
+            return False
+        producer, index = getitem
+        return index < producer_num_token_outputs(module, producer, cond_token_counts)
+
+    def get_passthrough_cond_tokens(
+        module: torch.fx.GraphModule, num_tokens: int
+    ) -> set[torch.fx.Node]:
+        return {
+            out
+            for out in get_output_args(module)[:num_tokens]
+            if isinstance(out, torch.fx.Node) and out.op == "placeholder"
+        }
+
+    def get_output_tokens(
+        node: torch.fx.Node, token_indices: set[int] | None = None
+    ) -> set[torch.fx.Node]:
+        if token_indices is None:
+            token_indices = {0}
         output_tokens = set()
         for user in list(node.users.keys()):
-            # Check if this is a getitem accessing index 0 (the token)
+            # Check if this is a getitem accessing a token output.
             if (
                 user.op == "call_function"
                 and user.target is operator.getitem
                 and len(user.args) > 1
-                and user.args[1] == 0
+                and user.args[1] in token_indices
             ):
                 # Check if this getitem is used in an output
                 for user_user in list(user.users.keys()):
@@ -378,9 +506,11 @@ def unlift_tokens(
         module: torch.fx.GraphModule,
         subgraph_str: str,
         expected_num_erased: int | None,
+        cond_token_counts: dict[torch.fx.Node, int],
     ) -> None:
         input_token_nodes = set()
         output_token_nodes = set()
+        tokens_to_sink = set()
 
         for node in module.graph.nodes:
             if (
@@ -393,6 +523,7 @@ def unlift_tokens(
 
                 tokens_from_with_effects = get_output_tokens(node)
                 output_token_nodes = output_token_nodes | tokens_from_with_effects
+                tokens_to_sink = tokens_to_sink | tokens_from_with_effects
 
             elif (
                 node.op == "call_function"
@@ -401,22 +532,7 @@ def unlift_tokens(
                 subgraph_node, identifier, *operands = node.args
 
                 # Check if subgraph has effects by looking in the cache
-                from torch._guards import InvokeSubgraphCache, TracingContext
-
-                effects = None
-                tracing_ctx = TracingContext.try_get()
-                if tracing_ctx:
-                    invoke_subgraph_cache = (
-                        tracing_ctx.hop_dispatch_set_cache.get_cache(
-                            torch.ops.higher_order.invoke_subgraph
-                        )
-                    )
-                    if invoke_subgraph_cache:
-                        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
-                            raise AssertionError(
-                                f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
-                            )
-                        effects = invoke_subgraph_cache.get_effects(identifier)
+                effects = get_invoke_subgraph_effects(identifier)
 
                 if effects is not None:
                     # Wrap invoke_subgraph with with_effects
@@ -463,22 +579,73 @@ def unlift_tokens(
                     output_token_nodes = (
                         output_token_nodes | tokens_from_invoke_subgraph
                     )
+                    tokens_to_sink = tokens_to_sink | tokens_from_invoke_subgraph
 
-        if not output_token_nodes and not input_token_nodes:
-            return
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.cond
+            ):
+                operands = node.args[3]
+                if not isinstance(operands, (list, tuple)):
+                    raise AssertionError(
+                        f"expected cond operands to be list/tuple, got {type(operands)}"
+                    )
 
-        output_node = next(reversed(module.graph.find_nodes(op="output")))
-        if output_node is None:
-            raise AssertionError("output node not found in graph")
-        with module.graph.inserting_before(output_node):
-            module.graph.call_function(
-                torch.ops.prims._sink_tokens.default,
-                (list(output_token_nodes),),
-            )
+                num_tokens = get_cond_token_count(module, node, cond_token_counts)
+                if num_tokens == 0:
+                    continue
+
+                for token in operands[:num_tokens]:
+                    if isinstance(token, torch.fx.Node):
+                        if token.op == "placeholder":
+                            input_token_nodes.add(token)
+                        elif is_definite_token_output(module, token, cond_token_counts):
+                            tokens_to_sink.add(token)
+
+                node.args = (
+                    node.args[0],
+                    node.args[1],
+                    node.args[2],
+                    type(operands)(operands[num_tokens:]),
+                )
+                if "val" in node.meta and isinstance(node.meta["val"], (list, tuple)):
+                    node.meta["val"] = node.meta["val"][num_tokens:]
+
+                tokens_from_cond = get_output_tokens(node, set(range(num_tokens)))
+                output_token_nodes = output_token_nodes | tokens_from_cond
+                for user in list(node.users.keys()):
+                    if (
+                        user.op == "call_function"
+                        and user.target is operator.getitem
+                        and len(user.args) > 1
+                        and isinstance(user.args[1], int)
+                        and user.args[1] >= num_tokens
+                    ):
+                        user.args = (user.args[0], user.args[1] - num_tokens)
+
+        output_node = get_output_node(module)
+        if tokens_to_sink:
+            with module.graph.inserting_before(output_node):
+                module.graph.call_function(
+                    torch.ops.prims._sink_tokens.default,
+                    (list(tokens_to_sink),),
+                )
         new_out_args = tuple(
-            [out for out in output_node.args[0] if out not in output_token_nodes]
+            out for out in get_output_args(module) if out not in output_token_nodes
         )
         output_node.args = (new_out_args,)
+
+        for output_token_node in output_token_nodes - tokens_to_sink:
+            if not output_token_node.users:
+                module.graph.erase_node(output_token_node)
+
+        for input_token_node in input_token_nodes:
+            if (
+                input_token_node.op == "placeholder"
+                and not input_token_node.users
+                and not getattr(input_token_node, "_erased", False)
+            ):
+                module.graph.erase_node(input_token_node)
 
         if expected_num_erased:
             if len(input_token_nodes) != expected_num_erased:
@@ -496,18 +663,77 @@ def unlift_tokens(
 
         module.recompile()
 
+    def drop_passthrough_cond_tokens(
+        module: torch.fx.GraphModule, passthrough_tokens: set[torch.fx.Node]
+    ) -> None:
+        if not passthrough_tokens:
+            return
+
+        output_node = get_output_node(module)
+        output_node.args = (
+            tuple(
+                out for out in get_output_args(module) if out not in passthrough_tokens
+            ),
+        )
+
+        for token in passthrough_tokens:
+            if token.op == "placeholder" and not token.users:
+                module.graph.erase_node(token)
+        module.recompile()
+
     def unlift_tokens_from_module(
         module: torch.fx.GraphModule, subgraph_str: str, expected_num_erased: int
     ) -> None:
+        cond_token_counts: dict[torch.fx.Node, int] = {}
+        cond_branch_token_counts: dict[str, int] = {}
+        for prefix, m in module.named_modules():
+            if not isinstance(m, torch.fx.GraphModule):
+                continue
+            for node in m.graph.nodes:
+                if (
+                    node.op != "call_function"
+                    or node.target is not torch.ops.higher_order.cond
+                ):
+                    continue
+                num_tokens = get_cond_token_count(m, node, cond_token_counts)
+                if num_tokens == 0:
+                    continue
+                for branch_node in node.args[1:3]:
+                    if (
+                        isinstance(branch_node, torch.fx.Node)
+                        and branch_node.op == "get_attr"
+                        and isinstance(branch_node.target, str)
+                    ):
+                        qualified_branch_name = (
+                            f"{prefix}.{branch_node.target}"
+                            if prefix
+                            else branch_node.target
+                        )
+                        cond_branch_token_counts[qualified_branch_name] = max(
+                            num_tokens,
+                            cond_branch_token_counts.get(qualified_branch_name, 0),
+                        )
+
+        passthrough_cond_tokens = {}
+        for name, m in module.named_modules():
+            if isinstance(m, torch.fx.GraphModule) and name in cond_branch_token_counts:
+                passthrough_cond_tokens[name] = get_passthrough_cond_tokens(
+                    m, cond_branch_token_counts[name]
+                )
+
         for name, m in module.named_modules():
             if isinstance(m, torch.fx.GraphModule):
                 if name == "":
                     _unlift_tokens_from_module_helper(
-                        m, subgraph_str, expected_num_erased
+                        m, subgraph_str, expected_num_erased, cond_token_counts
                     )
                 else:
                     # Subgraph -- we may or may not have effects applied
-                    _unlift_tokens_from_module_helper(m, f"{subgraph_str}_{name}", None)
+                    _unlift_tokens_from_module_helper(
+                        m, f"{subgraph_str}_{name}", None, cond_token_counts
+                    )
+                    if name in passthrough_cond_tokens:
+                        drop_passthrough_cond_tokens(m, passthrough_cond_tokens[name])
 
     if num_forward_tokens > 0:
         if aot_config.enable_log:
