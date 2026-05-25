@@ -63,7 +63,7 @@ __global__ void RowwiseMomentsCUDAKernel(
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
-  __shared__ alignas(WelfordType)
+  alignas(WelfordType) __shared__
       char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
