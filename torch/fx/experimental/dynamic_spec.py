@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING, TypeAlias
 
 import sympy
 
-from torch import SymInt
+from torch import SymBool, SymInt
 
 
 if TYPE_CHECKING:
@@ -192,23 +192,22 @@ class IntVar(SymInt):
         }
 
 
-def _validate_spec_value(v: Any, *, where: str) -> None:
-    """Assert a SymInt / SymBool entering a spec originates from spec IntVars.
-
-    Args:
-        v: value being validated.
-        where: description of the spec position (for error messages).
+def _validate_spec_sym(v: Any, *, where: str) -> None:
+    """If ``v`` is a SymInt or SymBool, validate it originates from the
+    spec ShapeEnv. No-op for any other type — callers do their own
+    type-shape checking (e.g. TensorSpec rejects SymBool as a dim).
     """
-    import torch as _torch
-
-    if isinstance(v, (SymInt, _torch.SymBool)):
-        env = v.node.shape_env
-        if env is not _get_spec_shape_env():
-            raise TypeError(
-                f"{where}: SymInt / SymBool spec values must originate from "
-                f"spec IntVar / ShapeVar (built against the singleton spec "
-                f"ShapeEnv). Got {v!r} backed by a different ShapeEnv: {env}."
-            )
+    if isinstance(v, SymInt):
+        kind = "SymInt"
+    elif isinstance(v, SymBool):
+        kind = "SymBool"
+    else:
+        return
+    if v.node.shape_env is not _get_spec_shape_env():
+        raise TypeError(
+            f"{where}: {kind} spec values must originate from spec IntVar / "
+            f"ShapeVar; got {v!r} backed by a different ShapeEnv."
+        )
 
 
 class ShapeVar(IntVar):
@@ -255,7 +254,13 @@ class TensorSpec:
 
     def __init__(self, dims: Sequence[LeafIntSpec]) -> None:
         for i, d in enumerate(dims):
-            _validate_symint_spec(d, where=f"TensorSpec dim {i}")
+            if d is not None and not isinstance(d, (int, SymInt)):
+                raise TypeError(
+                    f"TensorSpec dim {i}: expected LeafIntSpec "
+                    f"(IntVar | SymInt | int | None), got "
+                    f"{type(d).__name__}: {d!r}"
+                )
+            _validate_spec_sym(d, where=f"TensorSpec dim {i}")
         self._specs: list[LeafIntSpec] = list(dims)
 
     def __getitem__(self, index: int) -> LeafIntSpec:
@@ -417,18 +422,6 @@ LeafSpec: TypeAlias = LeafIntSpec | TensorSpec
 IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
 
 
-def _validate_symint_spec(v: Any, *, where: str) -> None:
-    """If ``v`` is a SymInt, validate it originates from spec IntVars.
-    No-op for any other type."""
-    if not isinstance(v, SymInt):
-        return
-    if v.node.shape_env is not _get_spec_shape_env():
-        raise TypeError(
-            f"{where}: SymInt spec values must originate from spec "
-            f"IntVar / ShapeVar; got {v!r} backed by a different ShapeEnv."
-        )
-
-
 class ParamsSpec:
     """Specification for the arguments of a compiled function.
 
@@ -460,7 +453,7 @@ class ParamsSpec:
 
     def __init__(
         self,
-        params: dict[str, IntermediateSpec] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> None:
         self._named_args: dict[str, IntermediateSpec] = {}
         self._varargs: list[IntermediateSpec] | None = None
@@ -475,7 +468,7 @@ class ParamsSpec:
                         f"of leaf specs, got {type(value).__name__}"
                     )
                 for i, v in enumerate(value):
-                    _validate_symint_spec(v, where=f"ParamsSpec '{key}'[{i}]")
+                    _validate_spec_sym(v, where=f"ParamsSpec '{key}'[{i}]")
                 self._varargs = list(value)
             elif key == self._VARKW_KEY:
                 if not isinstance(value, dict):
@@ -484,7 +477,7 @@ class ParamsSpec:
                         f"of leaf specs, got {type(value).__name__}"
                     )
                 for k, v in value.items():
-                    _validate_symint_spec(v, where=f"ParamsSpec '{key}'[{k!r}]")
+                    _validate_spec_sym(v, where=f"ParamsSpec '{key}'[{k!r}]")
                 self._varkw = dict(value)
             elif key.startswith("*"):
                 raise ValueError(
@@ -492,7 +485,7 @@ class ParamsSpec:
                     f"{self._VARARGS_KEY!r} and {self._VARKW_KEY!r} are reserved"
                 )
             else:
-                _validate_symint_spec(value, where=f"ParamsSpec[{key!r}]")
+                _validate_spec_sym(value, where=f"ParamsSpec[{key!r}]")
                 self._named_args[key] = value
 
     def __repr__(self) -> str:
@@ -544,12 +537,20 @@ class ShapesSpec:
     function this is the function's parameters, for an ``nn.Module`` this
     is the parameters of ``forward`` (excluding ``self``).
 
-    Currently only ``params`` is supported::
+    ``assumptions`` is an optional list of ``SymBool`` expressions built
+    from spec ``IntVar`` / ``ShapeVar`` values. Each assumption is wired
+    into the shape env at compile time and asserted at runtime via the
+    deferred-runtime-assert mechanism::
 
-        ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+        ShapesSpec(
+            params={"x": TensorSpec([A, None]), "y": TensorSpec([B, None])},
+            assumptions=[A + B > 10, A * 2 == B],
+        )
 
-    ``globals`` and ``assumptions`` are reserved for future use and will
-    raise ``NotImplementedError`` if set.
+    ``globals`` is reserved for future use and will raise
+    ``NotImplementedError`` if set.
     """
 
     def __init__(
@@ -557,12 +558,10 @@ class ShapesSpec:
         params: ParamsSpec | dict[str, Any] | None = None,
         *,
         globals: Any = None,
-        assumptions: Any = None,
+        assumptions: Sequence[SymBool] | None = None,
     ) -> None:
         if globals is not None:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
-        if assumptions is not None:
-            raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
         # Auto-wrap a bare dict so callers can write
         # ``ShapesSpec({"x": ...})`` instead of
         # ``ShapesSpec(params=ParamsSpec({"x": ...}))``.
@@ -575,6 +574,21 @@ class ShapesSpec:
             )
         self._params = params
 
+        self._assumptions: list[SymBool] = []
+        if assumptions is not None:
+            for i, a in enumerate(assumptions):
+                if not isinstance(a, SymBool):
+                    raise TypeError(
+                        f"ShapesSpec.assumptions[{i}]: expected SymBool, "
+                        f"got {type(a).__name__}: {a!r}"
+                    )
+                _validate_spec_sym(a, where=f"ShapesSpec.assumptions[{i}]")
+                self._assumptions.append(a)
+
+    @property
+    def assumptions(self) -> list[Any]:
+        return list(self._assumptions)
+
     def __repr__(self) -> str:
         lines = ["shapes_spec:"]
         if self._params is not None:
@@ -582,10 +596,15 @@ class ShapesSpec:
             param_repr = repr(self._params)
             for line in param_repr.splitlines():
                 lines.append(_INDENT * 2 + line)
+        if self._assumptions:
+            lines.append(f"{_INDENT}assumptions:")
+            for a in self._assumptions:
+                lines.append(_INDENT * 2 + repr(a))
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "type": "ShapesSpec",
             "params": None if self._params is None else self._params.to_jsonable(),
+            "assumptions": [repr(a) for a in self._assumptions],
         }

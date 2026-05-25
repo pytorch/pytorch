@@ -238,6 +238,64 @@ shapes_spec:
         1: None""",
         )
 
+    def test_shapes_spec_repr_with_assumptions(self):
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+        ss = ShapesSpec(
+            params={"x": TensorSpec([A, None]), "y": TensorSpec([B, None])},
+            assumptions=[A > B, A + B > 10],
+        )
+        self.assertEqual(
+            repr(ss),
+            """\
+shapes_spec:
+  params:
+    x:
+      Tensor:
+        0: ShapeVar(a#0, min=0)
+        1: None
+    y:
+      Tensor:
+        0: ShapeVar(b#1, min=0)
+        1: None
+  assumptions:
+    a#0 > b#1
+    a#0 + b#1 > 10""",
+        )
+
+    def test_shapes_spec_to_jsonable_with_assumptions(self):
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+        ss = ShapesSpec(
+            params={"x": TensorSpec([A, None])},
+            assumptions=[A > B, A + B > 10],
+        )
+        self.assertEqual(
+            ss.to_jsonable(),
+            {
+                "type": "ShapesSpec",
+                "params": {
+                    "type": "ParamsSpec",
+                    "params": {
+                        "x": {
+                            "type": "TensorSpec",
+                            "dims": [
+                                {
+                                    "type": "ShapeVar",
+                                    "name": "a",
+                                    "min": 0,
+                                    "max": None,
+                                    "optimization_hint": None,
+                                },
+                                None,
+                            ],
+                        },
+                    },
+                },
+                "assumptions": ["a#0 > b#1", "a#0 + b#1 > 10"],
+            },
+        )
+
     def test_params_spec_repr_with_varargs_and_varkw(self):
         sv = ShapeVar("batch")
         ps = ParamsSpec(
@@ -882,6 +940,152 @@ class TestDerivedDimSpec(TestCase):
         # y.shape[0] and z.shape[0] both = 8 (= 2 * x.shape[0])
         out = compiled(torch.randn(4, 3), torch.randn(8, 5), torch.randn(8, 5))
         self.assertTrue(torch.is_tensor(out))
+
+
+class TestAssumptionsSpec(TestCase):
+    """``ShapesSpec.assumptions`` — list of SymBool expressions over spec
+    IntVars asserted at runtime via deferred runtime asserts."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_simple_assumption(self):
+        """Assumption ``A > B`` enables ``if x.shape[0] > y.shape[0]`` to
+        resolve without DDE."""
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+
+        def fn(x, y):
+            if x.shape[0] > y.shape[0]:
+                return x.sum() + 1000.0
+            return y.sum() - 1000.0
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={
+                    "x": TensorSpec([A, None]),
+                    "y": TensorSpec([B, None]),
+                },
+                assumptions=[A > B],
+            ),
+        )
+        # Correct: A=5 > B=3, takes if branch.
+        out = compiled(torch.ones(5, 2), torch.ones(3, 2))
+        self.assertTrue(out.item() > 500.0)
+
+        # Violation: A=2 not > B=3.
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            (RuntimeError, AssertionError), "(Runtime assertion failed|Guard fail)"
+        ):
+            compiled(torch.ones(2, 2), torch.ones(3, 2))
+
+        # Sanity check: same fn WITHOUT the assumption DDEs on the
+        # conditional (proves the assumption is what makes the above work).
+        torch._dynamo.reset()
+        compiled_no_assumption = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={
+                    "x": TensorSpec([A, None]),
+                    "y": TensorSpec([B, None]),
+                },
+            ),
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled_no_assumption(torch.ones(5, 2), torch.ones(3, 2))
+
+    def test_orphan_intvar_in_assumption_raises(self):
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+
+        def fn(x):
+            return x.sum()
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={"x": TensorSpec([A, None])},
+                assumptions=[A + B > 0],  # B never bound
+            ),
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as cm:
+            compiled(torch.randn(4, 3))
+        self.assertIn(
+            "ValueError: shapes_spec: 1 pending check(s) reference unbound "
+            "IntVar(s) ['b']. Every IntVar used in a derived expression or "
+            "assumption must also appear as a bare-IntVar slot somewhere in "
+            "the spec. Offending checks:\n"
+            "  - a + b > 0  (unbound: ['b'])",
+            str(cm.exception),
+        )
+
+    def test_multiple_orphan_assumptions(self):
+        """Multiple assumptions with multiple unbound IntVars: error lists
+        all offending checks with user-friendly expressions."""
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+        C = ShapeVar("c")
+
+        def fn(x):
+            return x.sum()
+
+        # C is bound by x; A and B are not.
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={"x": TensorSpec([C, None])},
+                assumptions=[A + B > 0, A * 2 == B],
+            ),
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as cm:
+            compiled(torch.randn(4, 3))
+        self.assertIn(
+            "ValueError: shapes_spec: 2 pending check(s) reference unbound "
+            "IntVar(s) ['a', 'b']. Every IntVar used in a derived expression "
+            "or assumption must also appear as a bare-IntVar slot somewhere "
+            "in the spec. Offending checks:\n"
+            "  - a + b > 0  (unbound: ['a', 'b'])\n"
+            "  - Eq(b, 2*a)  (unbound: ['a', 'b'])",
+            str(cm.exception),
+        )
+
+    def test_foreign_symbool_rejected_at_construction(self):
+        """A SymBool backed by a different ShapeEnv is rejected at
+        ShapesSpec construction."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        real_env = ShapeEnv()
+        u = real_env.create_unbacked_symint()
+        foreign_symbool = u > 0  # SymBool from real_env
+        with self.assertRaises(TypeError) as cm:
+            ShapesSpec(assumptions=[foreign_symbool])
+        self.assertIn(
+            "ShapesSpec.assumptions[0]: SymBool spec values must originate "
+            "from spec IntVar / ShapeVar; got u0 > 0 backed by a different "
+            "ShapeEnv.",
+            str(cm.exception),
+        )
+
+    def test_non_symbool_rejected(self):
+        """Plain bool / non-SymBool elements are rejected."""
+        with self.assertRaisesRegex(TypeError, r"expected SymBool"):
+            ShapesSpec(assumptions=[True])
+        with self.assertRaisesRegex(TypeError, r"expected SymBool"):
+            ShapesSpec(assumptions=[1])
 
 
 class TestObjectSpec(TestCase):

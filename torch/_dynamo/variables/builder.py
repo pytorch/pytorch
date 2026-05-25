@@ -94,6 +94,7 @@ from torch.fx.experimental.symbolic_shapes import (
     _nested_int_aware_sort,
     DimDynamic,
     RelaxedUnspecConstraint,
+    ShapeEnv,
     StatefulSymbolicContext,
     SubclassSymbolicContext,
     SymbolicContext,
@@ -4354,7 +4355,7 @@ def _wire_spec_slot(
         )
 
 
-def _emit_pending_bool(shape_env: Any, bool_expr: Any) -> None:
+def _emit_pending_bool(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
     """Substitute spec symbols and defer the resulting boolean as a runtime
     assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
     spec symbols must already be present in ``_int_var_to_symbol``."""
@@ -4362,7 +4363,7 @@ def _emit_pending_bool(shape_env: Any, bool_expr: Any) -> None:
     shape_env.guard_or_defer_runtime_assert(substituted, "shapes_spec deferred check")
 
 
-def _drain_shape_spec_pending_assumptions(shape_env: Any) -> None:
+def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
     """Re-scan pending derived/assumption checks; emit any whose deps are now bound.
 
     TODO: optimize with an inverted index (sym → pending entries) if the
@@ -4383,7 +4384,23 @@ def _drain_shape_spec_pending_assumptions(shape_env: Any) -> None:
     shape_env._shape_spec_pending_assumptions[:] = keep
 
 
-def _finalize_spec_wiring(shape_env: Any) -> None:
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
+    """Append each ShapesSpec.assumptions SymBool to the pending list.
+    Called BEFORE any input is processed (``_int_var_to_symbol`` is empty),
+    so every assumption defers. Drain happens on bare-IntVar bindings;
+    finalize raises if any still has unbound deps at end of trace.
+    """
+    assumptions = getattr(shapes_spec, "_assumptions", None)
+    if not assumptions:
+        return
+    for a in assumptions:
+        bool_expr = a.node.expr
+        shape_env._shape_spec_pending_assumptions.append(
+            (bool_expr.free_symbols, bool_expr)
+        )
+
+
+def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     """Verify all pending spec assumptions/derived-dim checks have been
     emitted (i.e. every spec IntVar referenced by a derived expression or
     user assumption has been bound by some bare-IntVar input slot).
@@ -4397,17 +4414,30 @@ def _finalize_spec_wiring(shape_env: Any) -> None:
     from torch.fx.experimental.dynamic_spec import _intvar_symbol_registry
 
     subst_keys = shape_env._int_var_to_symbol.keys()
-    unbound: set[Any] = set()
-    for free, _ in pending:
-        unbound |= free - subst_keys
-    names = sorted(
-        _intvar_symbol_registry[s].name for s in unbound if s in _intvar_symbol_registry
-    )
+
+    def _name(s: Any) -> str:
+        iv = _intvar_symbol_registry.get(s)
+        return iv.name if iv is not None else str(s)
+
+    # Build a "expr (unbound: [...])" line per pending check that still
+    # has unbound deps, with user-given IntVar names.
+    lines = []
+    all_unbound: set[Any] = set()
+    for free, bool_expr in pending:
+        missing = free - subst_keys
+        if not missing:
+            continue
+        all_unbound |= missing
+        rename = {s: sympy.Symbol(_name(s)) for s in free}
+        pretty_expr = bool_expr.xreplace(rename)
+        missing_names = sorted(_name(s) for s in missing)
+        lines.append(f"  - {pretty_expr}  (unbound: {missing_names})")
     raise ValueError(
-        f"shapes_spec: {len(pending)} pending check(s) reference unbound "
-        f"IntVar(s) {names}. Every IntVar used in a derived expression or "
-        f"assumption must also appear as a bare-IntVar slot somewhere in "
-        f"the spec."
+        f"shapes_spec: {len(lines)} pending check(s) reference unbound "
+        f"IntVar(s) {sorted(_name(s) for s in all_unbound)}. Every IntVar "
+        f"used in a derived expression or assumption must also appear as a "
+        f"bare-IntVar slot somewhere in the spec. Offending checks:\n"
+        + "\n".join(lines)
     )
 
 
