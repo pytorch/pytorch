@@ -3181,7 +3181,11 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 )
             )
             if not SIMDScheduling.tiling_is_compatible(
-                node_schedule, numel_ep, rnumel_ep, tiling
+                # pyrefly: ignore [bad-argument-type]
+                node_schedule,
+                numel_ep,
+                rnumel_ep,
+                tiling,
             ):
                 why(
                     "epilogue iteration space is incompatible with output_tile dimensions"
@@ -3196,6 +3200,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         layout1 = self.node.mutable_args[0].layout
         layout2 = writing_node.node.layout
+        assert isinstance(layout1, ir.Layout) and isinstance(layout2, ir.Layout)
         if (
             layout1.size != layout2.size
             or layout1.stride != layout2.stride
@@ -3206,6 +3211,7 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         written_buffer_name = self.node.mutation_outputs[0].name
         # Other nodes read the real (pre-mutation) buffer, not the mutation output.
+        assert written_buffer_name is not None
         real_written_buffer_name = self.scheduler.mutation_real_name.get(
             written_buffer_name, written_buffer_name
         )
@@ -3246,7 +3252,9 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
         # Reductions always require additional indexing (reduction dimension);
         # the symbol-usage check below is only valid for Pointwise nodes.
-        if not isinstance(node2.node.data, ir.Pointwise):
+        if not isinstance(node2.node, ComputedBuffer) or not isinstance(
+            node2.node.data, ir.Pointwise
+        ):
             return True
 
         # The epilogue depends on expressions not originally available in the user
@@ -3262,6 +3270,8 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
 
 
 class FusedUserTritonSchedulerNode(FusedSchedulerNode):
+    """A fused scheduler node combining a UserTritonSchedulerNode with an epilogue."""
+
     kernel_node: UserTritonSchedulerNode
 
     def __init__(
@@ -3277,6 +3287,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         self.kernel_node = kernel_node
         self.epilogue = epilogue
         self.min_order = self.kernel_node.min_order
+        # pyrefly: ignore[bad-assignment]
         self.outputs = self.writing_node.get_outputs()
 
     @property
@@ -3291,7 +3302,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             )
         ]
         assert len(writers) == 1
-        return writers[0]
+        return typing.cast(SchedulerNode, writers[0])
 
     @classmethod
     def epilogue_fuse(
@@ -3318,7 +3329,12 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        """
+        Generate code for the fused user-defined Triton kernel.
+        """
+
         assert isinstance(self.kernel_node.node, ir.UserDefinedTritonKernel)
+        assert isinstance(self.writing_node.node, ir.ComputedBuffer)
         from torch._inductor.codegen.simd import SIMDScheduling
         from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
         from torch._inductor.codegen.triton import FusedUserTritonKernel
@@ -3331,7 +3347,10 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             rnumel, sympy.S.One
         )
         kernel_features = SIMDKernelFeatures(
-            epilogue_nodes, numel_ep, reduction_numel=rnumel
+            # pyrefly: ignore [bad-argument-type]
+            epilogue_nodes,
+            numel_ep,
+            reduction_numel=rnumel,
         )
 
         excluded_names = (
@@ -3347,8 +3366,6 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         additional_args = [
             (f"_fused_in_ptr{i}", name) for i, name in enumerate(external_reads)
         ]
-
-        writing_node = self.writing_node
 
         epilogue_needs_indexing = any(
             self.kernel_node.epilogue_requires_indexing(sn) for sn in epilogue_nodes
@@ -3396,8 +3413,9 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
             pid_cache=pid_cache,
         )
         new_kernel_src = fused_user_kernel.codegen()
+
         return self.kernel_node.node.codegen_with_epilogue_fusion(
-            wrapper, (writing_node.node, new_kernel_src, additional_args)
+            wrapper, (self.writing_node.node, new_kernel_src, additional_args)
         )
 
     def is_extern(self) -> bool:

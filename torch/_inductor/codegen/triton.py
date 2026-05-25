@@ -6999,7 +6999,7 @@ class UserTritonStore:
 
 @dataclasses.dataclass
 class UserTritonMeta:
-    stores: list[TritonStore]
+    stores: list[UserTritonStore]
     func_def: ast.FunctionDef | None = None
 
 
@@ -7101,16 +7101,17 @@ class FusedUserTritonKernel(TritonKernel):
         ).replace("\n", "")
         self.func_def = self.kernel_stores.func_def
 
-        self.new_store_cse_var: CSEVariable | None = None
-        self.intermediate_cse_vars: dict[str, CSEVariable] = {}
+        self.new_store_cse_var: TritonCSEVariable | None = None
+        self.intermediate_cse_vars: dict[str, TritonCSEVariable] = {}
 
         writing_node = scheduler_node.writing_node
         assert isinstance(writing_node.node, ir.ComputedBuffer)
         self.epilogue_output_names: OrderedSet[str] = writing_node.get_buffer_names()
+        assert isinstance(writing_node.node.layout, ir.Layout)
         self.output_store_dtype: torch.dtype = writing_node.node.layout.dtype
 
     def want_no_x_dim(self) -> bool:
-        # For now, we enforce 1d reductions. Thus, supress XBLOCK=1 for reductions.
+        # For now, we enforce 1d reductions. Thus, suppress XBLOCK=1 for reductions.
         return self.features.is_reduction()
 
     def _get_persistent_RBLOCK(self, rnumel) -> int | str:
@@ -7178,6 +7179,7 @@ class FusedUserTritonKernel(TritonKernel):
                 shape=value.shape,
             )
         else:
+            assert isinstance(value, TritonCSEVariable)
             self.intermediate_cse_vars[name] = value
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
@@ -7187,6 +7189,7 @@ class FusedUserTritonKernel(TritonKernel):
         self.store(name, index, value)
 
     def codegen_new_params(self) -> None:
+        assert self.func_def is not None
         new_args = [ast.arg(arg=p) for p in self.additional_buf_args.values()]
         self.func_def.args.args[:0] = new_args
         ast.fix_missing_locations(self.kernel_ast)
@@ -7221,6 +7224,7 @@ class FusedUserTritonKernel(TritonKernel):
         """
         with self:
             for sn in self.scheduler_node.epilogue.get_nodes():
+                assert isinstance(sn, SchedulerNode)
                 index_vars = self.split_and_set_ranges(sn.get_ranges())
                 sn.codegen(index_vars)
 
@@ -7238,6 +7242,7 @@ class FusedUserTritonKernel(TritonKernel):
                 if keyword.arg == arg_name:
                     keyword.value = new_arg
 
+        assert self.new_store_cse_var is not None
         _replace_arg(
             self.kernel_stores.stores[0].store_node,
             "value",
@@ -7258,6 +7263,7 @@ class FusedUserTritonKernel(TritonKernel):
             indexing_lines = [
                 indentations + l for l in self.indexing_code.get_lines_ref()
             ]
+            assert kernel_stores.func_def is not None
             def_line_index = kernel_stores.func_def.lineno - 1
             new_src_lines = (
                 src_lines[: def_line_index + 1]
@@ -7451,6 +7457,7 @@ class TritonScheduling(SIMDScheduling):
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
+
         in milliseconds on randomly generated inputs.
         """
         src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
