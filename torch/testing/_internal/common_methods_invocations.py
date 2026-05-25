@@ -6933,7 +6933,13 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 continue
 
             if "weight" in kwargs:
-                kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype)
+                # Strictly positive class weights only. Real-world
+                # class-balancing weights are always > 0 anyway. The
+                # narrow [0.5, 2) range keeps the weighted-CE output
+                # magnitude similar to the unweighted case so
+                # kernels-level tolerances (e.g. CUDA matmul contig vs
+                # non-contig drift) stay within bounds.
+                kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype, low=0.5, high=2)
             if probabilities_target:
                 # ignore_index is not supported for probabilities target
                 if "ignore_index" in kwargs:
