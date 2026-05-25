@@ -86,7 +86,7 @@ class TestBwdGradients(TestGradients):
     @skipOps(
         _bwd_grad_all
         | {
-            skip("abs"),
+            skip("abs", dtypes=(torch.cdouble,)),
             skip("acos"),
             xfail("as_strided", variant_name="partial_views"),
         }
@@ -161,7 +161,7 @@ class TestBwdGradients(TestGradients):
     @skipOps(
         _bwd_grad_all
         | {
-            skip("abs"),
+            skip("abs", dtypes=(torch.cdouble,)),
             xfail("as_strided", variant_name="partial_views"),
             xfail("nn.functional.hardsigmoid"),
         }
