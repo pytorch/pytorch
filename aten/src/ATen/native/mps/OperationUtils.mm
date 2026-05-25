@@ -995,11 +995,12 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
-                                           std::optional<c10::ScalarType> scalar_arg_type) {
+                                           std::optional<c10::ScalarType> scalar_arg_type,
+                                           std::optional<uint32_t> ilp_threshold) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
     }
     return;
   }
@@ -1059,9 +1060,20 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   // semantics. Castout variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
   // TORCH_CHECK still fires for missing direct kernel).
   bool cast_needed = false;
+  bool cast_ilp = false;
   if (!alpha.has_value() && !hasFunction(kernel_name)) {
     cast_needed = true;
-    dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    // ILP castout is opt-in via caller-supplied ilp_threshold (mirrors exec_binary_kernel).
+    // Default is off because for general unary ops the runtime ScalarType switch in
+    // store_at_offs has variable cost. Copy-style call sites that know they're bandwidth-bound
+    // can pass ilp_threshold=0u (or a custom crossover) to force ILP whenever the launch shape
+    // and dtypes are compatible.
+    cast_ilp = is_contiguous && ilp_threshold.has_value() && length >= ilp_threshold.value();
+    if (cast_ilp) {
+      dense_suffix = "dense_castout_ilp";
+    } else {
+      dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    }
     dense_ilp = false;
     kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
   }
@@ -1080,15 +1092,23 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         // {dense,strided}_castout take the output dtype at runtime via the ScalarType in the trailing constant buffer;
         // input is read at compile-time Tin.
         const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
-        if (is_contiguous) {
-          std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
-                                                  out_type};
-          mtl_setBytes(computeEncoder, size_outtype, 2);
+        if (cast_ilp) {
+          std::array<uint32_t, 3> size_outtype_numel = {
+              static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())), out_type, length};
+          mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+          mtl_dispatch1DJob(
+              computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
         } else {
-          std::array<uint32_t, 2> ndim_outtype = {static_cast<uint32_t>(iter.ndim()), out_type};
-          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_outtype);
+          if (is_contiguous) {
+            std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
+                                                    out_type};
+            mtl_setBytes(computeEncoder, size_outtype, 2);
+          } else {
+            std::array<uint32_t, 2> ndim_outtype = {static_cast<uint32_t>(iter.ndim()), out_type};
+            mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_outtype);
+          }
+          mtl_dispatch1DJob(computeEncoder, cplState, length);
         }
-        mtl_dispatch1DJob(computeEncoder, cplState, length);
       } else if (dense_ilp) {
         mtl_setBytes(computeEncoder, length, 2);
         mtl_dispatch1DJob(

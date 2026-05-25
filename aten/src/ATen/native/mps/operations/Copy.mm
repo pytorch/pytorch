@@ -50,7 +50,7 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 
   if (needs_conj && needs_neg) {
     auto iter = build_iter(dst_view);
-    lib.exec_unary_kernel(iter, "copy_conj");
+    lib.exec_unary_kernel(iter, "copy_conj", std::nullopt, std::nullopt, /*ilp_threshold=*/0u);
     // Second pass: in-place neg over dst.
     auto neg_iter = at::TensorIteratorConfig()
                         .check_all_same_dtype(false)
@@ -59,13 +59,13 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
                         .add_output(dst_view)
                         .add_input(dst_view)
                         .build();
-    lib.exec_unary_kernel(neg_iter, "copy_neg");
+    lib.exec_unary_kernel(neg_iter, "copy_neg", std::nullopt, std::nullopt, /*ilp_threshold=*/0u);
     return;
   }
 
   const std::string_view name = needs_conj ? "copy_conj" : (needs_neg ? "copy_neg" : "copy_identity");
   auto iter = build_iter(dst_view);
-  lib.exec_unary_kernel(iter, std::string(name));
+  lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/0u);
 }
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
