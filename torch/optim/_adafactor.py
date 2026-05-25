@@ -391,12 +391,16 @@ def _single_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
-                torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                .square_()
+                .div_(grad.size(-1))
             )
             row_var.lerp_(row_mean, one_minus_beta2_t)
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_mean = (
-                torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                .square_()
+                .div_(grad.size(-2))
             )
             col_var.lerp_(col_mean, one_minus_beta2_t)
             var_estimate = row_var @ col_var
@@ -545,7 +549,8 @@ def _multi_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_means = [
-                torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(row_means, row_means)
             torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
@@ -554,7 +559,8 @@ def _multi_tensor_adafactor(
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_means = [
-                torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(col_means, col_means)
             torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])

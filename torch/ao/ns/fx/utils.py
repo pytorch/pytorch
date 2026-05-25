@@ -478,8 +478,8 @@ def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     Return:
         float or tuple of floats
     """
-    Ps = torch.norm(x)
-    Pn = torch.norm(x - y)
+    Ps = torch.linalg.vector_norm(x)
+    Pn = torch.linalg.vector_norm(x - y)
     return 20 * torch.log10(Ps / Pn)
 
 
