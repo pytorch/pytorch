@@ -53,6 +53,8 @@ std::string opTypeToString(OpType opType) {
       return "_ALLREDUCE_SPARSE";
     case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
       return "REDUCE_SCATTER_TENSOR_COALESCED";
+    case OpType::ALLGATHER_INTO_TENSOR_COALESCED:
+      return "ALLGATHER_INTO_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }

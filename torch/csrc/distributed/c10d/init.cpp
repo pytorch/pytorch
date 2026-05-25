@@ -3783,6 +3783,9 @@ Returns:
       .value(
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::OpType::ALLGATHER_INTO_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")
