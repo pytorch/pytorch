@@ -1702,6 +1702,7 @@ class cpp:
     )
 
     # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
     enable_kernel_context_guard = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
     )
