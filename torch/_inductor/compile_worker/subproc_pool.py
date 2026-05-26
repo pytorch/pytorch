@@ -12,7 +12,7 @@ import threading
 import traceback
 import typing
 from collections.abc import Callable
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
 from typing import Any, IO, TypeVar
@@ -478,7 +478,7 @@ class SubprocMain:
         return pickler.dumps(result)
 
 
-AnyPool = ProcessPoolExecutor | SubprocPool
+AnyPool = ProcessPoolExecutor | SubprocPool | ThreadPoolExecutor
 
 
 def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:
