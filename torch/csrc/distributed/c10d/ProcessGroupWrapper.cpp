@@ -468,7 +468,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   // NOTE: We don't enforce shape checking for allgather_into_tensor_coalesced
-  // because the implementation itself does not enforce it we have tests that
+  // because the implementation itself does not enforce it. We have tests that
   // use inconsistent shapes, see python implementation in distributed_c10d for
   // details.
   runCollectiveChecks(OpType::ALLGATHER_INTO_TENSOR_COALESCED, {});
