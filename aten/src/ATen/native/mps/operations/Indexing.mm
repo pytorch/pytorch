@@ -198,6 +198,13 @@ static void index_put_kernel_mps(TensorIterator& iter,
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index_put_impl");
     if (accumulate) {
+      // Metal atomic-add is non-associative for floating/complex types, so
+      // duplicate indices race on the result. Integer adds are associative
+      // and remain deterministic
+      const auto dtype = iter.tensor_base(0).scalar_type();
+      if (at::isFloatingType(dtype) || at::isComplexType(dtype)) {
+        at::globalContext().alertNotDeterministic("index_put_with_accumulate_mps");
+      }
       dispatch_index_kernel(iter,
                             index_size,
                             index_stride,
@@ -762,6 +769,15 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
+  // Atomic prod/mean are non-associative for floating-point; alert unless we're
+  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
+  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
+  // actually produce non-deterministic output on MPS.
+  const auto dtype = self.scalar_type();
+  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
+      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
+    at::globalContext().alertNotDeterministic("index_reduce_mps");
+  }
 
   if (!result.is_same(self)) {
     result.copy_(self);
