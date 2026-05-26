@@ -4859,6 +4859,53 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_dataclass_constructor_overrides_tensor_defaults(self):
+        @dataclass
+        class CacheParams:
+            conv_state: torch.Tensor = torch.Tensor()
+            ssm_state: torch.Tensor = torch.Tensor()
+            state_indices_tensor: torch.Tensor = torch.Tensor()
+
+            def at_layer_idx(self, layer_idx):
+                return CacheParams(
+                    self.conv_state[layer_idx],
+                    self.ssm_state[layer_idx],
+                    self.state_indices_tensor,
+                )
+
+        params = CacheParams(torch.randn(2, 3), torch.randn(2, 3), torch.arange(3))
+        compiled_fn = torch.compile(
+            params.at_layer_idx, fullgraph=True, backend="eager"
+        )
+
+        expected = params.at_layer_idx(1)
+        actual = compiled_fn(1)
+
+        self.assertEqual(expected.conv_state, actual.conv_state)
+        self.assertEqual(expected.ssm_state, actual.ssm_state)
+        self.assertEqual(expected.state_indices_tensor, actual.state_indices_tensor)
+
+        def make_cache_with_keywords(conv_state, ssm_state, state_indices_tensor):
+            return CacheParams(
+                conv_state=conv_state[1],
+                ssm_state=ssm_state[1],
+                state_indices_tensor=state_indices_tensor,
+            )
+
+        compiled_keyword_fn = torch.compile(
+            make_cache_with_keywords, fullgraph=True, backend="eager"
+        )
+        expected = make_cache_with_keywords(
+            params.conv_state, params.ssm_state, params.state_indices_tensor
+        )
+        actual = compiled_keyword_fn(
+            params.conv_state, params.ssm_state, params.state_indices_tensor
+        )
+
+        self.assertEqual(expected.conv_state, actual.conv_state)
+        self.assertEqual(expected.ssm_state, actual.ssm_state)
+        self.assertEqual(expected.state_indices_tensor, actual.state_indices_tensor)
+
     @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_meth_default_tensor_args(self):
         """

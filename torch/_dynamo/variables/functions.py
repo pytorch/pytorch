@@ -216,8 +216,15 @@ def bind_args_cached(
     rem_kw = dict(kwargs)
 
     # 1) Bind all positional (pos-only + pos-or-kw)
-    # 1.1) Apply pos-defaults first (maybe overridden later)
+    # 1.1) Apply pos-defaults that are actually used. Defaults may be objects
+    # that cannot be represented sourcelessly, so do not wrap values that the
+    # call overrides with explicit arguments.
+    provided_positional_names = set(spec.all_pos_names[: len(args)])
     for name, idx in spec.pos_default_map.items():
+        if name in provided_positional_names or (
+            name in rem_kw and name not in spec.posonly_names
+        ):
+            continue
         default_source = None
         if fn_source and not (
             ConstantVariable.is_literal(spec.defaults[idx])
