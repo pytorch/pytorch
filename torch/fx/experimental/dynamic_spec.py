@@ -190,8 +190,7 @@ class IntVar(SymInt):
 
 def _validate_spec_sym(v: Any, *, where: str) -> None:
     """If ``v`` is a SymInt or SymBool, validate it originates from the
-    spec ShapeEnv. No-op for any other type — callers do their own
-    type-shape checking (e.g. TensorSpec rejects SymBool as a dim).
+    spec ShapeEnv.
     """
     if isinstance(v, SymInt):
         kind = "SymInt"
@@ -253,7 +252,6 @@ class TensorSpec:
             if d is not None and not isinstance(d, (int, SymInt)):
                 raise TypeError(
                     f"TensorSpec dim {i}: expected LeafIntSpec "
-                    f"(IntVar | SymInt | int | None), got "
                     f"{type(d).__name__}: {d!r}"
                 )
             _validate_spec_sym(d, where=f"TensorSpec dim {i}")
