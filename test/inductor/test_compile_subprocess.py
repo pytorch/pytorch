@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -115,6 +116,8 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
     @requires_gpu()
     @requires_triton()
     @unittest.skipIf(

@@ -50,6 +50,9 @@ import torch
 import torch.utils._pytree as pytree
 from itertools import product
 import operator
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+)
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
@@ -389,6 +392,7 @@ class TestCaseMPS(TestCase):
         return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
 
 class TestMemoryLeak(TestCaseMPS):
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/160550")
     def test_mps_memory_leak_detection(self):
         l = []
 

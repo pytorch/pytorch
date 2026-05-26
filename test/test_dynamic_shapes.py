@@ -44,9 +44,15 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_XPU,
     TestCase,
 )
@@ -3651,6 +3657,15 @@ class TestUnbacked(TestCase):
         with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN
+        or IS_LINUX
+        or IS_MACOS
+        or TEST_WITH_ROCM
+        or TEST_WITH_SLOW
+        or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/163953",
+    )
     @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):

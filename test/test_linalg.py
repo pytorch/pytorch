@@ -49,6 +49,10 @@ from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
 import contextlib
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    TEST_WITH_SLOW,
+)
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 
@@ -4826,6 +4830,7 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/150959")
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
@@ -6298,6 +6303,7 @@ class TestLinalg(TestCase):
             self.assertTrue(ok)
 
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165603")
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float32)

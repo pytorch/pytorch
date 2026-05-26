@@ -23,6 +23,12 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 try:
@@ -70,6 +76,7 @@ class TestMemoryPlanning(TestCase):
         ).check("buf1 = alloc_from_pool(pool1, align(4*s77*s77),").run(code)
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -104,6 +111,10 @@ class TestMemoryPlanning(TestCase):
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/168171",
+    )
     @config.patch({"triton.autotune_at_compile_time": False})
     def test_unbacked_symint(self):
         # when allocation's size has unbacked symints
