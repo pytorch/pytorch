@@ -1336,7 +1336,8 @@ class OverlapScheduler:
                 key = get_full_bucket_key(coll, self.bucket_mode)
                 bucket_groups[key].append(coll)
 
-            # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
+            # Sort bucket groups by the best candidate priority in each group,
+            # with larger groups first as tiebreaker.
             sorted_bucket_keys = sorted(
                 bucket_groups.keys(),
                 key=lambda k: (
