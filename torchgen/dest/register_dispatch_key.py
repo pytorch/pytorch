@@ -397,7 +397,6 @@ class RegisterDispatchKey:
             out_args_bindings[:-num_out_args] if num_out_args > 0 else out_args_bindings
         )
 
-        name = sig.name()
         # Setup logic for functional vs inplace
         # Functional: Need to create 'out' tensors
         # Inplace: 'out' is just 'self'
@@ -993,7 +992,10 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif self.backend_index.external and self.class_method_name is not None:
-                assert metadata is not None
+                if metadata is None:
+                    raise AssertionError(
+                        f"No kernel metadata found for {self.g.functional.func.name}"
+                    )
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::{self.class_method_name}::structured_{metadata.kernel}"
             else:
