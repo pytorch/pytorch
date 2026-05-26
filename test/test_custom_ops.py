@@ -5541,6 +5541,27 @@ class TestCustomOpFastPath(TestCase):
         # so redispatch is called three times
         self.assertEqual(after_count - before, 3)
 
+    def test_fast_path_multiple_torch_ops_in_body(self):
+        @torch.library.custom_op("_torch_testing::fp_multi_body", mutates_args=())
+        def fp_multi_body(x: Tensor, y: Tensor) -> Tensor:
+            # Multiple torch ops inside the body should work normally
+            z = torch.add(x, y)
+            z = torch.relu(z)
+            z = z * 2
+            z = torch.nn.functional.softmax(z, dim=0)
+            return z
+
+        @fp_multi_body.register_fake
+        def _(x, y):
+            return torch.empty_like(x)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        with self._assert_fast_path_taken(fp_multi_body):
+            result = fp_multi_body(x, y)
+        expected = torch.nn.functional.softmax(torch.relu(x + y) * 2, dim=0)
+        self.assertEqual(result, expected)
+
     def test_fast_path_mutable(self):
         @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
         def fp_inplace(x: Tensor) -> None:
