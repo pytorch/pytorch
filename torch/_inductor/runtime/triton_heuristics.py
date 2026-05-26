@@ -553,8 +553,6 @@ class CachingAutotuner(KernelInterface):
             and not self.dump_launch_params
             and not self.dump_launch_tensors
         )
-        # Tracks which launchers (by id) have already passed
-        # _check_launcher_call_args can validate without inspect.signature().
 
         self._plugins = get_caching_autotuner_plugins(self)
 
@@ -2088,7 +2086,7 @@ class CachingAutotuner(KernelInterface):
                 f"{kernel_name}: too many positional arguments - "
                 f"expected {expected}, got {len(args)}. "
                 "'stream' must be passed as a keyword argument."
-            )
+            ) from None
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.

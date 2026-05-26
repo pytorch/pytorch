@@ -25,7 +25,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     requires_gpu_with_enough_memory,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -1302,19 +1301,6 @@ class TestCheckLauncherCallArgs(TestCase):
             autotuner._check_launcher_call_args(launcher, (1, 2, 3))
         self.assertIn("my_custom_kernel", str(cm.exception))
 
-    def test_check_runs_only_once_per_launcher(self):
-        """Second call with the same launcher is a no-op (fast-path via set)."""
-        autotuner = self._make_autotuner()
-        launcher = self._make_launcher(n_positional=3)
-
-        # First call: too many args raises.
-        with self.assertRaises(TypeError):
-            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
-
-        # Failed validations are not cached, so the improved error is stable.
-        with self.assertRaises(TypeError):
-            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
-
     def test_launcher_without_expected_count_is_skipped(self):
         """Launchers without the generated metadata are skipped gracefully."""
 
@@ -1325,19 +1311,6 @@ class TestCheckLauncherCallArgs(TestCase):
         autotuner = self._make_autotuner()
         # Should not raise, even with many args.
         autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
-
-    def test_checked_set_cleared_on_restore_after_unpickle(self):
-        """_launcher_arg_count_checked is reset by restore_after_unpickle."""
-        autotuner = self._make_autotuner()
-        launcher = self._make_launcher(n_positional=3)
-
-        # Populate the checked set.
-        autotuner._check_launcher_call_args(launcher, (1, 2, 3))
-        self.assertIn(id(launcher), autotuner._launcher_arg_count_checked)
-
-        # After restore_after_unpickle the set must be empty.
-        autotuner.restore_after_unpickle(None)
-        self.assertEqual(autotuner._launcher_arg_count_checked, OrderedSet())
 
 
 if __name__ == "__main__":
