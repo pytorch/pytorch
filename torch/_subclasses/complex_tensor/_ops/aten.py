@@ -17,6 +17,7 @@ from .common import (
     register_complex,
     register_error,
     register_force_test,
+    register_incorrect_aliasing,
     register_simple,
     split_complex_arg,
     split_complex_tensor,
@@ -724,7 +725,7 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
     return torch.logical_not(elemwise_nonzero(self), *args, **kwargs)
 
 
-@register_complex(aten.view_as_real)
+@register_incorrect_aliasing(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
     # See "NOTE conj/neg (hameerabbasi)"
     if self.is_conj():
@@ -734,6 +735,13 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
             "the resulting tensor will NOT alias the original."
         )
     return torch.stack([self.re, self.im], dim=-1)
+
+
+@register_incorrect_aliasing(aten.view_as_complex)
+def view_as_complex_impl(self: ComplexTensor) -> torch.Tensor:
+    if len(self.shape) < 1 or self.shape[-1] != 2:
+        raise RuntimeError("Tensor must have a last dimension of size 2")
+    return ComplexTensor(self[..., 0], self[..., 1])
 
 
 @register_complex(aten.linalg_vector_norm)

@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
-
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
@@ -38,7 +36,6 @@ class ComplexTests(ComplexDynamoTestCase):
             c = torch.complex(re, im)
             return c.abs()
 
-
         re = torch.randn(2, 2, dtype=torch.float32)
         im = torch.randn(2, 2, dtype=torch.float32)
         fn_c = torch.compile(f, fullgraph=True)
@@ -67,8 +64,7 @@ class ComplexTests(ComplexDynamoTestCase):
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
 
-    @unittest.expectedFailure
-    def test_aliasing_semantics(self):
+    def test_incorrect_aliasing_semantics_raises(self):
         # view_as_real decomposes to stack (a copy), so mutation of the
         # original complex tensor does not propagate through the view.
         def f(a):
@@ -78,9 +74,9 @@ class ComplexTests(ComplexDynamoTestCase):
 
         a = torch.randn(2, 2, dtype=torch.complex64)
         fn_c = torch.compile(f, fullgraph=True)
-        self.assertEqual(f(a.clone()), fn_c(a.clone()))
+        self.assertRaises(RuntimeError, fn_c, a)
 
-    def test_aliasing_semantics_2(self):
+    def test_aliasing_semantics(self):
         def f(a):
             return a
 
@@ -92,6 +88,15 @@ class ComplexTests(ComplexDynamoTestCase):
 
         fn_c = torch.compile(f, fullgraph=True)
         self.assertEqual(mutate(f), mutate(fn_c))
+
+    def test_view_as_real(self):
+        def f():
+            a = torch.ones(2, 2, dtype=torch.complex64)
+            b = torch.zeros(2, 2, dtype=torch.complex64)
+            return torch.view_as_real(a).clone(), b
+
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(f(), fn_c())
 
 
 instantiate_parametrized_tests(ComplexTests)

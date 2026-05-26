@@ -40,6 +40,8 @@ PROMOTE_TYPES = {
     torch.complex32: torch.complex64,
 }
 
+INCORRECT_ALIASING_OPS: set[OpType] = set()
+
 
 def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
     r"""Returns True if the input is a ComplexTensor, else False
@@ -117,6 +119,15 @@ def register_force_test(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
     """Will attempt to test these ops even if they err on "normal" inputs"""
     FORCE_TEST_LIST.append(op)
+    return register_complex(op, func_impl)
+
+
+def register_incorrect_aliasing(
+    op: OpType, func_impl: Callable[..., Any] | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    """These ops are known to have incorrect aliasing semantics, and will err on
+    `torch.compile` when the inputs/outputs are mutated, or they escape the compiled block."""
+    INCORRECT_ALIASING_OPS.add(op)
     return register_complex(op, func_impl)
 
 
