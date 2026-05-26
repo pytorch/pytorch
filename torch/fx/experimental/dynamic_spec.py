@@ -48,9 +48,6 @@ _INDENT = "  "
 
 _SPEC_SHAPE_ENV = None  # populated lazily by _get_spec_shape_env()
 
-# Maps each spec sympy.Symbol back to the IntVar that created it.
-_intvar_symbol_registry: dict[sympy.Symbol, IntVar] = {}
-
 
 def _get_spec_shape_env() -> ShapeEnv:
     """Lazily build the singleton spec ShapeEnv."""
@@ -163,7 +160,6 @@ class IntVar(SymInt):
             hint=_NO_HINT,
         )
         super().__init__(node)
-        _intvar_symbol_registry[self.sympy_sym] = self
 
     def __repr__(self) -> str:
         # Always include uid so two same-named (or anonymous) instances
@@ -560,6 +556,11 @@ class ShapesSpec:
         globals: Any = None,
         assumptions: Sequence[SymBool] | None = None,
     ) -> None:
+        # Normalize attributes up front so partially-constructed instances
+        # (e.g. when a later check raises) still have a stable shape.
+        self._params: ParamsSpec | None = None
+        self._assumptions: list[SymBool] = []
+
         if globals is not None:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
         # Auto-wrap a bare dict so callers can write
@@ -574,7 +575,6 @@ class ShapesSpec:
             )
         self._params = params
 
-        self._assumptions: list[SymBool] = []
         if assumptions is not None:
             for i, a in enumerate(assumptions):
                 if not isinstance(a, SymBool):
