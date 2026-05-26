@@ -245,16 +245,22 @@ class TestFakePG(TestCase):
     @parametrize("rank", [0, 1])
     def test_reduce_scatter_copy_semantics(self, rank):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=rank, world_size=world_size, store=store
+        )
 
-        to_reduce_scatter = [torch.ones(3, 3) * r for r in range(2)]
+        to_reduce_scatter = [torch.ones(3, 3) * r for r in range(world_size)]
         output = torch.empty(3, 3)
         dist.reduce_scatter(output, to_reduce_scatter)
-        self.assertEqual(output, to_reduce_scatter[rank])
+        self.assertEqual(output, to_reduce_scatter[rank] * world_size)
 
     def test_reduce_scatter_requires_grad(self):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=1, world_size=world_size, store=store
+        )
 
         inputs = [
             torch.ones(3, 3).requires_grad_(True),
@@ -262,7 +268,7 @@ class TestFakePG(TestCase):
         ]
         output = torch.empty(3, 3)
         dist.reduce_scatter(output, inputs)
-        self.assertEqual(output, inputs[1])
+        self.assertEqual(output, inputs[1] * world_size)
         self.assertFalse(output.requires_grad)
 
     @parametrize("rank", [0, 1])
@@ -296,41 +302,53 @@ class TestFakePG(TestCase):
     @parametrize("rank", [0, 1])
     def test_reduce_scatter_base_copy_semantics(self, rank):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=rank, world_size=world_size, store=store
+        )
 
         in_buf = torch.arange(12.0).reshape(6, 2)
         out_buf = torch.empty(3, 2)
-        dist._reduce_scatter_base(out_buf, in_buf)
-        self.assertEqual(out_buf, in_buf.chunk(2)[rank])
+        dist.reduce_scatter_tensor(out_buf, in_buf)
+        self.assertEqual(out_buf, in_buf.chunk(world_size)[rank] * world_size)
 
     @parametrize("rank", [0, 1])
     def test_reduce_scatter_tensor_copy_semantics(self, rank):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=rank, world_size=world_size, store=store
+        )
 
         in_tensor = torch.arange(8.0).reshape(4, 2)
         out_tensor = torch.empty(2, 2)
         dist.reduce_scatter_tensor(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor.chunk(2)[rank])
+        self.assertEqual(out_tensor, in_tensor.chunk(world_size)[rank] * world_size)
 
     def test_reduce_scatter_base_requires_grad(self):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=1, world_size=world_size, store=store
+        )
 
         in_tensor = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
         out_tensor = torch.empty(2, 1)
-        dist._reduce_scatter_base(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor.chunk(2)[1])
+        dist.reduce_scatter_tensor(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.chunk(world_size)[1] * world_size)
 
     def test_reduce_scatter_tensor_coalesced_requires_grad(self):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        world_size = 2
+        dist.init_process_group(
+            backend="fake", rank=1, world_size=world_size, store=store
+        )
 
         in_tensor = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
         out_tensor = torch.empty(2, 1)
         with dist._coalescing_manager():
             dist.reduce_scatter_tensor(out_tensor, in_tensor)
-        self.assertEqual(out_tensor, in_tensor.chunk(2)[1])
+        self.assertEqual(out_tensor, in_tensor.chunk(world_size)[1] * world_size)
 
     @parametrize("rank", [0, 1])
     def test_allgather_copy_semantics(self, rank):
@@ -708,7 +726,7 @@ class TestFakePG(TestCase):
             RuntimeError,
             "input tensor must be the same size as output size times world size",
         ):
-            dist._reduce_scatter_base(out_buf, in_buf)
+            dist.reduce_scatter_tensor(out_buf, in_buf)
 
     def test_allgather_coalesced_wrong_inner_list_size(self):
         store = FakeStore()
@@ -718,6 +736,78 @@ class TestFakePG(TestCase):
         inputs = [torch.ones(3, 3)]
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
+
+    def test_reduce_numerics_all_ranks_identical(self):
+        world_size = 64
+        dist.init_process_group(backend="fake", rank=0, world_size=world_size)
+        pg = dist.distributed_c10d._get_default_group()
+
+        x = torch.randn(32)
+
+        shard = x[:4].clone()
+        gathered = torch.empty(4 * world_size)
+        dist.all_gather_into_tensor(gathered, shard)
+        for chunk in gathered.chunk(world_size):
+            self.assertEqual(chunk, shard)
+
+        shard_data = torch.randn(4)
+        inp = shard_data.repeat(world_size)
+        out = torch.empty(4)
+        dist.reduce_scatter_tensor(out, inp)
+        self.assertEqual(out, shard_data * world_size)
+
+        ar = x.clone()
+        dist.all_reduce(ar)
+        self.assertEqual(ar, x * world_size)
+
+        ar_max = x.clone()
+        dist.all_reduce(ar_max, op=dist.ReduceOp.MAX)
+        self.assertEqual(ar_max, x)
+
+        ar_avg = x.clone()
+        dist.all_reduce(ar_avg, op=dist.ReduceOp.AVG)
+        self.assertEqual(ar_avg, x)
+
+        pos = x.abs() + 0.1
+        ar_prod = pos.clone()
+        dist.all_reduce(ar_prod, op=dist.ReduceOp.PRODUCT)
+        self.assertEqual(ar_prod, pos.pow(world_size))
+
+        factor = 0.5
+        ar_premul = x.clone()
+        dist.all_reduce(ar_premul, op=dist._make_nccl_premul_sum(factor))
+        self.assertEqual(ar_premul, x * factor * world_size)
+
+        t_factor = torch.tensor(0.25)
+        ar_premul_t = x.clone()
+        dist.all_reduce(ar_premul_t, op=dist._make_nccl_premul_sum(t_factor))
+        self.assertEqual(ar_premul_t, x * t_factor * world_size)
+
+        r = x.clone()
+        dist.reduce(r, dst=0)
+        self.assertEqual(r, x * world_size)
+
+        t1, t2 = x[:16].clone(), x[16:].clone()
+        tensors = [t1, t2]
+        dist.all_reduce_coalesced(tensors)
+        self.assertEqual(tensors[0], x[:16] * world_size)
+        self.assertEqual(tensors[1], x[16:] * world_size)
+
+        fg = funcol.all_gather_tensor(shard, 0, pg)
+        for chunk in fg.chunk(world_size):
+            self.assertEqual(chunk, shard)
+
+        inp2 = torch.randn(4).repeat(world_size)
+        rs = funcol.reduce_scatter_tensor(inp2, "sum", 0, pg)
+        self.assertEqual(rs, inp2.chunk(world_size)[0] * world_size)
+
+        ar2 = x.clone()
+        ar2 = funcol.all_reduce(ar2, "sum", pg)
+        self.assertEqual(ar2, x * world_size)
+
+        ar3 = x.clone()
+        ar3 = funcol.all_reduce(ar3, "max", pg)
+        self.assertEqual(ar3, x)
 
 
 instantiate_parametrized_tests(TestFakePG)

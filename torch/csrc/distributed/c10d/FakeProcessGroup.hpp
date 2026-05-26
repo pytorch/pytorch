@@ -55,38 +55,55 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& tensor : tensors) {
+      applyReduceScaling_(tensor, opts.reduceOp);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce_sparse(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& tensor : tensors) {
+      applyReduceScaling_(tensor, opts.reduceOp);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce_coalesced(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ =
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override {
     checkCollectiveError();
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& tensor : tensors) {
+      applyReduceScaling_(tensor, opts.reduceOp);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const ReduceOptions& /* opts */ = ReduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override {
     checkCollectiveError();
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& tensor : tensors) {
+      applyReduceScaling_(tensor, opts.reduceOp);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   // NOTE [FakeProcessGroup collective semantics]
-  // Collectives use deterministic single-process approximations. When output
-  // can be derived from local inputs, fake collectives copy those values into
-  // local outputs so tests do not consume uninitialized memory. For scatter on
+  // Collectives simulate a multi-rank run where every rank holds identical
+  // data. Gather-style ops (allgather) replicate the local input. Reduce-style
+  // ops (allreduce, reduce_scatter) apply the reduction scaling factor: e.g.
+  // SUM multiplies by world_size, AVG/MIN/MAX are identity. For scatter on
   // non-root ranks, the root's input list is unavailable in this single-process
   // simulation, so the output tensor is left unchanged.
   c10::intrusive_ptr<Work> allgather(
@@ -205,8 +222,7 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::reduce_scatter: ", msg);
@@ -219,6 +235,7 @@ class FakeProcessGroup : public Backend {
       assertInputTensorListSizeEqualsWorldSize(
           invalidArgument, inputTensors[i].size(), size_);
       outputTensors[i].copy_(inputTensors[i][rank_]);
+      applyReduceScaling_(outputTensors[i], opts.reduceOp);
     }
     return c10::make_intrusive<FakeWork>();
   }
@@ -226,8 +243,7 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     TORCH_CHECK(
         inputBuffer.numel() == outputBuffer.numel() * size_,
@@ -236,14 +252,14 @@ class FakeProcessGroup : public Backend {
     at::AutoDispatchBelowAutograd guard;
     auto chunks = inputBuffer.chunk(size_);
     outputBuffer.copy_(chunks[rank_]);
+    applyReduceScaling_(outputBuffer, opts.reduceOp);
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(
@@ -259,6 +275,7 @@ class FakeProcessGroup : public Backend {
           "input tensor must be the same size as output size times world size");
       auto chunks = inputs[i].chunk(size_);
       outputs[i].copy_(chunks[rank_]);
+      applyReduceScaling_(outputs[i], opts.reduceOp);
     }
     return c10::make_intrusive<FakeWork>();
   }
@@ -381,6 +398,39 @@ class FakeProcessGroup : public Backend {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,
         "FakeProcessGroup collective operation error (error_on_collective=true)");
+  }
+
+  // Scale reduce output assuming all ranks hold identical data.
+  // SUM of N identical values = N*x, PREMUL_SUM = f*x*N, AVG = x,
+  // MIN/MAX = x, PRODUCT = x^N.
+  void applyReduceScaling_(at::Tensor& tensor, const ReduceOp& op) const {
+    switch (op.op_) {
+      case ReduceOp::SUM:
+        tensor.mul_(size_);
+        break;
+      case ReduceOp::PREMUL_SUM: {
+        const auto* supp =
+            static_cast<PreMulSumSupplement*>(op.supplement_.get());
+        if (supp && supp->tensor_factor.defined()) {
+          tensor.mul_(supp->tensor_factor);
+        } else if (supp) {
+          tensor.mul_(supp->double_factor);
+        }
+        tensor.mul_(size_);
+        break;
+      }
+      case ReduceOp::PRODUCT:
+        tensor.pow_(size_);
+        break;
+      case ReduceOp::AVG:
+      case ReduceOp::MIN:
+      case ReduceOp::MAX:
+      case ReduceOp::BAND:
+      case ReduceOp::BOR:
+      case ReduceOp::BXOR:
+      case ReduceOp::UNUSED:
+        break;
+    }
   }
 };
 
