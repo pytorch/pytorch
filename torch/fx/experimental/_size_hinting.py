@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -290,9 +291,11 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
     return shape_env._unbacked_replacements
 
 
+@lru_cache(maxsize=1024)
 def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
     """Substitute unbacked expressions with canonical equivalents.
-    Used by optimization_hint to maximize consistency when hinting unbacked symbols."""
+    Used by optimization_hint to maximize consistency when hinting unbacked symbols.
+    """
     replacements = _get_unbacked_replacements(shape_env)
 
     # consider making this threshold configurable
