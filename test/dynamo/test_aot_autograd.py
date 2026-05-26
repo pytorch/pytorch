@@ -1935,7 +1935,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         z = graph.call_function(
             torch.ops.aten.as_strided.default, (y, [2], [1], 0)
         )
-        # Dead prims.copy_to: result is not used (num_users=0), target is non-placeholder.
+        # Dead prims.copy_to: result is unused and target is non-placeholder.
         graph.call_function(torch.ops.prims.copy_to.default, (z, x))
         graph.output(y)
 
@@ -1958,6 +1958,15 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         with self.assertRaises(AssertionError):
             assert_functional_graph(graph2)
+
+        graph3 = torch.fx.Graph()
+        x3 = graph3.placeholder("x3")
+        y3 = graph3.call_function(torch.ops.aten.sin.default, (x3,))
+        graph3.call_function(torch.ops.prims.copy_to.default, (x3, y3))
+        graph3.output(y3)
+
+        with self.assertRaises(AssertionError):
+            assert_functional_graph(graph3)
 
 
 if __name__ == "__main__":

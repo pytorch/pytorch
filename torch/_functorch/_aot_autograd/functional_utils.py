@@ -592,10 +592,11 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
                     # write-backs are emitted as aten.copy_ nodes).  DCE cannot
                     # remove them because is_impure returns True for mutable ops,
                     # so we simply skip them here.
+                    mutation_target = n.args[0] if n.args else None
                     is_dead_intermediate_mutation = (
                         len(n.users) == 0
-                        and n.args
-                        and n.args[0] not in placeholders
+                        and isinstance(mutation_target, torch.fx.Node)
+                        and mutation_target not in placeholders
                     )
                     if not is_dead_intermediate_mutation:
                         error = f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
