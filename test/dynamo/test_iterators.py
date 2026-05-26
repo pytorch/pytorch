@@ -67,6 +67,10 @@ class CustomSetDefaultIter(set):
         super().__init__([10, 20, 30])
 
 
+class CustomListDefaultIter(list):
+    pass
+
+
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
 
@@ -329,7 +333,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             result.append(char.upper())
         self.assertEqual("".join(result), "HELLO")
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_bytes_iteration(self):
         """Test iteration over bytes"""
@@ -346,6 +349,52 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             ord("o") * 2,
         ]
         self.assertEqual(result, expected)
+
+    def test_constant_variable_list_tp_iter(self):
+        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
+
+        ConstantVariable.create() normally redirects list to ListVariable. This
+        test bypasses __init__ to construct a ConstantVariable holding a list
+        directly, exercising the generic tp_iter_impl unpack path.
+        """
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = [1, 2, 3]
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
+
+    def test_constant_variable_tuple_tp_iter(self):
+        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lists import ListIteratorVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = (10, 20, 30)
+
+        result = cv.tp_iter_impl(None)
+        self.assertIsInstance(result, ListIteratorVariable)
+        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
+
+    def test_constant_variable_non_iterable_tp_iter(self):
+        """Non-iterable ConstantVariable falls back to base unimplemented."""
+        from torch._dynamo.exc import Unsupported
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        cv = ConstantVariable.__new__(ConstantVariable)
+        VariableTracker.__init__(cv)
+        cv.value = 42
+
+        with self.assertRaises(Unsupported):
+            cv.tp_iter_impl(None)
 
     @make_dynamo_test
     def test_comprehensions_with_iterator(self):
@@ -678,6 +727,19 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         cs = CustomSet([1, 2, 3])
         result = sorted(cs.__iter__())
         self.assertEqual(result, [2, 4, 6])
+
+    @make_dynamo_test
+    def test_custom_list_subclass_with_default_iter(self):
+        """Test custom list subclass with default __iter__ (inherited from list)"""
+
+        cl = CustomListDefaultIter([1, 2, 3])
+        result = list(iter(cl))
+        self.assertEqual(result, [1, 2, 3])
+
+        result2 = []
+        for v in cl:
+            result2.append(v * 2)
+        self.assertEqual(result2, [2, 4, 6])
 
     @make_dynamo_test
     def test_custom_set_subclass_with_default_iter(self):
