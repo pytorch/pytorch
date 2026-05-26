@@ -1616,6 +1616,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ref_quantized_mod, (v,), strict=True
         ).module()
         atol, rtol = 1e-2, 1e-2
+        torch._dynamo.mark_static(v, v.dim() - 1)
         with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
