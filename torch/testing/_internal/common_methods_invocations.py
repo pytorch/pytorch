@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
-    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
+    floating_and_complex_types_and, all_types_and_complex_and, all_types_and, integral_types_and,
     empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
     highest_precision_complex,
     highest_precision_float,
@@ -34,7 +34,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM89OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -4405,6 +4405,20 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=(1,))
 
+
+def sample_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    for si in sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+        inp: torch.Tensor = si.input
+        weight: torch.Tensor | None = si.kwargs.get("weight", None)
+        bias: torch.Tensor | None = si.kwargs.get("bias", None)
+        N: int = inp.shape[0]
+        C: int = inp.shape[1]
+        HxW: int = math.prod(inp.shape[2:])
+        group: int = si.args[0]
+        eps: float = si.kwargs.get("eps", 1e-5)
+        yield SampleInput(inp, weight, bias, N, C, HxW, group, eps)
+
+
 def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_group_norm(
         op_info, device, dtype, requires_grad, **kwargs)
@@ -4440,6 +4454,19 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
                 **kwargs
             }
             yield SampleInput(input_tensor, num_groups, **kwargs)
+
+
+def reference_inputs_native_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    for si in reference_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
+        inp: torch.Tensor = si.input
+        weight: torch.Tensor | None = si.kwargs.get("weight", None)
+        bias: torch.Tensor | None = si.kwargs.get("bias", None)
+        N: int = inp.shape[0]
+        C: int = inp.shape[1]
+        HxW: int = math.prod(inp.shape[2:])
+        group: int = si.args[0]
+        eps: float = si.kwargs.get("eps", 1e-5)
+        yield SampleInput(inp, weight, bias, N, C, HxW, group, eps)
 
 
 def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -4653,6 +4680,28 @@ def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
         )
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=((2,),))
+
+def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwargs):
+    # Shapes chosen to land on the quack/cutedsl override's supported path:
+    # fp16/bf16/fp32, SM 9.x/10.x, rank >= 2.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((8, 128), (128,), {'eps': 1e-5}),
+        ((4, 8, 32), (32,), {'eps': 1e-5}),
+        ((2, 16, 512), (512,), {'eps': 1e-5}),
+        ((4, 32, 1024), (1024,), {'eps': 1e-5}),
+        # multi-dim normalized_shape: exercises the override's reshape logic
+        ((2, 4, 8, 16), (8, 16), {'eps': 1e-5}),
+        # eps=None exercises the finfo(float32).eps fallback in _fused_rms_norm_impl
+        # (accumulator dtype, matching aten/src/ATen/native/cuda/layer_norm_kernel.cu).
+        ((8, 128), (128,), {}),
+    )
+    for input_shape, normalized_shape, kw in cases:
+        weight = make_arg(normalized_shape)
+        yield SampleInput(make_arg(input_shape), args=(normalized_shape, weight), kwargs=kw)
+    # weight=None
+    yield SampleInput(make_arg((8, 128)), args=((128,),), kwargs={'eps': 1e-5})
+
 
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -12181,25 +12230,35 @@ def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weig
     return Y.reshape(*inp.shape)
 
 
-def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
-    inp_view = inp
-    if np.prod(inp.shape) != 0:
-        inp_view = inp.reshape((inp.shape[0], num_groups, -1))
-    mean = inp_view.mean(axis=-1, keepdims=True)
-    var = inp_view.var(axis=-1, ddof=0, keepdims=True)
-    Y = (inp_view - mean) / np.sqrt(var + eps)
-    Y = Y.reshape(inp.shape)
+def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, bias: npt.NDArray | None, N: int, C: int, HxW: int, group: int, eps: float) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    if math.prod(input.shape) == 0:
+        return (
+            np.empty_like(input),
+            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+            np.full((input.shape[0], group), np.nan, dtype=input.dtype),
+        )
+
+    input_view = input.reshape((N, group, C // group * HxW))
+    mean = input_view.mean(axis=-1, keepdims=True)
+    var = input_view.var(axis=-1, ddof=0, keepdims=True)
+    rsqrt = np.power(var + eps, -0.5)
+    Y = (input_view - mean) * rsqrt
+    Y = Y.reshape(input.shape)
     if weight is not None:
         # weight is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
+            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(input.ndim - 2)])
         Y = Y * weight
     if bias is not None:
         # bias is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
+            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(input.ndim - 2)])
         Y = Y + bias
-    return Y
+    return Y, mean.squeeze(-1), rsqrt.squeeze(-1)
+
+
+def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
+    return reference_native_group_norm(inp, weight, bias, inp.shape[0], inp.shape[1], math.prod(inp.shape[2:]), num_groups, eps)[0]
 
 
 # using a custom reference function since numpy only has a string side arg (instead of right and side) and doesn't
@@ -15849,6 +15908,37 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
+    OpInfo(
+        "native_group_norm",
+        aten_name="native_group_norm",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        ref=reference_native_group_norm,
+        reference_inputs_func=reference_inputs_native_group_norm,
+        sample_inputs_func=sample_inputs_native_group_norm,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
+            # native_group_norm expects contiguous inputs
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            # composite compliance fails with "performing in-place operation add_"
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
+            # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
+            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
+            # tensor-likes are not close
+            DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
+            # fails in TorchScript interpreter with failures associated with batch_norm
+            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
+            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness_with_reusing_ir"),
+            # lazy dispatch failure
+            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
+            # native_group_norm expects contiguous inputs on CUDA
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides", device_type="cuda"),
+        ),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+    ),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
@@ -19000,9 +19090,12 @@ op_db: list[OpInfo] = [
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
-                    dtypes=floating_types_and(torch.bfloat16, torch.half,),
+                    dtypes=all_types_and(torch.bfloat16, torch.half),
                     dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
                     dtypesIfMPS=all_types_and(torch.bfloat16, torch.half, torch.bool),
+                    # __rmod__ computes other % self, so self (lhs) is the divisor;
+                    # exclude zero to avoid undefined behavior for integer types.
+                    lhs_make_tensor_kwargs={'exclude_zero': True},
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_out=False,
@@ -19012,11 +19105,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NotImplementedError: "remainder_cpu" not implemented for *
-                        DecorateInfo(
-                            unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                            dtypes=(torch.bool, torch.int16, torch.uint8, torch.int8, torch.int32, torch.int64)
-                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
@@ -21408,7 +21496,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_logsumexp,
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
-           dtypes=all_types_and_complex(),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            error_inputs_func=error_inputs_trace,
@@ -23517,6 +23605,37 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
         variant_test_name="triton_optimized",
     )
 )
+
+if "cutedsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.rms_norm",
+            variant_test_name="cutedsl",
+            aten_name="rms_norm",
+            ref=reference_rms_norm,
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            sample_inputs_func=sample_inputs_rms_norm_cutedsl,
+            decorators=[
+                onlyCUDA,
+                skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
+            ],
+            skips=(
+                # test_dtypes probes every dtype and expects the listed set
+                # to exactly match what the op accepts. The override falls
+                # through to aten for fp64/complex, so those "work" from the
+                # probe's perspective -- but this variant is specifically for
+                # the override's supported dtypes only.
+                DecorateInfo(
+                    unittest.skip("override intentionally narrower than aten"),
+                    "TestCommon", "test_dtypes",
+                ),
+            ),
+        )
+    )
 
 op_db += opinfo.definitions.op_db
 
@@ -26301,6 +26420,16 @@ python_ref_db = [
         "_refs.nn.functional.group_norm",
         torch_opinfo_name="nn.functional.group_norm",
         validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.native_group_norm",
+        skips=(
+            # The torch implementation does not return a view, while the reference does
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+        ),
+        torch_opinfo_name="native_group_norm",
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
