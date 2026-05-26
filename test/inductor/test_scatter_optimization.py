@@ -249,7 +249,10 @@ class TestPartitionedScatterOpt(TestCase):
             compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
             actual = compiled_f(*args)
 
-        outputs = list(zip(expected, actual)) if isinstance(expected, (list, tuple)) else [(expected, actual)]
+        if isinstance(expected, (list, tuple)):
+            outputs = list(zip(expected, actual))
+        else:
+            outputs = [(expected, actual)]
         for e, a in outputs:
             if exact:
                 self.assertTrue(torch.equal(e, a), f"expected={e}\nactual={a}")
@@ -259,7 +262,9 @@ class TestPartitionedScatterOpt(TestCase):
                     f"expected={e}\nactual={a}",
                 )
 
-    def _make_scatter_inputs(self, N, output_shape, dtype=torch.float32, index_high=None, dim=0):
+    def _make_scatter_inputs(
+        self, N, output_shape, dtype=torch.float32, index_high=None, dim=0
+    ):
         """
         Create (out, idx, vals) for a 1-index scatter-add along `dim`.
 
@@ -271,7 +276,10 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, index_high, (N,), dtype=torch.int64)
         val_shape = list(output_shape)
         val_shape[dim] = N
-        vals = torch.randint(0, 4, val_shape, dtype=dtype) if dtype in (torch.int32,) else torch.randn(val_shape, dtype=dtype)
+        if dtype in (torch.int32,):
+            vals = torch.randint(0, 4, val_shape, dtype=dtype)
+        else:
+            vals = torch.randn(val_shape, dtype=dtype)
         out = torch.zeros(output_shape, dtype=dtype)
         return out, idx, vals
 
@@ -308,7 +316,9 @@ class TestPartitionedScatterOpt(TestCase):
         idx1 = torch.randint(0, 4, (N,), dtype=torch.int64)
         idx2 = torch.randint(0, 4, (N,), dtype=torch.int64)
 
-        self._check_accuracy(f, (out0, out1, out2, idx0, idx1, idx2, vals), atol=1.0, rtol=1e-2)
+        self._check_accuracy(
+            f, (out0, out1, out2, idx0, idx1, idx2, vals), atol=1.0, rtol=1e-2
+        )
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
     def test_accuracy_int32_exact(self):
@@ -392,7 +402,9 @@ class TestPartitionedScatterOpt(TestCase):
 
         with torch.no_grad():
             expected = f(out, idx, vals)
-            actual = torch.compile(f, backend="inductor", fullgraph=True)(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
         self.assertTrue(same(expected, actual, tol=1e-3))
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
 
@@ -472,7 +484,9 @@ class TestPartitionedScatterOpt(TestCase):
         output_size = 1_000_000
         element_bytes = 4
         available = 20_000_000  # 20 MB → fits P=4 (12 MB) but not P=8 (28 MB)
-        result = _compute_num_partitions(available, output_size, element_bytes, min_p=2, max_p=128)
+        result = _compute_num_partitions(
+            available, output_size, element_bytes, min_p=2, max_p=128
+        )
         self.assertEqual(result, 4)
 
     def test_compute_num_partitions_diminishing_returns_cap(self):
@@ -589,9 +603,9 @@ class TestPartitionedScatterOpt(TestCase):
             _compute_num_partitions returns 0 < min_p=2 → skip entirely.
         """
         torch.manual_seed(12)
-        N            = 11_000_000     # index size: ratio=1.1 ≥ 1.0 ✓, size ≥ 4096 ✓
-        output_size  = 10_000_000     # 10 M float32 = 40 MB
-        persist_n    = 100_000_000    # 100 M float32 = 400 MB
+        N = 11_000_000  # index size: ratio=1.1 >= 1.0, size >= 4096
+        output_size = 10_000_000  # 10 M float32 = 40 MB
+        persist_n = 100_000_000  # 100 M float32 = 400 MB
 
         def f(out, idx, vals, persistent):
             scattered = out.index_put([idx], vals, accumulate=True)
@@ -599,9 +613,9 @@ class TestPartitionedScatterOpt(TestCase):
             # MemoryTracker counts it as live (440 MB) at the index_put node.
             return scattered + persistent.sum()
 
-        out        = torch.zeros(output_size, dtype=torch.float32, device=GPU_TYPE)
-        idx        = torch.randint(0, output_size, (N,), dtype=torch.int64, device=GPU_TYPE)
-        vals       = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
+        out = torch.zeros(output_size, dtype=torch.float32, device=GPU_TYPE)
+        idx = torch.randint(0, output_size, (N,), dtype=torch.int64, device=GPU_TYPE)
+        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
         persistent = torch.randn(persist_n, dtype=torch.float32, device=GPU_TYPE)
 
         with torch.no_grad():
@@ -734,7 +748,9 @@ class TestPartitionedScatterOpt(TestCase):
             out2 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
             # All three ops share one index tensor: every write to a slot is
             # a true atomic conflict between thread blocks on all three ops.
-            idx = torch.randint(0, index_high + 1, (N,), dtype=torch.int64, device=GPU_TYPE)
+            idx = torch.randint(
+                0, index_high + 1, (N,), dtype=torch.int64, device=GPU_TYPE
+            )
             inputs = (out0, out1, out2, idx, vals)
 
             # ---- baseline: pass disabled ----------------------------------------
@@ -746,7 +762,9 @@ class TestPartitionedScatterOpt(TestCase):
             with torch.no_grad():
                 for _ in range(3):
                     baseline_fn(*inputs)
-            baseline_ms = benchmarker.benchmark_gpu(lambda: baseline_fn(*inputs))  # noqa: B023
+            baseline_ms = benchmarker.benchmark_gpu(
+                lambda: baseline_fn(*inputs)  # noqa: B023
+            )
 
             # ---- partitioned: pass enabled --------------------------------------
             config.partitioned_scatter_enabled = True
@@ -758,7 +776,9 @@ class TestPartitionedScatterOpt(TestCase):
             with torch.no_grad():
                 for _ in range(3):
                     partitioned_fn(*inputs)
-            partitioned_ms = benchmarker.benchmark_gpu(lambda: partitioned_fn(*inputs))  # noqa: B023
+            partitioned_ms = benchmarker.benchmark_gpu(
+                lambda: partitioned_fn(*inputs)  # noqa: B023
+            )
 
             speedup = baseline_ms / partitioned_ms
             n_applied = counters["inductor"]["partitioned_scatter_applied"]
