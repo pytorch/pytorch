@@ -2761,7 +2761,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, 0.0).isnan()))
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
-
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
