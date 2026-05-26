@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import os
 import threading
 import warnings
 import weakref
@@ -21,6 +22,9 @@ from .effects import EffectType
 device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
 tags_t: TypeAlias = _C.Tag | Sequence[_C.Tag] | None  # noqa: PYI042
 log = logging.getLogger(__name__)
+
+
+_FAST_CUSTOM_OPS_ENABLED = os.environ.get("TORCH_DISABLE_FAST_CUSTOM_OPS") != "1"
 
 
 def _normalize_tags(tags: tags_t) -> tuple[_C.Tag, ...]:
@@ -515,7 +519,8 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-            self._install_fast_path()
+            if _FAST_CUSTOM_OPS_ENABLED:
+                self._install_fast_path()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
