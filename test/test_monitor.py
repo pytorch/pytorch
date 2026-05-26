@@ -60,6 +60,11 @@ class TestMonitor(TestCase):
         self.assertEqual(s.count, 0)
         self.assertEqual(s.get(), {Aggregation.SUM: 6.0, Aggregation.COUNT: 3})
 
+    def test_invalid_stat_window_size(self) -> None:
+        for window_size in (timedelta(milliseconds=0), timedelta(milliseconds=-1)):
+            with self.assertRaisesRegex(ValueError, "windowSize must be greater than 0"):
+                Stat("asdf", (Aggregation.SUM, Aggregation.COUNT), window_size)
+
     def test_log_event(self) -> None:
         e = Event(
             name="torch.monitor.TestEvent",

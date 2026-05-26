@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/monitor/events.h>
 
@@ -107,6 +108,8 @@ class Stat {
         aggregations_(merge(aggregations)),
         windowSize_(windowSize),
         maxSamples_(maxSamples) {
+    TORCH_CHECK_VALUE(
+        windowSize.count() > 0, "windowSize must be greater than 0");
     detail::registerStat(this);
   }
 
@@ -119,6 +122,8 @@ class Stat {
         aggregations_(merge(aggregations)),
         windowSize_(windowSize),
         maxSamples_(maxSamples) {
+    TORCH_CHECK_VALUE(
+        windowSize.count() > 0, "windowSize must be greater than 0");
     detail::registerStat(this);
   }
   Stat(const Stat&) = delete;
