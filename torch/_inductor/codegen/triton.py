@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Min,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -1364,6 +1365,21 @@ class TritonOverrides(OpOverrides):
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
 
+    @staticmethod
+    def sub(x, y):
+        if (
+            isinstance(x, CSEVariable)
+            and x == y
+            and x.dtype is not None
+            and x.dtype.is_floating_point
+        ):
+            # Avoid giving LLVM a tmp - tmp pattern that it can reassociate
+            # through tmp's producer. A plain 0.0 is only valid for finite
+            # inputs; nan/inf inputs should still produce nan like x - x.
+            non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
+            return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
+        return f"{x} - {y}"
+
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
         if isinstance(arg, torch._prims_common.Number):
@@ -2037,6 +2053,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def rand4x(seed, offset):
+        if not isinstance(V.kernel, TritonKernel) or V.kernel.triton_tensor_ndim() != 1:
+            return TritonOverrides.rand(seed, offset)
+        offset = f"({offset}).to(tl.uint32)"
+        (block,) = V.kernel.dense_size_list()
+        return f"triton_helpers.rand4x({seed}, {offset}, {block})"
+
+    @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid, vec):
         # vec: 4 for fp32, 8 for fp16/bf16
         tid_u32 = f"({tid}).to(tl.uint32)"
@@ -2050,6 +2074,14 @@ class TritonOverrides(OpOverrides):
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
+
+    @staticmethod
+    def randn4x(seed, offset):
+        if not isinstance(V.kernel, TritonKernel) or V.kernel.triton_tensor_ndim() != 1:
+            return TritonOverrides.randn(seed, offset)
+        offset = f"({offset}).to(tl.uint32)"
+        (block,) = V.kernel.dense_size_list()
+        return f"triton_helpers.randn4x({seed}, {offset}, {block})"
 
     @staticmethod
     def randint64(seed, offset, low, high):
@@ -3449,7 +3481,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         sizevars.lookup_precomputed_size(slice_numels[0]),
                     )
                 ] + [
-                    sympy.Min(
+                    Min(
                         CeilDiv(
                             linear_block_size, sizevars.lookup_precomputed_size(numel)
                         ),
