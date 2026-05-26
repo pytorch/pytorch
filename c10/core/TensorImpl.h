@@ -250,6 +250,10 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
   bool allow_fallback_kernels_ = true;
 
+  std::function<bool(const void* op, void* stack)> decomp_fn_;
+  std::function<bool(const void* op, void* stack)> op_impl_fn_;
+  std::function<bool(const void* op, void* stack)> prim_meta_fn_;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter)

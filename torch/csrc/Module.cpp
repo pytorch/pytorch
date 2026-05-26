@@ -3095,6 +3095,13 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
+  // Callbacks moved to PyInterpreter.cpp (fake_try_decomp, fake_try_op_impl,
+  // fake_try_prim_meta). Kept here commented out for reference.
+  //
+  // static auto tryPythonDecomp = ...;
+  // static auto tryPythonOpImpl = ...;
+  // static auto tryPythonPrimMeta = ...;
+
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
@@ -3121,7 +3128,7 @@ Call this whenever a new thread is created in order to propagate values from
         at::Tensor meta_tensor;
         {
           c10::impl::ExcludeDispatchKeyGuard guard(
-              c10::DispatchKeySet(c10::DispatchKey::Fake));
+              {c10::DispatchKeySet(c10::DispatchKey::Fake)});
           auto meta_obj = converter.attr("to_meta_tensor")(
               real,
               py::arg("shape_env") = shape_env,

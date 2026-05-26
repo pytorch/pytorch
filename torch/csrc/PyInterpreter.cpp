@@ -1030,6 +1030,13 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     return false;
   }
 
+  if (op.hasKernelForDispatchKey(
+          c10::DispatchKey::CompositeExplicitAutograd) ||
+      op.hasKernelForDispatchKey(
+          c10::DispatchKey::CompositeImplicitAutograd)) {
+    return false;
+  }
+
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
 

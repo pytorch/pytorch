@@ -14,33 +14,33 @@
 namespace {
 
 // copied from fake_tensor.py _cpp_meta_supports_symint
-static bool cpp_meta_supports_symint(const c10::OperatorHandle& op) {
-  static const std::unordered_set<std::string> allowlist = {
-      "aten::empty.memory_format",
-      "aten::empty_strided",
-      "aten::as_strided",
-      "aten::as_strided_",
-      "aten::zeros",
-      "aten::detach",
-      "aten::view_as_real",
-      "aten::view_as_complex",
-      "aten::set_.source_Storage_storage_offset",
-      "aten::_sparse_coo_tensor_with_dims_and_tensors",
+bool cpp_meta_supports_symint(const c10::OperatorHandle& op) {
+  static const std::unordered_set<c10::OperatorHandle> allowlist = {
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::empty", "memory_format"),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::empty_strided", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::as_strided_scatter", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::as_strided", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::as_strided_", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::zeros", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::detach", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::view_as_real", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::view_as_complex", ""),
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::set_", "source_Storage_storage_offset"),
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::_sparse_coo_tensor_with_dims_and_tensors", ""),
   };
-  const auto& name = op.operator_name();
-  auto full_name = name.name;
-  if (!name.overload_name.empty()) {
-    full_name += "." + name.overload_name;
-  }
-  if (allowlist.count(full_name)) {
+  if (allowlist.contains(op)) {
     return true;
   }
-  // view_copy ops also support SymInt
-  return full_name.find("view_copy") != std::string::npos;
+  return op.hasTag(at::Tag::view_copy);
 }
 
 template <typename Fn>
-static void for_each_tensor(
+void for_each_tensor(
     torch::jit::Stack* stack,
     size_t begin,
     size_t count,
@@ -75,31 +75,34 @@ static void for_each_tensor(
   }
 }
 
-static bool has_symbolic_sizes(
+bool has_symbolic_sizes(
     torch::jit::Stack* stack,
     size_t begin,
     size_t num_arguments) {
   bool found = false;
-  for_each_tensor(
-      stack, begin, num_arguments,
-      [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+  for (const auto idx : c10::irange(num_arguments)) {
+    (*stack)[begin + idx].visit([&](const c10::IValue& ivalue) -> bool {
+      if (ivalue.isTensor()) {
+        const auto& t = ivalue.toTensor();
         if (t.defined() &&
-            t.unsafeGetTensorImpl()->has_symbolic_sizes_strides())
+            t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
           found = true;
-        return std::nullopt;
-      });
-  if (found)
-    return true;
-  auto arguments = torch::jit::last(*stack, num_arguments);
-  for (size_t idx = 0; idx < num_arguments; ++idx) {
-    const auto& ivalue = arguments[idx];
-    if (ivalue.isSymInt() || ivalue.isSymFloat() || ivalue.isSymIntList())
+          return true;
+        }
+      } else if (
+          ivalue.isSymInt() || ivalue.isSymFloat() || ivalue.isSymIntList()) {
+        found = true;
+        return true;
+      }
+      return false;
+    });
+    if (found)
       return true;
   }
   return false;
 }
 
-static std::optional<c10::Device> _find_common_device(
+std::optional<c10::Device> _find_common_device(
     torch::jit::Stack* stack,
     size_t begin,
     size_t num_arguments) {
@@ -107,7 +110,9 @@ static std::optional<c10::Device> _find_common_device(
   bool is_cpu_zero_dim = false;
 
   for_each_tensor(
-      stack, begin, num_arguments,
+      stack,
+      begin,
+      num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (!t.defined() || !t.is_fake())
           return std::nullopt;
@@ -137,7 +142,7 @@ static std::optional<c10::Device> _find_common_device(
   return common_device;
 }
 
-static bool is_device_type_arg(const c10::Argument& arg) {
+bool is_device_type_arg(const c10::Argument& arg) {
   const auto& type = arg.type();
   if (type->kind() == c10::TypeKind::DeviceObjType)
     return true;
@@ -148,15 +153,14 @@ static bool is_device_type_arg(const c10::Argument& arg) {
   return false;
 }
 
-static std::optional<c10::Device> rewrite_device_args_to_meta(
+std::optional<c10::Device> rewrite_device_args_to_meta(
     torch::jit::Stack* stack,
     size_t arguments_begin,
     size_t num_arguments,
     const c10::FunctionSchema& schema) {
   std::optional<c10::Device> original_device;
-  auto arguments = torch::jit::last(*stack, num_arguments);
-  for (size_t idx = 0; idx < num_arguments; ++idx) {
-    const auto& ivalue = arguments[idx];
+  for (const auto idx : c10::irange(num_arguments)) {
+    auto& ivalue = (*stack)[arguments_begin + idx];
     if (ivalue.isDevice()) {
       auto dev = ivalue.toDevice();
       TORCH_CHECK(
@@ -164,25 +168,25 @@ static std::optional<c10::Device> rewrite_device_args_to_meta(
           "FakeTensor does not support meta device inputs");
       if (!original_device.has_value())
         original_device = dev;
-      (*stack)[arguments_begin + idx] =
-          c10::IValue(c10::Device(c10::DeviceType::Meta));
+      ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
     } else if (ivalue.isNone() && is_device_type_arg(schema.arguments()[idx])) {
       if (!original_device.has_value()) {
         original_device = c10::Device(c10::DeviceType::CPU);
       }
-      (*stack)[arguments_begin + idx] =
-          c10::IValue(c10::Device(c10::DeviceType::Meta));
+      ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
     }
   }
   return original_device;
 }
 
-static bool is_our_fake(const at::Tensor& t, const std::shared_ptr<c10::FakeTensorMode>& mode) {
+bool is_our_fake(
+    const at::Tensor& t,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
   return t.defined() && t.is_fake() &&
-          t.unsafeGetTensorImpl()->fake_tensor_mode() == mode;
+      t.unsafeGetTensorImpl()->fake_tensor_mode() == mode;
 }
 
-static void transmute_to_fake(
+void transmute_to_fake(
     const at::Tensor& t,
     c10::Device fake_device,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
@@ -194,7 +198,7 @@ static void transmute_to_fake(
 
 // Takes a real tensor and creates a corresponding fake (meta) tensor
 // stamped with the original device.
-static at::Tensor real_tensor_to_fake(
+at::Tensor real_tensor_to_fake(
     const at::Tensor& t,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
   auto original_device = t.device();
@@ -212,31 +216,27 @@ static at::Tensor real_tensor_to_fake(
   return meta_t;
 }
 
-static bool can_generate_trivial_fake_impl(
-    const c10::FunctionSchema& schema) {
+bool can_generate_trivial_fake_impl(const c10::FunctionSchema& schema) {
   auto is_builtin = [&]() {
     auto ns = schema.operator_name().getNamespace();
-    return ns.has_value() &&
-        (*ns == "aten" || *ns == "prim" || *ns == "prims");
+    return ns.has_value() && (*ns == "aten" || *ns == "prim" || *ns == "prims");
   };
   return !is_builtin() && schema.is_mutable() && schema.returns().empty();
 }
 
-static bool can_run_unsafe_fallback(const c10::FunctionSchema& schema) {
+bool can_run_unsafe_fallback(const c10::FunctionSchema& schema) {
   const auto& name = schema.name();
   return name.rfind("aten::", 0) == 0 || name.rfind("prims::", 0) == 0 ||
       name.rfind("quantized::", 0) == 0;
 }
 
-static constexpr int64_t CONSTANT_NUMEL_LIMIT = 1;
-static bool may_turn_const(const at::Tensor& t) {
-  return t.numel() <= CONSTANT_NUMEL_LIMIT &&
-      !t.is_sparse() &&
-      !t.is_fake() &&
+constexpr int64_t CONSTANT_NUMEL_LIMIT = 1;
+bool may_turn_const(const at::Tensor& t) {
+  return t.numel() <= CONSTANT_NUMEL_LIMIT && !t.is_sparse() && !t.is_fake() &&
       t.device().type() != c10::DeviceType::Meta;
 }
 
-static void set_constant_on_mode(
+void set_constant_on_mode(
     const at::Tensor& fake_tensor,
     std::shared_ptr<at::Tensor> constant,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
@@ -249,7 +249,7 @@ static void set_constant_on_mode(
       fake_tensor.getIntrusivePtr(), std::move(constant), storage);
 }
 
-static void invalidate_written_to_constants(
+void invalidate_written_to_constants(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     size_t arguments_begin,
@@ -285,11 +285,11 @@ static void invalidate_written_to_constants(
   }
 }
 
-// creates a zero-filled real tensor on the fake tensor's original device.
+// creates a zero-filled real tensor on the fake tensor's original device
 // we need to temporarily exit FakeTensorMode TLS so the created tensor is
 // actually real
 // matches Python FakeTensor behaviour (with no_dispatch())
-static at::Tensor to_real_tensor(const at::Tensor& t) {
+at::Tensor to_real_tensor(const at::Tensor& t) {
   auto device = t.device(); // returns fake device (e.g. CPU)
   auto saved_mode = c10::impl::FakeTensorModeTLS::get_state();
   c10::impl::FakeTensorModeTLS::reset_state();
@@ -300,19 +300,21 @@ static at::Tensor to_real_tensor(const at::Tensor& t) {
   return real;
 }
 
-static std::vector<at::Tensor> validate_and_convert_non_fake_tensors(
+std::vector<at::Tensor> validate_and_convert_non_fake_tensors(
     torch::jit::Stack* stack,
     size_t arguments_begin,
     size_t num_arguments,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
-
   std::vector<at::Tensor> flat_arg_fake_tensors;
 
   for_each_tensor(
-      stack, arguments_begin, num_arguments,
+      stack,
+      arguments_begin,
+      num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (t.defined() && !is_our_fake(t, mode)) {
-          // TODO: check if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags
+          // TODO: check if hasattr(func, "tags") and torch.Tag.inplace_view in
+          // func.tags
           // TODO: allow non fake inputs
           // TODO: if not allow non fake inputs checks
 
@@ -331,12 +333,13 @@ static std::vector<at::Tensor> validate_and_convert_non_fake_tensors(
   return flat_arg_fake_tensors;
 }
 
-static bool is_lift_func(const c10::OperatorHandle& op) {
+bool is_lift_func(const c10::OperatorHandle& op) {
   const auto& name = op.operator_name();
-  return (name.name == "aten::lift_fresh" || name.name == "aten::lift_fresh_copy");
+  return (
+      name.name == "aten::lift_fresh" || name.name == "aten::lift_fresh_copy");
 }
 
-static void maybe_run_unsafe_fallback(
+void maybe_run_unsafe_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     size_t arguments_begin,
@@ -356,7 +359,9 @@ static void maybe_run_unsafe_fallback(
       op.operator_name());
 
   for_each_tensor(
-      stack, arguments_begin, num_arguments,
+      stack,
+      arguments_begin,
+      num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (t.defined() && t.is_fake())
           return to_real_tensor(t);
@@ -373,7 +378,9 @@ static void maybe_run_unsafe_fallback(
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for_each_tensor(
-      stack, returns_begin, num_returns,
+      stack,
+      returns_begin,
+      num_returns,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (t.defined() && !t.is_fake())
           return real_tensor_to_fake(t, mode);
@@ -395,7 +402,9 @@ void fakeFallback(
 
   std::vector<at::Tensor> flat_arg_fake_tensors;
   for_each_tensor(
-      stack, arguments_begin, num_arguments,
+      stack,
+      arguments_begin,
+      num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
         if (is_our_fake(t, mode))
           flat_arg_fake_tensors.push_back(t);
@@ -403,8 +412,8 @@ void fakeFallback(
       });
 
   // skip constant prop for _to_copy when the input is already on meta device
-  // TODO: implement avoiding_device_init (requires avoid_device_init on C++ FakeTensorMode)
-  // auto arguments = torch::jit::last(*stack, num_arguments);
+  // TODO: implement avoiding_device_init (requires avoid_device_init on C++
+  // FakeTensorMode) auto arguments = torch::jit::last(*stack, num_arguments);
 
   // bool device_conversion_skip_const_prop =
   //     op.operator_name().name == "aten::_to_copy" &&
@@ -431,16 +440,16 @@ void fakeFallback(
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;
     for_each_tensor(
-        stack, returns_begin, num_returns,
+        stack,
+        returns_begin,
+        num_returns,
         [&](const at::Tensor& t) -> std::optional<at::Tensor> {
           if (!t.defined() || t.is_fake())
             return std::nullopt;
           auto fake = real_tensor_to_fake(t, mode);
           if (may_turn_const(t)) {
             set_constant_on_mode(
-                fake,
-                std::make_shared<at::Tensor>(t.clone()),
-                mode);
+                fake, std::make_shared<at::Tensor>(t.clone()), mode);
           }
           return fake;
         });
@@ -451,7 +460,9 @@ void fakeFallback(
   // lift_fresh is identity so the stack already holds the return value.
   if (is_lift_func(op)) {
     for_each_tensor(
-        stack, arguments_begin, num_arguments,
+        stack,
+        arguments_begin,
+        num_arguments,
         [&](const at::Tensor& t) -> std::optional<at::Tensor> {
           if (t.defined() && !t.is_fake())
             return real_tensor_to_fake(t, mode);
@@ -461,10 +472,11 @@ void fakeFallback(
   }
 
   // TODO: constant propagation for should_allow_numbers_as_tensors
-  // (requires access to torch::should_allow_numbers_as_tensors from Python layer)
+  // (requires access to torch::should_allow_numbers_as_tensors from Python
+  // layer)
 
-  flat_arg_fake_tensors =
-      validate_and_convert_non_fake_tensors(stack, arguments_begin, num_arguments, mode);
+  flat_arg_fake_tensors = validate_and_convert_non_fake_tensors(
+      stack, arguments_begin, num_arguments, mode);
 
   // constant prop, if every fake-tensor argument carries a backing
   // constant, run the real op on those constants
@@ -480,10 +492,8 @@ void fakeFallback(
     // isinstance(func, torch._ops.OpOverload) — always true in C++ fallback
     if (!op.hasTag(at::Tag::nondeterministic_seeded) &&
         (!op.hasTag(at::Tag::inplace_view) ||
-          schema.name() == "aten::detach_") &&
-        all_constant &&
-        !flat_arg_fake_tensors.empty() &&
-        !has_symints &&
+         schema.name() == "aten::detach_") &&
+        all_constant && !flat_arg_fake_tensors.empty() && !has_symints &&
         // TODO: avoiding_device_init
         schema.name() != "aten::_nested_tensor_from_tensor_list") {
       // save the original arguments so we can restore the stack if the
@@ -496,7 +506,9 @@ void fakeFallback(
       // updated constant) instead of creating a new one
       std::unordered_map<c10::TensorImpl*, at::Tensor> tensor_memo;
       for_each_tensor(
-          stack, arguments_begin, num_arguments,
+          stack,
+          arguments_begin,
+          num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (is_our_fake(t, mode)) {
               auto constant = mode->get_constant(t.unsafeGetTensorImpl());
@@ -522,7 +534,9 @@ void fakeFallback(
       const auto returns_begin = stack->size() - num_returns;
       bool all_outputs_const = true;
       for_each_tensor(
-          stack, returns_begin, num_returns,
+          stack,
+          returns_begin,
+          num_returns,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (!may_turn_const(t))
               all_outputs_const = false;
@@ -531,7 +545,9 @@ void fakeFallback(
 
       if (all_outputs_const) {
         for_each_tensor(
-            stack, returns_begin, num_returns,
+            stack,
+            returns_begin,
+            num_returns,
             [&](const at::Tensor& t) -> std::optional<at::Tensor> {
               if (!may_turn_const(t))
                 return std::nullopt;
@@ -553,7 +569,9 @@ void fakeFallback(
       // outputs too large to keep as constants
       // invalidate all constants that might alias the output tensors
       for_each_tensor(
-          stack, returns_begin, num_returns,
+          stack,
+          returns_begin,
+          num_returns,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
             if (t.defined() && !t.is_fake() && t.has_storage())
               mode->invalidate_constant_aliases(
@@ -570,22 +588,25 @@ void fakeFallback(
   }
 
   // HOPs
-  // this is already taken care of by adding @py_impl(DispatchKey.Fake) to all HOPs
-  // when the dispatcher for HOPs is hit (which happens before fake fallback),
-  // it will route to the proper fake kernel
-  // THIS BEHAVIOUR IS DIFFERENT THAN TODAY'S PYTHON IMPL
+  // this is already taken care of by adding @py_impl(DispatchKey.Fake) to all
+  // HOPs when the dispatcher for HOPs is hit (which happens before fake
+  // fallback), it will route to the proper fake kernel THIS BEHAVIOUR IS
+  // DIFFERENT THAN TODAY'S PYTHON IMPL
 
   invalidate_written_to_constants(
       op, stack, arguments_begin, num_arguments, flat_arg_fake_tensors, mode);
 
   // TODO: propagate_real_tensors
   /*if propagate_real_tensors {
-      TORCH_CHECK(false, "propagate_real_tensors not implemented in C++ faketensor");
+      TORCH_CHECK(false, "propagate_real_tensors not implemented in C++
+  faketensor");
   } */
 
-  auto common_device = _find_common_device(stack, arguments_begin, num_arguments);
+  auto common_device =
+      _find_common_device(stack, arguments_begin, num_arguments);
 
-  // doing this in place (talked about this at the beginning, richard thinks this is ok)
+  // doing this in place (talked about this at the beginning, richard thinks
+  // this is ok)
   auto wrap_meta_outputs_with_default_device_logic = [&]() {
     if (!common_device.has_value()) {
       common_device = c10::Device(c10::DeviceType::CPU);
@@ -646,7 +667,9 @@ void fakeFallback(
     // Fix up by casting all tensors to a common dtype before calling.
     std::optional<c10::ScalarType> target_dtype;
     for_each_tensor(
-        stack, arguments_begin, num_arguments,
+        stack,
+        arguments_begin,
+        num_arguments,
         [&](const at::Tensor& t) -> std::optional<at::Tensor> {
           if (t.defined() && t.dim() > 0 &&
               t.scalar_type() != c10::ScalarType::Bool &&
@@ -657,10 +680,11 @@ void fakeFallback(
         });
     if (!target_dtype.has_value()) {
       for_each_tensor(
-          stack, arguments_begin, num_arguments,
+          stack,
+          arguments_begin,
+          num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-            if (t.defined() &&
-                t.scalar_type() != c10::ScalarType::Bool &&
+            if (t.defined() && t.scalar_type() != c10::ScalarType::Bool &&
                 t.scalar_type() != c10::ScalarType::Double &&
                 t.scalar_type() != c10::ScalarType::Long &&
                 !target_dtype.has_value()) {
@@ -671,10 +695,11 @@ void fakeFallback(
     }
     if (target_dtype.has_value()) {
       for_each_tensor(
-          stack, arguments_begin, num_arguments,
+          stack,
+          arguments_begin,
+          num_arguments,
           [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-            if (t.defined() &&
-                t.scalar_type() != c10::ScalarType::Bool &&
+            if (t.defined() && t.scalar_type() != c10::ScalarType::Bool &&
                 t.scalar_type() != *target_dtype) {
               return t.to(*target_dtype);
             }
@@ -695,15 +720,13 @@ void fakeFallback(
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
   bool has_meta_kernel = op.hasKernelForDispatchKey(c10::DispatchKey::Meta);
-  bool has_composite_kernel =
-      op.hasKernelForDispatchKey(
-          c10::DispatchKey::CompositeExplicitAutograd) ||
-      op.hasKernelForDispatchKey(
-          c10::DispatchKey::CompositeImplicitAutograd);
-  if (!has_meta_kernel && !has_composite_kernel && mode && interp &&
-      (*interp)->fake_try_op_impl(
-          op, stack, common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
-    return;
+  if (!has_meta_kernel && mode && interp) {
+    if ((*interp)->fake_try_op_impl(
+            op,
+            stack,
+            common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
+      return;
+    }
   }
 
   auto device_from_args = rewrite_device_args_to_meta(
@@ -715,11 +738,11 @@ void fakeFallback(
     common_device = c10::Device(c10::DeviceType::CPU);
   }
 
-  if (can_generate_trivial_fake_impl(schema)) {
-    // do nothing for mutable ops that only modify out tensor
-    stack->resize(arguments_begin);
-    return;
-  }
+  // if (can_generate_trivial_fake_impl(schema)) {
+  //   // do nothing for mutable ops that only modify out tensor
+  //   stack->resize(arguments_begin);
+  //   return;
+  // }
 
   // Try the Meta kernel. If it raises, fall back to:
   //   1. Python op_impl handlers (for ops like _local_scalar_dense whose
@@ -751,10 +774,13 @@ void fakeFallback(
       stack->push_back(arg);
     }
 
-    if (!has_composite_kernel && mode && interp &&
-        (*interp)->fake_try_op_impl(
-            op, stack, common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
-      return;
+    if (mode && interp) {
+      if ((*interp)->fake_try_op_impl(
+              op,
+              stack,
+              common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
+        return;
+      }
     }
 
     // Python handler didn't handle it either. For NotImplementedError,
