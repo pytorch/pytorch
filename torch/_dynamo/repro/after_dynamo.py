@@ -53,6 +53,7 @@ from torch.hub import tqdm
 from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
+from ..types import CompilerConfig, CompilerConfigProvider
 
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,8 @@ def _accuracy_fails(
 
 
 class WrapBackendDebug:
+    get_compiler_config: Callable[[], CompilerConfig | None]
+
     def __init__(
         self, unconfigured_compiler_fn: CompilerFn, compiler_name: str | None
     ) -> None:
@@ -91,8 +94,8 @@ class WrapBackendDebug:
             self.__name__ = unconfigured_compiler_fn.__name__
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
             self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
-        if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
+        if isinstance(unconfigured_compiler_fn, CompilerConfigProvider):
+            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
