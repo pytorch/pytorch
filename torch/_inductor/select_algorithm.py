@@ -4088,13 +4088,15 @@ class AlgorithmSelectorCache(PersistentCache):
         try:
             return benchmark_fn(choices)
         finally:
-            evict_paths = {
-                path
-                for choice in choices
-                for bmreq in (getattr(choice, "bmreq", None),)
-                for path in (getattr(bmreq, "module_path", None),)
-                if path is not None
-            }
+            evict_paths = OrderedSet(
+                [
+                    path
+                    for choice in choices
+                    for bmreq in (getattr(choice, "bmreq", None),)
+                    for path in (getattr(bmreq, "module_path", None),)
+                    if path is not None
+                ]
+            )
             if evict_paths:
                 for path in evict_paths:
                     PyCodeCache.modules_no_attr.pop(path, None)
