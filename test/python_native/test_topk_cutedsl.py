@@ -100,6 +100,41 @@ class TestCuTeDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
 
     @parametrize("k", _SUPPORTED_KS)
+    def test_correctness_with_nan(self, k: int) -> None:
+        """NaN of either sign must be classified as NaN (sorts at the top),
+        matching aten's TopKTypeConfig<float> behaviour. The radix-ordinal
+        encoder flags NaN explicitly so negative-sign NaN doesn't sort below
+        -inf. We can't compare bit-exactly with aten because aten's final
+        sort over the K gathered values uses fp32 ``<`` (NaN comparisons all
+        false), so NaN positions within the top-K are unstable on aten's
+        side. Instead we check the invariants: the same number of NaNs and
+        the same set of finite values appear in our output and aten's."""
+        import struct
+
+        torch.manual_seed(10)
+        x = torch.randn(256, _test_n(k), device="cuda", dtype=torch.float32)
+        neg_nan = struct.unpack("<f", struct.pack("<I", 0xFFC00000))[0]
+        x[:, 0] = float("nan")
+        x[:, 1] = neg_nan
+        x[:, 2] = float("inf")
+        x[:, 3] = float("-inf")
+        pn = torch.backends.python_native
+        with pn.cutedsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+        got_v, got_i = torch.topk(x, k, dim=-1)
+        # gather round-trip: every output value must come from the input
+        # at the reported index (works for NaN since assertEqual treats
+        # NaN==NaN).
+        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        # Same NaN count per row as aten (proves negative-NaN didn't sink
+        # below -inf).
+        self.assertEqual(got_v.isnan().sum(dim=-1), ref_v.isnan().sum(dim=-1))
+        # Finite tails must match aten bit-exactly (sorted descending).
+        ref_finite = ref_v.masked_select(~ref_v.isnan()).reshape(256, -1)
+        got_finite = got_v.masked_select(~got_v.isnan()).reshape(256, -1)
+        self.assertEqual(got_finite, ref_finite)
+
+    @parametrize("k", _SUPPORTED_KS)
     def test_nd_input(self, k: int) -> None:
         """Leading dims should be flattened to 2D; output should be
         reshaped back to self.shape[:-1] + (k,)."""
