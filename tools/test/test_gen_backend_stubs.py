@@ -430,11 +430,11 @@ use_out_as_primary: true
 device_guard: true
 supported:
 - mul.out:
-  structred: true"""
+  structred: true"""  # codespell:ignore structred
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Expected exactly one operator name per entry, but got ['mul.out', 'structred'] in ['mul.out', 'structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",
+            """Expected exactly one operator name per entry, but got ['mul.out', 'structred'] in ['mul.out', 'structred']. Supported option keys: ['device_guard', 'ext_structured_meta', 'structured'].""",  # codespell:ignore structred
         )
 
 
@@ -473,9 +473,7 @@ supported:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as fp:
             fp.write(self._PRIV1_HEADER + supported)
             fp.flush()
-            backend_yaml = parse_backend_yaml(
-                fp.name, grouped, parsed.backend_indices
-            )
+            backend_yaml = parse_backend_yaml(fp.name, grouped, parsed.backend_indices)
         backend_index = backend_yaml.backend_indices[backend_yaml.backend_key]
         class_name = (
             backend_yaml.class_name or backend_index.native_function_class_name()
@@ -517,7 +515,9 @@ supported:
     def test_out_as_primary_wrappers(self) -> None:
         anon = self.anonymous_definitions("- div.out")
         self.assertNotIn("at::_copy_from_and_resize", anon)
-        self.assertExpectedInline(anon, """\
+        self.assertExpectedInline(
+            anon,
+            """\
 at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
   auto out = at::empty({0}, self.options());
 
@@ -542,7 +542,8 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
 }
-""")
+""",
+        )
 
     # structured: true reuses the native meta -- the backend struct inherits the
     # native meta parent and declares only impl().
@@ -584,7 +585,9 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & 
         self.assertIn(guard, self.anonymous_definitions("- div.out"))
         off = self.anonymous_definitions("- div.out:\n  device_guard: false")
         self.assertNotIn(guard, off)
-        self.assertExpectedInline(off, """\
+        self.assertExpectedInline(
+            off,
+            """\
 at::Tensor wrapper_PrivateUse1_Tensor_div(const at::Tensor & self, const at::Tensor & other) {
   auto out = at::empty({0}, self.options());
 
@@ -609,7 +612,8 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
   at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
   return self;
 }
-""")
+""",
+        )
 
 
 if __name__ == "__main__":

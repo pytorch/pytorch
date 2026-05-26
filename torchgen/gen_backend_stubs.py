@@ -155,16 +155,17 @@ def parse_backend_yaml(
             device_guard = use_device_guard
             if isinstance(op, dict):
                 names = [k for k in op if k not in _SUPPORTED_OP_OPTION_KEYS]
-                assert len(names) == 1, (
-                    f"Expected exactly one operator name per entry, but got {names} in "
-                    f"{sorted(op)}. Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
-                )
+                if len(names) != 1:
+                    raise AssertionError(
+                        f"Expected exactly one operator name per entry, but got {names} in "
+                        f"{sorted(op)}. Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
+                    )
                 _op = names[0]
                 structured = op.get("structured", False)
                 ext_structured_meta = op.get("ext_structured_meta", False)
                 device_guard = op.get("device_guard", use_device_guard)
-                if ext_structured_meta:
-                    assert structured, (
+                if ext_structured_meta and not structured:
+                    raise AssertionError(
                         f"Operator '{_op}' has 'ext_structured_meta: True' but 'structured: False'. "
                         "Custom meta functions require a structured kernel."
                     )
@@ -175,10 +176,11 @@ def parse_backend_yaml(
             # See Note [External Backends Follow Dispatcher API]
             native_function = native_functions_map[op_name]
             if structured:
-                assert native_function.structured, (
-                    f"Operator '{op_name}' is marked as 'structured: true' in the backend YAML, "
-                    f"but it is not defined as a structured operator in native_functions.yaml."
-                )
+                if not native_function.structured:
+                    raise AssertionError(
+                        f"Operator '{op_name}' is marked as 'structured: true' in the backend YAML, "
+                        f"but it is not defined as a structured operator in native_functions.yaml."
+                    )
                 kernel_name = str(native_function.func.name).replace(".", "_")
             else:
                 kernel_name = dispatcher.name(native_function.func)
