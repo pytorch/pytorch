@@ -8322,6 +8322,18 @@ class TestMPS(TestCaseMPS):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
+    def test_mps_generator_clone_state(self):
+        # clone_state() must copy the full engine state, not just the seed.
+        # Regression test: previously only the seed was cloned, so the clone
+        # restarted the sequence from offset 0 instead of continuing.
+        g = torch.Generator(device='mps').manual_seed(0)
+        torch.rand(4, device='mps', generator=g)  # advance the engine
+        g_clone = g.clone_state()
+        self.assertEqual(g.get_offset(), g_clone.get_offset())
+        a = torch.rand(4, device='mps', generator=g)
+        b = torch.rand(4, device='mps', generator=g_clone)
+        self.assertEqual(a, b)
+
     @serialTest()
     def test_default_mps_generator(self):
         # manual seeding on the "default" MPS generator using
@@ -13498,12 +13510,29 @@ class TestAdvancedIndexing(TestCaseMPS):
                     torch.use_deterministic_algorithms(False)
 
         for accumulate, deterministic in product((False, True), (False, True)):
-            dtype = torch.float if accumulate else torch.long
+            dtype = torch.long
             if not accumulate and not deterministic:
                 with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
                     helper(dtype, accumulate, deterministic)
             else:
                 helper(dtype, accumulate, deterministic)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_index_put_accumulate_nondeterministic(self, dtype):
+        device = "mps"
+        t = torch.zeros(3, dtype=dtype, device=device)
+        idx = torch.tensor([0, 0, 1, 2, 2, 2], device=device)
+        src = torch.arange(idx.numel(), device=device, dtype=dtype)
+        try:
+            torch.use_deterministic_algorithms(True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                t.index_put_((idx,), src, accumulate=True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).scatter_add_(0, idx, src)
+        finally:
+            torch.use_deterministic_algorithms(False)
 
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
@@ -14785,6 +14814,20 @@ class TestErrorInputs(TestCase):
             torch.nn.functional.one_hot(torch.tensor([-1], device=device), num_classes=8)
             torch.mps.synchronize()
 
+    def test_bernoulli_invalid_probabilities(self, device):
+        # Scalar-p path: host-side TORCH_CHECK
+        for bad_p in (-0.1, 1.1, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+                torch.empty(4, device=device).bernoulli_(bad_p)
+        # Tensor-p path: device-side assert
+        mixed = torch.tensor([0.5, 1.5, -0.3, float("nan"), float("inf")], device=device)
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.bernoulli(mixed)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.empty_like(mixed).bernoulli_(mixed)
+            torch.mps.synchronize()
+
 
 class TestComplex(TestCase):
     def test_conj_imag(self):
@@ -15265,6 +15308,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)

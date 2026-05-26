@@ -4664,6 +4664,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
             if dynamic_shapes == "from_tracing_context"
             else nullcontext()
         )
+        standalone_fake_mode = (
+            fake_mode if dynamic_shapes == "from_example_inputs" else None
+        )
 
         # Run standalone_compile and capture the real cache key.
         real_cache_key_fn = autograd_cache.autograd_cache_key
@@ -4685,6 +4688,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                     dynamic_shapes=dynamic_shapes,
                     options={},
                     aot=aot,
+                    fake_mode=standalone_fake_mode,
                 )
 
             self.assertIsNotNone(captured_key)
@@ -4694,6 +4698,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
                 aot=aot,
+                fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
 
