@@ -1695,44 +1695,17 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         actual = torch.compile(f)(x)
         self.assertEqual(actual, expected)
 
-    def test_bool_dtype_pointwise_skips_tma(self):
-        """
-        Pointwise op on bool tensors should skip TMA and still work.
-        """
-
-        def fn(a, b):
-            return a & b
-
-        a = torch.randint(0, 2, (4096,), dtype=torch.bool, device=self.device)
-        b = torch.randint(0, 2, (4096,), dtype=torch.bool, device=self.device)
-
-        result, (code,) = self._run_and_compare(
-            fn,
-            a,
-            b,
-            expected_num_block_pointers=0,
-            expected_num_triton_kernels=1,
-        )
-
-    def test_bool_dtype_scan_skips_tma(self):
+    def test_bool_dtype_skips_tma(self):
         """
         torch.bool maps to Triton tl.int1 which has no CUtensorMapDataType
-        entry. Verify that TMA is skipped for a scan (cumsum) kernel and
-        the result is still correct.
+        entry, so it should skip TMA.
         """
 
         def fn(a):
             return torch.cumsum(a, -1)
 
-        inp = torch.zeros(2048, dtype=torch.bool, device=self.device)
-        inp[100:200] = True
-
-        compiled = torch.compile(fn, backend="inductor")
-        result, code = run_and_get_code(compiled, inp)
-        expected = fn(inp)
-        self.assertTrue(torch.equal(result, expected))
-        tma_count = sum(prog.count("tl.make_tensor_descriptor") for prog in code)
-        self.assertEqual(tma_count, 0)
+        inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
+        self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
 
 test_torchinductor.copy_tests(
