@@ -398,7 +398,9 @@ class FSDPParamGroup:
                     self.fsdp_params,
                     self._all_gather_process_group,
                     async_op,
-                    *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
+                    *self.comm_ctx.get_all_gather_streams(
+                        async_op, self._training_state
+                    ),
                     self.device,
                     self._all_gather_comm,
                 )
