@@ -2477,7 +2477,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslator", obj: VariableTracker
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         # TODO(dynamo-team): Implement a reverse iterator + proper support for __reverse__
         items = list(reversed(unpack_iterable(tx, obj)))
         return variables.TupleVariable(items, mutation_type=ValueMutationNew())
