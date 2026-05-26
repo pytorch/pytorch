@@ -1,12 +1,12 @@
 """TMA-based scatter_add for the ``index.unsqueeze(-1).expand(-1, N)`` pattern.
 
 Port of the CUDA C++ kernel from https://github.com/pytorch/pytorch/pull/182675
-to CuTeDSL. Each CTA (one warp) handles one source row (within an assigned
-chunk-index range): a tile-mode TMA bulk load (``cute.copy`` with
-``CopyBulkTensorTileG2SOp`` via ``make_tiled_tma_atom``) stages
-``src[i, d_start:d_end]`` into smem, then
-``cp.reduce.async.bulk.global.shared::cta.bulk_group.add`` deposits the
-reduction into ``out[index[i], d_start:d_end]``.
+to CuTeDSL. Each CTA holds ``_WARPS_PER_CTA`` warps; each warp independently
+handles its own row stream (within an assigned chunk-index range): a tile-mode
+TMA bulk load (``cute.copy`` with ``CopyBulkTensorTileG2SOp`` via
+``make_tiled_tma_atom``) stages ``src[i, d_start:d_end]`` into the warp's smem
+slice, then ``cp.reduce.async.bulk.global.shared::cta.bulk_group.add``
+deposits the reduction into ``out[index[i], d_start:d_end]``.
 
 Using the tile-mode TMA with a descriptor over the full ``(M_src, N)``
 source tensor lets TMA clamp out-of-range column reads to zero, so the
@@ -15,19 +15,19 @@ handled natively -- we just reduce only the valid byte count on the
 store side. That widens coverage to any ``row_bytes`` that's 16-byte
 aligned (the ``cp.reduce.async.bulk`` gmem operand requirement).
 
-Synchronization between the load and the reduce uses
-``cutlass.pipeline.PipelineTmaAsync`` with ``num_stages=2``: producer
-``acquire``/``commit`` guards the TMA issue, consumer ``wait``/``release``
-guards the reduce. Producer and consumer cooperative groups are both
-``Agent.Thread, size=1`` -- the single driver thread inside the warp
-does both roles. ``PipelineState.advance()`` handles the stage index +
-phase bit.
+Synchronization between load and reduce goes through
+``PerWarpTmaPipeline`` (in ``_per_warp_pipeline.py``), an
+API-compatible drop-in for ``cutlass.pipeline.PipelineTmaAsync`` that
+supports N independent pipes per CTA -- one per warp. Stock
+``PipelineTmaAsync.create`` gates ``mbarrier_init`` on
+``warp_idx == 0`` and so cannot service multiple pipes; the wrapper
+inits mbarriers from lane 0 of every warp instead.
 
 The pipeline is software-pipelined across the flat sequence of
-``(entry, chunk)`` pairs: each loop iteration issues the TMA load for
-the current pair and consumes the previous one, keeping one TMA load
-in flight alongside an in-progress bulk-reduce. An epilogue drains
-the final outstanding load.
+``(entry, chunk)`` pairs per warp: each loop iteration issues the TMA
+load for the current pair and consumes the previous one, keeping one
+TMA load in flight alongside an in-progress bulk-reduce. An epilogue
+drains the final outstanding load via ``drain_bulk_reduces``.
 
 Chunks along D at a compile-time ``chunk_elems``: small rows travel as
 a single chunk, large rows chunk at 512 B. The TMA descriptor OOB-clamp
@@ -38,7 +38,8 @@ and large D: ``(grid_x, grid_y)``, where ``grid_y`` partitions the
 chunk-index axis. When N is large the host sets ``grid_y = 1`` so the
 inner chunk loop recovers the classic schedule. When N is tiny (say
 100 rows, D=640K), ``grid_y`` grows so the grid still fills the
-machine.
+machine. Row mapping: warp ``w`` in CTA ``(bx, by)`` starts at row
+``bx * _WARPS_PER_CTA + w`` and strides by ``gdim_x * _WARPS_PER_CTA``.
 
 Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
   - sm_90+ (cp.reduce.async.bulk availability)
@@ -55,17 +56,19 @@ import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
 import cutlass.cute.testing as cute_testing
-import cutlass.pipeline as pipeline
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
 import torch
 from torch._vendor.quack.cache_utils import jit_cache
 
+from ._per_warp_pipeline import PerWarpTmaPipeline
 from ._ptx import cvta_smem, make_bulk_reduce_add
 
 
 _MAX_CHUNK_BYTES = 512
-_THREADS_PER_CTA = 32  # one warp per CTA
+_WARPS_PER_CTA = 8
+_THREADS_PER_CTA = _WARPS_PER_CTA * 32
+_NUM_STAGES = 2
 # cp.async.bulk requires 128B-aligned smem destinations.
 _SMEM_ALIGN_BYTES = 128
 
@@ -97,7 +100,12 @@ def _reduce_op_for(dtype):
 
 
 def _make_kernel(
-    dtype, elem_bytes: int, N: int, chunk_elems: int, reduce_op, contig: bool
+    dtype,
+    elem_bytes: int,
+    N: int,
+    chunk_elems: int,
+    reduce_op,
+    contig: bool,
 ):
     """Build a dtype-specialized kernel closure. dtype/elem_bytes/N
     /chunk_elems/contig are Python-time constants that the preprocessor
@@ -109,10 +117,11 @@ def _make_kernel(
     reduce side then writes only the actual valid byte count, so
     partial final chunks are handled natively.
 
-    One CTA = one warp. The single driver thread (tidx == 0) serves as
-    both producer (issues the TMA load) and consumer (issues the
-    bulk-reduce). Both CooperativeGroups are ``Agent.Thread, size=1``
-    so the mbarrier arrive counts match the single-threaded flow.
+    Each CTA holds ``_WARPS_PER_CTA`` warps; each warp owns its own
+    smem buffer slice and mbarrier slice (``_NUM_STAGES`` mbarriers
+    per warp, TMA full-side only). Lane 0 of each warp initializes
+    its mbarriers and drives both the TMA load (producer) and the
+    bulk-reduce (consumer) for its row stream.
 
     ``contig`` gates a fast path on the reduce side: when True, the
     output row stride is D at compile time, avoiding a runtime stride
@@ -148,6 +157,9 @@ def _make_kernel(
         bidx, bidy, _ = cute.arch.block_idx()
         gdim_x, _, _ = cute.arch.grid_dim()
 
+        warp_id = tidx // Int32(32)
+        lane_id = tidx % Int32(32)
+
         # num_entries (M_src) comes from mIndex's shape; mIndex is 1D
         # of length M_src after host-side flattening.
         num_entries = mIndex.shape[0]
@@ -168,88 +180,124 @@ def _make_kernel(
             out_rs = out_row_stride
 
         smem = cutlass.utils.SmemAllocator()
-        sBuf = smem.allocate_tensor(
+        # Per-warp slot: _NUM_STAGES tiles of chunk_elems, total
+        # _WARPS_PER_CTA * _NUM_STAGES tiles.
+        sBuf_all = smem.allocate_tensor(
             dtype,
-            cute.make_layout((chunk_elems, 2), stride=(1, stage_stride_elems)),
+            cute.make_layout(
+                (chunk_elems, _NUM_STAGES * _WARPS_PER_CTA),
+                stride=(1, stage_stride_elems),
+            ),
             _SMEM_ALIGN_BYTES,
         )
-        mbar_storage = smem.allocate_array(cutlass.Uint64, num_elems=2 * 2)
-
-        pipe = pipeline.PipelineTmaAsync.create(
-            num_stages=2,
-            producer_group=pipeline.CooperativeGroup(pipeline.Agent.Thread, size=1),
-            consumer_group=pipeline.CooperativeGroup(pipeline.Agent.Thread, size=1),
-            tx_count=chunk_bytes,
-            barrier_storage=mbar_storage,
-            tidx=tidx,
+        # Per-warp barrier slice: full + empty mbarriers per stage.
+        mbar_per_warp = PerWarpTmaPipeline.barrier_storage_size(_NUM_STAGES)
+        mbar_all = smem.allocate_array(
+            cutlass.Uint64, num_elems=mbar_per_warp * _WARPS_PER_CTA
         )
 
-        # Tile the source (M, N) by (1, chunk_elems) to get
-        # (1, chunk_elems, M, num_chunks); tma_partition collapses and
-        # returns tma_gmem[None, row_idx, chunk_idx] and tma_smem[None,
-        # stage].
+        # Padded stage stride keeps every stage 128B-aligned for cp.async.bulk;
+        # propagate it into the per-warp offset / view so warp w lands on its
+        # own 2-tile slice rather than overlapping the next warp's.
+        my_buf_off = warp_id * Int32(_NUM_STAGES * stage_stride_elems)
+        my_mbar_off = warp_id * Int32(mbar_per_warp)
+        my_buf_ptr = sBuf_all.iterator + my_buf_off
+        my_mbar_ptr = mbar_all + my_mbar_off
+
+        # One independent pipe per warp. PipelineTmaAsync.create's
+        # mbarrier_init is gated on warp 0 only, which can't service N
+        # pipes per CTA -- PerWarpTmaPipeline replaces it with a
+        # lane-0-of-each-warp init.
+        pipe = PerWarpTmaPipeline.create(
+            num_stages=_NUM_STAGES,
+            barrier_storage=my_mbar_ptr,
+            tx_count=chunk_bytes,
+            lane_id=lane_id,
+        )
+        cute.arch.mbarrier_init_fence()
+        cute.arch.sync_threads()
+
+        # Per-warp TMA partition. Each warp views only its own smem
+        # slice as a (chunk_elems, _NUM_STAGES) tensor.
+        my_sBuf = cute.make_tensor(
+            my_buf_ptr,
+            cute.make_layout(
+                (chunk_elems, _NUM_STAGES), stride=(1, stage_stride_elems)
+            ),
+        )
         tiled_gmem = cute.local_tile(tma_tensor_src, (1, chunk_elems), (None, None))
         tma_smem, tma_gmem = cpasync.tma_partition(
             tma_atom,
             Int32(0),
             cute.make_layout(1),
-            cute.group_modes(sBuf, 0, 1),
+            cute.group_modes(my_sBuf, 0, 1),
             cute.group_modes(tiled_gmem, 0, 2),
         )
 
-        producer_state = pipeline.make_pipeline_state(
-            pipeline.PipelineUserType.Producer, 2
-        )
-        consumer_state = pipeline.make_pipeline_state(
-            pipeline.PipelineUserType.Consumer, 2
-        )
-
-        # Software-pipelined schedule: at each iteration, issue the TMA
-        # load for the current (entry, chunk) pair, then consume the
-        # previous pair (bulk-reduce). With num_stages=2 this keeps one
-        # TMA load in flight while a bulk-reduce is running. Final
-        # iteration's load is drained in an epilogue after the main loop.
-        # pair_count is a runtime Int32 so the ``pair_count > 0`` branch
-        # stays in the compiled IR (a Python bool would be baked in at
-        # trace time).
-        pair_count = Int32(0)
+        # Software-pipelined schedule (per-warp): each iteration issues
+        # the TMA load for the current (entry, chunk) pair, then
+        # consumes the previous pair (bulk-reduce). With _NUM_STAGES=2
+        # this keeps one TMA load in flight while a bulk-reduce runs.
+        # Final iteration's load is drained in an epilogue.
+        prod_state = PerWarpTmaPipeline.make_producer_state(_NUM_STAGES)
+        cons_state = PerWarpTmaPipeline.make_consumer_state(_NUM_STAGES)
         prev_chunk_idx = Int32(0)
         prev_r = Int64(0)
+        # pair_count is a runtime Int32 (not a Python bool) so the
+        # ``pair_count > 0`` branches stay in the compiled IR.
+        pair_count = Int32(0)
 
-        base = bidx
+        # Per-warp row stream: warp w in CTA bx starts at
+        # bx * _WARPS_PER_CTA + w, strides by gdim_x * _WARPS_PER_CTA.
+        base = bidx * Int32(_WARPS_PER_CTA) + warp_id
+        warp_stride = gdim_x * Int32(_WARPS_PER_CTA)
         while base < num_entries:
             entry_id = base
 
             chunk_idx = chunk_start
             while chunk_idx < chunk_end:
-                if tidx == Int32(0):
-                    r = Int64(mIndex[entry_id])
-                    # Bounds check: index values must be valid output
-                    # rows. Compiling with ``--enable-assertions`` turns
-                    # this into a device-side trap; otherwise it folds
-                    # away. Driver thread only -- no need to replicate
-                    # the check across all 32 lanes.
+                # All 32 lanes execute the loop body in lockstep. The
+                # mbarrier ops with arrive_count=1 (producer_acquire,
+                # consumer_release) are gated on lane 0 so we don't
+                # over-arrive. Per-thread ops (consumer_wait,
+                # mbarrier_wait inside) and the cute.copy TMA load
+                # (which elects internally per CuTeDSL contract) run
+                # on all 32 lanes -- the warp must stay converged at
+                # the elect.sync inside the TMA atom, otherwise
+                # divergent lanes deadlock waiting for elected lane.
+                # Driver-thread-only ops (bulk-reduce gmem issue) stay
+                # lane-0-gated. mIndex[entry_id] is read by all lanes
+                # (uniform load, coalesces) but the bounds assert is
+                # lane-0-only -- 32 redundant trap checks per row would
+                # be 32x the assertion cost under --enable-assertions.
+                r = Int64(mIndex[entry_id])
+                if lane_id == Int32(0):
                     cute_testing.assert_(r >= Int64(0))
                     cute_testing.assert_(r < Int64(mOut.shape[0]))
 
-                    pipe.producer_acquire(producer_state)
-                    cute.copy(
-                        tma_atom,
-                        tma_gmem[None, entry_id, chunk_idx],
-                        tma_smem[None, producer_state.index],
-                        tma_bar_ptr=pipe.producer_get_barrier(producer_state),
-                    )
-                    pipe.producer_commit(producer_state)
-                    producer_state.advance()
+                # Lane-0-only producer_acquire: lane 0 spins on the
+                # empty mbarrier while lanes 1-31 race ahead. Warp
+                # convergence is restored at the elect.sync inside
+                # cute.copy's TMA atom (CuTeDSL contract: TMA copy elects
+                # one issuing lane internally). PerWarpTmaPipeline's
+                # bare mbarrier_arrive_and_expect_tx is per-thread-safe
+                # in this divergent context (stock PipelineTmaAsync's
+                # elect_one wrapper would deadlock here).
+                if lane_id == Int32(0):
+                    pipe.producer_acquire(prod_state)
+                cute.copy(
+                    tma_atom,
+                    tma_gmem[None, entry_id, chunk_idx],
+                    tma_smem[None, prod_state.index],
+                    tma_bar_ptr=pipe.producer_get_barrier(prod_state),
+                )
+                pipe.producer_commit(prod_state)  # no-op for TMA
+                prod_state.advance()
 
-                    if pair_count > Int32(0):
-                        pipe.consumer_wait(consumer_state)
-                        cbuf_ptr = sBuf[None, consumer_state.index].iterator
-
-                        # Partial-chunk handling: actual valid element
-                        # count is min(chunk_elems, N - off). TMA
-                        # OOB-clamped the tail to 0 in smem, we reduce
-                        # only the valid bytes.
+                if pair_count > Int32(0):
+                    pipe.consumer_wait(cons_state)
+                    cbuf_ptr = my_sBuf[None, cons_state.index].iterator
+                    if lane_id == Int32(0):
                         off = prev_chunk_idx * Int32(chunk_elems)
                         cur_elems = Int32(N) - off
                         if cur_elems > Int32(chunk_elems):
@@ -259,25 +307,30 @@ def _make_kernel(
                         dst_off = prev_r * out_rs + Int64(off)
                         gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
                         reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
+                        # commit_group makes smem reuse safe: cp.reduce.
+                        # async.bulk reads smem at issue time, and the
+                        # bulk-group counter tracks gmem-write completion
+                        # separately. The empty-mbarrier arrive on
+                        # consumer_release is therefore safe immediately
+                        # after commit_group; no per-iteration wait_group
+                        # is needed (drain is deferred to kernel exit).
                         cute.arch.cp_async_bulk_commit_group()
-                        cute.arch.cp_async_bulk_wait_group(0, read=False)
-                        pipe.consumer_release(consumer_state)
-                        consumer_state.advance()
+                        pipe.consumer_release(cons_state)
+                    cons_state.advance()
 
-                    prev_chunk_idx = chunk_idx
-                    prev_r = r
-                    pair_count = pair_count + Int32(1)
+                prev_chunk_idx = chunk_idx
+                prev_r = r
+                pair_count = pair_count + Int32(1)
 
                 chunk_idx = chunk_idx + Int32(1)
 
-            base = base + gdim_x
+            base = base + warp_stride
 
-        # Epilogue: drain the last outstanding TMA load.
-        if tidx == Int32(0):
-            if pair_count > Int32(0):
-                pipe.consumer_wait(consumer_state)
-                cbuf_ptr = sBuf[None, consumer_state.index].iterator
-
+        # Epilogue: drain the last outstanding TMA load + bulk-reduce.
+        if pair_count > Int32(0):
+            pipe.consumer_wait(cons_state)
+            cbuf_ptr = my_sBuf[None, cons_state.index].iterator
+            if lane_id == Int32(0):
                 off = prev_chunk_idx * Int32(chunk_elems)
                 cur_elems = Int32(N) - off
                 if cur_elems > Int32(chunk_elems):
@@ -288,8 +341,8 @@ def _make_kernel(
                 gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
                 reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
                 cute.arch.cp_async_bulk_commit_group()
-                cute.arch.cp_async_bulk_wait_group(0, read=False)
-                pipe.consumer_release(consumer_state)
+                pipe.consumer_release(cons_state)
+                pipe.drain_bulk_reduces()
 
     @cute.jit
     def _launch(
@@ -302,9 +355,9 @@ def _make_kernel(
         grid_y: Int32,
         out_row_stride: Int64,
     ):
-        # Build the tile-mode TMA descriptor. Shape (M_src, N) comes
-        # from mSrc; TMA clamps OOB column reads to 0, so rows with
-        # ``N % chunk_elems != 0`` are handled natively on the load.
+        # 1D TMA descriptor with cta_tiler=(1, chunk_elems). Shape
+        # (M_src, N) comes from mSrc; TMA clamps OOB column reads to 0
+        # so rows with N % chunk_elems != 0 are handled natively.
         tma_atom, tma_tensor_src = cpasync.make_tiled_tma_atom(
             cpasync.CopyBulkTensorTileG2SOp(),
             mSrc,
@@ -408,10 +461,11 @@ def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int
     chunk-axis across grid_y so every SM gets work.
     """
     n_chunks = (D + chunk_elems - 1) // chunk_elems
-    # 1 warp per CTA: need many more CTAs than an 8-warp layout to keep
-    # occupancy up. sm*32 target with a sm*64 clamp works well across
-    # uniform / high_cont / few_idx on B200.
-    row_ctas = M
+    # _WARPS_PER_CTA warps per CTA -> each CTA's first slice covers
+    # _WARPS_PER_CTA rows; subsequent slices stride by gdim_x * _WARPS_PER_CTA.
+    row_ctas = (M + _WARPS_PER_CTA - 1) // _WARPS_PER_CTA
+    # Target: keep per-SM CTA count high enough to hide TMA / bulk-reduce
+    # latency.
     target_ctas = sm * 32
     if row_ctas >= target_ctas:
         grid_x = min(row_ctas, sm * 64)
