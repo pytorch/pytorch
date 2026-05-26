@@ -634,6 +634,14 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
   // For Composite Compliance, we always choose the slower but composite compliant path.
   bool are_inputs_tensors_sublcass = areAnyTensorSubclassLike({input, grad, output});
+  auto make_subclass_aware_zeros = [&](c10::SymIntArrayRef sizes) {
+    return are_inputs_tensors_sublcass ? grad.new_zeros_symint(sizes)
+                                       : at::zeros_symint(sizes, grad.options());
+  };
+  auto make_subclass_aware_ones = [&](c10::SymIntArrayRef sizes) {
+    return are_inputs_tensors_sublcass ? grad.new_ones_symint(sizes)
+                                       : at::ones({1}, grad.options()).expand_symint(sizes);
+  };
 
   const auto w = output_conj * grad;
   const auto is_zero = input == 0;
@@ -670,7 +678,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
-    Tensor grad_input = at::zeros_symint(input.sym_sizes(), grad.options());
+    Tensor grad_input = make_subclass_aware_zeros(input.sym_sizes());
     const auto cumsum = is_zero.cumsum(dim);
 
     // case k < z1
@@ -698,8 +706,8 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // which is true in the range [z1, z2)
     const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
     const auto first_zero_mask = at::zeros_like(mask)
-                                  .scatter_(dim, first_zero_index, /*src*/ 1)
-                                  .logical_and_(mask);
+                                  .scatter(dim, first_zero_index, /*value*/ true)
+                                  .logical_and(mask);
 
     // select everything between the first zero and the second zero (z1, z2)
     mask &= ~first_zero_mask;
@@ -752,11 +760,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     if (are_inputs_tensors_sublcass) {
       grad_inputs.reserve(dim_size);
     } else {
-      grad_input = at::zeros(input.sizes(), grad.options());
+      grad_input = make_subclass_aware_zeros(input.sym_sizes());
     }
     auto ones_size = input.sym_sizes().vec();
     ones_size[dim] = 1;
-    const Tensor ones = at::ones({1}, grad.options()).expand_symint(ones_size);
+    const Tensor ones = make_subclass_aware_ones(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
@@ -908,13 +916,15 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   if (input.sym_numel() == 0) {
     return input;
   }
-  auto result = at::zeros_symint(input.sym_sizes(), input.options());
 
-  // for composite compliance, use out-of-place variant of
-  // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
+  // for composite compliance and tensor subclasses (e.g. DTensor), create the
+  // scatter destination via the subclass so subsequent scatter_add stays in the
+  // same tensor subclass.
   if (areAnyTensorSubclassLike({indices, grad})) {
+    auto result = grad.new_zeros_symint(input.sym_sizes());
     return result.scatter_add(dim, indices, grad);
   }
+  auto result = at::zeros_symint(input.sym_sizes(), input.options());
   return result.scatter_add_(dim, indices, grad);
 }
 
