@@ -225,7 +225,7 @@ def max_clock_rate():
     """
     unit: MHz
     """
-    if not torch.version.hip and not torch.xpu.is_available():
+    if not torch.version.hip:
         from triton.testing import nvsmi
 
         return nvsmi(["clocks.max.sm"])[0]
