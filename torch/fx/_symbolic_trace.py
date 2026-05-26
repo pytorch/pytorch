@@ -61,19 +61,19 @@ def is_fx_tracing_warning() -> None:
         "or torch.compiler.is_compiling() for specifically torch.export/compile."
     )
 
-
-def is_fx_tracing() -> bool:
-    is_fx_tracing_warning()
-    return getattr(_is_fx_tracing_tls, "flag", False)
-
-
 def _set_is_fx_tracing(value: bool) -> None:
     _is_fx_tracing_tls.flag = value
 
+def _get_is_fx_tracing() -> bool:
+    return getattr(_is_fx_tracing_tls, "flag", False)
+
+def is_fx_tracing() -> bool:
+    is_fx_tracing_warning()
+    return _get_is_fx_tracing()
 
 def is_fx_symbolic_tracing():
     return (
-        getattr(_is_fx_tracing_tls, "flag", False) and not torch.compiler.is_compiling()
+        _get_is_fx_tracing() and not torch.compiler.is_compiling()
     )
 
 
@@ -801,7 +801,7 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        old_is_fx_tracing_flag = getattr(_is_fx_tracing_tls, "flag", False)
+        old_is_fx_tracing_flag = _get_is_fx_tracing()
         _set_is_fx_tracing(True)
         try:
             if isinstance(root, torch.nn.Module):
