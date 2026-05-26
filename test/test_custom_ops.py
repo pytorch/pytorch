@@ -60,8 +60,8 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
@@ -5490,6 +5490,56 @@ class TestCustomOpFastPath(TestCase):
         with torch.autocast("cpu"):
             fp_counter(x)
         self.assertEqual(fp_counter._fast_path_hits, 2)
+
+    def test_fast_path_redispatch_chain_counter(self):
+        from torch._ops import _fast_redispatch_count
+
+        @torch.library.custom_op("_torch_testing::fp_redispatch_cnt", mutates_args=())
+        def fp_redispatch_cnt(x: Tensor) -> Tensor:
+            return x + 1
+
+        @fp_redispatch_cnt.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        def _backward(ctx, grad):
+            return grad
+
+        fp_redispatch_cnt.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        before = _fast_redispatch_count
+
+        fp_redispatch_cnt(x)
+
+        from torch._ops import _fast_redispatch_count as after_count
+
+        # Immutable op with autograd: chain is (autograd_impl, backend_dispatch)
+        # so redispatch is called twice (once per chain element)
+        self.assertEqual(after_count - before, 2)
+
+    def test_fast_path_redispatch_chain_counter_mutable(self):
+        from torch._ops import _fast_redispatch_count
+
+        @torch.library.custom_op(
+            "_torch_testing::fp_redispatch_cnt_mut", mutates_args={"x"}
+        )
+        def fp_redispatch_cnt_mut(x: Tensor) -> None:
+            x.mul_(2)
+
+        x = torch.randn(3)
+        before = _fast_redispatch_count
+
+        fp_redispatch_cnt_mut(x)
+
+        from torch._ops import _fast_redispatch_count as after_count
+
+        # Mutable op: chain is (autograd_impl, adinplaceorview_impl, backend_dispatch)
+        # so redispatch is called three times
+        self.assertEqual(after_count - before, 3)
 
     def test_fast_path_mutable(self):
         @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
