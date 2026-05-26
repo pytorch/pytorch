@@ -14810,6 +14810,20 @@ class TestErrorInputs(TestCase):
             torch.nn.functional.one_hot(torch.tensor([-1], device=device), num_classes=8)
             torch.mps.synchronize()
 
+    def test_bernoulli_invalid_probabilities(self, device):
+        # Scalar-p path: host-side TORCH_CHECK
+        for bad_p in (-0.1, 1.1, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+                torch.empty(4, device=device).bernoulli_(bad_p)
+        # Tensor-p path: device-side assert
+        mixed = torch.tensor([0.5, 1.5, -0.3, float("nan"), float("inf")], device=device)
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.bernoulli(mixed)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.empty_like(mixed).bernoulli_(mixed)
+            torch.mps.synchronize()
+
 
 class TestComplex(TestCase):
     def test_conj_imag(self):
