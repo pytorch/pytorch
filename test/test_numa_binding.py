@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 from unittest import skipUnless
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import torch
 from torch._utils_internal import signpost_event
@@ -54,12 +54,20 @@ class NumaBindingTest(TestCase):
         self._mock_num_numa_nodes = 0
         self._mock_num_sockets = 0
 
+        self._mock_device_module = MagicMock()
+        self._mock_device_module.get_device_properties = (
+            self._mock_get_device_properties
+        )
+        self._mock_device_module.device_count = self._mock_device_count
+
         self._context_managers_to_apply_to_all_tests = [
-            patch("torch.cuda.device_count", self._mock_device_count),
-            patch("torch.cuda.get_device_properties", self._mock_get_device_properties),
-            patch("torch.cuda.is_available", self._mock_is_available),
-            # Implicitly used by dynamo
-            patch("torch.cuda.get_rng_state"),
+            patch("torch.accelerator.device_count", self._mock_device_count),
+            patch("torch.accelerator.is_available", self._mock_is_available),
+            patch(
+                "torch.accelerator.current_accelerator",
+                return_value=torch.device("cpu"),
+            ),
+            patch("torch.get_device_module", return_value=self._mock_device_module),
             patch("builtins.open", new=self._mock_open),
             patch("os.listdir", new=self._mock_listdir),
             patch("os.sched_getaffinity", new=self._mock_sched_getaffinity),
@@ -85,7 +93,7 @@ class NumaBindingTest(TestCase):
         *,
         num_sockets: int,
         num_numa_nodes_per_socket: int,
-        num_gpus_per_numa_node: int,
+        num_devices_per_numa_node: int,
         num_l3_caches_per_numa_node: int,
         num_physical_core_per_l3_cache: int,
     ) -> None:
@@ -103,20 +111,20 @@ class NumaBindingTest(TestCase):
                     contents=f"{self._mock_num_logical_cpus}-"
                     + f"{self._mock_num_logical_cpus + num_l3_caches_per_numa_node * num_physical_core_per_l3_cache * 2 - 1}",
                 )
-                for gpu_index in range(
+                for dev_index in range(
                     len(self._mock_device_properties),
-                    len(self._mock_device_properties) + num_gpus_per_numa_node,
+                    len(self._mock_device_properties) + num_devices_per_numa_node,
                 ):
                     device_properties = MockDeviceProperties(
-                        name=f"mock_gpu_{gpu_index}",
+                        name=f"mock_device_{dev_index}",
                         major=8,
                         minor=0,
                         total_memory="512GB",
                         multi_processor_count=256,
-                        uuid=f"mock_gpu_uuid_{gpu_index}",
-                        pci_bus_id=gpu_index,
-                        pci_device_id=gpu_index,
-                        pci_domain_id=gpu_index,
+                        uuid=f"mock_device_uuid_{dev_index}",
+                        pci_bus_id=dev_index,
+                        pci_device_id=dev_index,
+                        pci_domain_id=dev_index,
                         L2_cache_size="40MB",
                     )
                     self._mock_device_properties.append(device_properties)
@@ -294,7 +302,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=4,
             num_numa_nodes_per_socket=2,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=4,
             num_physical_core_per_l3_cache=2,
         )
@@ -316,7 +324,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=4,
             num_numa_nodes_per_socket=2,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=4,
             num_physical_core_per_l3_cache=2,
         )
@@ -336,7 +344,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -364,7 +372,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -372,7 +380,7 @@ class NumaBindingTest(TestCase):
         with (
             patch("torch.numa.binding.signpost_event") as signpost_patch,
             patch(
-                "torch.numa.binding._get_numa_node_index_for_gpu_index",
+                "torch.numa.binding._get_numa_node_index_for_device_index",
                 side_effect=Exception("Mock exception!"),
             ),
         ):
@@ -398,7 +406,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -444,7 +452,7 @@ class NumaBindingTest(TestCase):
             NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
         )
 
-    def test_nproc_must_equal_cuda_device_count_to_use_default_numa_options(
+    def test_nproc_must_equal_device_count_to_use_default_numa_options(
         self,
     ) -> None:
         # Inner import to avoid crashing if not torch.distributed.is_available()
@@ -453,7 +461,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -473,7 +481,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=4,
             num_numa_nodes_per_socket=2,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=4,
             num_physical_core_per_l3_cache=2,
         )
@@ -494,7 +502,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=4,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=4,
             num_physical_core_per_l3_cache=2,
         )
@@ -515,7 +523,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=3,
         )
@@ -546,14 +554,14 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "There are only 1 physical cores on numa_node_index=0, but there are 2 GPUs associated with this NUMA node.",
+            "There are only 1 physical cores on numa_node_index=0, but there are 2 devices associated with this NUMA node.",
         ):
             self._start_processes_for_str_entrypoint_and_get_command_args(
                 numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
@@ -564,7 +572,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=3,
             num_physical_core_per_l3_cache=3,
         )
@@ -585,7 +593,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=2,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=3,
         )
@@ -606,7 +614,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=3,
             num_physical_core_per_l3_cache=3,
         )
@@ -634,7 +642,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=2,
             num_physical_core_per_l3_cache=1,
         )
@@ -655,7 +663,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -685,7 +693,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=4,
             num_numa_nodes_per_socket=2,
-            num_gpus_per_numa_node=2,
+            num_devices_per_numa_node=2,
             num_l3_caches_per_numa_node=4,
             num_physical_core_per_l3_cache=2,
         )
@@ -707,7 +715,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
@@ -737,7 +745,7 @@ class NumaBindingTest(TestCase):
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
-            num_gpus_per_numa_node=1,
+            num_devices_per_numa_node=1,
             num_l3_caches_per_numa_node=1,
             num_physical_core_per_l3_cache=1,
         )
