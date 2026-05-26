@@ -1,0 +1,7 @@
+backend: PrivateUse1
+cpp_namespace: at::native::openreg
+use_out_as_primary: true
+device_guard: true
+supported:
+  - maximum.out:
+    structured: true
