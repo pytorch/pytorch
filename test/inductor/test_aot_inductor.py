@@ -1905,6 +1905,9 @@ class AOTInductorTestsTemplate:
         # Large batch exceeding CUDA grid.y limit of 65535
         large_batch = 70000
         list_example_inputs.append(make_inputs(large_batch))
+        # ROCm Triton fp16 BMM uses a different reduction order than eager BLAS,
+        # so a few elements diff by ~1 fp16 ULP; NVIDIA stays bit-equivalent.
+        tol = 1e-3 if TEST_WITH_ROCM else 1e-4
         self.check_model_with_multiple_inputs(
             model,
             list_example_inputs,
@@ -1913,7 +1916,7 @@ class AOTInductorTestsTemplate:
                 "max_autotune_gemm_backends": "TRITON",
             },
             dynamic_shapes=dynamic_shapes,
-            tol=1e-3,
+            tol=tol,
         )
 
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
