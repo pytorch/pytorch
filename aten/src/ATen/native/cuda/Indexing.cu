@@ -639,7 +639,7 @@ makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   }
   auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] =
     computeLinearIndex(self, indices, check_range);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, std::move(inversePerm),
+  return std::make_tuple(std::move(linearIndex), std::move(self), nElemBefore, strideBefore, nElemAfter, std::move(inversePerm),
                          dims_before, dims_indexed);
 }
 namespace {

@@ -232,7 +232,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(std::move(vec_res[i]));
       i++;
     } else {
       result.emplace_back(at::native::empty_cuda(
@@ -588,7 +588,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(std::move(vec_res[i]));
       i++;
     } else {
       result.emplace_back(at::zeros({}, res_option));
