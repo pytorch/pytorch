@@ -11,7 +11,11 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import (
+    Max as TorchMax,
+    Min as TorchMin,
+    ModularIndexing,
+)
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -828,6 +832,10 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    def rand4x(seed: str, offset: str) -> str:
+        return PallasKernelOverrides.rand(seed, offset)
+
+    @staticmethod
     def randn(seed: str, offset: str) -> str:
         """Generate standard normal random numbers.
 
@@ -841,6 +849,10 @@ class PallasKernelOverrides(OpOverrides):
             f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
             f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
         )
+
+    @staticmethod
+    def randn4x(seed: str, offset: str) -> str:
+        return PallasKernelOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed: str, offset: str, low: str, high: str) -> str:
@@ -2392,7 +2404,7 @@ class PallasKernel(SIMDKernel):
             self.has_flatten_indexing = True
             self.flatten_indexed_buffers.add(name)
             # Flatten then index for non-contiguous access (gather operation)
-            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            has_minmax = index.has(sympy.Min, sympy.Max, TorchMin, TorchMax)
             idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
             idx = (
                 f"({indexing.index_str}).astype({idx_dtype})"

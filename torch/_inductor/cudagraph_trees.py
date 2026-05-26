@@ -2235,12 +2235,6 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
 
-        if (
-            self.path_state == ExecutionState.EXECUTION
-            and self.can_start_new_generation()
-        ):
-            self.try_end_curr_execution()
-
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
             self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
@@ -2271,7 +2265,10 @@ class CUDAGraphTreeManager:
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:
-                self.apply_checkpoint_execution_state_in_allocator()
+                if self.can_start_new_generation():
+                    self.try_end_curr_execution(dealloc_live_outputs=True)
+                elif self.current_node is not None:
+                    self.apply_checkpoint_execution_state_in_allocator()
 
             return self.run_eager(new_inputs, function_id)
 
@@ -2359,7 +2356,7 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            self.try_end_curr_execution(dealloc_live_outputs=True)
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2582,11 +2579,14 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(self, *, dealloc_live_outputs: bool = False) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
         Will set current_node to None if successful.
+
+        dealloc_live_outputs is only needed when leaving execution to warm up or record a new
+        graph. Ordinary replay can keep cached output Tensor objects for the next invocation.
         """
 
         assert not self.in_recording
@@ -2594,9 +2594,9 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation():
-            if not self.current_node.all_outputs_are_dead():
+            if dealloc_live_outputs and not self.current_node.all_outputs_are_dead():
                 self.apply_checkpoint_execution_state_in_allocator()
-            self.dealloc_current_path_weakrefs()
+                self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2653,10 +2653,23 @@ class CUDAGraphTreeManager:
         )
 
     @staticmethod
-    def format_dealloc_msg(stack_trace: str | None) -> str:
+    def format_dealloc_msg(
+        stack_trace: str | None, *, is_grad_output: bool = False
+    ) -> str:
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
+        if is_grad_output:
+            return (
+                "Error: accessing gradient tensor output of CUDAGraphs that has been overwritten "
+                f"by a subsequent run. Stack trace: {stack_trace}. "
+                "This can happen with torch.compile(mode='reduce-overhead') and gradient "
+                "accumulation when a .grad tensor is allocated during CUDAGraph capture. "
+                "If you need gradient accumulation, allocate stable .grad buffers outside "
+                "CUDAGraph capture before the compiled backward runs, for example by running "
+                "an eager warmup iteration or by preallocating zeroed .grad tensors. "
+                "If you do not need gradient accumulation, set .grad to None before each backward."
+            )
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
@@ -2666,7 +2679,7 @@ class CUDAGraphTreeManager:
 
     def dealloc_current_path_weakrefs(self) -> None:
         assert self.current_node is not None
-        # TODO: we could also allow the these weak refs to continue to be allocated,
+        # TODO: we could also allow these weak refs to continue to be allocated,
         # but that adds some complications.
         live_storage_refs = list(self.current_node.path_live_weakrefs())
         if not live_storage_refs:
@@ -2678,17 +2691,21 @@ class CUDAGraphTreeManager:
             # fresh Tensor objects.
             self.current_node.remove_path_cached_tensors()
 
-        stor_stack_trace: dict[int, str | None] = {}
+        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            is_grad_output = (
+                self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
+            )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
-                    ten, self.format_dealloc_msg(stack_trace)
+                    ten,
+                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2704,7 +2721,10 @@ class CUDAGraphTreeManager:
                 if not storage_ref:
                     continue
 
-                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
+                stor_dealloc_info[storage_ref.data_ptr()] = (
+                    stack_trace,
+                    is_grad_output,
+                )
 
         deleted = OrderedSet[Any]()
         for storage_ref in live_storage_refs:
@@ -2712,8 +2732,11 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
+                stack_trace, is_grad_output = stor_dealloc_info.get(
+                    storage_ref.data_ptr(), (None, False)
+                )
                 msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
+                    stack_trace, is_grad_output=is_grad_output
                 )
                 if torch._C._has_Standard_Deleter(_storage_deref):
                     torch._C._free_And_Remove_DeleterFn(_storage_deref)
