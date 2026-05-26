@@ -99,7 +99,7 @@ TEST(XPUGuardTest, EventBehavior) {
   // ensure deviceData1 and deviceData2 are different buffers.
   int* deviceData2 = sycl::malloc_device<int>(numel, xpu_stream1);
 #if SYCL_COMPILER_VERSION >= 20260000
-  sycl::free(deviceData1);
+  sycl::ext::oneapi::experimental::free(deviceData1);
 #else
   sycl::free(deviceData1, c10::xpu::get_device_context());
 #endif
@@ -119,7 +119,7 @@ TEST(XPUGuardTest, EventBehavior) {
   EXPECT_NE(event1.eventId(), event2.eventId());
   event1.elapsedTime(event2);
 #if SYCL_COMPILER_VERSION >= 20260000
-  sycl::free(deviceData2);
+  sycl::ext::oneapi::experimental::free(deviceData2);
 #else
   sycl::free(deviceData2, c10::xpu::get_device_context());
 #endif

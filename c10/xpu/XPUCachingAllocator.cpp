@@ -410,7 +410,7 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
-#ifdef SYCL_COMPILER_VERSION >= 20260000
+#if SYCL_COMPILER_VERSION >= 20260000
     *ptr = sycl::ext::oneapi::experimental::aligned_alloc_device(
         kDeviceAlignment, size, xpu::get_raw_device(p.device()));
 #else
@@ -430,7 +430,7 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
 #if SYCL_COMPILER_VERSION >= 20260000
     sycl::ext::oneapi::experimental::free(ptr);
 #else
-    ycl::free(ptr, xpu::get_device_context());
+    sycl::free(ptr, xpu::get_device_context());
 #endif
   }
 }
@@ -2206,4 +2206,3 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 }
 
 } // namespace c10::xpu
- 
