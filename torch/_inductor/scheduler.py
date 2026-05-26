@@ -6302,6 +6302,13 @@ class Scheduler:
                 continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
+            # Template nodes may produce mutation outputs that are not in
+            # read_writes.writes (since MultiOutputLayout only writes a
+            # placeholder).  Include output buffer names so that epilogue
+            # consumers sharing the mutation output are grouped together.
+            if node.is_template():
+                for buf in node.get_buffer_names():
+                    buffer_names_grouping[buf].append(node)
         for node_grouping in buffer_names_grouping.values():
             check_all_pairs(node_grouping)
 
@@ -7814,9 +7821,13 @@ class Scheduler:
     def fusable_stardep_write_and_read_on_empty_tensor(
         self, read: Dep, write: StarDep, writing_node: ir.Operation | None
     ) -> bool:
-        if not isinstance(writing_node, ir.UserDefinedTritonKernel):
-            return False
-        if not writing_node.can_fuse_epilogue():
+        if isinstance(writing_node, ir.UserDefinedTritonKernel):
+            if not writing_node.can_fuse_epilogue():
+                return False
+        elif isinstance(writing_node, ir.TemplateBuffer):
+            if not writing_node.allow_epilogue_fusion:
+                return False
+        else:
             return False
         read_name = self.mutation_renames.get(read.name, read.name)
         write_name = self.mutation_renames.get(write.name, write.name)

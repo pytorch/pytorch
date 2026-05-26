@@ -5571,6 +5571,8 @@ class TemplateBuffer(OperationBuffer):
                     ),
                 ]
             )
+            for mut_out in self.mutation_outputs:
+                writes.add(dependencies.StarDep(mut_out.get_name()))
             return dependencies.ReadWrites(
                 reads=self._read_deps_from_inputs(normalize),
                 writes=writes,

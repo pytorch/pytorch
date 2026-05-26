@@ -2193,18 +2193,22 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             self.render_hooks[subgraph_name] = lambda: ""
             return
 
-        n_dims = len(self._template_buffer.get_size())
-        indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
         val = f"_kernel_val_{store_idx}"
         mask = f"_tile_mask_{store_idx}"
 
         buf = output_buf
         node = V.graph.get_buffer(buf) if buf else None
-        output_size = (
-            list(node.get_size())
-            if node is not None
-            else list(self.output_node.get_size())
-        )
+        if node is not None and isinstance(node, ir.MutationOutput):
+            mutated = V.graph.get_buffer(node.mutation_names[0])
+            output_size = list(mutated.get_size())
+            n_dims = len(output_size)
+        elif node is not None:
+            output_size = list(node.get_size())
+            n_dims = len(self._template_buffer.get_size())
+        else:
+            output_size = list(self.output_node.get_size())
+            n_dims = len(self._template_buffer.get_size())
+        indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
         self._make_independent_subgraph(subgraph_name, sympy_product(output_size))
         with self.set_subgraph_body(subgraph_name):
             indices = list(map(OpOverrides.paren, indices))
@@ -2229,9 +2233,13 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             )
             if not block_shape:
                 block_shape = ("XBLOCK",)
-            self.cse.store_cache[buf] = self.cse.namedvar(
+            cse_var = self.cse.namedvar(
                 val, dtype=torch.float32, shape=block_shape
             )
+            self.cse.store_cache[buf] = cse_var
+            if isinstance(node, ir.MutationOutput):
+                for mutated_name in node.mutation_names:
+                    self.cse.store_cache[mutated_name] = cse_var
             assert output_param is not None
             self.args.output_buffers[buf] = output_param
 

@@ -2061,6 +2061,8 @@ class SIMDScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
+                if node1.is_template():
+                    return True
                 if not node2.is_template():
                     why(
                         "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",

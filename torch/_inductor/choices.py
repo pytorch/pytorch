@@ -583,7 +583,7 @@ class InductorChoices:
         """
         if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
-        ):
+        ) and not node1.is_template():
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
                 common_buf_names: OrderedSet[str] = (
                     node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
