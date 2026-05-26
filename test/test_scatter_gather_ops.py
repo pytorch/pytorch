@@ -891,6 +891,31 @@ class TestScatterAddOverrideCorrectness(TestCase):
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    @parametrize("M_src", [
+        subtest(4, name="M4"),      # M_src == K -> exactly one full tile
+        subtest(99, name="M99"),    # not divisible by K=4
+        subtest(101, name="M101"),  # nor by 8 (warps_per_cta)
+        subtest(3, name="M3"),      # M_src < K -> single partial tile
+    ])
+    def test_partial_last_tile(self, M_src, dtype):
+        # Exercises the small-N kernel's `row < num_entries` mask for
+        # the unrolled K-row consumer loop. Covers:
+        #   - M_src vs K=4: not divisible (99, 101), strictly less (3),
+        #     and exactly K (4) which exercises the single-iteration
+        #     epilogue.
+        #   - dtype: bf16/fp16 are the regime the small-N path is
+        #     specifically tuned for, so partial-tile bugs at the dtype
+        #     boundary need direct coverage.
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(
+            M_src + 5, M_src, (128,), dtype=dtype
+        )
+        got = torch.scatter_add(self_t, 0, idx, src)
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        tol = _override_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
     @parametrize("variant", ["functional", "out", "inplace"])
     def test_op_variants(self, variant):
         torch.manual_seed(0)
