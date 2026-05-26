@@ -3489,6 +3489,7 @@ MOD_INLINELIST = [
     "torch._dynamo.polyfills",
     "torch._dynamo.test_case",
     "torch._export.non_strict_utils",
+    "torch._functorch._activation_checkpointing.memory_budget",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
