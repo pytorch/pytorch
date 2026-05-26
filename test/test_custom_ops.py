@@ -5492,7 +5492,7 @@ class TestCustomOpFastPath(TestCase):
         self.assertEqual(fp_counter._fast_path_hits, 2)
 
     def test_fast_path_redispatch_chain_counter(self):
-        from torch._ops import _fast_redispatch_count
+        import torch._ops
 
         @torch.library.custom_op("_torch_testing::fp_redispatch_cnt", mutates_args=())
         def fp_redispatch_cnt(x: Tensor) -> Tensor:
@@ -5511,18 +5511,16 @@ class TestCustomOpFastPath(TestCase):
         fp_redispatch_cnt.register_autograd(_backward, setup_context=_setup_context)
 
         x = torch.randn(3, requires_grad=True)
-        before = _fast_redispatch_count
+        before = torch._ops._fast_redispatch_count
 
         fp_redispatch_cnt(x)
 
-        from torch._ops import _fast_redispatch_count as after_count
-
         # Immutable op with autograd: chain is (autograd_impl, backend_dispatch)
         # so redispatch is called twice (once per chain element)
-        self.assertEqual(after_count - before, 2)
+        self.assertEqual(torch._ops._fast_redispatch_count - before, 2)
 
     def test_fast_path_redispatch_chain_counter_mutable(self):
-        from torch._ops import _fast_redispatch_count
+        import torch._ops
 
         @torch.library.custom_op(
             "_torch_testing::fp_redispatch_cnt_mut", mutates_args={"x"}
@@ -5531,15 +5529,13 @@ class TestCustomOpFastPath(TestCase):
             x.mul_(2)
 
         x = torch.randn(3)
-        before = _fast_redispatch_count
+        before = torch._ops._fast_redispatch_count
 
         fp_redispatch_cnt_mut(x)
 
-        from torch._ops import _fast_redispatch_count as after_count
-
         # Mutable op: chain is (autograd_impl, adinplaceorview_impl, backend_dispatch)
         # so redispatch is called three times
-        self.assertEqual(after_count - before, 3)
+        self.assertEqual(torch._ops._fast_redispatch_count - before, 3)
 
     def test_fast_path_multiple_torch_ops_in_body(self):
         @torch.library.custom_op("_torch_testing::fp_multi_body", mutates_args=())
