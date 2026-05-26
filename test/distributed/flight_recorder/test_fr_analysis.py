@@ -2,6 +2,7 @@
 
 import copy
 import math
+from dataclasses import asdict
 from typing import Any
 
 from torch.distributed.flight_recorder.components.builder import build_db
@@ -30,8 +31,8 @@ def create_one_event(
     return FlightRecorderEntry(
         process_group=pg_info,
         profiling_name=f"nccl:{collective_name}",
-        collective_seq_id=str(collective_seq_id),
-        p2p_seq_id=str(p2p_seq_id),
+        collective_seq_id=collective_seq_id,
+        p2p_seq_id=p2p_seq_id,
         record_id=-1,
         input_sizes=input_sizes,
         output_sizes=output_sizes,
@@ -189,8 +190,8 @@ class FlightRecorderOpBackendTest(TestCase):
         return FlightRecorderEntry(
             process_group=("0", "default"),
             profiling_name=f"{backend}:{collective}",
-            collective_seq_id="1",
-            p2p_seq_id="0",
+            collective_seq_id=1,
+            p2p_seq_id=0,
             record_id=-1,
             input_sizes=[[4, 4]],
             output_sizes=[[4, 4]],
@@ -275,8 +276,7 @@ def create_one_entry(
         output_dtypes,
     )
     event.record_id = record_id
-    event.is_p2p = False
-    return event
+    return asdict(event)
 
 
 class FlightRecorderE2ETest(TestCase):

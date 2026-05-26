@@ -11,6 +11,7 @@ from enum import auto, Enum
 from typing import (
     _eval_type,  # pyrefly: ignore [missing-module-attribute]
     Any,
+    cast,
     Generic,
     NamedTuple,
     TypeVar,
@@ -185,8 +186,8 @@ class Database(NamedTuple):
 class FlightRecorderEntry:
     process_group: tuple[str, str]
     profiling_name: str
-    collective_seq_id: int | str
-    p2p_seq_id: int | str
+    collective_seq_id: int
+    p2p_seq_id: int
     record_id: int
     input_sizes: list[list[int]]
     output_sizes: list[list[int]]
@@ -200,22 +201,22 @@ class FlightRecorderEntry:
 
     @classmethod
     def from_dict(cls, entry: dict[str, Any]) -> "FlightRecorderEntry":
-        process_group = entry["process_group"]
+        process_group = cast(tuple[str, str], entry["process_group"])
         return cls(
             process_group=(process_group[0], process_group[1]),
-            profiling_name=entry["profiling_name"],
-            collective_seq_id=entry["collective_seq_id"],
-            p2p_seq_id=entry["p2p_seq_id"],
-            record_id=entry["record_id"],
-            input_sizes=entry["input_sizes"],
-            output_sizes=entry["output_sizes"],
-            state=entry["state"],
-            is_p2p=entry["is_p2p"],
+            profiling_name=cast(str, entry["profiling_name"]),
+            collective_seq_id=int(entry["collective_seq_id"]),
+            p2p_seq_id=int(entry["p2p_seq_id"]),
+            record_id=cast(int, entry["record_id"]),
+            input_sizes=cast(list[list[int]], entry["input_sizes"]),
+            output_sizes=cast(list[list[int]], entry["output_sizes"]),
+            state=cast(str, entry["state"]),
+            is_p2p=cast(bool, entry["is_p2p"]),
             input_dtypes=entry.get("input_dtypes"),
             output_dtypes=entry.get("output_dtypes"),
-            time_created_ns=entry.get("time_created_ns", 0),
-            frames=entry.get("frames", []),
-            stack_id=entry.get("stack_id", -1),
+            time_created_ns=cast(int, entry.get("time_created_ns", 0)),
+            frames=cast(list[dict[str, str]], entry.get("frames", [])),
+            stack_id=cast(int, entry.get("stack_id", -1)),
         )
 
 
@@ -349,7 +350,7 @@ class EntryState:
         id: int,
         errors: set[tuple[int, MatchInfo]] | None = None,
         idx_map: dict[int, int] | None = None,
-        all_entries: dict[int, list[FlightRecorderEntry]] | None = None,
+        all_entries: dict[int, list[dict[str, Any]]] | None = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -374,9 +375,10 @@ class EntryState:
             if all_entries is None:
                 raise AssertionError("all_entries is None")
             mismatch_collectives = {}
+            typed_entries = cast(dict[int, list[FlightRecorderEntry]], all_entries)
             for rank, error in errors:
                 idx = idx_map[rank]
-                entry = all_entries[rank][idx]
+                entry = typed_entries[rank][idx]
                 desc = entry.process_group[1]
                 pg_name = entry.process_group[0]
                 mismatch_collectives[rank] = Collective(
@@ -421,14 +423,15 @@ class EntryState:
 
     def to_nccl_call(
         self,
-        all_entries: dict[int, list[FlightRecorderEntry]],
+        all_entries: dict[int, list[dict[str, Any]]],
         idx_map: dict[int, int],
         nccl_call_id: int,
         collective_id: Any,
     ) -> list[NCCLCall]:
         result = []
+        typed_entries = cast(dict[int, list[FlightRecorderEntry]], all_entries)
         for i, k in idx_map.items():
-            all_entries[i].pop(k)
+            typed_entries[i].pop(k)
             result.append(
                 NCCLCall(
                     id=nccl_call_id,
@@ -486,6 +489,8 @@ class Op:
             self._src, self._dst = -1, -1
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
+        self.input_sizes: list[list[int]] | None
+        self.output_sizes: list[list[int]] | None
         if type in P2P | COLLECTIVES:
             self.input_sizes = event.input_sizes
             self.output_sizes = event.output_sizes
@@ -544,6 +549,13 @@ class Op:
 
     def dtype_mismatch(self, other: "Op") -> bool:
         if (
+            self.input_sizes is None
+            or self.output_sizes is None
+            or other.input_sizes is None
+            or other.output_sizes is None
+        ):
+            return False
+        if (
             (
                 self.type not in ["scatter", "gather", "broadcast"]
                 and set(self.input_dtypes) != set(self.output_dtypes)
@@ -601,6 +613,13 @@ class Op:
                     MatchState.COLLECTIVE_TYPE_MISMATCH,
                     f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
                 )
+            if (
+                self.input_sizes is None
+                or self.output_sizes is None
+                or other.input_sizes is None
+                or other.output_sizes is None
+            ):
+                return MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             if (
                 self.type not in ["all_to_all", "scatter"]
                 and self.input_sizes != other.input_sizes
