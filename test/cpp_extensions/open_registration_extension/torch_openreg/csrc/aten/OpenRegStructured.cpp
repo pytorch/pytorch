@@ -13,6 +13,7 @@
 // struct also declares a backend-defined meta(); we provide one that reuses the
 // native meta via the generated `base` alias (a real backend could add
 // hardware-specific shape/type checks here).
+#include <ATen/ops/div.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 
@@ -38,6 +39,19 @@ TORCH_PRIV1_META_FUNC(minimum_out)
 TORCH_PRIV1_IMPL_FUNC(minimum_out)
 (const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
   out.copy_(at::minimum(self.cpu(), other.cpu()));
+}
+
+// Non-structured out-as-primary: no native meta is run, so the backend's
+// op_out must size the output itself. torchgen routes the functional and
+// inplace variants of div through this single function.
+at::Tensor& TORCH_PRIV1_FUNC(div_out)(
+    const at::Tensor& self,
+    const at::Tensor& other,
+    at::Tensor& out) {
+  const auto result = at::div(self.cpu(), other.cpu());
+  out.resize_(result.sizes());
+  out.copy_(result);
+  return out;
 }
 
 } // namespace at::native::openreg
