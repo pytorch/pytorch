@@ -2639,6 +2639,139 @@ class TestFP8Matmul(TestCase):
         actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
         self.assertEqual(actual, expected)
 
+    @parametrize(
+        "test_case",
+        [
+            ("rowwise_2d_2d", "rowwise", "2d_2d"),
+            ("rowwise_3d_3d", "rowwise", "3d_3d"),
+            ("mxfp8_2d_2d", "mxfp8", "2d_2d"),
+            ("nvfp4_2d_2d", "nvfp4", "2d_2d"),
+        ],
+        name_fn=lambda test_case: test_case[0],
+    )
+    def test_scaled_grouped_mm_v2_meta(self, test_case) -> None:
+        _, scaling, layout = test_case
+        device = "meta"
+        m, n, k, n_groups = 16, 32, 64, 4
+
+        if layout == "2d_2d":
+            mat_dtype = (
+                torch.float4_e2m1fn_x2 if scaling == "nvfp4" else torch.float8_e4m3fn
+            )
+            mat_a = torch.empty_strided(
+                (m, k * n_groups),
+                (k * n_groups, 1),
+                device=device,
+                dtype=mat_dtype,
+            )
+            mat_b = torch.empty_strided(
+                (k * n_groups, n),
+                (1, k * n_groups),
+                device=device,
+                dtype=mat_dtype,
+            )
+            offs = torch.empty((n_groups,), device=device, dtype=torch.int32)
+            expected_shape = (n_groups, m, n)
+            contraction_dim = []
+        elif layout == "3d_3d":
+            mat_a = torch.empty_strided(
+                (n_groups, m, k),
+                (m * k, k, 1),
+                device=device,
+                dtype=torch.float8_e4m3fn,
+            )
+            mat_b = torch.empty_strided(
+                (n_groups, k, n),
+                (k * n, 1, k),
+                device=device,
+                dtype=torch.float8_e4m3fn,
+            )
+            offs = None
+            expected_shape = (n_groups, m, n)
+            contraction_dim = [-1, -2]
+        else:
+            raise AssertionError(f"Invalid layout: {layout}")
+
+        if scaling == "rowwise":
+            if layout == "2d_2d":
+                scale_a = [torch.empty((m * n_groups,), device=device)]
+                scale_b = [torch.empty((n * n_groups,), device=device)]
+            else:
+                scale_a = [torch.empty((n_groups, m), device=device)]
+                scale_b = [torch.empty((n_groups, n), device=device)]
+            scale_recipe_a = [ScalingType.RowWise]
+            scale_recipe_b = [ScalingType.RowWise]
+            swizzle_a = []
+            swizzle_b = []
+        elif scaling == "mxfp8":
+            scale_a = [
+                torch.empty(
+                    (round_up(m, 128), round_up(k // 32, 4) * n_groups),
+                    device=device,
+                    dtype=torch.float8_e8m0fnu,
+                )
+            ]
+            scale_b = [
+                torch.empty(
+                    (round_up(n, 128), round_up(k // 32, 4) * n_groups),
+                    device=device,
+                    dtype=torch.float8_e8m0fnu,
+                )
+            ]
+            scale_recipe_a = [ScalingType.BlockWise1x32]
+            scale_recipe_b = [ScalingType.BlockWise1x32]
+            swizzle_a = [SwizzleType.SWIZZLE_32_4_4]
+            swizzle_b = [SwizzleType.SWIZZLE_32_4_4]
+        elif scaling == "nvfp4":
+            scale_a = [
+                torch.empty(
+                    (round_up(m, 128), round_up(k // 16, 4) * n_groups),
+                    device=device,
+                    dtype=torch.float8_e4m3fn,
+                ),
+                torch.empty((1,), device=device),
+            ]
+            scale_b = [
+                torch.empty(
+                    (round_up(n, 128), round_up(k // 16, 4) * n_groups),
+                    device=device,
+                    dtype=torch.float8_e4m3fn,
+                ),
+                torch.empty((1,), device=device),
+            ]
+            scale_recipe_a = [
+                ScalingType.BlockWise1x16,
+                ScalingType.TensorWise,
+            ]
+            scale_recipe_b = [
+                ScalingType.BlockWise1x16,
+                ScalingType.TensorWise,
+            ]
+            swizzle_a = [SwizzleType.SWIZZLE_32_4_4]
+            swizzle_b = [SwizzleType.SWIZZLE_32_4_4]
+        else:
+            raise AssertionError(f"Invalid scaling: {scaling}")
+
+        out = scaled_grouped_mm(
+            mat_a,
+            mat_b,
+            scale_a,
+            scale_recipe_a,
+            scale_b,
+            scale_recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            offs=offs,
+            bias=None,
+            output_dtype=torch.bfloat16,
+            contraction_dim=contraction_dim,
+            use_fast_accum=False,
+        )
+
+        self.assertEqual(out.shape, expected_shape)
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(out.device.type, device)
+
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
 

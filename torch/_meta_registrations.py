@@ -8794,6 +8794,297 @@ def meta_scaled_grouped_mm(
     )
 
 
+@register_meta([aten._scaled_grouped_mm_v2])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[ScalingType],
+    swizzle_a: list[SwizzleType],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[ScalingType],
+    swizzle_b: list[SwizzleType],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    torch._check(
+        mat_a.dim() in [2, 3] and mat_b.dim() in [2, 3],
+        lambda: (
+            "mat_a and mat_b must be 2D or 3D, "
+            f"but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}"
+        ),
+    )
+    mat_a_is_2d = mat_a.dim() == 2
+    mat_b_is_2d = mat_b.dim() == 2
+
+    if not mat_a_is_2d or not mat_b_is_2d:
+        if contraction_dim:
+            torch._check(
+                len(contraction_dim) == 2,
+                lambda: "contraction_dim must contain two dimensions",
+            )
+            dim_a, dim_b = contraction_dim
+            torch._check(
+                mat_a.size(dim_a) == mat_b.size(dim_b),
+                lambda: (
+                    f"Contraction dimensions ({dim_a},{dim_b}) of mat_a and "
+                    "mat_b must match, got: "
+                    f"{mat_a.size(dim_a)} and {mat_b.size(dim_b)}"
+                ),
+            )
+            torch._check(
+                dim_a == -1 and dim_b == -2,
+                lambda: "Currently contraction dims must be (-1, -2) only",
+            )
+        else:
+            torch._check(
+                mat_a.size(-1) == mat_b.size(-2),
+                lambda: "contraction dimension of mat_a and mat_b must match",
+            )
+
+    torch._check(
+        mat_a.size(-1) % 16 == 0,
+        lambda: (
+            "Expected trailing dimension of mat_a to be divisible by 16 "
+            f"but got mat_a shape: {mat_a.shape}."
+        ),
+    )
+    torch._check(
+        mat_b.size(-2) % 16 == 0 and mat_b.size(-1) % 16 == 0,
+        lambda: (
+            "Expected mat_b shape to be divisible by 16 "
+            f"but got mat_b shape: {mat_b.shape}."
+        ),
+    )
+    torch._check(bias is None, lambda: "Bias not supported yet")
+
+    torch._check(
+        (offs is not None) == (mat_a_is_2d or mat_b_is_2d),
+        lambda: "Have to provide offsets if there is a 2d matrix",
+    )
+    if offs is not None:
+        torch._check(offs.dim() == 1, lambda: "offs has to be 1D")
+        torch._check(offs.dtype == torch.int32, lambda: "Offsets have to be int32")
+
+    out_dtype = out_dtype or torch.bfloat16
+    torch._check(
+        out_dtype == torch.bfloat16,
+        lambda: "Only bf16 high precision output types are supported for grouped gemm",
+    )
+
+    def is_row_major(mat):
+        return mat.stride()[-2] > 1 and mat.stride()[-1] == 1
+
+    def is_col_major(mat):
+        return mat.stride()[-2] == 1 and mat.stride()[-1] > 1
+
+    torch._check(
+        is_row_major(mat_a),
+        lambda: (
+            "Expected mat_a tensor to be row major in the last two dimensions, "
+            f"got strides {mat_a.stride()[-2:]}"
+        ),
+    )
+    torch._check(
+        is_col_major(mat_b),
+        lambda: (
+            "Expected mat_b tensor to be column major in the last two dimensions, "
+            f"got strides {mat_b.stride()[-2:]}"
+        ),
+    )
+
+    scale_recipe_a = [ScalingType(si) for si in scale_recipe_a]
+    scale_recipe_b = [ScalingType(si) for si in scale_recipe_b]
+    swizzle_a = [SwizzleType(si) for si in swizzle_a]
+    swizzle_b = [SwizzleType(si) for si in swizzle_b]
+
+    def is_float8_type(dtype):
+        return dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
+
+    def is_rowwise():
+        return (
+            len(scale_a) == 1
+            and len(scale_recipe_a) == 1
+            and len(scale_b) == 1
+            and len(scale_recipe_b) == 1
+            and scale_recipe_a[0] == ScalingType.RowWise
+            and scale_recipe_b[0] == ScalingType.RowWise
+            and scale_a[0].dtype == torch.float32
+            and scale_b[0].dtype == torch.float32
+            and is_float8_type(mat_a.dtype)
+            and is_float8_type(mat_b.dtype)
+        )
+
+    def is_mx():
+        return (
+            len(scale_a) == 1
+            and len(scale_recipe_a) == 1
+            and len(scale_b) == 1
+            and len(scale_recipe_b) == 1
+            and scale_recipe_a[0] == ScalingType.BlockWise1x32
+            and scale_recipe_b[0] == ScalingType.BlockWise1x32
+            and scale_a[0].dtype == torch.float8_e8m0fnu
+            and scale_b[0].dtype == torch.float8_e8m0fnu
+            and (
+                (
+                    mat_a.dtype == torch.float8_e4m3fn
+                    and mat_b.dtype == torch.float8_e4m3fn
+                )
+                or (
+                    mat_a.dtype == torch.float4_e2m1fn_x2
+                    and mat_b.dtype == torch.float4_e2m1fn_x2
+                )
+            )
+        )
+
+    def is_nv():
+        return (
+            len(scale_a) == 2
+            and len(scale_recipe_a) == 2
+            and len(scale_b) == 2
+            and len(scale_recipe_b) == 2
+            and scale_recipe_a[0] == ScalingType.BlockWise1x16
+            and scale_recipe_a[1] == ScalingType.TensorWise
+            and scale_recipe_b[0] == ScalingType.BlockWise1x16
+            and scale_recipe_b[1] == ScalingType.TensorWise
+            and scale_a[0].dtype == torch.float8_e4m3fn
+            and scale_a[1].dtype == torch.float32
+            and scale_b[0].dtype == torch.float8_e4m3fn
+            and scale_b[1].dtype == torch.float32
+            and mat_a.dtype == torch.float4_e2m1fn_x2
+            and mat_b.dtype == torch.float4_e2m1fn_x2
+        )
+
+    def check_rowwise_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
+        if mat.dim() == 2:
+            torch._check(
+                scale.dim() == 1,
+                lambda: (
+                    f"Expected {scale_name} to be 1D tensor, "
+                    f"but got {scale.dim()}D tensor."
+                ),
+            )
+            torch._check(
+                scale.is_contiguous(),
+                lambda: f"Expected {scale_name} to be contiguous.",
+            )
+            torch._check(
+                scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
+                lambda: (
+                    f"Expected {scale_name} to have "
+                    f"{mat.shape[scaled_dim] * scale_multiplier} elements, "
+                    f"got {scale.shape[0]} elements."
+                ),
+            )
+        else:
+            torch._check(
+                scale.dim() == 2,
+                lambda: (
+                    f"Expected {scale_name} to be 2D tensor, "
+                    f"but got {scale.dim()}D tensor."
+                ),
+            )
+            torch._check(
+                scale.stride(-1) == 1,
+                lambda: (
+                    f"Expected {scale_name} to be contiguous in the last dimension."
+                ),
+            )
+            torch._check(
+                scale.shape[0] == mat.shape[0],
+                lambda: (
+                    f"Expected {scale_name} batch dimension to be "
+                    f"{mat.shape[0]}, got {scale.shape[0]}."
+                ),
+            )
+            torch._check(
+                scale.shape[1] == mat.shape[1 + scaled_dim],
+                lambda: (
+                    f"Expected {scale_name} non-batch dimension to be "
+                    f"{mat.shape[1 + scaled_dim]}, got {scale.shape[1]}."
+                ),
+            )
+
+    def check_blocked_scale(scale_name, scale, mat, arg_idx):
+        if mat.dim() == 2:
+            torch._check(
+                scale.dim() == mat.dim(),
+                lambda: (
+                    "For block-scaled, scale must have same number of "
+                    f"dimensions as target tensor, but {scale_name} has "
+                    f"mat.ndim={mat.ndim} and scale.ndim={scale.ndim}"
+                ),
+            )
+            # 2D grouped inputs have variable per-group K, so only validate the
+            # padded scale dimension that covers M for A or N for B.
+            mat_dim_to_check = 0 if arg_idx == 0 else 1
+            torch._check(
+                scale.shape[0] >= mat.shape[mat_dim_to_check],
+                lambda: (
+                    f"For block-scaled, expected {scale_name}.shape[0] >= "
+                    f"{mat.shape[mat_dim_to_check]}, got {scale.shape[0]}."
+                ),
+            )
+        else:
+            block_size = 16 if scale.dtype == torch.float8_e4m3fn else 32
+            g, k, n = mat.shape
+            if mat.dtype == torch.float4_e2m1fn_x2:
+                k *= 2
+            blocked_k = round_up(k // block_size, 4)
+            blocked_n = round_up(n, 128)
+            torch._check(
+                scale.dim() == mat.dim() - 1,
+                lambda: (
+                    f"For block-scaled 3D grouped GEMM, {scale_name} must "
+                    f"be 2D, but got {scale.dim()}D."
+                ),
+            )
+            torch._check(
+                scale.shape[0] == g and scale.shape[1] == blocked_k * blocked_n,
+                lambda: (
+                    f"For block-scaled grouped GEMM, expected {scale_name} "
+                    f"shape ({g}, {blocked_k * blocked_n}), got {scale.shape}."
+                ),
+            )
+
+    if is_rowwise():
+        scale_multiplier = (
+            offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
+        )
+        check_rowwise_scale("scale_a", scale_a[0], mat_a, 0, scale_multiplier)
+        check_rowwise_scale("scale_b", scale_b[0], mat_b, 1, scale_multiplier)
+    elif is_mx():
+        torch._check(
+            len(swizzle_a) == 1 and len(swizzle_b) == 1,
+            lambda: "Expected single swizzle argument",
+        )
+        check_blocked_scale("scale_a", scale_a[0], mat_a, 0)
+        check_blocked_scale("scale_b", scale_b[0], mat_b, 1)
+    elif is_nv():
+        torch._check(
+            len(swizzle_a) == 1 and len(swizzle_b) == 1,
+            lambda: "Expected single swizzle argument",
+        )
+        torch._check(
+            scale_a[1].numel() == 1 and scale_b[1].numel() == 1,
+            lambda: "For NVFP4 scaling, tensorwise scales must be single element tensors",
+        )
+        check_blocked_scale("scale_a", scale_a[0], mat_a, 0)
+        check_blocked_scale("scale_b", scale_b[0], mat_b, 1)
+    else:
+        torch._check(False, lambda: "No gemm implementation was found")
+
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
+
+
 @register_meta(aten._foreach_norm.Scalar)
 def meta_foreach_norm(tensors, ord=2, dtype=None):
     if float(ord) == float("inf"):
