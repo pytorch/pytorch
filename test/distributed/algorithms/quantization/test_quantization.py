@@ -23,20 +23,22 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_PRIOR_ALLOW_TF32: bool | None = None
+_PRIOR_FP32_PRECISION: str | None = None
 
 
 def setUpModule():
-    global _PRIOR_ALLOW_TF32
-    _PRIOR_ALLOW_TF32 = torch.backends.cuda.matmul.allow_tf32
+    global _PRIOR_FP32_PRECISION
+    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
+    # exact original; writing allow_tf32 back can't reproduce the "none" default.
+    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
-    global _PRIOR_ALLOW_TF32
-    if _PRIOR_ALLOW_TF32 is not None:
-        torch.backends.cuda.matmul.allow_tf32 = _PRIOR_ALLOW_TF32
-        _PRIOR_ALLOW_TF32 = None
+    global _PRIOR_FP32_PRECISION
+    if _PRIOR_FP32_PRECISION is not None:
+        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _PRIOR_FP32_PRECISION = None
 
 
 if not dist.is_available():
