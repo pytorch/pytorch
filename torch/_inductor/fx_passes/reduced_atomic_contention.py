@@ -340,7 +340,7 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
         state = _current_pass_state
         _current_pass_state = None
 
-    if state is not None:
+    if state is not None and state.n_candidates > 0:
         log.info(
             "partitioned_scatter: candidates=%d applied=%d skipped=%d "
             "partitions_per_op=%s "
