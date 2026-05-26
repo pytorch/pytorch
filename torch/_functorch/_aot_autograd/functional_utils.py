@@ -585,7 +585,20 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
                 mutation_count += 1
             else:
                 if n.target._schema.is_mutable:
-                    error = f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                    # Dead mutations (no users) on non-placeholder tensors are
+                    # harmless: they are leftover prims/aten mutation nodes (e.g.
+                    # prims.copy_to) whose side-effects have already been
+                    # accounted for by the functionalization mechanism (any needed
+                    # write-backs are emitted as aten.copy_ nodes).  DCE cannot
+                    # remove them because is_impure returns True for mutable ops,
+                    # so we simply skip them here.
+                    is_dead_intermediate_mutation = (
+                        len(n.users) == 0
+                        and n.args
+                        and n.args[0] not in placeholders
+                    )
+                    if not is_dead_intermediate_mutation:
+                        error = f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
     return error, mutation_count
 
 

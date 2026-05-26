@@ -1917,6 +1917,48 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         result = torch.compile(f)(x, w)
         self.assertIsInstance(result, torch.Tensor)
 
+    def test_prims_copy_to_dead_node_is_allowed_in_functional_graph(self):
+        # Regression test: prims.copy_to with num_users=0 on a non-placeholder
+        # tensor should not cause assert_functional_graph to fail.
+        # This can occur when an op is decomposed to a prims-level mutation that
+        # operates on an intermediate (non-input) tensor and whose result is unused.
+        # See https://github.com/pytorch/pytorch/issues/154307
+        from torch._functorch._aot_autograd.functional_utils import (
+            assert_functional_graph,
+        )
+
+        # Build a minimal FX graph: placeholder -> sin -> dead prims.copy_to -> output
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(torch.ops.aten.sin.default, (x,))
+        # Create an intermediate (non-placeholder) node to be the mutation target.
+        z = graph.call_function(
+            torch.ops.aten.as_strided.default, (y, [2], [1], 0)
+        )
+        # Dead prims.copy_to: result is not used (num_users=0), target is non-placeholder.
+        graph.call_function(torch.ops.prims.copy_to.default, (z, x))
+        graph.output(y)
+
+        # Should not raise: dead mutation of an intermediate tensor is harmless.
+        assert_functional_graph(graph)
+
+        # A live mutable op (one whose result IS used) still raises.
+        graph2 = torch.fx.Graph()
+        x2 = graph2.placeholder("x2")
+        y2 = graph2.call_function(torch.ops.aten.sin.default, (x2,))
+        z2 = graph2.call_function(
+            torch.ops.aten.as_strided.default, (y2, [2], [1], 0)
+        )
+        copy_node = graph2.call_function(
+            torch.ops.prims.copy_to.default, (z2, x2)
+        )
+        # Make copy_node have a user so it's not dead.
+        result2 = graph2.call_function(torch.ops.aten.sin.default, (copy_node,))
+        graph2.output(result2)
+
+        with self.assertRaises(AssertionError):
+            assert_functional_graph(graph2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
