@@ -3,7 +3,6 @@ import collections
 import inspect
 import logging
 import os
-import threading
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -275,7 +274,6 @@ def custom_op(
 
 # Sentinel returned by fast_path when it can't handle the call.
 _DO_SLOW_PATH = object()
-
 
 
 class CustomOpDef:
@@ -895,6 +893,15 @@ class CustomOpDef:
         backend_impls = self._backend_impls
         is_mutable = schema.is_mutable
         opdef = self
+        chain_cache: dict[str | None, tuple] = {}
+
+        def _build_chain(backend_impl):
+            def backend_dispatch(keyset, *args, **kwargs):
+                return backend_impl(*args, **kwargs)
+
+            if is_mutable:
+                return (autograd_impl, adinplaceorview_impl, backend_dispatch)
+            return (autograd_impl, backend_dispatch)
 
         def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -922,13 +929,10 @@ class CustomOpDef:
             if backend_impl is None:
                 return _DO_SLOW_PATH
 
-            def backend_dispatch(keyset, *args, **kwargs):
-                return backend_impl(*args, **kwargs)
-
-            if is_mutable:
-                chain = (autograd_impl, adinplaceorview_impl, backend_dispatch)
-            else:
-                chain = (autograd_impl, backend_dispatch)
+            chain = chain_cache.get(device_type)
+            if chain is None:
+                chain = _build_chain(backend_impl)
+                chain_cache[device_type] = chain
 
             opdef._fast_path_hits += 1
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
