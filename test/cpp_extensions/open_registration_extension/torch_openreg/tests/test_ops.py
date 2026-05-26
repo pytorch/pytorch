@@ -639,10 +639,12 @@ class TestCustomAutogradFunctions(TestCase):
 
 
 class TestStructuredCodegen(TestCase):
-    """maximum.out is registered for openreg through torchgen
+    """maximum.out and minimum.out are registered for openreg through torchgen
     (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
     csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
-    These exercise the generated structured wrappers end to end."""
+    maximum.out reuses the native meta; minimum.out additionally sets
+    ext_structured_meta: true and supplies a backend meta(). These exercise the
+    generated structured wrappers end to end."""
 
     def test_maximum_functional(self):
         """Functional variant: out-as-primary allocates an out and reuses it."""
@@ -660,6 +662,23 @@ class TestStructuredCodegen(TestCase):
         ret = torch.maximum(x, y, out=out)
         self.assertEqual(ret.cpu(), torch.tensor([4.0, 5.0, 6.0]))
         self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_minimum_ext_structured_meta_functional(self):
+        """ext_structured_meta: the backend's own meta() drives the functional op."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        z = torch.minimum(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+
+    def test_minimum_ext_structured_meta_out(self):
+        """ext_structured_meta out variant: backend meta() + impl()."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.minimum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
 
 
 if __name__ == "__main__":
