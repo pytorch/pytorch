@@ -1061,10 +1061,14 @@ class TestCuteDSLSubprocessCompile(TestCase):
             def test_kernel_precompile(precompile_shapes, precompile_strides,
                                        precompile_dtypes, device_index=0,
                                        device_capability=None, hw_info=None):
+                # Verify we're running in a forked subprocess where CUDA
+                # has been inherited -- calling torch.cuda.* here would crash.
+                in_bad_fork = torch.cuda._is_in_bad_fork()
                 with open(_SENTINEL_PATH, "w") as f:
                     json.dump({{
                         "device_index": device_index,
                         "device_capability": list(device_capability) if device_capability else None,
+                        "in_bad_fork": in_bad_fork,
                         "shapes": precompile_shapes,
                         "strides": precompile_strides,
                         "dtypes": precompile_dtypes,
@@ -1129,6 +1133,11 @@ class TestCuteDSLSubprocessCompile(TestCase):
             self.assertEqual(
                 sentinel_data["device_capability"],
                 list(dev_cap),
+            )
+            self.assertTrue(
+                sentinel_data["in_bad_fork"],
+                "Precompile did not run in a forked-after-CUDA-init subprocess. "
+                "This test only validates the fix when the worker inherits CUDA state.",
             )
         finally:
             if os.path.exists(sentinel_path):

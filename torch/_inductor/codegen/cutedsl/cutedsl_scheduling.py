@@ -146,7 +146,7 @@ class CuteDSLScheduling(BaseScheduling):
         else:
             src_code_str = src_code
 
-        precompile_metadata = self._build_precompile_metadata(kernel, ctb, src_code_str)
+        precompile_metadata = self._build_precompile_metadata(kernel, ctb)
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
@@ -158,7 +158,7 @@ class CuteDSLScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
-    def _build_precompile_metadata(self, kernel, ctb, src_code_str=None):
+    def _build_precompile_metadata(self, kernel, ctb):
         """Extract shapes and dtypes from kernel inputs/output for subprocess precompilation.
 
         Returns None if shapes are symbolic (dynamic shapes), in which case the
@@ -211,35 +211,33 @@ class CuteDSLScheduling(BaseScheduling):
             "device_capability": device_capability,
         }
 
-        hw_info = self._build_hw_info(src_code_str)
+        hw_info = self._build_hw_info(kernel)
         if hw_info is not None:
             metadata["hw_info"] = hw_info
 
         return metadata
 
     @staticmethod
-    def _build_hw_info(
-        src_code_str: str | None,
-    ) -> tuple[int, int] | None:
+    def _build_hw_info(kernel) -> tuple[int, int] | None:
         """Compute (sm_count, max_active_clusters) in the main process.
 
-        Parses CLUSTER_M/N from the rendered template source and queries
+        Reads CLUSTER_M/N from kernel template kwargs and queries
         HardwareInfo so subprocess workers never touch CUDA driver APIs.
         Returns None if CUTLASS is unavailable or the template has no cluster config.
         """
-        if src_code_str is None:
+        template_kwargs = getattr(kernel, "_template_kwargs", None)
+        if template_kwargs is None:
             return None
-        try:
-            import re
 
+        cluster_m = template_kwargs.get("CLUSTER_M")
+        cluster_n = template_kwargs.get("CLUSTER_N")
+        if cluster_m is None or cluster_n is None:
+            return None
+
+        try:
             import cutlass.utils
 
-            m_match = re.search(r"CLUSTER_M\b.*?=\s*(\d+)", src_code_str)
-            n_match = re.search(r"CLUSTER_N\b.*?=\s*(\d+)", src_code_str)
-            if m_match is None or n_match is None:
-                return None
-
-            cluster_product = int(m_match.group(1)) * int(n_match.group(1))
+            cluster_product = int(cluster_m) * int(cluster_n)
             hw = cutlass.utils.HardwareInfo()
             sm_count = hw.get_max_active_clusters(1)
             max_active_clusters = hw.get_max_active_clusters(cluster_product)
