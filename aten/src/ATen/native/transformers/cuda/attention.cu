@@ -1506,12 +1506,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
-    // Not using dropout. These tensors are unused by backward, but AOTAutograd
-    // may still save them. Keep their device independent of CUDA graph capture
-    // so checkpoint recomputation sees stable metadata.
+    // Not using dropout. AOTAutograd may still save these dummy tensors, and
+    // ROCm attention backends may read their pointers. Keep their device
+    // independent of CUDA graph capture and their value deterministic.
     const auto options = query.options().dtype(at::kLong);
-    seed_t = at::empty({}, options);
-    offset_t = at::empty({}, options);
+    seed_t = at::zeros({}, options);
+    offset_t = at::zeros({}, options);
   }
 
 #ifdef USE_ROCM

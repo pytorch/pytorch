@@ -1849,6 +1849,16 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             return x + attn(x)
 
         x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        _, _, philox_seed, philox_offset = (
+            torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                x_ref, x_ref, x_ref, None, True, dropout_p=0.0
+            )
+        )
+        self.assertEqual(philox_seed, torch.zeros((), device=device, dtype=torch.int64))
+        self.assertEqual(
+            philox_offset, torch.zeros((), device=device, dtype=torch.int64)
+        )
+
         ref = x_ref + eager_attn(x_ref)
         ref.sum().backward()
 
