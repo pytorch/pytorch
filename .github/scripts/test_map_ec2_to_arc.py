@@ -145,7 +145,7 @@ def test_mixed_runners():
         == [
             "l-x86iavx512-16-128",
             "l-x86aavx2-29-113-a10g",
-            "l-arm64g2-6-32",
+            "l-arm64g2-6-25",
         ]
     )
 
