@@ -13,7 +13,6 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/LogAddExp.h>
-#include <ATen/native/cpu/moments_utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -142,10 +141,10 @@ void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt
         iter,
         WelfordOps<
             scalar_t,
-            opmath_t<scalar_t>,
+            double,
             int64_t,
-            std::tuple<scalar_t, scalar_t>>{static_cast<opmath_t<scalar_t>>(correction), take_sqrt},
-        WelfordData<opmath_t<scalar_t>, int64_t>());
+            std::tuple<scalar_t, scalar_t>>{correction, take_sqrt},
+        WelfordData<double, int64_t>());
   });
 }
 
