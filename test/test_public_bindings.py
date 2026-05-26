@@ -418,6 +418,7 @@ class TestPublicBindings(TestCase):
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
                 "torch._native.ops.scatter_add.",
+                "torch._native.ops.topk.",
                 "torch._vendor.quack",
             )
             if (

@@ -79,9 +79,18 @@ def _f32_to_radix_ord(val: Float32) -> Int32:
     non-negatives keep their bits. With the byte-0 xor of 0x80 (applied
     at the histogram-bin level), this gives a total order suitable for
     MSB-first radix select.
+
+    NaN of either sign maps to 0x7FFFFFFF (the largest ordinal under the
+    byte-0 xor), matching aten's TopKTypeConfig<float> behaviour: NaN
+    sorts at the very top of largest-first topk regardless of sign.
     """
     bits = _bitcast_f32_to_i32(val)
-    return bits ^ ((bits >> Int32(31)) & Int32(0x7FFFFFFF))
+    ord_ = bits ^ ((bits >> Int32(31)) & Int32(0x7FFFFFFF))
+    # NaN detection: bits with all-ones exponent and non-zero mantissa.
+    # Equivalent to ``val != val``, but the DSL doesn't expose that
+    # comparator; the bit test is exact for IEEE-754 fp32.
+    is_nan = (bits & Int32(0x7FFFFFFF)) > Int32(0x7F800000)
+    return Int32(0x7FFFFFFF) if is_nan else ord_
 
 
 def _smem_scalar(smem: cutlass.utils.SmemAllocator, dtype) -> cute.Tensor:
@@ -533,9 +542,8 @@ class _RadixSelectTopK:
         # without OOB reads/writes. The writes from those lanes are
         # discarded via the `tidx < K` guard on the store.
         sort_tidx = tidx if tidx < Int32(K) else Int32(0)
-        sort_bits = _bitcast_f32_to_i32(s_vals[sort_tidx])
         if tidx < K:
-            s_ords[tidx] = sort_bits ^ ((sort_bits >> Int32(31)) & Int32(0x7FFFFFFF))
+            s_ords[tidx] = _f32_to_radix_ord(s_vals[sort_tidx])
         cute.arch.barrier()
 
         for stage in cutlass.range_constexpr(self.NUM_STAGES):
