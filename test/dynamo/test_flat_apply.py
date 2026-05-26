@@ -191,13 +191,14 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        t: "f32[10]" = l_x_ + l_y_
-
         trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
         trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
-        res: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
-        return (res,)
+
+        add: "f32[10]" = l_x_ + l_y_
+
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
+        getitem: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
+        return (getitem,)
 """,
         )
 
