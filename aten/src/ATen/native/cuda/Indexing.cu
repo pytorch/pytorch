@@ -23,6 +23,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_assert_async.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros_like.h>
@@ -557,8 +558,9 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    at::_assert_async(index.max() < dim_size);
-    at::_assert_async(index.min() >= -dim_size);
+    auto [index_min, index_max] = at::aminmax(index);
+    at::_assert_async(index_max < dim_size);
+    at::_assert_async(index_min >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -1189,11 +1191,14 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   // Older builds therefore stay on the existing indexFunc dispatch.
   // index_add supports {complex64, complex128, ComplexHalf, Bool} that
   // scatter_add does not, so exclude those and let them use indexFunc.
+  // The dtype check is ordered FIRST so short-circuit evaluation skips
+  // alpha.equal(1) for complex `self`, where alpha may itself be a
+  // complex Scalar and the equality comparison would be ill-defined.
   const auto stype = self_.scalar_type();
   const bool dtype_supported_by_scatter_add =
       !c10::isComplexType(stype) && stype != at::kBool;
-  if (dim == 0 && alpha.toDouble() == 1.0 && numIndex > 0 &&
-      dtype_supported_by_scatter_add &&
+  if (dtype_supported_by_scatter_add && dim == 0 &&
+      alpha.equal(1) && numIndex > 0 &&
       index.dim() <= 1 && indContig) {
     std::vector<int64_t> idx_shape(source_.dim(), 1);
     idx_shape[0] = static_cast<int64_t>(numIndex);
