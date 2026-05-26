@@ -9541,14 +9541,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because where op is not supported for opset < 9.
-    def test_where_with_byte_tensor(self):
+    def test_where_with_bool_condition_tensor(self):
         class M(torch.nn.Module):
             def forward(self, cond, mat1, mat2):
                 out = torch.where(cond, mat1, mat2)
                 return out
 
-        cond = torch.ones(2, 3, dtype=torch.uint8)
-        cond[1, 2] = 0
+        cond = torch.ones(2, 3, dtype=torch.bool)
+        cond[1, 2] = False
         mat1 = torch.randn(2, 3)
         mat2 = torch.ones(2, 3)
         self.run_test(M(), input_args=(cond, mat1, mat2))

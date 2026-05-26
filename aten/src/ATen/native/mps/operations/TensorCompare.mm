@@ -141,16 +141,9 @@ static void where_kernel_mps(TensorIterator& iter) {
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
               "Expected all tensors to be on the same device, but found at least two devices.");
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-
-  if (condition.scalar_type() == ScalarType::Byte) {
-    TORCH_WARN_ONCE(
-        "where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-    TORCH_CHECK(condition.scalar_type() == ScalarType::Bool,
-                "where expected condition to be a boolean tensor, but got a tensor with dtype ",
-                condition.scalar_type());
-  }
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool,
+              "where expected condition to be a boolean tensor, but got a tensor with dtype ",
+              condition.scalar_type());
 
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
@@ -179,10 +172,10 @@ static void where_kernel_mps(TensorIterator& iter) {
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
 
   @autoreleasepool {
-    std::string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
+    std::string key = "where_self_out_mps:" + getTensorsStringKey({condition, self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
+      MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(condition));
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, selfDataType, getMPSShape(self));
       MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, otherDataType, getMPSShape(other));
 
@@ -198,7 +191,7 @@ static void where_kernel_mps(TensorIterator& iter) {
     });
 
     Placeholder conditionPlaceholder = Placeholder(
-        cachedGraph->conditionTensor_, cond_bool, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, conditionDataType);
+        cachedGraph->conditionTensor_, condition, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, conditionDataType);
     Placeholder selfPlaceholder =
         Placeholder(cachedGraph->selfTensor_, self, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, selfDataType);
     Placeholder otherPlaceholder =
