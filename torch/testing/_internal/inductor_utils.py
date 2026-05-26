@@ -480,8 +480,6 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
     return config.patch(post_grad_custom_pre_pass=Pass())
 
-# TODO #enhancement: make this also take a dict, to patch multiple things at
-# once
 def try_patch_inductor_backend_config(device: str, key: str,
                                       value: Any) -> contextlib.ContextDecorator:
     """
