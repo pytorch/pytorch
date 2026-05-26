@@ -1206,7 +1206,9 @@ class CachingAutotuner(KernelInterface):
                             stream=stream,
                         )
                     except Exception as e:
-                        if isinstance(e, TypeError) and "got multiple values for argument" in str(e):
+                        if isinstance(
+                            e, TypeError
+                        ) and "got multiple values for argument" in str(e):
                             num_expected = len(self.triton_meta.get("signature", {}))
                             num_received = len(cloned_args) + len(cloned_kwargs)
                             raise TypeError(
