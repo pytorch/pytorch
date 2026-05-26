@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
     xfailIfS390X,
@@ -2922,6 +2923,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/184324")
     def test_tokenization(self):
         from collections import UserDict
 

@@ -16,7 +16,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfWindows
+from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -77,6 +77,7 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176968")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce_repeatedly(self):
         pool = SubprocPool(2)

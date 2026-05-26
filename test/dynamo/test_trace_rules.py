@@ -340,6 +340,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )

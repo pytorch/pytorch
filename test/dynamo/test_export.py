@@ -36,6 +36,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_SLOW
 
 
 @torch._dynamo.assume_constant_result
@@ -4611,6 +4612,9 @@ torch.testing.assert_close(out_export, out_orig)
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181344"
+    )
     def test_export_with_parameters(self, device):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

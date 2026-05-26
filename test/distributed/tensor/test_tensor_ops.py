@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -638,6 +639,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175064")
     @skipIfRocmArch(MI200_ARCH)
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):

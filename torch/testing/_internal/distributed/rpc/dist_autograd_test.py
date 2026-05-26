@@ -4,6 +4,7 @@ import random
 import sys
 import threading
 import time
+import unittest
 from datetime import timedelta
 from enum import Enum
 
@@ -2517,6 +2518,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
 
 class CudaDistAutogradTest(CommonDistAutogradTest):
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70753")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):

@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import unittest
 from functools import partial
 
 import torch
@@ -11,6 +12,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     TestCase,
     TestGradients,
     unMarkDynamoStrictTest,
@@ -28,6 +32,18 @@ _gradcheck_ops = partial(
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
     # Tests that gradients are computed correctly
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/131079",
+    )
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/164232",
+    )
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/164192",
+    )
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):
         # This is verified by test_dtypes in test_ops.py
@@ -64,6 +80,7 @@ class TestBwdGradients(TestGradients):
             )
 
     # Test that gradients of gradients are computed correctly
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164193")
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
