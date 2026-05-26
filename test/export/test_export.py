@@ -7107,6 +7107,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=False,
             ).graph
 
+    def test_export_min_scaled_dynamic_dim(self):
+        class Model(torch.nn.Module):
+            def forward(self, input_ids):
+                seq_len = input_ids.size(1)
+                max_len = min(128 * seq_len, 512 * seq_len)
+                if max_len == 128 * seq_len:
+                    return input_ids.sum()
+                else:
+                    return input_ids.sum()
+
+        input_ids = torch.randn(1, 100)
+        ep = export(
+            Model(),
+            (input_ids,),
+            dynamic_shapes={
+                "input_ids": {1: Dim("text_seq_length", max=2048)},
+            },
+        )
+        self.assertEqual(ep.module()(input_ids), input_ids.sum())
+
     def test_math_pow(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
