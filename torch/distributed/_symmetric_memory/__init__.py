@@ -2156,65 +2156,77 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
 
 
 def _cuda_get_out(
-    dst: torch.Tensor, src: torch.Tensor, peer: int, group_name: c10d.GroupName
+    dst: torch.Tensor, hdl: _SymmetricMemory, offset: int, size: int, peer: int
 ) -> None:
-    hdl = _SymmetricMemory.rendezvous(src, group_name)
-    if hdl is None:
-        raise RuntimeError("get: src must be allocated from symmetric memory")
-    if peer < 0 or peer >= hdl.world_size:
-        raise ValueError("get: invalid peer")
-    if hdl.offset % src.element_size() != 0:
-        raise RuntimeError("get: source storage offset is not element-aligned")
-    storage_offset = hdl.offset // src.element_size() + int(src.storage_offset())
-    remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
-    dst.copy_(remote_src)
+    storage_offset = hdl.offset // dst.element_size() + offset
+    remote_src = hdl.get_buffer(peer, (size,), dst.dtype, storage_offset)
+    dst.view(-1)[:size].copy_(remote_src)
 
 
 # One-sided communication APIs.
 def get(
     dst: torch.Tensor,
-    src: torch.Tensor,
-    group: c10d.GroupName,
+    hdl: _SymmetricMemory,
+    offset: int,
+    size: int,
     peer: int,
 ) -> None:
     r"""
-    get(dst, src, group, peer) -> ()
+    get(dst, hdl, offset, size, peer) -> ()
 
-    Copy ``src`` from ``peer`` into local ``dst`` using one-sided symmetric
-    memory access.
+    Copy ``size`` elements starting at ``offset`` from ``peer``'s symmetric
+    allocation into local ``dst`` using one-sided symmetric memory access.
 
-    ``src`` must be a contiguous tensor allocated with
-    :func:`torch.distributed._symmetric_memory.empty` and rendezvoused with
-    ``group``. ``dst`` can be a regular CUDA tensor or a symmetric-memory
-    tensor. Both tensors must be backed by contiguous memory, have the same
-    dtype, and contain the same number of elements. The copy is issued on the
-    current CUDA stream.
+    ``hdl`` is the symmetric memory handle returned by
+    :func:`torch.distributed._symmetric_memory.rendezvous`; the remote source
+    is ``peer``'s allocation backing that handle. ``offset`` and ``size`` are
+    expressed in elements of ``dst``'s dtype. ``dst`` can be a regular CUDA
+    tensor or a symmetric-memory tensor; it must be on the same device as
+    ``hdl``, backed by contiguous memory, and contain at least ``size``
+    elements. The copy is issued on the current CUDA stream.
 
     Args:
         dst (Tensor): local destination tensor.
-        src (Tensor): local symmetric-memory tensor whose peer allocation is
-            the remote source.
-        group (str): process group name identifying peers.
-        peer (int): rank in ``group`` to copy from.
+        hdl (SymmetricMemory): handle whose peer allocation is the remote
+            source.
+        offset (int): element offset into the peer allocation to start reading
+            from.
+        size (int): number of elements to copy.
+        peer (int): rank to copy from.
     """
-    if dst.device != src.device:
-        raise ValueError("get: dst and src must be on the same device")
-    if dst.dtype != src.dtype:
-        raise ValueError("get: dst and src must have the same dtype")
-    if dst.numel() != src.numel():
-        raise ValueError("get: dst and src must have the same number of elements")
-    if not dst.is_contiguous() or not src.is_contiguous():
-        raise ValueError("get: dst and src must be backed by contiguous memory")
-    if not is_symm_mem_tensor(src):
-        raise RuntimeError("get: src must be allocated from symmetric memory")
+    if dst.device != hdl.device:
+        raise ValueError("get: dst must be on the same device as hdl")
+    if not dst.is_contiguous():
+        raise ValueError("get: dst must be backed by contiguous memory")
+    if offset < 0:
+        raise ValueError("get: offset must be non-negative")
+    if size < 0:
+        raise ValueError("get: size must be non-negative")
+    if dst.numel() < size:
+        raise ValueError("get: dst must contain at least `size` elements")
+    if peer < 0 or peer >= hdl.world_size:
+        raise ValueError("get: invalid peer")
+    element_size = dst.element_size()
+    if hdl.offset % element_size != 0:
+        raise RuntimeError("get: handle offset is not element-aligned")
+    start = hdl.offset + offset * element_size
+    end = start + size * element_size
+    if start > hdl.buffer_size or end > hdl.buffer_size:
+        raise ValueError("get: requested range exceeds symmetric allocation")
 
-    backend = get_backend(src.device)
+    backend = get_backend(dst.device)
+    if backend == "CUDA":
+        _cuda_get_out(dst, hdl, offset, size, peer)
+        return
+
+    # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
+    # TorchBind custom class type `__torch__.torch.classes.c10d.SymmetricMemory`.
+    # Convert via `.boxed()`.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
     if backend == "NVSHMEM":
-        torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group)
+        torch.ops.symm_mem.nvshmem_get_out(dst, hdl_boxed, offset, size, peer)
     elif backend == "NCCL":
-        torch.ops.symm_mem.nccl_get_out(dst, src, peer, group)
-    elif backend == "CUDA":
-        _cuda_get_out(dst, src, peer, group)
+        torch.ops.symm_mem.nccl_get_out(dst, hdl_boxed, offset, size, peer)
     else:
         raise ValueError(f"get: unsupported backend: {backend}")
 

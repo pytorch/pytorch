@@ -373,52 +373,81 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         dtype = torch.float
         numel = 1024
+
+        # Full-buffer get from a peer's allocation.
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        dst = torch.empty_like(src)
-        symm_mem.rendezvous(src, group=group_name)
+        hdl = symm_mem.rendezvous(src, group=group_name)
         dist.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src, group_name, peer=1)
+            dst = torch.empty_like(src)
+            symm_mem.get(dst, hdl, 0, numel, peer=1)
             torch.testing.assert_close(dst, torch.ones_like(dst))
 
         dist.barrier()
 
+        # Offset get: copy a sub-region of the peer's allocation.
         src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
         src_base.copy_(
             torch.arange(2 * numel, dtype=dtype, device=self.device)
             + self.rank * 2 * numel
         )
-        src_view = src_base.narrow(0, numel // 2, numel)
-        dst = torch.empty_like(src_view)
-        symm_mem.rendezvous(src_base, group=group_name)
+        hdl = symm_mem.rendezvous(src_base, group=group_name)
         dist.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src_view, group_name, peer=1)
+            offset = numel // 2
+            dst = torch.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.get(dst, hdl, offset, numel, peer=1)
             expected = (
-                torch.arange(
-                    numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
-                )
+                torch.arange(offset, offset + numel, dtype=dtype, device=self.device)
                 + 2 * numel
             )
             torch.testing.assert_close(dst, expected)
 
-            with self.assertRaisesRegex(ValueError, "contiguous"):
-                symm_mem.get(
-                    torch.empty(numel, dtype=dtype, device=self.device),
-                    src_base[::2],
-                    group_name,
-                    peer=1,
-                )
+            larger_dst = torch.full((numel + 1,), -1, dtype=dtype, device=self.device)
+            symm_mem.get(larger_dst, hdl, offset, numel, peer=1)
+            self.assertEqual(larger_dst[:numel], expected)
+            self.assertEqual(larger_dst[numel], -1)
 
             noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
             with self.assertRaisesRegex(ValueError, "contiguous"):
-                symm_mem.get(noncontig_dst, src, group_name, peer=1)
+                symm_mem.get(noncontig_dst, hdl, 0, numel, peer=1)
 
-            with self.assertRaisesRegex(RuntimeError, "symmetric memory"):
+            with self.assertRaisesRegex(ValueError, "at least"):
                 symm_mem.get(
-                    torch.empty_like(src), torch.empty_like(src), group_name, peer=1
+                    torch.empty(numel // 2, dtype=dtype, device=self.device),
+                    hdl,
+                    0,
+                    numel,
+                    peer=1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    -1,
+                    numel,
+                    peer=1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                symm_mem.get(
+                    torch.empty(1, dtype=dtype, device=self.device),
+                    hdl,
+                    hdl.buffer_size // dst.element_size(),
+                    1,
+                    peer=1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "invalid peer"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    0,
+                    numel,
+                    peer=hdl.world_size,
                 )
 
         dist.barrier()

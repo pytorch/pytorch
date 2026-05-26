@@ -812,6 +812,7 @@ class _SymmetricMemory:
     def rendezvous(
         tensor: torch.Tensor, group_name: str | None = None
     ) -> _SymmetricMemory: ...
+    def boxed(self) -> ScriptObject: ...
     def get_buffer(
         self,
         rank: int,

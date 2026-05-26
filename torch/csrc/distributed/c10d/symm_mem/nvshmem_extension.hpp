@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #define NVSHMEM_CHECK(stmt, msg)                                             \
   do {                                                                       \
@@ -27,9 +28,10 @@ TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nvshmem_get_out(
     at::Tensor& dst,
-    const at::Tensor& src,
-    int64_t peer,
-    const std::string& group_name);
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer);
 
 at::Tensor nvshmem_broadcast(
     at::Tensor& input,

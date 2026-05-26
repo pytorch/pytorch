@@ -551,7 +551,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
   m.def(
-      "nvshmem_get_out(Tensor(a!) dst, Tensor src, int peer, str group_name) -> ()");
+      "nvshmem_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
@@ -560,7 +560,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
   m.def(
-      "nccl_get_out(Tensor(a!) dst, Tensor src, int peer, str group_name) -> ()");
+      "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(

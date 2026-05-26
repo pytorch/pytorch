@@ -201,18 +201,20 @@ a peer's symmetric allocation into a local tensor:
 
 ```python
 src = symm_mem.empty(1024, device=device)
-symm_mem.rendezvous(src, group)
+hdl = symm_mem.rendezvous(src, group)
 
 if dist.get_rank(group) == 0:
     dst = torch.empty((512,), device=device)
-    # Copy the last 512 elements from src[512:] into dst.
-    symm_mem.get(dst, src[512:], group, peer=1)
+    # Copy the last 512 elements of the peer's allocation into dst.
+    symm_mem.get(dst, hdl, offset=512, size=512, peer=1)
 ```
 
-`src` identifies the symmetric allocation to read from on the peer rank.
-`dst` may be a regular CUDA tensor or another symmetric tensor. Both tensors
-must be backed by contiguous memory, have the same dtype, and contain the same
-number of elements. The copy is issued on the current CUDA stream.
+`hdl` is the symmetric memory handle returned by `rendezvous`; the remote
+source is the peer's allocation backing that handle. `offset` and `size` are
+given in elements of `dst`'s dtype. `dst` may be a regular CUDA tensor or
+another symmetric tensor; it must be on the same device as `hdl`, backed by
+contiguous memory, and contain at least `size` elements. The copy is issued on
+the current CUDA stream.
 
 ## Scale out
 
