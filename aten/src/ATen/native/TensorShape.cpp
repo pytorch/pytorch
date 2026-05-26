@@ -2177,6 +2177,13 @@ Tensor _reshape_alias(
   return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
+Tensor _reshape_alias_symint(
+    const Tensor& self,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
+  return alias_with_sizes_and_strides(self, sizes, strides);
+}
+
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
   return self.reshape_symint(other.sym_sizes());
 }
@@ -4102,6 +4109,20 @@ static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   return alias_with_sizes_and_strides(self, inferred_size, *stride);
 }
 
+static inline Tensor view_impl_symint(
+    const Tensor& self,
+    c10::SymIntArrayRef size) {
+  c10::SymDimVector inferred_size = at::infer_size_dv(size, self.sym_numel());
+  auto stride = at::detail::computeStride(
+      self.sym_sizes(), self.sym_strides(), inferred_size);
+  TORCH_CHECK(
+      stride.has_value(),
+      "view size is "
+      "not compatible with input tensor's size and stride (at least one dimension"
+      " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+}
+
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
   return view_impl(self, size);
 }
@@ -4562,6 +4583,10 @@ Tensor adjoint(const Tensor& self) {
 
 Tensor view(const Tensor& self, at::IntArrayRef size) {
   return view_impl(self, size);
+}
+
+Tensor view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  return view_impl_symint(self, size);
 }
 
 Tensor alias(const Tensor& self) {
