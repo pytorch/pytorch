@@ -14762,6 +14762,61 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(x.grad.cpu(), x_cpu.grad)
             self.assertEqual(gamma.grad.cpu(), gamma_cpu.grad)
 
+    # Test large tensor inputs to `group_norm`. This test currently passes
+    # because 64-bit indexing is supported. But if 64-bit is turned off, the
+    # test fails.
+    #
+    # Input parameters were tuned such that they cause an overflow in 32-bit
+    # indexing while still fitting in MPS memory. For float16 dtypes, the input
+    # is a little larger than 8 GB. MPS allocations are capped at 16 GB, so it
+    # cannot be run on float32.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("trigger_32bit_overflow", [False, True])
+    def test_group_norm_large_input(self, device, dtype, trigger_32bit_overflow):
+        N = 2**7
+        C = 2**6
+        HxW = 2**19 + 64 + (1 if trigger_32bit_overflow else 0)
+
+        # Since we're reducing a large number of half-precision values, a
+        # `torch.rand` input would produce too much floating point error.
+        # So instead, we make the last batch-channel alternating 0 and 1000
+        x = torch.zeros(N, C, HxW, device=device, dtype=dtype)
+        x[-1, -1, 1::2] = 1000.0
+        mps_out = torch.group_norm(x, num_groups=C)
+
+        # Run CPU group_norm only on the last batch-channel to avoid processing
+        # the full tensor on CPU, which would take a long time.
+        x_last_cpu = x[-1:, -1:].cpu()
+        cpu_out_last = torch.group_norm(x_last_cpu, num_groups=1)
+        mps_out_last = mps_out[-1:, -1:].cpu()
+
+        self.assertEqual(mps_out_last, cpu_out_last)
+
+    # Test large tensor inputs to `group_norm`. This test currently passes
+    # because 64-bit indexing is supported. But if 64-bit is turned off, the
+    # test fails.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("trigger_32bit_overflow", [False, True])
+    def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
+        N = 2**7
+        C = 2**6
+        HxW = 2**19 + (2 if trigger_32bit_overflow else 0)
+
+        x = torch.zeros(N, C, HxW, device=device, dtype=dtype)
+        x[-1, -1, :] = 1000.0
+        x = x.requires_grad_(True)
+        weight = torch.ones(C, device=device, dtype=dtype, requires_grad=True)
+        torch.group_norm(x, num_groups=C, weight=weight).sum().backward()
+
+        x_last_cpu = x[-1:, -1:].detach().cpu().requires_grad_(True)
+        weight_last_cpu = torch.ones(1, dtype=dtype, requires_grad=True)
+        torch.group_norm(x_last_cpu, num_groups=1, weight=weight_last_cpu).sum().backward()
+
+        self.assertEqual(x.grad[-1:, -1:].cpu(), x_last_cpu.grad)
+        self.assertEqual(weight.grad[-1].cpu(), weight_last_cpu.grad.squeeze())
+
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
         # MPSGraph matrixMultiplication produces incorrect results with stride-0
