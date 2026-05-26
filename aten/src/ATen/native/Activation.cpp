@@ -770,7 +770,7 @@ std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
-  return std::make_tuple(result, buffer);
+  return std::make_tuple(std::move(result), std::move(buffer));
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Tensor& result, Tensor& buffer) {

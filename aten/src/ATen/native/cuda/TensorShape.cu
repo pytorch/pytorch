@@ -543,13 +543,13 @@ get_chunk_cat_metadata(
       leading_dim,
       num_blocks_per_chunk,
       slice_size,
-      srcs,
-      block_idx_to_tensor_idx,
-      tensor_idx_to_start_tensor_bytes,
-      start_block_idx_per_tensor_chunk,
-      actual_tensor_sizes,
-      pad_tensor_chunk_sizes,
-      num_blocks_per_tensor_chunk);
+      std::move(srcs),
+      std::move(block_idx_to_tensor_idx),
+      std::move(tensor_idx_to_start_tensor_bytes),
+      std::move(start_block_idx_per_tensor_chunk),
+      std::move(actual_tensor_sizes),
+      std::move(pad_tensor_chunk_sizes),
+      std::move(num_blocks_per_tensor_chunk));
 }
 
 // See [CUDA kernel for chunk_cat_cuda]

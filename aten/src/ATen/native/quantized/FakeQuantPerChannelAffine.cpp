@@ -103,7 +103,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   fake_quant_per_channel_cachemask_stub(iter.device_type(), iter, iter_mask, quant_min, quant_max);
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 /* Backward path to fake-quantize the 'inputs' tensor per channel, with mask.
