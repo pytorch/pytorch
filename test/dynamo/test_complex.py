@@ -98,6 +98,54 @@ class ComplexTests(ComplexDynamoTestCase):
         fn_c = torch.compile(f, fullgraph=True)
         self.assertEqual(f(), fn_c())
 
+    def test_rope(self):
+        """Test the RoPE function, taken from:
+        https://github.com/meta-llama/llama/blob/689c7f261b9c5514636ecc3c5fefefcbb3e6eed7/llama/model.py#L80-L161"""
+
+        def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+            freqs = 1.0 / (
+                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+            )
+            t = torch.arange(end, device=freqs.device)
+            freqs = torch.outer(t, freqs).float()
+            freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+            return freqs_cis
+
+        def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
+            ndim = x.ndim
+            assert ndim >= 2  # noqa: S101
+            assert freqs_cis.shape == (x.shape[1], x.shape[-1])  # noqa: S101
+            shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+            return freqs_cis.view(*shape)
+
+        def apply_rotary_emb(
+            xq: torch.Tensor,
+            xk: torch.Tensor,
+            freqs_cis: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Clone to avoid aliasing errors
+            xq_ = torch.view_as_complex(
+                xq.clone().float().reshape(*xq.shape[:-1], -1, 2)
+            )
+            xk_ = torch.view_as_complex(
+                xk.clone().float().reshape(*xk.shape[:-1], -1, 2)
+            )
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).clone().flatten(3)
+            xk_out = torch.view_as_real(xk_ * freqs_cis).clone().flatten(3)
+            return xq_out.type_as(xq), xk_out.type_as(xk)
+
+        def f(xq: torch.Tensor, xk: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            freqs_cis = precompute_freqs_cis(xq.shape[-1], xq.shape[1])
+            return apply_rotary_emb(xq, xk, freqs_cis)
+
+        g = torch.Generator().manual_seed(42)
+        xq = torch.randn(4, 32, 64, generator=g)
+        xk = torch.randn(4, 32, 64, generator=g)
+
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(f(xq, xk), fn_c(xq, xk))
+
 
 instantiate_parametrized_tests(ComplexTests)
 
