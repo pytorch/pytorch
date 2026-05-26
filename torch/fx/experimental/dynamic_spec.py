@@ -88,7 +88,7 @@ def _get_spec_shape_env() -> ShapeEnv:
                 # Allow everything during super().__init__.
                 object.__setattr__(self, "_init_done", False)
                 super().__init__()
-                object.__setattr__(self, "_sinit_done", True)
+                object.__setattr__(self, "_init_done", True)
 
             def __getattribute__(self, name: str) -> Any:
                 if name.startswith("_"):

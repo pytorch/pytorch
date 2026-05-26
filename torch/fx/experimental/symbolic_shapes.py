@@ -4157,14 +4157,14 @@ class ShapeEnv:
         # `_finalize_spec_wiring` in `torch/_dynamo/variables/builder.py`
         # when wiring a `ShapesSpec` into this ShapeEnv during compile.
         #
-        # `_int_var_to_symbol` maps each spec sympy.Symbol (from a spec
+        # `_spec_symbol_to_compile_symbol` maps each spec sympy.Symbol (from a spec
         # `IntVar`) to the real unbacked sympy.Symbol allocated for the
         # input that binds it.
-        self._int_var_to_symbol: dict[sympy.Symbol, sympy.Expr] = {}
+        self._spec_symbol_to_compile_symbol: dict[sympy.Symbol, sympy.Expr] = {}
 
         # `_shape_spec_pending_assumptions` entries are
         # `(free_spec_symbols, bool_expr)`: a deferred boolean waiting for
-        # its free spec symbols to be bound in `_int_var_to_symbol`.
+        # its free spec symbols to be bound in `_spec_symbol_to_compile_symbol`.
         # Substituted and emitted as a runtime assert once all deps are
         # bound.
         self._shape_spec_pending_assumptions: list[
