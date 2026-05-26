@@ -13,11 +13,10 @@
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/full_native.h>
 #include <ATen/ops/group_norm_native.h>
-#include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
-#include <ATen/ops/var_mean_native.h>
+#include <ATen/ops/var_mean.h>
 #endif
 
 #include <algorithm>
@@ -222,7 +221,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t group,
     double eps) {
   auto input_shape = input.sizes();
-  if (std::any_of(input_shape.begin(), input_shape.end(), [](auto s) { return s == 0; })) {
+  if (std::ranges::any_of(input_shape, [](auto s) { return s == 0; })) {
     return std::make_tuple(
         at::native::empty_like(input),
         at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()),
@@ -230,21 +229,21 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   }
 
   auto input_reshaped = input.view({N, group, C / group * HxW});
-  auto [var, mean] = at::native::var_mean(input_reshaped, {2}, 0, true);
-  auto rsqrt = var.add_(eps).rsqrt_();
-  auto out = input_reshaped.sub(mean).mul_(rsqrt).reshape(input_shape);
+  auto [var, mean] = at::var_mean(input_reshaped, {2}, c10::Scalar(0), true);
+  auto rsqrt = var.add(eps).rsqrt();
+  auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input_shape);
 
   std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
   weight_bias_shape[1] = C;
   if (weight_opt && weight_opt->defined()) {
-    out.mul_(weight_opt->view(weight_bias_shape));
+    out = out.mul(weight_opt->view(weight_bias_shape));
   }
   if (bias_opt && bias_opt->defined()) {
-    out.add_(bias_opt->view(weight_bias_shape));
+    out = out.add(bias_opt->view(weight_bias_shape));
   }
 
-  mean.squeeze_(-1);
-  rsqrt.squeeze_(-1);
+  mean = mean.squeeze(-1);
+  rsqrt = rsqrt.squeeze(-1);
   return std::make_tuple(std::move(out), std::move(mean), std::move(rsqrt));
 }
 } // namespace at::native
