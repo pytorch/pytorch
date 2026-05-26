@@ -638,5 +638,29 @@ class TestCustomAutogradFunctions(TestCase):
         self.assertFalse(y.requires_grad)
 
 
+class TestStructuredCodegen(TestCase):
+    """maximum.out is registered for openreg through torchgen
+    (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
+    csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
+    These exercise the generated structured wrappers end to end."""
+
+    def test_maximum_functional(self):
+        """Functional variant: out-as-primary allocates an out and reuses it."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        z = torch.maximum(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_maximum_out(self):
+        """Out variant: the wrapper redirects straight to the impl _out call."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.maximum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+        self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+
 if __name__ == "__main__":
     run_tests()
