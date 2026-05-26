@@ -53,6 +53,7 @@ from .object_protocol import (
     pyindex_check,
     type_implements_nb_index,
     validate_sequence_index,
+    vt_add,
 )
 
 
@@ -103,6 +104,7 @@ class BaseListVariable(VariableTracker):
     def __init__(
         self,
         items: list[VariableTracker],
+        symbolic_lengths: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -110,15 +112,40 @@ class BaseListVariable(VariableTracker):
             raise AssertionError(f"items must be a list, got {type(items).__name__}")
         if not all(isinstance(x, VariableTracker) for x in items):
             raise AssertionError("all items must be VariableTracker instances")
+        symbolic_lengths = list(symbolic_lengths or [])
+        if not isinstance(symbolic_lengths, list):
+            raise AssertionError(
+                f"symbolic_lengths must be a list, got {type(symbolic_lengths).__name__}"
+            )
+        if not all(isinstance(x, VariableTracker) for x in symbolic_lengths):
+            raise AssertionError(
+                "all symbolic_lengths must be VariableTracker instances"
+            )
         self.items: list[VariableTracker] = items
+        self.symbolic_lengths: list[VariableTracker] = symbolic_lengths
+
+    def _check_no_symbolic_length(self, action: str) -> None:
+        if self.symbolic_lengths:
+            unimplemented(
+                gb_type="list_with_symbolic_length_materialized",
+                context=f"{action} on {type(self).__name__} with symbolic length",
+                explanation=(
+                    "Dynamo can track the length of a list extended by a "
+                    "symbolic-length iterable, but cannot materialize its "
+                    "individual elements."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     def _as_proxy(self) -> list[Any]:
+        self._check_no_symbolic_length("as_proxy")
         return [x.as_proxy() for x in self.items]
 
     def modified(
         self, items: list[VariableTracker], **kwargs: Any
     ) -> "BaseListVariable":
-        return type(self)(items, **kwargs)
+        symbolic_lengths = kwargs.pop("symbolic_lengths", list(self.symbolic_lengths))
+        return type(self)(items, symbolic_lengths=symbolic_lengths, **kwargs)
 
     @property
     def value(self) -> Any:
@@ -128,6 +155,7 @@ class BaseListVariable(VariableTracker):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
     def as_python_constant(self) -> Any:
+        self._check_no_symbolic_length("as_python_constant")
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self) -> Any:
@@ -142,6 +170,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .tensor import SymNodeVariable
 
+        self._check_no_symbolic_length("__getitem__")
         arg = validate_sequence_index(tx, arg, self.python_type_name())
 
         if isinstance(arg, SymNodeVariable):
@@ -173,11 +202,15 @@ class BaseListVariable(VariableTracker):
                 )
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+        self._check_no_symbolic_length("unpack")
         return list(self.items)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
-        return VariableTracker.build(tx, len(self.items))
+        length = VariableTracker.build(tx, len(self.items))
+        for symbolic_length in self.symbolic_lengths:
+            length = vt_add(tx, length, symbolic_length)
+        return length
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -199,6 +232,7 @@ class BaseListVariable(VariableTracker):
             return self._tree_map_fallback(
                 tx, tree_map_fn, map_fn, rest, tree_map_kwargs
             )
+        self._check_no_symbolic_length("tree_map")
 
         other_lists: list[BaseListVariable] = []
         for candidate in rest:
@@ -211,6 +245,7 @@ class BaseListVariable(VariableTracker):
                     tx, tree_map_fn, map_fn, rest, tree_map_kwargs
                 )
             other_lists.append(candidate)
+            candidate._check_no_symbolic_length("tree_map")
 
         new_items: list[VariableTracker] = []
         for idx, item in enumerate(self.items):
@@ -244,6 +279,7 @@ class BaseListVariable(VariableTracker):
             return self._tree_map_with_path_fallback(
                 tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
             )
+        self._check_no_symbolic_length("tree_map_with_path")
 
         other_lists: list[BaseListVariable] = []
         for candidate in rest:
@@ -256,6 +292,7 @@ class BaseListVariable(VariableTracker):
                     tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
                 )
             other_lists.append(candidate)
+            candidate._check_no_symbolic_length("tree_map_with_path")
 
         new_items: list[VariableTracker] = []
         for idx, item in enumerate(self.items):
@@ -310,6 +347,7 @@ class BaseListVariable(VariableTracker):
         tx: "InstructionTranslator",
         count: VariableTracker,
     ) -> VariableTracker:
+        self._check_no_symbolic_length("__mul__")
         n = count.as_python_constant()
         try:
             new_items = self.items * n
@@ -339,6 +377,8 @@ class BaseListVariable(VariableTracker):
 
         if not isinstance(other, BaseListVariable):
             return ConstantVariable.create(NotImplemented)
+        self._check_no_symbolic_length("richcompare")
+        other._check_no_symbolic_length("richcompare")
         try:
             self_base = list if issubclass(self.python_type(), list) else tuple
             other_base = list if issubclass(other.python_type(), list) else tuple
@@ -412,6 +452,7 @@ class BaseListVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "index":
+            self._check_no_symbolic_length("index")
             if not len(args):
                 raise_args_mismatch(
                     tx,
@@ -442,6 +483,7 @@ class BaseListVariable(VariableTracker):
                     kwargs,
                 )
         elif name == "count":
+            self._check_no_symbolic_length("count")
             if len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -475,9 +517,19 @@ class BaseListVariable(VariableTracker):
                 )
 
             if name == "__add__":
-                return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
+                other_symbolic_lengths = (
+                    args[0].symbolic_lengths  # type: ignore[attr-defined]
+                )
+                symbolic_lengths = self.symbolic_lengths + other_symbolic_lengths
+                return type(self)(
+                    self.items + args[0].items,  # type: ignore[attr-defined]
+                    symbolic_lengths=symbolic_lengths,
+                )
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
+                self.symbolic_lengths += (
+                    args[0].symbolic_lengths  # type: ignore[attr-defined]
+                )
                 return self
         return super().call_method(tx, name, args, kwargs)
 
@@ -518,14 +570,33 @@ class RangeVariable(BaseListVariable):
         super().__init__([start, stop, step], **kwargs)
 
     def debug_repr(self) -> str:
-        repr = f"range({self.start()}, {self.stop()}"
-        if self.step() != 1:
-            repr += f", {self.step()}"
+        repr = f"range({self.items[0].debug_repr()}, {self.items[1].debug_repr()}"
+        if (
+            not self.items[2].is_python_constant()
+            or self.items[2].as_python_constant() != 1
+        ):
+            repr += f", {self.items[2].debug_repr()}"
         repr += ")"
         return repr
 
     def python_type(self) -> type:
         return range
+
+    def _has_concrete_bounds(self) -> bool:
+        return all(var.is_python_constant() for var in self.items)
+
+    def _check_concrete_bounds(self, action: str) -> None:
+        if not self._has_concrete_bounds():
+            unimplemented(
+                gb_type="range_symbolic_materialized",
+                context=f"{action} on {self.debug_repr()}",
+                explanation=(
+                    "Dynamo can track len(range(...)) for simple symbolic "
+                    "ranges, but cannot materialize or inspect the individual "
+                    "range elements without concrete bounds."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     def start(self) -> Any:
         return self.items[0].as_python_constant()
@@ -537,6 +608,7 @@ class RangeVariable(BaseListVariable):
         return self.items[2].as_python_constant()
 
     def range_length(self) -> int:
+        self._check_concrete_bounds("range_length")
         lo = self.start()
         hi = self.stop()
         step = self.step()
@@ -635,7 +707,39 @@ class RangeVariable(BaseListVariable):
         return result
 
     def as_python_constant(self) -> range:
+        self._check_concrete_bounds("as_python_constant")
         return range(*[x.as_python_constant() for x in self.items])
+
+    def _symbolic_range_length(self, tx: "InstructionTranslator") -> VariableTracker:
+        start, stop, step = self.items
+        if (
+            start.is_python_constant()
+            and start.as_python_constant() == 0
+            and step.is_python_constant()
+            and step.as_python_constant() == 1
+        ):
+            if stop.is_python_constant():
+                return VariableTracker.build(tx, max(stop.as_python_constant(), 0))
+
+            from .tensor import SymNodeVariable
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                torch.sym_max,
+                (stop.as_proxy(), 0),
+                {},
+            )
+            return SymNodeVariable.create(tx, proxy, sym_num=None)
+
+        unimplemented(
+            gb_type="range_symbolic_length",
+            context=f"len({self.debug_repr()})",
+            explanation=(
+                "Dynamo can only keep len(range(...)) symbolic for "
+                "range(stop) with the default start and step."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -643,6 +747,7 @@ class RangeVariable(BaseListVariable):
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
         from .object_protocol import validate_sequence_index
 
+        self._check_concrete_bounds("__getitem__")
         arg = validate_sequence_index(tx, arg, "range")
         index = arg.as_python_constant()
 
@@ -656,21 +761,35 @@ class RangeVariable(BaseListVariable):
             )
 
     def as_proxy(self) -> range:
+        self._check_concrete_bounds("as_proxy")
         return self.python_type()(*self._as_proxy())
 
     def unpack_var_sequence(
         self, tx: Optional["InstructionTranslator"] = None
     ) -> list[VariableTracker]:
+        if not all(var.is_python_constant() for var in self.items):
+            unimplemented(
+                gb_type="range_symbolic_unpack",
+                context=f"unpack {self.debug_repr()}",
+                explanation=(
+                    "Dynamo cannot materialize the individual elements of a "
+                    "range with symbolic bounds."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for range objects."""
+        if not self._has_concrete_bounds():
+            return self._symbolic_range_length(tx)
         length = self.range_length()
         if length > sys.maxsize:
             raise_observed_exception(OverflowError, tx)
         return VariableTracker.build(tx, length)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        self._check_concrete_bounds("reconstruct")
         if "range" in codegen.tx.f_globals:
             raise AssertionError("'range' must not be shadowed in f_globals")
         codegen.add_push_null(
@@ -688,6 +807,8 @@ class RangeVariable(BaseListVariable):
 
     def range_equals(self, other: "RangeVariable") -> bool:
         # ref: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/rangeobject.c#L514-L553  (range_equals)
+        self._check_concrete_bounds("richcompare")
+        other._check_concrete_bounds("richcompare")
         r0, r1 = self, other
         if r0 is r1:
             return True
@@ -704,6 +825,7 @@ class RangeVariable(BaseListVariable):
     def range_count(self, x: VariableTracker) -> int:
         # Based on CPython
         # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
+        self._check_concrete_bounds("count")
         x = x.as_python_constant()
         if type(x) not in (bool, int, float):
             return 0
@@ -732,11 +854,21 @@ class RangeVariable(BaseListVariable):
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
+        self._check_concrete_bounds("__contains__")
         return VariableTracker.build(tx, self.range_count(item))
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
         if not all(var.is_python_constant() for var in self.items):
+            items = [VariableTracker.build(tx, guard_if_dyn(var)) for var in self.items]
+            if all(var.is_python_constant() for var in items):
+                start, stop, step = [var.as_python_constant() for var in items]
+                return RangeIteratorVariable(
+                    start,
+                    stop,
+                    step,
+                    len(range(start, stop, step)),
+                )
             # Can't represent a `range_iterator` without well defined bounds
             return variables.misc.DelayGraphBreakVariable(
                 msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
@@ -753,6 +885,7 @@ class RangeVariable(BaseListVariable):
         # range_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L405-L416
         # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
         # nb_index_impl).  Unlike mp_subscript (range_subscript), no slices.
+        self._check_concrete_bounds("__getitem__")
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
@@ -796,8 +929,10 @@ class RangeVariable(BaseListVariable):
         from .builder import SourcelessBuilder
 
         if name == "count":
+            self._check_concrete_bounds("count")
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
+            self._check_concrete_bounds("index")
             x = args[0].as_python_constant()
             start, stop, step = self.start(), self.stop(), self.step()
             in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
@@ -818,11 +953,14 @@ class RangeVariable(BaseListVariable):
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
+        self._check_concrete_bounds("hash")
         return hash(self.as_python_constant()), False
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, variables.RangeVariable):
             return False
+        self._check_concrete_bounds("is_python_equal")
+        other._check_concrete_bounds("is_python_equal")
 
         return (
             self.start() == other.start()
@@ -870,11 +1008,17 @@ class CommonListMethodsVariable(BaseListVariable):
             # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
             from .dicts import ConstDictVariable
             from .sets import SetVariable
+            from .tensor import TensorVariable
             from .user_defined import UserDefinedObjectVariable
 
             sz = len(self.items)
             if isinstance(args[0], (ListVariable, TupleVariable)):
+                if args[0].symbolic_lengths and not isinstance(self, ListVariable):
+                    args[0]._check_no_symbolic_length("extend")
                 self.items.extend(args[0].items)
+                if args[0].symbolic_lengths:
+                    tx.output.side_effects.mutation(self)
+                    self.symbolic_lengths.extend(args[0].symbolic_lengths)
             elif isinstance(args[0], UserDefinedObjectVariable):
                 self.items.extend(unpack_iterable(tx, args[0]))
             elif isinstance(args[0], (ConstDictVariable, SetVariable)):
@@ -883,6 +1027,28 @@ class CommonListMethodsVariable(BaseListVariable):
             elif isinstance(args[0], ConstantVariable):
                 items = unpack_iterable(tx, args[0])
                 self.items.extend(items)
+            elif (
+                isinstance(self, ListVariable)
+                and isinstance(args[0], RangeVariable)
+                and not all(item.is_python_constant() for item in args[0].items)
+            ):
+                tx.output.side_effects.mutation(self)
+                self.symbolic_lengths.append(args[0].sq_length(tx))
+            elif (
+                isinstance(self, ListVariable)
+                and isinstance(args[0], TensorVariable)
+                and args[0].has_unpack_var_sequence(tx)
+            ):
+                length = args[0].sq_length(tx)
+                if length.is_python_constant():
+                    unpack_and_apply_fn(
+                        tx,
+                        args[0],
+                        lambda item: self.call_method(tx, "append", [item], {}),
+                    )
+                else:
+                    tx.output.side_effects.mutation(self)
+                    self.symbolic_lengths.append(length)
             else:
                 unpack_and_apply_fn(
                     tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
@@ -900,6 +1066,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             idx, value = args
+            self._check_no_symbolic_length("insert")
             if isinstance(idx, SymNodeVariable):
                 const_idx = idx.evaluate_expr()
             else:
@@ -917,6 +1084,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
+            self._check_no_symbolic_length("pop")
             if len(self.items) == 0:
                 raise_observed_exception(IndexError, tx, args=["pop from empty list"])
 
@@ -938,6 +1106,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
             tx.output.side_effects.mutation(self)
             self.items.clear()
+            self.symbolic_lengths.clear()
             return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
@@ -958,6 +1127,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_no_symbolic_length("reverse")
             self.items.reverse()
             tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
@@ -970,6 +1140,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
+            self._check_no_symbolic_length("remove")
             idx = self.call_method(tx, "index", args, kwargs)
             self.call_method(tx, "pop", [idx], {})
             return ConstantVariable.create(None)
@@ -992,6 +1163,7 @@ class ListVariable(CommonListMethodsVariable):
         return self.debug_repr_helper("[", "]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        self._check_no_symbolic_length("reconstruct")
         if self._contains_self_reference():
             # Self-referential list: create empty, cache, then extend
             codegen.extend_output(
@@ -1016,6 +1188,7 @@ class ListVariable(CommonListMethodsVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Include/internal/pycore_list.h#L55-L59
+        self._check_no_symbolic_length("__iter__")
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
     def sq_inplace_repeat_impl(
@@ -1029,6 +1202,7 @@ class ListVariable(CommonListMethodsVariable):
                 f"sq_inplace_repeat_impl reached an immutable {type(self).__name__}; "
                 "every construction site should set mutation_type."
             )
+        self._check_no_symbolic_length("__imul__")
         n = count.as_python_constant()
         try:
             new_items = self.items * n
@@ -1046,6 +1220,7 @@ class ListVariable(CommonListMethodsVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "sort" and self.is_mutable():
+            self._check_no_symbolic_length("sort")
             if len(args) != 0:
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
@@ -1110,11 +1285,16 @@ class ListVariable(CommonListMethodsVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
+                tx.output.side_effects.mutation(self)
+                self.items.clear()
+                self.symbolic_lengths.clear()
                 return ConstantVariable.create(None)
             elif len(args) == 1:
+                self._check_no_symbolic_length("__init__")
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
                 self.items[:] = unpack_iterable(tx, arg)
+                self.symbolic_lengths.clear()
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1145,6 +1325,7 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L865-L890 (list_ass_item)
         if not self.is_mutable():
             return super().sq_ass_item_impl(tx, key, value)
+        self._check_no_symbolic_length("__setitem__")
         # value=None signals delete (CPython NULL sentinel).
         idx = key.nb_index_impl(tx).as_python_constant()
         if not (0 <= idx < len(self.items)):
@@ -1170,6 +1351,7 @@ class ListVariable(CommonListMethodsVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3119-L3150 (list_ass_subscript)
         if not self.is_mutable():
             return super().mp_ass_subscript_impl(tx, key, value)
+        self._check_no_symbolic_length("__setitem__")
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(key.python_type()):
             i = key.nb_index_impl(tx).as_python_constant()
@@ -1234,7 +1416,11 @@ class ListVariable(CommonListMethodsVariable):
             )
 
         items = self.items + other.unpack_var_sequence(tx)
-        return ListVariable(items, mutation_type=ValueMutationNew())
+        return ListVariable(
+            items,
+            symbolic_lengths=list(self.symbolic_lengths),
+            mutation_type=ValueMutationNew(),
+        )
 
     def sq_inplace_concat_impl(
         self,

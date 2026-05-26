@@ -85,6 +85,16 @@
       ]
     }
   ],
+  "GB7160": [
+    {
+      "Gb_type": "range_symbolic_materialized",
+      "Context": "{action} on {self.debug_repr()}",
+      "Explanation": "Dynamo can track len(range(...)) for simple symbolic ranges, but cannot materialize or inspect the individual range elements without concrete bounds.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0005": [
     {
       "Gb_type": "Attempted to a str() method implemented in C/C++",
@@ -658,6 +668,36 @@
       "Context": "",
       "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
       "Hints": []
+    }
+  ],
+  "GB2466": [
+    {
+      "Gb_type": "range_symbolic_length",
+      "Context": "len({self.debug_repr()})",
+      "Explanation": "Dynamo can only keep len(range(...)) symbolic for range(stop) with the default start and step.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3046": [
+    {
+      "Gb_type": "list_with_symbolic_length_materialized",
+      "Context": "{action} on {type(self).__name__} with symbolic length",
+      "Explanation": "Dynamo can track the length of a list extended by a symbolic-length iterable, but cannot materialize its individual elements.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4840": [
+    {
+      "Gb_type": "range_symbolic_unpack",
+      "Context": "unpack {self.debug_repr()}",
+      "Explanation": "Dynamo cannot materialize the individual elements of a range with symbolic bounds.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB7000": [
