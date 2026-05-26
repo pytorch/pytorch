@@ -70,6 +70,11 @@ from torch.utils.checkpoint import (
     create_selective_checkpoint_contexts,
 )
 
+ACC_TYPE = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+HAS_ACCELERATOR = torch.accelerator.is_available()
+
 
 class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
@@ -722,7 +727,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -731,8 +736,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(x, y):
             return (x * 2, y @ y)
 
-        a = torch.rand(25, device=GPU_TYPE)
-        b = torch.rand(5, 5, device=GPU_TYPE)
+        a = torch.rand(25, device=ACC_TYPE)
+        b = torch.rand(5, 5, device=ACC_TYPE)
 
         compiled_fn = torch.compile(fn, backend="inductor")
         self.assertEqual(fn(a, b), compiled_fn(a, b))
@@ -917,7 +922,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
+    @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -939,7 +945,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=ACC_TYPE, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -973,7 +979,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
+    @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -995,7 +1002,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=ACC_TYPE, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1999,7 +2006,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda_and_triton
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
+    @requires_triton()
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2014,8 +2022,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def f(x, y):
             return x.sin() + y
 
-        x = torch.randn(10, device="cuda")
-        y = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=ACC_TYPE)
+        y = torch.randn(10, device=ACC_TYPE)
         with torch.no_grad():
             result = f(x, y)
             self.assertEqual(result, x.sin() + y)
@@ -2060,7 +2068,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2070,7 +2078,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"saved_tensors_hooks_filtering_mode": "all"})
     def test_saved_tensors_hooks_autograd_cache(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
-        device = torch.device("cuda:0")
+        device = torch.device(f"{ACC_TYPE}:0")
 
         def pack_cpu(x):
             return x.to(device="cpu")
@@ -2162,7 +2170,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2183,7 +2191,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             x = x.relu()
             return x
 
-        device = torch.device("cuda:0")
+        device = torch.device(f"{ACC_TYPE}:0")
         backend = "inductor"
 
         def inp_fn():
@@ -3308,7 +3316,7 @@ class _MockEntryForPickleTest:
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return ACC_TYPE
 
     def default_config(self):
         return AOTConfig(
