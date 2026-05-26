@@ -15,7 +15,7 @@ handling of iterator operations during code transformation and optimization.
 
 import itertools
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
@@ -62,6 +62,11 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
@@ -74,7 +79,7 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence["VariableTracker"],
+        args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
@@ -249,6 +254,11 @@ class ItertoolsVariable(VariableTracker):
 class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         unimplemented(
