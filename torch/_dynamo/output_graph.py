@@ -4620,14 +4620,14 @@ class SubgraphTracer(fx.Tracer):
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
-                example_value = _collect_fake_inputs([node])[0]
-                if isinstance(example_value, torch.Tensor):
-                    for storage in get_tensor_storages(example_value):
-                        if storage in input_storages:
-                            # input-input aliasing
-                            msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
-                            return AliasingInfo(True, msg)
-                        input_storages[storage] = node
+                for example_value in _collect_fake_inputs([node]):
+                    if isinstance(example_value, torch.Tensor):
+                        for storage in get_tensor_storages(example_value):
+                            if storage in input_storages:
+                                # input-input aliasing
+                                msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                                return AliasingInfo(True, msg)
+                            input_storages[storage] = node
             else:
                 break
 
@@ -4635,16 +4635,16 @@ class SubgraphTracer(fx.Tracer):
         out_nodes = self.graph.find_nodes(op="output")[0]
         for out_node in pytree.tree_leaves(out_nodes.args[0]):
             if out_node:
-                example_value = _collect_fake_inputs([out_node])[0]
-                if isinstance(example_value, list):
-                    raise AssertionError("example_value must not be a list")
-                if isinstance(example_value, torch.Tensor):
-                    for storage in get_tensor_storages(example_value):
-                        if storage in output_storages:
-                            # output-output aliasing
-                            msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
-                            return AliasingInfo(True, msg)
-                        output_storages[storage] = out_node
+                for example_value in _collect_fake_inputs([out_node]):
+                    if isinstance(example_value, list):
+                        raise AssertionError("example_value must not be a list")
+                    if isinstance(example_value, torch.Tensor):
+                        for storage in get_tensor_storages(example_value):
+                            if storage in output_storages:
+                                # output-output aliasing
+                                msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                                return AliasingInfo(True, msg)
+                            output_storages[storage] = out_node
 
         intersected_storages = input_storages.keys() & output_storages.keys()
         if len(intersected_storages) > 0:
