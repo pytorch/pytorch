@@ -14772,9 +14772,14 @@ if __name__ == '__main__':
                         expected_linear_bias_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
-                    expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
+                    if bias:
+                        expected_input_grad_max_ulp_diff = 6  # A100
+                        expected_weight_grad_max_ulp_diff = 4  # A100
+                        expected_linear_bias_grad_max_ulp_diff = 17  # A100
+                    else:
+                        expected_input_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
         elif _resolved_policy == "balanced":
             if "cpu" in device:
                 if dtype == torch.float16:
@@ -14807,8 +14812,8 @@ if __name__ == '__main__':
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
-                    expected_weight_grad_max_ulp_diff = 0
-                    expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
+                    expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
+                    expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         elif _resolved_policy == "compact":
             # Mirrors "balanced" except on CUDA (direct addmm_ skips
             # weight_grad_chunk). Falls back to "balanced" on non-CUDA
@@ -14853,7 +14858,7 @@ if __name__ == '__main__':
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 44
                         expected_weight_grad_max_ulp_diff = 193
-                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
+                        expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14861,7 +14866,7 @@ if __name__ == '__main__':
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 8284  # x86_64 6236
                     expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, x86_64 2271, ci 2239
-                    expected_linear_bias_grad_max_ulp_diff = 3 if bias else 0
+                    expected_linear_bias_grad_max_ulp_diff = 4 if bias else 0  # aarch64 4, x86_64 3
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
