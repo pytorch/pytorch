@@ -546,7 +546,7 @@ std::vector<Tensor> to_functional_tensor(ITensorListRef t_list) {
   return outputs;
 }
 
-Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
+const Tensor& from_functional_tensor(const Tensor& tensor, bool assert_functional) {
   // Note [Wrapped Numbers <> Functionalization]
   if (!tensor.defined() || tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
