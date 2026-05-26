@@ -22,7 +22,7 @@ import enum
 import functools
 import inspect
 import types
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -177,7 +177,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the
@@ -328,10 +328,33 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     __repr__ = __str__
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        from .constant import ConstantVariable
         from .object_protocol import object_richcompare
 
-        return object_richcompare(self, tx, other, op)
+        # Try value-based comparison first. TorchScriptObjectVariable wraps
+        # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
+        # does value comparison. Falling through to object_richcompare would
+        # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
+        # would be False instead of True).
+        try:
+            self_val = self.as_python_constant()
+        except NotImplementedError:
+            return object_richcompare(self, tx, other, op)
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        try:
+            result = getattr(type(self_val), op)(self_val, other_val)
+            return ConstantVariable.create(result)
+        except Exception:
+            return ConstantVariable.create(NotImplemented)
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."

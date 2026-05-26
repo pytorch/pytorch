@@ -15,7 +15,7 @@ handling of iterator operations during code transformation and optimization.
 
 import itertools
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
@@ -31,6 +31,7 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
+from ..utils import unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
@@ -78,7 +79,7 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence["VariableTracker"],
+        args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
@@ -97,7 +98,7 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [arg.force_unpack_var_sequence(tx) for arg in args]
+            seqs = [unpack_iterable(tx, arg) for arg in args]
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
@@ -110,10 +111,9 @@ class ItertoolsVariable(VariableTracker):
             self.value is itertools.combinations
             and not kwargs
             and len(args) == 2
-            and args[0].has_unpack_var_sequence(tx)
             and args[1].is_python_constant()
         ):
-            iterable = args[0].unpack_var_sequence(tx)
+            iterable = unpack_iterable(tx, args[0])
             r = args[1].as_python_constant()
 
             items = []
@@ -152,9 +152,7 @@ class ItertoolsVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                seq = args[0].unpack_var_sequence(tx)
-            else:
+            if len(args) != 1:
                 unimplemented(
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
@@ -167,6 +165,7 @@ class ItertoolsVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
+            seq = unpack_iterable(tx, args[0])
 
             if "key" in kwargs:
 
@@ -242,9 +241,7 @@ class ItertoolsVariable(VariableTracker):
                 r = None
             items = [
                 variables.TupleVariable(list(item))
-                for item in itertools.permutations(
-                    args[0].force_unpack_var_sequence(tx), r
-                )
+                for item in itertools.permutations(unpack_iterable(tx, args[0]), r)
             ]
             return variables.ListIteratorVariable(
                 items,  # type: ignore[arg-type]
