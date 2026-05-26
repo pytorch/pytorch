@@ -13506,12 +13506,29 @@ class TestAdvancedIndexing(TestCaseMPS):
                     torch.use_deterministic_algorithms(False)
 
         for accumulate, deterministic in product((False, True), (False, True)):
-            dtype = torch.float if accumulate else torch.long
+            dtype = torch.long
             if not accumulate and not deterministic:
                 with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
                     helper(dtype, accumulate, deterministic)
             else:
                 helper(dtype, accumulate, deterministic)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_index_put_accumulate_nondeterministic(self, dtype):
+        device = "mps"
+        t = torch.zeros(3, dtype=dtype, device=device)
+        idx = torch.tensor([0, 0, 1, 2, 2, 2], device=device)
+        src = torch.arange(idx.numel(), device=device, dtype=dtype)
+        try:
+            torch.use_deterministic_algorithms(True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                t.index_put_((idx,), src, accumulate=True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).scatter_add_(0, idx, src)
+        finally:
+            torch.use_deterministic_algorithms(False)
 
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
@@ -15273,6 +15290,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
