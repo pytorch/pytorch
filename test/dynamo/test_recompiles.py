@@ -7,6 +7,9 @@ import torch._dynamo.testing
 from torch._dynamo import config as dc
 
 
+_GLOBAL_SPLIT_SIZE = 0
+
+
 class RecompileTests(torch._dynamo.test_case.TestCase):
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
@@ -163,6 +166,27 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 3)
         self.assertEqual(with_automatic.op_count, 3)
+
+    def test_automatic_dynamic_unspecializes_global_int_split_size(self):
+        global _GLOBAL_SPLIT_SIZE
+
+        def foo(hidden_states):
+            hidden_states_t = hidden_states.transpose(0, 1)
+            _, prefill = torch.split(hidden_states_t, [0, _GLOBAL_SPLIT_SIZE], dim=-1)
+            return prefill.transpose(0, 1).sin()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=counter, fullgraph=True)
+
+        old_split_size = _GLOBAL_SPLIT_SIZE
+        try:
+            for split_size in [8, 4, 3, 2, 6]:
+                _GLOBAL_SPLIT_SIZE = split_size
+                opt(torch.randn(split_size, 4))
+        finally:
+            _GLOBAL_SPLIT_SIZE = old_split_size
+
+        self.assertEqual(counter.frame_count, 2)
 
     def test_aliasing_guard_failures(self):
         def foo(a, b, c):
