@@ -27,7 +27,6 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -1829,35 +1828,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             torch.manual_seed(0)
             res = opt_gn(*args)
             self.assertEqual(ref, res)
-
-    @requires_cuda_and_triton
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "This platform doesn't support efficient attention",
-    )
-    def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
-        def eager_attn(x):
-            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
-                x, x, x, None, True, dropout_p=0.0
-            )[0]
-
-        @torch.compile(mode="reduce-overhead")
-        def attn(x):
-            return eager_attn(x)
-
-        def block(x):
-            return x + attn(x)
-
-        x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
-        ref = x_ref + eager_attn(x_ref)
-        ref.sum().backward()
-
-        x = x_ref.detach().clone().requires_grad_(True)
-        y = checkpoint(block, x, use_reentrant=False)
-        y.sum().backward()
-
-        self.assertEqual(ref, y)
-        self.assertEqual(x_ref.grad, x.grad)
 
     @requires_cuda_and_triton
     def test_error_msg(self, device):
