@@ -675,9 +675,8 @@ class TestPartitionedScatterOpt(TestCase):
         )
 
 
-
     # -----------------------------------------------------------------------
-    # Performance — requires DO_PERF_TEST=1
+    # Performance
     # -----------------------------------------------------------------------
 
     @unittest.skipUnless(HAS_GPU, "requires GPU")
