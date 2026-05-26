@@ -987,7 +987,7 @@ class TestBinaryUfuncs(TestCase):
         d_trunc = torch.divide(a, b, rounding_mode="trunc")
         rounding_unsupported = (
             dtype == torch.half
-            and torch.device(device).type not in ["cuda", "xpu"]
+            and torch.device(device).type != "cpu"
             or dtype == torch.bfloat16
             and device != "cpu"
         )
@@ -1477,11 +1477,11 @@ class TestBinaryUfuncs(TestCase):
                     isinstance(exponent, torch.Tensor)
                     and base.dim() == 0
                     and base.device.type == "cpu"
-                    and exponent.device.type in ["cuda", "xpu"]
+                    and exponent.device.type != "cpu"
                 ):
                     regex = (
                         f"Expected all tensors to be on the same device, "
-                        f"but found at least two devices, {device_type}.* and cpu!"
+                        f"but found at least two devices, {exponent.device.type}.* and cpu!"
                     )
                     self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
@@ -1664,8 +1664,8 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(base, tensor)
 
     @onlyAccelerator
-    def test_cuda_tensor_pow_scalar_tensor(self, device):
-        cuda_tensors = [
+    def test_device_tensor_pow_scalar_tensor(self, device):
+        device_tensors = [
             torch.randn((3, 3), device=device),
             torch.tensor(3.0, device=device),
         ]
@@ -1674,31 +1674,31 @@ class TestBinaryUfuncs(TestCase):
             torch.tensor(-3),
             torch.tensor(1),
         ]
-        for base, exp in product(cuda_tensors, scalar_tensors):
+        for base, exp in product(device_tensors, scalar_tensors):
             self._test_pow(base, exp)
 
     @onlyAccelerator
-    def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
-        cuda_tensors = [
-            torch.tensor(5.0, device=device_type),
-            torch.tensor(-3, device=device_type),
+    def test_cpu_tensor_pow_device_scalar_tensor(self, device):
+        device_tensors = [
+            torch.tensor(5.0, device=device),
+            torch.tensor(-3, device=device),
         ]
-        for exp in cuda_tensors:
+        for exp in device_tensors:
             base = torch.randn((3, 3), device="cpu")
-            regex = f"Expected all tensors to be on the same device, but found at least two devices, {device_type}.* and cpu!"
+            regex = f"Expected all tensors to be on the same device, but found at least two devices, {torch.device(device).type}.* and cpu!"
             self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
-        for exp in cuda_tensors:
+        for exp in device_tensors:
             # Binary ops with a cpu + cuda tensor are allowed if the cpu tensor has 0 dimension
             base = torch.tensor(3.0, device="cpu")
             self._test_pow(base, exp)
 
     @onlyAccelerator
     @dtypes(torch.complex64, torch.complex128)
-    def test_pow_cuda_complex_extremal_passing(self, device, dtype):
+    def test_pow_device_complex_extremal_passing(self, device, dtype):
         t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
-        cuda_out = t.pow(2)
+        device_out = t.pow(2)
         cpu_out = t.cpu().pow(2)
-        self.assertEqual(cpu_out, cuda_out)
+        self.assertEqual(cpu_out, device_out)
 
     @skipIfTorchDynamo()
     @dtypes(*all_types_and_complex_and(torch.half))
@@ -2314,7 +2314,7 @@ class TestBinaryUfuncs(TestCase):
             ):
                 torch_op(b, a)
 
-        # test cuda tensor and cpu scalar
+        # test device tensor and cpu scalar
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
         a_np = np.array(1)
         b_np = np.array([3, 0, 4])
@@ -2933,15 +2933,15 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
-        if torch.device(device).type in ["cuda", "xpu"]:
+        if torch.device(device).type != "cpu":
             # test using cpu scalar with cuda.
             x = torch.randn(10, device=device).to(dtype)
             y = torch.tensor(2.0).to(dtype)
             actual1 = torch.hypot(x, y)
             actual2 = torch.hypot(y, x)
             expected = np.hypot(x.cpu().numpy(), 2.0)
-            self.assertTrue(actual1.device.type == device_type)
-            self.assertTrue(actual2.device.type == device_type)
+            self.assertTrue(actual1.device.type == torch.device(device).type)
+            self.assertTrue(actual2.device.type == torch.device(device).type)
             self.assertEqual(actual1, expected, exact_dtype=False)
             self.assertEqual(actual2, expected, exact_dtype=False)
 
