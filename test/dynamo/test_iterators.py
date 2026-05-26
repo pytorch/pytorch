@@ -746,7 +746,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         result = sorted(items)
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_custom_list_subclass_with_custom_iter(self):
         """Test custom list subclass that overloads __iter__"""
