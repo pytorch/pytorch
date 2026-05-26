@@ -4324,6 +4324,8 @@ def touch(filename: str) -> None:
 
 @clear_on_fresh_cache
 class PyCodeCache:
+    """Caches generated Python modules and their source mappings."""
+
     # Track the loaded modules so we can remove the on-disk artifacts when
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
