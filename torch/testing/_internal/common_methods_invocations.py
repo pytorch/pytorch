@@ -15927,9 +15927,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
             # tensor-likes are not close
             DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
-            # fails in TorchScript interpreter with failures associated with batch_norm
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness_with_reusing_ir"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
             # native_group_norm expects contiguous inputs on CUDA
