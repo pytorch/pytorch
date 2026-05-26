@@ -1298,6 +1298,51 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.SetVariable,
+            variables.TupleVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -1594,6 +1639,7 @@ class CompilationMetrics:
     inline_inbuilt_nn_modules_candidate: bool | None = False
     pytorch_version: str | None = None
     inductor_provenance: set[str] | None = None
+    functorch_config: str | None = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1845,6 +1891,31 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
     return inductor_conf_str
 
 
+def _functorch_config_for_logging() -> str | None:
+    """Serialize functorch config (AOT autograd settings) for Scuba logging."""
+    if not justknobs_check("pytorch/dynamo:log_functorch_config"):
+        return None
+
+    try:
+        functorch_config_copy = torch._functorch.config.get_config_copy()
+    except (TypeError, AttributeError, RuntimeError, AssertionError):
+        return None
+
+    try:
+        blocklist = {
+            "TYPE_CHECKING",
+            "_save_config_ignore",
+        }
+        clean = {
+            k: (list(v) if isinstance(v, set) else v)
+            for k, v in functorch_config_copy.items()
+            if k not in blocklist and isinstance(k, str)
+        }
+        return json.dumps(clean, sort_keys=True, default=str)
+    except Exception:
+        return "Functorch Config is not JSON serializable"
+
+
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
@@ -1891,6 +1962,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
         "pytorch_version": torch.__version__,
+        "functorch_config": _functorch_config_for_logging(),
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -4240,9 +4312,31 @@ def object_has_getattribute(value: Any) -> bool:
 
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
-    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
-    d = object.__getattribute__(obj, "__dict__")
+    # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        # threading.local stores attributes in a per-thread C-backed dict that
+        # object.__getattribute__ cannot see. CPython passes that dict directly
+        # to _PyObject_GenericSetAttrWithDict:
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
+        d = threading.local.__getattribute__(obj, "__dict__")
     d[name] = value
+
+
+def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
+    # Same path as object_setattr_ignore_descriptor with a NULL value.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        d = threading.local.__getattribute__(obj, "__dict__")
+    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:
@@ -4974,6 +5068,19 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def is_torch_class(cls: type) -> bool:
+    """Check if cls is defined in torch or a torch submodule.
+
+    Torch-internal C-level descriptors (e.g. torch.Tensor.unsqueeze_) need
+    to go through VariableTracker.build / trace_rules so they get the right
+    VT (TorchInGraphFunctionVariable), which has guards like
+    inplace-view-on-input-tensor detection. This helper identifies classes
+    whose descriptors should take that path instead of descriptor VTs.
+    """
+    module = getattr(cls, "__module__", None)
+    return module is not None and (module == "torch" or module.startswith("torch."))
+
+
 def is_torch_function_object(value: Any) -> bool:
     return hasattr(value, "__torch_function__")
 
@@ -5447,6 +5554,13 @@ def _get_error_on_graph_break() -> bool:
 def _set_error_on_graph_break(value: bool) -> None:
     global _error_on_graph_break
     _error_on_graph_break = value
+
+
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
 @torch._disable_dynamo

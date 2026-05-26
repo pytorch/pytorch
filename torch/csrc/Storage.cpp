@@ -446,11 +446,8 @@ bool THPStorage_init(PyObject* module) {
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_getset = THPStorage_properties;
-  if (PyType_Ready(&THPStorageType) < 0)
+  if (PyModule_AddType(module, &THPStorageType) < 0)
     return false;
-  Py_INCREF(&THPStorageType);
-  PyModule_AddObject(
-      module, "StorageBase", reinterpret_cast<PyObject*>(&THPStorageType));
   return true;
 }
 

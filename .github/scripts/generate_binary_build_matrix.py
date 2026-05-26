@@ -17,7 +17,6 @@ import ast
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 
@@ -83,27 +82,27 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.3.2 | "
-        "intel-cmplr-lib-ur==2025.3.2 | "
-        "intel-cmplr-lic-rt==2025.3.2 | "
-        "intel-sycl-rt==2025.3.2 | "
-        "oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2025.3.1 | "
-        "onemkl-sycl-blas==2025.3.1 | "
-        "onemkl-sycl-dft==2025.3.1 | "
-        "onemkl-sycl-lapack==2025.3.1 | "
-        "onemkl-sycl-rng==2025.3.1 | "
-        "onemkl-sycl-sparse==2025.3.1 | "
-        "dpcpp-cpp-rt==2025.3.2 | "
-        "intel-opencl-rt==2025.3.2 | "
-        "mkl==2025.3.1 | "
-        "intel-openmp==2025.3.2 | "
-        "tbb==2022.3.1 | "
-        "tcmlib==1.4.1 | "
-        "umf==1.0.3 | "
-        "intel-pti==0.16.0"
+        "intel-cmplr-lib-rt==2026.0.0 | "
+        "intel-cmplr-lib-ur==2026.0.0 | "
+        "intel-cmplr-lic-rt==2026.0.0 | "
+        "intel-sycl-rt==2026.0.0 | "
+        "oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2026.0.0 | "
+        "onemkl-sycl-blas==2026.0.0 | "
+        "onemkl-sycl-dft==2026.0.0 | "
+        "onemkl-sycl-lapack==2026.0.0 | "
+        "onemkl-sycl-rng==2026.0.0 | "
+        "onemkl-sycl-sparse==2026.0.0 | "
+        "dpcpp-cpp-rt==2026.0.0 | "
+        "intel-opencl-rt==2026.0.0 | "
+        "mkl==2026.0.0 | "
+        "intel-openmp==2026.0.0 | "
+        "tbb==2023.0.0 | "
+        "tcmlib==1.5.0 | "
+        "umf==1.1.0 | "
+        "intel-pti==0.17.0"
     ),
 }
 
@@ -237,67 +236,38 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
-_BUILD_CUDA_SH = REPO_ROOT / ".ci" / "manywheel" / "build_cuda.sh"
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
 _RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
 
 
-def _extract_arch_list_block() -> str:
-    """Extract the self-contained arch-list logic from build_cuda.sh."""
-    text = _BUILD_CUDA_SH.read_text()
-    start_marker = "# Function to remove architectures from a list"
-    end_marker = "export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}"
-    start = text.index(start_marker)
-    end = text.index(end_marker)
-    return text[start:end]
-
-
-def _build_arch_list(cuda_version: str, arch: str) -> set[int]:
-    """Run the build_cuda.sh arch-list logic for (cuda_version, arch)."""
-    block = _extract_arch_list_block()
-    cmd = (
-        f'CUDA_VERSION="{cuda_version}" ARCH="{arch}"\n'
-        f"{{\n{block}\n}} >/dev/null\n"
-        'printf "%s" "$TORCH_CUDA_ARCH_LIST"\n'
-    )
-    out = subprocess.run(
-        ["bash", "-c", cmd], check=True, capture_output=True, text=True
-    ).stdout
-    result: set[int] = set()
-    for part in out.split(";"):
-        part = part.strip().removesuffix("+PTX")
-        if not part:
-            continue
-        major, minor = part.split(".")
-        result.add(int(major) * 10 + int(minor))
-    return result
-
-
-def _read_runtime_release_table() -> dict[str, dict[str, set[int]]]:
-    """Parse PYTORCH_RELEASES_CODE_CC out of torch/cuda/__init__.py."""
-    tree = ast.parse(_RUNTIME_CUDA_INIT.read_text())
+def _read_dict_constant(path: Path, name: str) -> dict[str, dict[str, set[int]]]:
+    """Parse a top-level annotated `name: dict[...] = {...}` literal from a Python file."""
+    tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
-            and node.target.id == "PYTORCH_RELEASES_CODE_CC"
+            and node.target.id == name
             and node.value is not None
         ):
             return ast.literal_eval(node.value)
-    raise RuntimeError("PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py")
+    raise RuntimeError(f"{name} not found in {path}")
 
 
 def validate_runtime_release_table_consistency() -> None:
-    """Ensure torch/cuda/__init__.py recommendation table matches the build matrix."""
-    expected = {
-        cuda: {arch: _build_arch_list(cuda, arch) for arch in ("x86_64", "aarch64")}
-        for cuda in CUDA_ARCHES
-    }
-    actual = _read_runtime_release_table()
-    if actual != expected:
+    """Ensure torch/cuda/__init__.py's recommendation table matches the build matrix.
+
+    PYTORCH_RELEASES_CODE_CC (runtime) and TORCH_CUDA_ARCH_LIST_TABLE (build)
+    use the same {cuda_version: {host_arch: set[cc_int]}} shape, so a direct
+    dict equality check catches any drift between them.
+    """
+    runtime = _read_dict_constant(_RUNTIME_CUDA_INIT, "PYTORCH_RELEASES_CODE_CC")
+    build = _read_dict_constant(_BUILD_ENV_SETUP, "TORCH_CUDA_ARCH_LIST_TABLE")
+    if runtime != build:
         raise RuntimeError(
             "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
-            "with .ci/manywheel/build_cuda.sh.\n"
-            f"Expected: {expected}\nActual:   {actual}"
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            f"runtime: {runtime}\nbuild:   {build}"
         )
 
 
@@ -336,7 +306,16 @@ WHEEL_CONTAINER_IMAGES = {
 RELEASE = "release"
 DEBUG = "debug"
 
-FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+FULL_PYTHON_VERSIONS = [
+    "3.10",
+    "3.11",
+    "3.12",
+    "3.13",
+    "3.14",
+    "3.14t",
+    "3.15",
+    "3.15t",
+]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -448,6 +427,20 @@ def generate_wheels_matrix(
                 "macos-arm64",
                 "windows",
             ] and (python_version == "3.14" or python_version == "3.14t"):
+                continue
+
+            # TODO: Enable python 3.15 on non linux OSes
+            if os not in ["linux", "linux-aarch64"] and (
+                python_version == "3.15" or python_version == "3.15t"
+            ):
+                continue
+
+            # TODO: Re-enable ROCm for python 3.15 once composable_kernel's
+            # ck_tile/01_fmha/generate.py is updated; it still uses
+            # importlib.abc.Loader.load_module() which was removed in 3.15.
+            if arch_version in ROCM_ARCHES and (
+                python_version == "3.15" or python_version == "3.15t"
+            ):
                 continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
