@@ -436,6 +436,22 @@ class BaseListVariable(VariableTracker):
                 {},
             )
 
+        elif name == "__reversed__":
+            # list/tuple/NamedTuple __reversed__: reverse-order iterator over
+            # items. RangeVariable overrides this since its items hold
+            # (start, stop, step), not the materialized elements.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ListIteratorVariable(
+                list(reversed(self.items)),
+                mutation_type=ValueMutationNew(),
+            )
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -759,6 +775,26 @@ class RangeVariable(BaseListVariable):
                 return SourcelessBuilder.create(tx, cmp)
             else:
                 return SourcelessBuilder.create(tx, not cmp)
+        if name == "__reversed__":
+            # range.__reversed__: equivalent to range(stop - step, start - step, -step)
+            # restricted to range_length elements. CPython:
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L955
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if not all(var.is_python_constant() for var in self.items):
+                return variables.misc.DelayGraphBreakVariable(
+                    msg="Cannot create reversed range_iterator: bounds must be concrete constants.",
+                )
+            start, stop, step = self.start(), self.stop(), self.step()
+            n = self.range_length()
+            new_start = start + (n - 1) * step
+            new_stop = start - step
+            return RangeIteratorVariable(new_start, new_stop, -step, n)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
