@@ -23,14 +23,15 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
-    Max,
-    Min,
+    Max as TorchSymMax,
+    Min as TorchSymMin,
     OpaqueUnaryFn_cos,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
+from torch.utils._sympy.printers import CppPrinter
 from torch.utils._sympy.reference import (
     PythonReferenceAnalysis,
     ReferenceAnalysis,
@@ -222,6 +223,38 @@ class TestNumbers(TestCase):
         self.assertIs(max(int_oo, sympy.oo), sympy.oo)
         self.assertTrue(-int_oo > -sympy.oo)
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
+
+
+class TestCppPrinter(TestCase):
+    def test_min_max_preserve_float_expressions(self):
+        s0 = sympy.Symbol("s0")
+        expr = TorchSymMin(
+            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
+        )
+        printed = CppPrinter().doprint(expr)
+
+        self.assertIn("std::min", printed)
+        self.assertIn("static_cast<double>", printed)
+        self.assertNotIn("static_cast<int64_t>", printed)
+
+        expr = TorchSymMax(
+            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
+        )
+        printed = CppPrinter().doprint(expr)
+
+        self.assertIn("std::max", printed)
+        self.assertIn("static_cast<double>", printed)
+        self.assertNotIn("static_cast<int64_t>", printed)
+
+    def test_min_max_preserve_integer_expressions(self):
+        s0 = sympy.Symbol("s0", integer=True)
+        printed = CppPrinter().doprint(TorchSymMin(sympy.Integer(4), s0))
+        self.assertIn("std::min", printed)
+        self.assertIn("static_cast<int64_t>", printed)
+
+        printed = CppPrinter().doprint(TorchSymMax(sympy.Integer(4), s0))
+        self.assertIn("std::max", printed)
+        self.assertIn("static_cast<int64_t>", printed)
 
 
 class TestValueRanges(TestCase):
@@ -961,16 +994,16 @@ class TestSympyFunctions(TestCase):
 
     def test_min_max_scaled_known_sign_term(self):
         s = sympy.Symbol("s", positive=True, integer=True)
-        self.assertEqual(Min(128 * s, 512 * s), 128 * s)
-        self.assertEqual(Max(128 * s, 512 * s), 512 * s)
+        self.assertEqual(TorchSymMin(128 * s, 512 * s), 128 * s)
+        self.assertEqual(TorchSymMax(128 * s, 512 * s), 512 * s)
 
         z = sympy.Symbol("z", nonpositive=True, integer=True)
-        self.assertEqual(Min(128 * z, 512 * z), 512 * z)
-        self.assertEqual(Max(128 * z, 512 * z), 128 * z)
+        self.assertEqual(TorchSymMin(128 * z, 512 * z), 512 * z)
+        self.assertEqual(TorchSymMax(128 * z, 512 * z), 128 * z)
 
         x = sympy.Symbol("x", integer=True)
-        self.assertIsInstance(Min(128 * x, 512 * x), Min)
-        self.assertIsInstance(Max(128 * x, 512 * x), Max)
+        self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
+        self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
 
 
 class TestSingletonInt(TestCase):
