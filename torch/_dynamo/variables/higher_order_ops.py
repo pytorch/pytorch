@@ -478,8 +478,8 @@ def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
     """
     Get storage references from a tensor.
 
-    Handles regular tensors. Raises NotImplementedError for sparse tensors
-    and traceable wrapper subclasses.
+    Handles regular tensors and traceable wrapper subclasses. Raises
+    NotImplementedError for sparse tensors.
 
     Args:
         tensor: The tensor to extract storages from
@@ -499,9 +499,10 @@ def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
         raise NotImplementedError("get_tensor_storages does not support sparse tensors")
 
     if is_traceable_wrapper_subclass(tensor):
-        raise NotImplementedError(
-            "get_tensor_storages does not support traceable wrapper subclasses"
-        )
+        for attr_name in tensor.__tensor_flatten__()[0]:
+            inner_tensor = getattr(tensor, attr_name)
+            if isinstance(inner_tensor, torch.Tensor):
+                storages.update(get_tensor_storages(inner_tensor))
     else:
         storages.add(StorageWeakRef(tensor._typed_storage()))
 
@@ -529,9 +530,9 @@ class StorageAliasingTracker:
 
         for node in tx.output.graph.nodes:
             if node.op == "placeholder":
-                example_value = _collect_fake_inputs([node])[0]
-                if isinstance(example_value, torch.Tensor):
-                    self._collect_storages_from_tensor(example_value)
+                for example_value in _collect_fake_inputs([node]):
+                    if isinstance(example_value, torch.Tensor):
+                        self._collect_storages_from_tensor(example_value)
             else:
                 break
 
@@ -541,9 +542,9 @@ class StorageAliasingTracker:
 
         for vt in graph_output_vts:
             proxy = vt.as_proxy()
-            example_value = _collect_fake_inputs([proxy.node])[0]
-            if isinstance(example_value, torch.Tensor):
-                self._collect_storages_from_tensor(example_value)
+            for example_value in _collect_fake_inputs([proxy.node]):
+                if isinstance(example_value, torch.Tensor):
+                    self._collect_storages_from_tensor(example_value)
 
     def check_and_track(self, proxy_node: Proxy) -> bool:
         """
@@ -561,26 +562,19 @@ class StorageAliasingTracker:
             False if it aliases (should be filtered out).
         """
         from torch._higher_order_ops.utils import _collect_fake_inputs
-        from torch.multiprocessing.reductions import StorageWeakRef
-        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-        example_value = _collect_fake_inputs([proxy_node])[0]
+        tensor_storages: set[StorageWeakRef] = set()
+        for example_value in _collect_fake_inputs([proxy_node]):
+            if isinstance(example_value, torch.Tensor):
+                tensor_storages.update(get_tensor_storages(example_value))
 
         # Non-tensor outputs (e.g., symints) don't have aliasing concerns
-        if not isinstance(example_value, torch.Tensor):
+        if not tensor_storages:
             return True
-
-        # Check if any storage aliases with existing inputs/outputs
-        tensor_storages = get_tensor_storages(example_value)
         if tensor_storages & self.excluded_storages:
             return False
 
-        # Track this tensor's storage (for wrapper subclasses, inner storages were already checked)
-        if not is_traceable_wrapper_subclass(example_value):
-            if not (example_value.is_sparse or example_value.is_sparse_csr):
-                self.excluded_storages.add(
-                    StorageWeakRef(example_value._typed_storage())
-                )
+        self.excluded_storages.update(tensor_storages)
 
         return True
 

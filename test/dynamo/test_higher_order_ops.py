@@ -7115,6 +7115,35 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
+    def test_hop_aliasing_checks_all_subclass_inner_tensors(self):
+        from torch._dynamo.output_graph import SubgraphTracer
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            first_inner = torch.randn(2)
+            second_inner = torch.randn(2)
+            subclass_input = TwoTensor(first_inner, second_inner)
+            subclass_output = TwoTensor(first_inner.clone(), second_inner)
+
+        graph = torch.fx.Graph()
+        placeholder = graph.placeholder("x")
+        placeholder.meta["example_value"] = subclass_input
+        output_value = graph.call_function(torch.ops.aten.clone.default, (placeholder,))
+        output_value.meta["example_value"] = subclass_output
+        graph.output((output_value,))
+
+        class DummyTracer:
+            pass
+
+        tracer = DummyTracer()
+        tracer.graph = graph
+
+        aliasing_info = SubgraphTracer.has_aliasing(tracer)
+        self.assertTrue(aliasing_info.has_aliasing)
+        self.assertIn("Input-to-output aliasing", aliasing_info.msg)
+
     def test_flop_counter_for_cond(self):
         from torch.utils.flop_counter import FlopCounterMode
 
