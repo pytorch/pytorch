@@ -45,6 +45,7 @@ from torch._inductor.codecache import (
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
     SubprocException,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.tracked_process_pool import (
@@ -281,7 +282,7 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> AnyPool:
+    def process_pool(kind: SubprocKind = SubprocKind.FORK) -> AnyPool:
         assert get_compile_threads() > 1
         AsyncCompile._ready_future = None
         log.info(
@@ -294,7 +295,9 @@ class AsyncCompile:
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(
-                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
+                get_compile_threads(),
+                kind=kind,
+                quiesce=config.quiesce_async_compile_pool,
             )
         else:
             if config.worker_start_method == "spawn":
@@ -634,7 +637,7 @@ class AsyncCompile:
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
-            subprocess_task = self.process_pool().submit(
+            subprocess_task = self.process_pool(SubprocKind.SPAWN).submit(
                 _worker_compile_pycodecache_kernel,
                 kernel_name,
                 source_code,
