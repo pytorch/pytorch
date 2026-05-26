@@ -218,22 +218,9 @@ rebuild = true
 
 [dependency-groups]
 dev = [
-    # This list should be kept in sync with the requirements-build.txt
-    # in PyTorch root until the project fully migrates to pyproject.toml
-    # after which this can be removed as it is already specified in the
-    # [build-system] section
-    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
-    "cmake>=3.27",
-    "ninja",
-    "numpy",
-    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
-    "pyyaml",
-    "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
-
-    # This list should be kept in sync with the requirements.txt in
-    # PyTorch root until the project fully migrates to pyproject.toml
+    # Build-time deps via the build persona; dev/test extras (mirroring
+    # requirements.txt) follow.
+    { include-group = "build" },
     "build[uv]",
     "expecttest>=0.3.0",
     "filelock",
@@ -245,8 +232,27 @@ dev = [
     "optree>=0.13.0",
     "psutil",
     "sympy>=1.13.3",
-    "typing-extensions>=4.15.0",
     "wheel",
+]
+# Build persona: the wheel's build-time deps (mirrors requirements-build.txt),
+# with the per-Python build-time numpy pin folded in (formerly hardcoded in
+# .ci/manywheel/build_install_deps.py::numpy_pin). Consumed lock-pinned via uv;
+# see that script.
+build = [
+    "scikit-build-core>=0.12",
+    "setuptools>=77.0.0,<82",  # 77.0: first release with PEP 639 license-files support
+    "spin",
+    "cmake>=3.27",
+    "ninja",
+    "numpy==2.3.4 ; python_version == '3.14'",
+    "numpy==2.1.0 ; python_version >= '3.10' and python_version != '3.14'",
+    "numpy==2.0.2 ; python_version < '3.10'",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
+    "pyyaml",
+    "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.15.0",
+    "pip",  # makes legacy setup.py invocation work
 ]
 
 # Runtime ("rt-") dependency groups: the published wheel's runtime deps, by
