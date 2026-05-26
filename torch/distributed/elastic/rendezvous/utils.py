@@ -191,7 +191,7 @@ class _PeriodicTimer:
             The function to run.
     """
 
-    # The state of the timer is hold in a separate context object to avoid a
+    # The state of the timer is held in a separate context object to avoid a
     # reference cycle between the timer and the background thread.
     class _Context:
         interval: float

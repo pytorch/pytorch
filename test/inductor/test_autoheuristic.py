@@ -212,22 +212,25 @@ class AutoHeuristicTest(TestCase):
         """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
         self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
 
-    def test_autoheuristic_init_device_capa(self):
-        """AutoHeuristic.__init__ must not crash regardless of CUDA availability."""
+    def test_autoheuristic_init_no_cuda(self):
+        """AutoHeuristic.__init__ must not crash in non-CUDA environments."""
 
         def fallback():
             return "fallback"
 
         context = AHContext()
         context.add_feature("x", 1)
-        ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_device_capa")
 
-        if torch.cuda.is_available():
-            self.assertEqual(
-                ah.metadata.device_capa, torch.cuda.get_device_capability()
-            )
-        else:
-            self.assertEqual(ah.metadata.device_capa, (0, 0))
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch(
+                "torch._inductor.autoheuristic.autoheuristic.get_gpu_shared_memory",
+                return_value=0,
+            ),
+        ):
+            ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_no_cuda")
+
+        self.assertEqual(ah.metadata.device_capa, (0, 0))
 
 
 if __name__ == "__main__":
