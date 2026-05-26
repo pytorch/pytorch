@@ -430,7 +430,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ],
         )
 
-        
         model_to_save = MyShardedModel3(src_spec).to(dist.get_rank())
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()

@@ -22,11 +22,7 @@ from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
-from torch.testing._internal.common_distributed import (
-    HAS_ACCELERATOR,
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import HAS_ACCELERATOR, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -843,7 +839,6 @@ class TestStateDictStager(TestCase):
 
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
-    
     @skip_if_lt_x_gpu(2)
     def test_dtensor(self):
         """
@@ -1221,7 +1216,6 @@ class TestReplicationStager(DTensorTestBase):
             )
 
     @with_comms
-    
     @skip_if_lt_x_gpu(4)
     def test_replication_basic(self):
         """Test basic replication functionality with world_size=16"""
@@ -1254,7 +1248,6 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
-    
     @skip_if_lt_x_gpu(4)
     def test_replication_dtensors(self):
         """Test replication with DTensor and mixed tensor types"""
@@ -1296,7 +1289,6 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
-    
     @skip_if_lt_x_gpu(4)
     def test_replication_sharded_tensors(self):
         """Test replication with ShardedTensor and mixed tensor types"""
@@ -1337,7 +1329,6 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
-    
     @skip_if_lt_x_gpu(4)
     def test_replication_persistence(self):
         """Test persistence functionality in _ReplicationStager"""
