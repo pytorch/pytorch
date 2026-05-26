@@ -2869,11 +2869,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         fixed_config: FixedTritonConfig | None = None,
         hint_override: int | None = None,
         is_combo_kernel: bool = False,
+        per_subkernel_blocks: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -2898,6 +2900,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: dict[str, Any] | None = None
+
+        # When the seed-autotune cap config is active, this holds the
+        # bucketed cap which is emitted into inductor_meta
+        self._combo_seed_max_autotune_configs: int | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -5778,6 +5784,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             flops = self.estimate_flops()
             if flops is not None:
                 out["kernel_flop"] = flops
+        if self._combo_seed_max_autotune_configs:
+            out["max_autotune_configs"] = self._combo_seed_max_autotune_configs
         return out
 
     @functools.cached_property
@@ -5975,6 +5983,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
+        # Combo-seed marker: when a kernel is generated solely to seed combo
+        # standalone autotune, the runtime only reads .config off its single
+        # launcher and never launches the compiled binary. Skip compile if
+        # the heuristic also lands on a single config.
+        if getattr(self, "_is_combo_seed", False):
+            inductor_meta["combo_seed_use_config_only"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
@@ -6292,7 +6306,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
         # Combo kernels use flattened dispatch where y_pid_offset is computed
         # from the flattened pid, so YZ overflow is not needed
-        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
+        if self.is_combo_kernel and self.per_subkernel_blocks:
             return False
         return (
             entry.grid_dim == 1
@@ -6756,7 +6770,11 @@ class TritonScheduling(SIMDScheduling):
             )
             if fused_name:
                 fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
-            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            dominant_fn = getattr(kernel, "dominant_sub_kernel_category", None)
+            if callable(dominant_fn):
+                kernel_category = str(dominant_fn())[:3]
+            else:
+                kernel_category = get_kernel_category_by_source_code(src_code)[:3]
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
@@ -7027,16 +7045,18 @@ class TritonScheduling(SIMDScheduling):
         V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
         enable_autotune = config.combo_kernels_autotune > 0
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
+        per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes=node_list,
             custom_part_algorithm=True,
             enable_autotune=enable_autotune,
             mixed_sizes=mixed_sizes,
             only_gen_src_code=True,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, kernel, node_group in kernel_code_list:
+        for src_code, kernel, node_group, _node_info_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 

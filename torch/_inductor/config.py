@@ -1052,12 +1052,21 @@ combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
+# Implies enable_autotune=True (per-subkernel blocks without tuning is pointless).
 combo_kernel_per_subkernel_blocks = False
-# When True, combo-kernel autotuning groups sub-kernels that share the same
-# candidate config set and kernel-analysis signature. Disabled by default.
-combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# When True, scheduler nodes whose reads or writes use indirect indexing
+# (an address computed from a previously loaded value, e.g. gather/scatter)
+# are kept out of combo kernels.
+combo_kernels_exclude_indirect_indexing = True
+# When True, combo-kernel seed autotune is size-bucketed: small subkernels
+# (rnumel <= combo_kernels_seed_small_rnumel for reductions, total numel <=
+# combo_kernels_seed_small_pointwise_total for pointwise) cap to 1 config;
+# larger ones cap to 2. Trades a bit of peak runtime for faster compile.
+combo_kernels_seed_autotune_cap = True
+combo_kernels_seed_small_rnumel = 64
+combo_kernels_seed_small_pointwise_total = 4096
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase

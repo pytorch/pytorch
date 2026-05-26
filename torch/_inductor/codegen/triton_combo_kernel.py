@@ -440,6 +440,7 @@ class ComboKernel(Kernel):
         triton_kernel_cls: type[TritonKernel],
         enable_autotune: bool = False,
         mixed_sizes: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         super().__init__()
         self.triton_kernel_cls = triton_kernel_cls
@@ -451,6 +452,7 @@ class ComboKernel(Kernel):
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
+        self.per_subkernel_blocks = per_subkernel_blocks
         self.dispatch_class: (
             type[
                 ComboKernel.SequentialDispatch
@@ -466,6 +468,27 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
+        self.standalone_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]] = []
+        # (src_code, kernel, node_schedule) for each subkernel, populated by
+        # SIMDScheduling.generate_combo_kernel_code BEFORE process_kernel so the
+        # seed signature matches the combo subkernel's (incl. in_out_ptr0).
+        self.standalone_autotune_seed_kernels: list[tuple[str, Any, Any]] = []
+        # {slot_idx: Config} for subkernels whose heuristic produced a single
+        # config at codegen time.  These skip define_kernel / async_compile
+        # entirely and are baked into combo_grid_meta["prepicked_seed_configs"].
+        self.prepicked_seed_configs: dict[int, Any] = {}
+
+    def dominant_sub_kernel_category(self) -> str:
+        counts: dict[str, int] = {}
+        for sk in self.sub_kernels:
+            if sk.persistent_reduction:
+                cat = "persistent_reduction"
+            elif sk.inside_reduction:
+                cat = "reduction"
+            else:
+                cat = "pointwise"
+            counts[cat] = counts.get(cat, 0) + 1
+        return max(counts, key=counts.__getitem__) if counts else "unknown"
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -484,13 +507,14 @@ class ComboKernel(Kernel):
         optimize_mask: bool,
         triton_kernel_cls: type[TritonKernel],
         tiling_scores: dict[str, sympy.Expr] | None = None,
+        per_subkernel_blocks: bool = False,
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
         # Flattened dispatch: all dimensions derived from single pid
-        if config.combo_kernel_per_subkernel_blocks:
+        if per_subkernel_blocks:
             pid_cache = {
                 "tl.program_id(0)": "x_pid_offset",
                 "tl.program_id(1)": "y_pid_offset",
@@ -504,6 +528,7 @@ class ComboKernel(Kernel):
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
+            per_subkernel_blocks=per_subkernel_blocks,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
@@ -560,13 +585,10 @@ class ComboKernel(Kernel):
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
-            elif tree.prefix in ("x", "y") and config.combo_kernel_per_subkernel_blocks:
+            elif tree.prefix in ("x", "y") and self.per_subkernel_blocks:
                 uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.is_reduction:
-                if (
-                    config.combo_kernel_per_subkernel_blocks
-                    or sub_kernel.persistent_reduction
-                ):
+                if self.per_subkernel_blocks or sub_kernel.persistent_reduction:
                     uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
         self.grids.append(grid)
         return uniquify_block_sizes
@@ -686,7 +708,7 @@ class ComboKernel(Kernel):
     def select_dispatch_strategy(self) -> None:
         if self.dispatch_class is not None:
             return
-        if config.combo_kernel_per_subkernel_blocks:
+        if self.per_subkernel_blocks:
             self.dispatch_class = ComboKernel.SequentialFlattenGridDispatch
             return
         # mixed_sizes is used for optimize_mask, so it only allows sequential dispatch
@@ -750,7 +772,7 @@ class ComboKernel(Kernel):
         # The max_persistent_rblock mirrors how R0_BLOCK is computed in
         # codegen_static_numels_sub_kernel() for persistent reductions.
         max_persistent_rblock = 0
-        if not config.combo_kernel_per_subkernel_blocks:
+        if not self.per_subkernel_blocks:
             max_persistent_rblock = max(
                 (
                     next_power_of_2(int(simplified))
@@ -795,6 +817,18 @@ class ComboKernel(Kernel):
                     filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
+                )
+                @triton.jit
+            """
+        elif self.per_subkernel_blocks:
+            # Combo with per-subkernel tuning: use its own decorator.
+            # Each subkernel is tuned individually by a standalone seed
+            # kernel; the combo only needs a placeholder config + metadata.
+            heuristics_line = f"""
+                @triton_heuristics.combo_kernel(
+                    filename=__file__,
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
             """
@@ -863,7 +897,7 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "y":
                     y_tree = tree
-                if config.combo_kernel_per_subkernel_blocks:
+                if self.per_subkernel_blocks:
                     block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
                 else:
                     block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
@@ -1154,6 +1188,67 @@ class ComboKernel(Kernel):
         if self.dynamic_shape_args:
             self.add_numel_to_call_args(name, call_args, arg_types)
 
+        triton_autotune_seed_infos = self.standalone_autotune_seed_infos
+        if self.standalone_autotune_seed_infos:
+            inplaced_call_arg_replacements: dict[str, str] = {}
+            seen_inplaced_args: OrderedSet[str] = OrderedSet()
+            for inplaced in self.args.inplace_buffers.values():
+                if isinstance(inplaced, RemovedArg):
+                    continue
+                if inplaced.inner_name in seen_inplaced_args:
+                    continue
+                seen_inplaced_args.add(inplaced.inner_name)
+                live_name = inplaced.other_names[-1]
+                for other_name in inplaced.other_names[:-1]:
+                    inplaced_call_arg_replacements[other_name] = live_name
+
+            seed_specs = []
+            triton_autotune_seed_infos = []
+            for (
+                seed_name,
+                seed_call_args,
+                seed_arg_types,
+            ) in self.standalone_autotune_seed_infos:
+                seed_call_args = [
+                    inplaced_call_arg_replacements.get(arg, arg)
+                    if isinstance(arg, str)
+                    else arg
+                    for arg in seed_call_args
+                ]
+                stale_args = [
+                    arg
+                    for arg in seed_call_args
+                    if isinstance(arg, str) and arg in V.graph.removed_buffers
+                ]
+                assert not stale_args, (
+                    f"Combo standalone autotune seed {seed_name} references "
+                    f"removed buffers {stale_args}"
+                )
+                triton_autotune_seed_infos.append(
+                    (seed_name, seed_call_args, seed_arg_types)
+                )
+                seed_args = wrapper.prepare_triton_kernel_call(seed_call_args)
+                if len(seed_args) == 1:
+                    seed_args_str = f"({seed_args[0]},)"
+                else:
+                    seed_args_str = f"({', '.join(seed_args)})"
+                seed_specs.append(f"({seed_name}, {seed_args_str})")
+            if seed_specs:
+                if len(seed_specs) == 1:
+                    seed_specs_str = f"({seed_specs[0]},)"
+                else:
+                    seed_specs_str = f"({', '.join(seed_specs)})"
+                # Emit into runtime call path (Python wrapper only).
+                # C++ wrappers can't call Python seed-bench functions.
+                # Guard so iterations 2+ skip tuple construction entirely.
+                # Use all() check to handle partial prepick (some slots
+                # pre-filled, others None needing runtime tuning).
+                if not V.graph.cpp_wrapper:
+                    wrapper.writeline(f"if combo_seeds_need_tuning({name}):")
+                    wrapper.writeline(
+                        f"    start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+                    )
+
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -1161,6 +1256,7 @@ class ComboKernel(Kernel):
             arg_types=arg_types,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
+            triton_autotune_seed_infos=triton_autotune_seed_infos,
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
@@ -1176,14 +1272,11 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
-            # Captured at codegen time so runtime sees the same value the
-            # source was generated with, regardless of later config changes.
-            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            if config.combo_kernel_per_subkernel_blocks:
+            if self.per_subkernel_blocks:
                 # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
                 for num, sub_kernel in enumerate(self.sub_kernels):
                     if sub_kernel.no_x_dim:
@@ -1213,7 +1306,7 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
 
-            if config.combo_kernel_per_subkernel_blocks:
+            if self.per_subkernel_blocks:
                 meta[f"heuristic_{num}"] = (
                     "persistent_reduction"
                     if sub_kernel.persistent_reduction
@@ -1243,5 +1336,15 @@ class ComboKernel(Kernel):
                         meta[numel_name] = None
                     else:
                         meta[numel_name] = int(V.graph.sizevars.simplify(tree.numel))
+
+        if self.prepicked_seed_configs:
+            meta["prepicked_seed_configs"] = {
+                idx: {
+                    "kwargs": dict(cfg.kwargs),
+                    "num_warps": cfg.num_warps,
+                    "num_stages": cfg.num_stages,
+                }
+                for idx, cfg in self.prepicked_seed_configs.items()
+            }
 
         return meta
