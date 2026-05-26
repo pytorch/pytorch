@@ -1709,6 +1709,11 @@ if(USE_KINETO)
     add_subdirectory("${KINETO_SOURCE_DIR}")
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
+  # libkineto attaches CUDA::nvperf_host only to its kineto_base OBJECT
+  # library; INTERFACE link libs don't propagate through $<TARGET_OBJECTS:>.
+  if(KINETO_BACKEND STREQUAL "cuda" AND TARGET CUDA::nvperf_host)
+    target_link_libraries(kineto PUBLIC CUDA::nvperf_host)
+  endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   # Propagate the backend macro globally so PyTorch TUs outside torch_cpu's
