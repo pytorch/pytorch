@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     requires_cuda_p2p_access,
     run_tests,
+    skipIfRocm,
     TestCase,
 )
 
@@ -1889,6 +1890,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
