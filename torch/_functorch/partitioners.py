@@ -3793,8 +3793,9 @@ def min_cut_rematerialization_partition(
 
     memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
-        if isinstance(node.meta.get("memory_budget", None), float):
-            memory_budget = node.meta["memory_budget"]
+        custom_budget = node.meta.get("custom", {}).get("memory_budget", None)
+        if isinstance(custom_budget, float):
+            memory_budget = custom_budget
             break
     saved_values = choose_saved_values_set(
         joint_graph,
