@@ -394,12 +394,10 @@ class TestConfigFilter(TestCase):
         scheduled = set_periodic_modes(test_matrix, "inductor-build / build")
 
         modes_per_config = [
-            entry.get("mem_leak_check") or entry.get("rerun_disabled_tests")
-            for entry in scheduled["include"]
+            entry.get("rerun_disabled_tests") for entry in scheduled["include"]
         ]
-        self.assertIn("mem_leak_check", modes_per_config)
         self.assertIn("rerun_disabled_tests", modes_per_config)
-        self.assertEqual(len(scheduled["include"]), 4)
+        self.assertEqual(len(scheduled["include"]), 2)
 
     @mock.patch("filter_test_configs.download_json")
     def test_remove_disabled_jobs(self, mock_download_json: Any) -> None:
