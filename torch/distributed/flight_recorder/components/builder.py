@@ -9,7 +9,7 @@ import ast
 import copy
 import os
 import sys
-from typing import Any, cast  # type: ignore[attr-defined]
+from typing import Any
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 from torch.distributed.flight_recorder.components.types import (
@@ -140,7 +140,7 @@ def build_groups_memberships(
 
 
 def build_collectives(
-    all_entries: dict[int, list[dict[str, Any]]],
+    all_entries: dict[int, list[FlightRecorderEntry]],
     _groups: dict[str, Group],
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
@@ -176,7 +176,6 @@ def build_collectives(
     }
     """
     tracebacks: list[Traceback] = []
-    typed_entries = cast(dict[int, list[FlightRecorderEntry]], all_entries)
 
     collectives: list[Collective] = []
     nccl_calls: list[NCCLCall] = []
@@ -186,27 +185,27 @@ def build_collectives(
     mismatch = {_groups[g].id: 0 for g in _groups}
 
     # For best effort partial analysis.
-    dumps_ranks = {int(key) for key in typed_entries}
+    dumps_ranks = {int(key) for key in all_entries}
     """
     - it doesn't matter what order I put collectives/ncclops into their table. we can later on re-sort it by start time
     - there could be multiple options for the "first" collective to pair up (rank 0,1 might do a bcast while rank 2,3 do a bcast)
     - within a group, the first collective must be the same on all ranks in the group, then it can be marked as a
     collective and removed
     """
-    while typed_entries:
+    while all_entries:
         # we greedily match collectives, starting arbitrarily with the trace from the first rank
         # later, if we exhaust the first rank, we continue with the next 'first rank'
-        rank_iter = iter(typed_entries)
+        rank_iter = iter(all_entries)
         first_rank = next(rank_iter)
         other_ranks = list(rank_iter)
 
-        if len(typed_entries[first_rank]) == 0:
-            typed_entries.pop(first_rank)
+        if len(all_entries[first_rank]) == 0:
+            all_entries.pop(first_rank)
             continue
 
         # lets match the first collective! we need to know which ranks are involved, and ensure that this same
         # collective is also the first one on those ranks within that group
-        entries = typed_entries[first_rank]
+        entries = all_entries[first_rank]
         current_entry = entries[0]
         desc = current_entry.process_group[1]
         # For db build and logs printing, we want to use the original pg_name, not the hash one.
@@ -232,20 +231,20 @@ def build_collectives(
             else find_coalesced_group_with_non_p2p
         )
         maybe_coalesced_group = find_coalesced_group(
-            pg_name, cast(list[dict[str, Any]], entries), _pg_guids, first_rank
+            pg_name, entries, _pg_guids, first_rank
         )
         if len(maybe_coalesced_group) > 1:
             num_coalesced_entries = len(maybe_coalesced_group)
             # We need a copy of the original expected ranks to avoid modifying it.
             candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
-            all_coalesced_entries = {}
+            all_coalesced_entries: dict[int, list[tuple[int, FlightRecorderEntry]]] = {}
             while candidate_ranks:
                 curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
-                    find_coalesced_group(pg_name, typed_entries[curr], _pg_guids, curr)  # type: ignore[arg-type]
-                    if curr in typed_entries
+                    find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)
+                    if curr in all_entries
                     else []
                 )
                 all_coalesced_entries[curr] = grp
@@ -314,7 +313,7 @@ def build_collectives(
                 for i, k in idx_map.items():
                     for _ in range(1, num_coalesced_entries):
                         try:
-                            typed_entries[i].pop(k)
+                            all_entries[i].pop(k)
                         except IndexError:
                             # In the case of a missing rank symptom that a rank didn't schedule the coalesced collective,
                             # we should not fail the analysis script here.
@@ -325,7 +324,7 @@ def build_collectives(
                 all_entries,
                 _pg_guids,
                 (pg_name, desc),
-                cast(dict[str, Any], current_entry),
+                current_entry,
                 _memberships,
                 mismatch,
                 match_record,
@@ -337,7 +336,7 @@ def build_collectives(
                 match_record,
                 dumps_ranks,
                 first_rank,
-                cast(dict[str, Any], current_entry),
+                current_entry,
                 mismatch,
                 get_version_detail(version),
                 pg_name,
@@ -415,7 +414,7 @@ def build_db(
     if args.verbose:
         os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"
     # temporary state used for building database
-    entries = {}
+    entries: dict[int, list[FlightRecorderEntry]] = {}
     pg_config = {}
     version_by_ranks = {}
     for dump in details.values():
@@ -428,7 +427,7 @@ def build_db(
 
     # Ensure version is consistent across all ranks.
     check_version(version_by_ranks, version)
-    entries = align_trace_from_beginning(cast(dict[int, list[dict[str, Any]]], entries))
+    entries = align_trace_from_beginning(entries)
     stack_id_trace_map: dict[str, int] = {}
     if args.just_print_entries:
         entries, stack_id_trace_map = add_stack_id_in_entries(entries)

@@ -350,7 +350,7 @@ class EntryState:
         id: int,
         errors: set[tuple[int, MatchInfo]] | None = None,
         idx_map: dict[int, int] | None = None,
-        all_entries: dict[int, list[dict[str, Any]]] | None = None,
+        all_entries: dict[int, list[FlightRecorderEntry]] | None = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -375,10 +375,9 @@ class EntryState:
             if all_entries is None:
                 raise AssertionError("all_entries is None")
             mismatch_collectives = {}
-            typed_entries = cast(dict[int, list[FlightRecorderEntry]], all_entries)
             for rank, error in errors:
                 idx = idx_map[rank]
-                entry = typed_entries[rank][idx]
+                entry = all_entries[rank][idx]
                 desc = entry.process_group[1]
                 pg_name = entry.process_group[0]
                 mismatch_collectives[rank] = Collective(
@@ -423,15 +422,14 @@ class EntryState:
 
     def to_nccl_call(
         self,
-        all_entries: dict[int, list[dict[str, Any]]],
+        all_entries: dict[int, list[FlightRecorderEntry]],
         idx_map: dict[int, int],
         nccl_call_id: int,
         collective_id: Any,
     ) -> list[NCCLCall]:
         result = []
-        typed_entries = cast(dict[int, list[FlightRecorderEntry]], all_entries)
         for i, k in idx_map.items():
-            typed_entries[i].pop(k)
+            all_entries[i].pop(k)
             result.append(
                 NCCLCall(
                     id=nccl_call_id,
