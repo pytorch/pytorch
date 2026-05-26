@@ -18,7 +18,7 @@ def torch_api_key_word_prefix(bankend_index: BackendIndex) -> str:
     # rather than "TORCH_API". Because the semantic of "TORCH_API" is "hidden" for out-of-tree backends.
     # For other in-tree backends like cpu and cuda, they still use "TORCH_API" prefix with "visible" semantic.
     device_torch_api_key_word_mapping = {
-        "XPU": "TORCH_API",
+        "XPU": "TORCH_XPU_API",
     }
 
     return (
