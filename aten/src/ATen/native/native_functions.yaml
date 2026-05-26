@@ -6545,6 +6545,7 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+    MPS: _s_poisson_mps
   tags: nondeterministic_seeded
   autogen: poisson.out
 

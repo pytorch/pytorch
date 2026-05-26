@@ -26,12 +26,13 @@ from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf,
+     set_rng_seed)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
-from torch.distributions import Uniform, Exponential, Dirichlet
+from torch.distributions import Dirichlet, Exponential, Poisson, Uniform
 from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
@@ -8790,6 +8791,53 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
+    def test_poisson_shape_mps(self):
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            rate = torch.randn(2, 3, device="mps", dtype=dtype).abs()
+            rate_1d = torch.randn(1, device="mps", dtype=dtype).abs()
+
+            self.assertEqual(Poisson(rate).sample().size(), (2, 3))
+            self.assertEqual(Poisson(rate).sample((7,)).size(), (7, 2, 3))
+            self.assertEqual(Poisson(rate_1d).sample().size(), (1,))
+            self.assertEqual(Poisson(rate_1d).sample((1,)).size(), (1, 1))
+            self.assertEqual(Poisson(torch.tensor(2.0, device="mps", dtype=dtype)).sample((2,)).size(), (2,))
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_poisson_sample_mps(self, dtype):
+        import scipy.stats
+
+        def check_sampler_discrete(
+            torch_dist, ref_dist, message, num_samples=10000, failure_rate=1e-3
+        ):
+            torch_samples = torch_dist.sample((num_samples,)).squeeze()
+            if torch_samples.dtype == torch.bfloat16:
+                torch_samples = torch_samples.float()
+            torch_samples = torch_samples.cpu().numpy()
+            unique, counts = np.unique(torch_samples, return_counts=True)
+            pmf = ref_dist.pmf(unique)
+            pmf = pmf / pmf.sum()  # renormalize to 1.0 for chisq test
+            msk = (counts > 5) & ((pmf * num_samples) > 5)
+            self.assertGreater(
+                pmf[msk].sum(),
+                0.9,
+                "Distribution is too sparse for test; try increasing num_samples",
+            )
+            if not msk.all():
+                counts = np.concatenate([counts[msk], [counts[~msk].sum()]])
+                pmf = np.concatenate([pmf[msk], [pmf[~msk].sum()]])
+            _, p = scipy.stats.chisquare(counts, pmf * num_samples)
+            self.assertGreater(p, failure_rate, message)
+
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        for rate in [0.1, 1.0, 5.0, 10.0]:
+            rate_tensor = torch.tensor([rate], device="mps", dtype=dtype)
+            check_sampler_discrete(
+                Poisson(rate_tensor),
+                scipy.stats.poisson(rate),
+                f"Poisson(lambda={rate}, dtype={dtype})",
+                failure_rate=1e-3,
+            )
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_exponential_nonzero(self, dtype):
         for _ in range(100):
@@ -8801,6 +8849,7 @@ class TestMPS(TestCaseMPS):
             ("normal_", lambda t: t.normal_(0, 1), []),
             ("uniform_", lambda t: t.uniform_(0, 1), []),
             ("exponential_", lambda t: t.exponential_(1.0), []),
+            ("poisson", lambda t: torch.full_like(t, 4.0).poisson(), []),
             ("bernoulli_", lambda t: t.bernoulli_(0.5), []),
             ("random_", lambda t: t.random_(), []),
             ("random_with_to", lambda t: t.random_(10), []),

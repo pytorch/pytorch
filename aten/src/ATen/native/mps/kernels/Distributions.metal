@@ -1,6 +1,7 @@
 #include <ATen/native/Distributions.h>
 #include <c10/metal/atomic.h>
 #include <c10/metal/error.h>
+#include <c10/metal/igamma.h>
 #include <c10/metal/random.h>
 #include <c10/metal/reduction_utils.h>
 #include <c10/metal/special_math.h>
@@ -555,6 +556,78 @@ kernel void standard_dirichlet(
 REGISTER_DIRICHLET(float);
 REGISTER_DIRICHLET(half);
 REGISTER_DIRICHLET(bfloat);
+
+// Poisson sampling adapted from aten/src/ATen/native/Distributions.cpp
+// sample_poisson()
+constant constexpr int POISSON_RANDOMS_STRIDE = 32;
+
+template <typename T>
+kernel void poisson(
+    device T* output [[buffer(0)]],
+    device const T* lambda_in [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  float lambda = static_cast<float>(lambda_in[tid]);
+  long base =
+      seed_base_offset.y + static_cast<long>(tid) * POISSON_RANDOMS_STRIDE;
+  long seed = seed_base_offset.x;
+  int rng_idx = 0;
+
+  if (lambda >= 10.0f) {
+    float slam = ::metal::precise::sqrt(lambda);
+    float loglam = ::metal::precise::log(lambda);
+    float b = 0.931f + 2.53f * slam;
+    float a = -0.059f + 0.02483f * b;
+    float invalpha = 1.1239f + 1.1328f / (b - 3.4f);
+    float vr = 0.9277f - 3.6224f / (b - 2.0f);
+
+    for (;;) {
+      float U = c10::metal::rand(seed, base + rng_idx++) - 0.5f;
+      float V = c10::metal::rand(seed, base + rng_idx++);
+      float us = 0.5f - ::metal::fabs(U);
+      float k = ::metal::floor((2.0f * a / us + b) * U + lambda + 0.43f);
+      if ((us >= 0.07f) && (V <= vr)) {
+        output[tid] = static_cast<T>(k);
+        return;
+      }
+      if ((k < 0.0f) || ((us < 0.013f) && (V > us))) {
+        continue;
+      }
+
+      if ((::metal::precise::log(V) + ::metal::precise::log(invalpha) -
+           ::metal::precise::log(a / (us * us) + b)) <=
+          (-lambda + k * loglam - ::lgamma(k + 1.0f))) {
+        output[tid] = static_cast<T>(k);
+        return;
+      }
+    }
+  } else if (lambda == 0.0f) {
+    output[tid] = static_cast<T>(0);
+    return;
+  } else {
+    float enlam = ::metal::precise::exp(-lambda);
+    int X = 0;
+    float prod = 1.0f;
+    for (;;) {
+      float U = c10::metal::rand(seed, base + rng_idx++);
+      prod *= U;
+      if (prod > enlam) {
+        X += 1;
+      } else {
+        output[tid] = static_cast<T>(static_cast<float>(X));
+        return;
+      }
+    }
+  }
+}
+
+#define REGISTER_POISSON(DTYPE)                                         \
+  template [[host_name("poisson_" #DTYPE)]] kernel void poisson<DTYPE>( \
+      device DTYPE*, device const DTYPE*, constant long2&, uint)
+
+REGISTER_POISSON(float);
+REGISTER_POISSON(half);
+REGISTER_POISSON(bfloat);
 
 // Reparameterized gradient for Gamma distribution.
 // Computes -(d/dalpha cdf(x;alpha)) / pdf(x;alpha).
