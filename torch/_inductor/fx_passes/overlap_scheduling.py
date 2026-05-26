@@ -1315,7 +1315,7 @@ class OverlapScheduler:
             else:
                 return 3  # Off-path, doesn't block reduce_scatter
 
-        def overlap_priority(n: fx.Node) -> object:
+        def overlap_priority(n: fx.Node) -> tuple[int, int, float, int]:
             return (
                 get_priority(n),
                 self.compute_index_domination[n],
