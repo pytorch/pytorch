@@ -1812,7 +1812,6 @@ torch.cuda.synchronize()
         if adaptive:
             cls_name = f"AdaptiveMaxPool{num_dim}d"
         else:
-            # FIXME(#105716): Test fails when using f-string
             cls_name = f"MaxPool{num_dim}d"
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
