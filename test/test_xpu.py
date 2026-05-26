@@ -408,6 +408,19 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_used, 0)
         self.assertLessEqual(mem_used, total_memory)
 
+    def test_list_gpu_processes_returns_string(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        processes_info = torch.xpu.list_gpu_processes()
+
+        self.assertIsInstance(processes_info, str)
+        # Sanity check: Output should contain the header line with the current device
+        current_device = torch.xpu.current_device()
+        self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
+
     def test_device_count_respects_affinity_mask(self):
         try:
             import pyzes  # noqa: F401
