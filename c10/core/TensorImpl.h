@@ -248,18 +248,7 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-
-  // callback to run a Python decomposition for an op
-  // returns true if a decomposition was found and executed
-  std::function<bool(const void* op, void* stack)> decomp_fn_;
-
-  // callback to run a Python register_op_impl handler for an op
-  // returns true if a handler was found and executed
-  std::function<bool(const void* op, void* stack)> op_impl_fn_;
-
-  // callback to call func.prim_meta_impl directly for prims ops
-  // returns true if prim_meta_impl was found and executed
-  std::function<bool(const void* op, void* stack)> prim_meta_fn_;
+  bool allow_fallback_kernels_ = true;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,

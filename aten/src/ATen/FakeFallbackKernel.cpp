@@ -3,6 +3,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -602,12 +603,14 @@ void fakeFallback(
         });
   };
 
+  auto* interp = c10::impl::getGlobalPyInterpreter();
+
   // for ops with symbolic sizes, try decompositions before the meta kernel
   if (has_symints && !cpp_meta_supports_symint(op) && mode) {
-    if (mode->decomp_fn_) {
+    if (interp) {
       bool found = false;
       try {
-        found = mode->decomp_fn_(&op, stack);
+        found = (*interp)->fake_try_decomp(op, stack);
       } catch (...) {
         throw;
       }
@@ -636,7 +639,7 @@ void fakeFallback(
   // Python FakeTensorMode's `with self: func.prim_meta_impl(*args, **kwargs)`.
   // Sub-ops (e.g. torch.empty inside _iota_meta) still enter fakeFallback
   // because Fake remains in TLS.
-  if (schema.name().rfind("prims::", 0) == 0 && mode && mode->prim_meta_fn_) {
+  if (schema.name().rfind("prims::", 0) == 0 && mode && interp) {
     // In Python, scalar args stay as Python floats/ints. In C++, the
     // dispatcher wraps them as tensors with default dtypes (float64 for
     // floats, int64 for ints), causing dtype mismatches in prim_meta_impl.
@@ -679,7 +682,7 @@ void fakeFallback(
           });
     }
 
-    if (mode->prim_meta_fn_(&op, stack)) {
+    if ((*interp)->fake_try_prim_meta(op, stack)) {
       wrap_meta_outputs_with_default_device_logic();
       return;
     }
@@ -691,16 +694,16 @@ void fakeFallback(
 
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
-  // Handlers registered via register_op_impl
-  // idk if this is right because im using a try catch pattern for this
-  // and i also made a wrapper to be able to pass in "FakeTensorMode" to the op impls
-  // this seemed like the least intrusive way to do it for now but idk
-  // probalby should revist
   bool has_meta_kernel = op.hasKernelForDispatchKey(c10::DispatchKey::Meta);
-  if (!has_meta_kernel && mode && mode->op_impl_fn_) {
-    if (mode->op_impl_fn_(&op, stack)) {
-      return;
-    }
+  bool has_composite_kernel =
+      op.hasKernelForDispatchKey(
+          c10::DispatchKey::CompositeExplicitAutograd) ||
+      op.hasKernelForDispatchKey(
+          c10::DispatchKey::CompositeImplicitAutograd);
+  if (!has_meta_kernel && !has_composite_kernel && mode && interp &&
+      (*interp)->fake_try_op_impl(
+          op, stack, common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
+    return;
   }
 
   auto device_from_args = rewrite_device_args_to_meta(
@@ -748,10 +751,10 @@ void fakeFallback(
       stack->push_back(arg);
     }
 
-    if (mode && mode->op_impl_fn_) {
-      if (mode->op_impl_fn_(&op, stack)) {
-        return;
-      }
+    if (!has_composite_kernel && mode && interp &&
+        (*interp)->fake_try_op_impl(
+            op, stack, common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
+      return;
     }
 
     // Python handler didn't handle it either. For NotImplementedError,

@@ -1,8 +1,10 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
@@ -151,6 +153,17 @@ struct ConcretePyInterpreterVTable final
   }
 
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
+
+  bool fake_try_decomp(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const override;
+  bool fake_try_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      c10::Device common_device) const override;
+  bool fake_try_prim_meta(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const override;
 
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
@@ -960,6 +973,143 @@ std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
   return ss.str();
+}
+
+bool ConcretePyInterpreterVTable::fake_try_decomp(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) const {
+  py::gil_scoped_acquire gil;
+
+  py::handle py_op = getTorchApiFunction(op);
+
+  static py::object meta_table =
+      py::module::import("torch._decomp").attr("meta_table");
+  if (meta_table.contains(py_op)) {
+    return false;
+  }
+
+  static py::object decomp_table =
+      py::module::import("torch._decomp").attr("decomposition_table");
+  if (!decomp_table.contains(py_op)) {
+    return false;
+  }
+
+  py::object decomp_fn = decomp_table[py_op];
+
+  const auto& schema = op.schema();
+  auto arguments = torch::jit::pop(*stack, schema.arguments().size());
+  auto args_kwargs =
+      parseIValuesToPyArgsKwargs(op, arguments);
+  auto result = decomp_fn(*args_kwargs.first, **args_kwargs.second);
+  pushPyOutToStack(
+      op, stack, std::move(result), "decomposition");
+  return true;
+}
+
+bool ConcretePyInterpreterVTable::fake_try_op_impl(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    c10::Device common_device) const {
+  py::gil_scoped_acquire gil;
+
+  if (PyErr_Occurred()) {
+    PyErr_Clear();
+  }
+
+  py::handle py_op = getTorchApiFunction(op);
+
+  static py::object op_impl_dict =
+      py::module::import("torch._subclasses.fake_impls")
+          .attr("op_implementations_dict");
+
+  py::object handler = py::none();
+  if (op_impl_dict.contains(py_op)) {
+    handler = op_impl_dict[py_op];
+  }
+  if (handler.is_none()) {
+    return false;
+  }
+
+  auto mode = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+
+  static py::object CppFakeModeShim =
+      py::module::import("torch._subclasses.fake_impls")
+          .attr("CppFakeModeShim");
+  auto shape_env = py::reinterpret_borrow<py::object>(
+      mode->shape_env_->ptr(getPyInterpreter()));
+  auto converter = py::reinterpret_borrow<py::object>(
+      mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+  py::object py_fake_mode = CppFakeModeShim(shape_env, converter);
+
+  const auto& schema = op.schema();
+  auto arguments = torch::jit::pop(*stack, schema.arguments().size());
+  auto args_kwargs =
+      parseIValuesToPyArgsKwargs(op, arguments);
+  py::object result;
+  {
+    c10::impl::ExcludeDispatchKeyGuard guard(
+        c10::DispatchKeySet(c10::DispatchKey::Python) |
+        c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+    result = handler(
+        py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
+  }
+  if (result.is(py::handle(Py_NotImplemented))) {
+    for (auto& arg : arguments) {
+      stack->push_back(std::move(arg));
+    }
+    return false;
+  }
+
+  auto convert_to_cpp_fake = [&](py::object obj) -> py::object {
+    if (!THPVariable_Check(obj.ptr())) {
+      return obj;
+    }
+    at::Tensor t = THPVariable_Unpack(obj.ptr());
+    if (!t.defined() || t.is_fake()) {
+      return obj;
+    }
+    t.unsafeGetTensorImpl()->set_and_normalize_fake_device(common_device);
+    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    return obj;
+  };
+
+  if (py::isinstance<py::tuple>(result)) {
+    py::tuple tup = result.cast<py::tuple>();
+    py::tuple converted(tup.size());
+    for (size_t i = 0; i < tup.size(); i++) {
+      converted[i] =
+          convert_to_cpp_fake(py::reinterpret_borrow<py::object>(tup[i]));
+    }
+    result = std::move(converted);
+  } else {
+    result = convert_to_cpp_fake(std::move(result));
+  }
+
+  pushPyOutToStack(
+      op, stack, std::move(result), "op_impl");
+  return true;
+}
+
+bool ConcretePyInterpreterVTable::fake_try_prim_meta(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) const {
+  py::gil_scoped_acquire gil;
+
+  py::handle py_op = getTorchApiFunction(op);
+  if (!py::hasattr(py_op, "prim_meta_impl")) {
+    return false;
+  }
+  py::object prim_meta_impl = py_op.attr("prim_meta_impl");
+
+  const auto& schema = op.schema();
+  auto arguments = torch::jit::pop(*stack, schema.arguments().size());
+  auto args_kwargs =
+      parseIValuesToPyArgsKwargs(op, arguments);
+  auto result = prim_meta_impl(*args_kwargs.first, **args_kwargs.second);
+  pushPyOutToStack(
+      op, stack, std::move(result), "prim_meta_impl");
+  return true;
 }
 
 PyInterpreterHolder self_interpreter;

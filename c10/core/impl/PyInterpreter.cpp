@@ -142,6 +142,23 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
   }
+
+  bool fake_try_decomp(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/) const override {
+    return false;
+  }
+  bool fake_try_op_impl(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      c10::Device /*common_device*/) const override {
+    return false;
+  }
+  bool fake_try_prim_meta(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/) const override {
+    return false;
+  }
 };
 
 // Construct this in Global scope instead of within `disarm`

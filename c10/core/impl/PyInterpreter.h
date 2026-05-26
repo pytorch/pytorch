@@ -224,6 +224,19 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+
+  // C++ FakeTensor callbacks: try running a Python decomposition, op_impl,
+  // or prim_meta_impl for the given op.  Return true if handled.
+  virtual bool fake_try_decomp(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
+  virtual bool fake_try_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      c10::Device common_device) const = 0;
+  virtual bool fake_try_prim_meta(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
 };
 
 struct C10_API PyInterpreter {
