@@ -210,7 +210,7 @@ class TestStandaloneInductor(TestCase):
             name="test_vectorized_bool_mask_cast",
             sources=source_path,
             output_dir=os.path.dirname(source_path),
-            BuildOption=CppTorchOptions(vec_isa=vec_isa),
+            BuildOption=CppTorchOptions(vec_isa=vec_isa, compile_only=True),
         )
         cpp_builder.build()
 
