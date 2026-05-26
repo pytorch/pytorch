@@ -8318,6 +8318,18 @@ class TestMPS(TestCaseMPS):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
+    def test_mps_generator_clone_state(self):
+        # clone_state() must copy the full engine state, not just the seed.
+        # Regression test: previously only the seed was cloned, so the clone
+        # restarted the sequence from offset 0 instead of continuing.
+        g = torch.Generator(device='mps').manual_seed(0)
+        torch.rand(4, device='mps', generator=g)  # advance the engine
+        g_clone = g.clone_state()
+        self.assertEqual(g.get_offset(), g_clone.get_offset())
+        a = torch.rand(4, device='mps', generator=g)
+        b = torch.rand(4, device='mps', generator=g_clone)
+        self.assertEqual(a, b)
+
     @serialTest()
     def test_default_mps_generator(self):
         # manual seeding on the "default" MPS generator using
@@ -8817,6 +8829,29 @@ class TestMPS(TestCaseMPS):
         helper((5, 5), torch.tanh, False)
         helper((5, 5), torch.tanh_, True)
         helper((5, 5), lambda x, **kwargs: torch.round(x, decimals=2, **kwargs), False)
+
+    def test_unary_op_out_cast_fallback(self):
+        # When the user passes out= with a dtype that has no direct
+        # `<op>_dense_<out>_<in>` kernel registered, exec_unary_kernel falls back
+        # to the `<op>_dense_castout_<in>` variant, which computes in the input
+        # dtype and casts to the user's out dtype on store -- matching CPU
+        # semantics. Cross-dtype pairs that DO have a direct kernel (e.g. int
+        # input naturally promotes to float) must keep using the direct path.
+        src_h = torch.rand(64, device='mps', dtype=torch.half)
+        out_f = torch.empty(64, device='mps', dtype=torch.float32)
+        torch.sin(src_h, out=out_f)
+        self.assertEqual(out_f, torch.sin(src_h.cpu(), out=torch.empty(64, dtype=torch.float32)))
+
+        # Strided output via the cast-fallback path.
+        dst_strided = torch.empty(4, 16, device='mps', dtype=torch.float32).t()
+        torch.sin(src_h.view(16, 4), out=dst_strided)
+        self.assertEqual(dst_strided, torch.sin(src_h.view(16, 4).cpu()).to(torch.float32))
+
+        # Integer input still hits the direct sin_dense_float_int kernel.
+        src_i = torch.randint(-10, 10, (64,), device='mps')
+        out_f = torch.empty(64, device='mps')
+        torch.sin(src_i, out=out_f)
+        self.assertEqual(out_f, torch.sin(src_i.cpu().float()))
 
     def test_atan2(self):
         def helper(shape):
