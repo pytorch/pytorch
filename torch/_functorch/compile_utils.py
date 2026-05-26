@@ -53,10 +53,11 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     env: dict[
         fx.Node, fx.Node
     ] = {}  # map from node in the old graph to node in the new graph
-    hash_env: dict[
-        tuple[str, int], fx.Node
-    ] = {}  # map from hash to a node in the new graph
-    token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
+    # map from hash to a node in the new graph
+    hash_env: dict[tuple[Any, int, int], fx.Node] = {}
+    # map from hash to token
+    token_map: dict[tuple[Any, int, int], dict[str, Any]] = {}
+    cse_region = 0
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
@@ -99,12 +100,16 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     }
 
     for n in fx_g.nodes:
+        node_is_impure = n.op == "call_function" and n.is_impure()
+        if node_is_impure:
+            cse_region += 1
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
         if (
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
+            or node_is_impure
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
@@ -162,7 +167,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             hash_arg = hash(
                 (tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs))
             )
-            hash_val = (n.target, hash_arg)
+            hash_val = (n.target, hash_arg, cse_region)
 
             # check if a node has a substitute and can be eliminated
             hash_val_in_hash_env = hash_val in hash_env
