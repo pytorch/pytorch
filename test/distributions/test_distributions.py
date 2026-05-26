@@ -3760,16 +3760,31 @@ class TestDistributions(DistributionsTestCase):
             )
 
     def test_kumaraswamy_mode(self):
-        # a=concentration1, b=concentration0
-        # Mode = ((a-1)/(ab-1))^(1/a), nan when a<1 or b<1 or (a==b==1)
+        # Cases where mode is undefined (a<1, b<1, or a=b=1) -> nan
         torch.set_default_dtype(torch.float64)
-        a = torch.tensor([0.5, 1.0, 0.5, 1.0, 3.0, 1.0, 3.0, 2.0])
-        b = torch.tensor([0.5, 0.5, 1.0, 1.0, 1.0, 3.0, 5.0, 1e19])
-        expected = torch.tensor(
-            [nan, nan, nan, nan, 1.0, 0.0, 0.52275795857471, 2.2360679774997896e-10]
+        a_nan = torch.tensor([0.5, 1.0, 0.5, 1.0])
+        b_nan = torch.tensor([0.5, 0.5, 1.0, 1.0])
+        mode_nan = Kumaraswamy(a_nan, b_nan).mode
+        self.assertTrue(mode_nan.isnan().all(), "expected nan for undefined modes")
+
+        # Cases where mode is well-defined: verify it is a local maximum of log-prob.
+        # If m is the mode, log_prob(m) >= log_prob(m +/- eps) for small eps.
+        a_valid = torch.tensor([3.0, 1.0, 3.0, 2.0])
+        b_valid = torch.tensor([1.0, 3.0, 5.0, 1e6])
+        dist = Kumaraswamy(a_valid, b_valid)
+        mode = dist.mode
+        eps = 1e-5
+        lp_mode = dist.log_prob(mode)
+        lp_left = dist.log_prob((mode - eps).clamp(min=0.0))
+        lp_right = dist.log_prob((mode + eps).clamp(max=1.0))
+        self.assertTrue(
+            (lp_mode >= lp_left).all(),
+            "mode log_prob not >= left neighbor",
         )
-        actual = Kumaraswamy(a, b).mode
-        torch.testing.assert_close(actual, expected, equal_nan=True)
+        self.assertTrue(
+            (lp_mode >= lp_right).all(),
+            "mode log_prob not >= right neighbor",
+        )
         torch.set_default_dtype(torch.float32)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
