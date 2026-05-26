@@ -664,12 +664,15 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
 
     def test_minimum_ext_structured_meta_functional(self):
-        """ext_structured_meta: the backend's own meta() drives the functional op."""
-        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
-        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
-        z = torch.minimum(x, y)
+        """ext_structured_meta: the backend's own meta() drives the functional op.
+        Uses broadcasting so the output shape comes from meta() -- a no-op meta
+        would fail to allocate the (2, 3) result."""
+        x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
+        y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
+        z = torch.minimum(x, y)  # broadcasts to (2, 3)
         self.assertEqual(z.device.type, "openreg")
-        self.assertEqual(z.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(z.shape, torch.Size([2, 3]))
+        self.assertEqual(z.cpu(), torch.tensor([[1.0, 4.0, 3.0], [1.0, 2.0, 2.0]]))
 
     def test_minimum_ext_structured_meta_out(self):
         """ext_structured_meta out variant: backend meta() + impl()."""
@@ -679,6 +682,32 @@ class TestStructuredCodegen(TestCase):
         ret = torch.minimum(x, y, out=out)
         self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+
+    # div.out is registered non-structured (out-as-primary only): the backend
+    # supplies div_out via TORCH_PRIV1_FUNC and torchgen derives the functional
+    # and inplace variants from it.
+    def test_div_out_as_primary_functional(self):
+        """Functional variant: allocates an out and reuses it (no temp-copy)."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        z = torch.div(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_out(self):
+        """Out variant: wrapper redirects straight to the backend div_out."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        out = torch.empty(2, device="openreg")
+        torch.div(x, y, out=out)
+        self.assertEqual(out.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_inplace(self):
+        """Inplace variant: derived from div_out, feeds self into the out slot."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        x.div_(y)
+        self.assertEqual(x.cpu(), torch.tensor([3.0, 2.0]))
 
 
 if __name__ == "__main__":
