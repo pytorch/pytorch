@@ -10,7 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.runtime.triton_compat import (
+    HAS_WARP_SPEC,
+    OutOfResources,
+    PTXASError,
+)
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -18,7 +22,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     runOnRocm,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -42,16 +45,22 @@ from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _enforce_reduction_config_block_minimums,
+    _persistent_reduction_configs,
+    _reduction_configs,
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
+    make_matmul_triton_config,
     template,
     triton_config,
 )
@@ -96,6 +105,67 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_native_matmul_config_block_numel_limit(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {"native_matmul": True, "device": device}
+
+        for size_hints in (
+            {"x": 1, "y": 1, "r0_": 1},
+            {"x": 1, "y": 1, "z": 1, "r0_": 1},
+        ):
+            cfgs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={},
+                triton_meta=triton_meta,
+            )
+            self.assertTrue(cfgs)
+            for cfg in cfgs:
+                self.assertLessEqual(
+                    native_matmul_block_numel(cfg.kwargs),
+                    TRITON_MAX_TENSOR_NUMEL,
+                )
+
+        for size_hints, inductor_meta in (
+            ({"x": 4096, "y": 4096, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "r0_": 2048}, {}),
+            (
+                {"x": 4096, "y": 4096, "r0_": 64},
+                {"native_matmul_persistent_rblock": 1024},
+            ),
+            ({"x": 4096, "y": 4096, "z": 128, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "z": 128, "r0_": 2048}, {}),
+            (
+                {"x": 4096, "y": 4096, "z": 128, "r0_": 64},
+                {"native_matmul_persistent_rblock": 1024},
+            ),
+        ):
+            cfgs = _persistent_reduction_configs(
+                size_hints=size_hints,
+                inductor_meta=inductor_meta,
+                triton_meta=triton_meta,
+            )
+            rblock = inductor_meta.get(
+                "native_matmul_persistent_rblock",
+                native_matmul_persistent_rblock(size_hints["r0_"]),
+            )
+            self.assertTrue(cfgs)
+            for cfg in cfgs:
+                self.assertLessEqual(
+                    native_matmul_block_numel(cfg.kwargs, r0_block=rblock),
+                    TRITON_MAX_TENSOR_NUMEL,
+                )
+
+        with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
+            make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
@@ -317,9 +387,6 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(
-        msg="lack _get_exceeding_shared_memory_checker support - torch-xpu-ops: 2331"
-    )
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
@@ -327,6 +394,7 @@ class TestTritonHeuristics(TestCase):
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
+            XPUConfigHeuristic,
         )
 
         expected_count = 1 if do_pruning else 2
@@ -339,7 +407,9 @@ class TestTritonHeuristics(TestCase):
         with config.patch(
             {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
         ):
-            if torch.version.hip:
+            if GPU_TYPE == "xpu":
+                config_heuristic = XPUConfigHeuristic()
+            elif torch.version.hip:
                 config_heuristic = ROCmConfigHeuristic()
             else:
                 config_heuristic = CUDAConfigHeuristic()
@@ -718,6 +788,69 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ.pop("TORCHINDUCTOR_DUMP_LAUNCH_TENSORS", None)
             else:
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
+
+
+class TestCachingAutotunerMakeLaunchers(TestCase):
+    @staticmethod
+    def _make_compile_result(cfg, exc):
+        result = MagicMock()
+        result.config = cfg
+        result.make_launcher.side_effect = exc
+        return result
+
+    @staticmethod
+    def _make_autotuner_with_results(configs, compile_results):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["configs"] = configs
+        autotuner = CachingAutotuner(**args)
+        autotuner.compile_results = compile_results
+        return autotuner
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_make_launchers_recovers_earlier_oom_by_disabling_pipelining(self):
+        cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
+        cfg_ptxas = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
+        result_oom = self._make_compile_result(
+            cfg_oom, OutOfResources(10, 5, "shared memory")
+        )
+        result_ptxas = self._make_compile_result(cfg_ptxas, PTXASError("ptxas"))
+        autotuner = self._make_autotuner_with_results(
+            [cfg_oom, cfg_ptxas],
+            [result_oom, result_ptxas],
+        )
+
+        fallback_result = MagicMock()
+        fallback_launcher = MagicMock()
+        with patch.object(
+            autotuner,
+            "_compile_config_with_disabled_pipelining",
+            return_value=(fallback_result, fallback_launcher),
+        ) as mock_disable_pipelining:
+            autotuner._make_launchers()
+
+        mock_disable_pipelining.assert_called_once_with(cfg_oom)
+        self.assertEqual(len(autotuner.launchers), 1)
+        self.assertIs(autotuner.launchers[0], fallback_launcher)
+        self.assertEqual(len(autotuner.compile_results), 1)
+        self.assertIs(autotuner.compile_results[0], fallback_result)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_make_launchers_does_not_retry_failed_disabled_pipelining(self):
+        cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
+        result_oom = self._make_compile_result(
+            cfg_oom, OutOfResources(10, 5, "shared memory")
+        )
+        autotuner = self._make_autotuner_with_results([cfg_oom], [result_oom])
+
+        with patch.object(
+            autotuner,
+            "_compile_config_with_disabled_pipelining",
+            side_effect=OutOfResources(10, 5, "shared memory"),
+        ) as mock_disable_pipelining:
+            with self.assertRaisesRegex(RuntimeError, "No valid triton configs"):
+                autotuner._make_launchers()
+
+        mock_disable_pipelining.assert_called_once_with(cfg_oom)
 
 
 class TestRecheckAutotuneCache(TestCase):
