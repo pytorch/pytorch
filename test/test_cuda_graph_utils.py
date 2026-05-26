@@ -50,11 +50,14 @@ class TestMarkKernels(TestCase):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
 
-    def test_single_scope(self):
+    def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
         with torch.cuda.graph(graph):
+            # mark_kernels is the first captured work here, so the entry
+            # frontier is empty and the implementation must fall back to
+            # newly created graph roots.
             with mark_kernels("phase_a"):
                 _ = x + 1
             resolve_pending_annotations()
