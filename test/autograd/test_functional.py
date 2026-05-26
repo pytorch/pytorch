@@ -765,6 +765,15 @@ class TestAutogradFunctional(TestCase):
             autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
+    def test_jacobian_err_check_forward_mode_requires_vectorize(self, ctors):
+        def foo(x):
+            raise AssertionError("foo should not be called")
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(ValueError, "requires `vectorize=True`"):
+            autogradF.jacobian(foo, inp, strategy="forward-mode")
+
+    @base_and_logging_tensor
     def test_jacobian_no_grad(self, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
@@ -1123,6 +1132,17 @@ class TestAutogradFunctional(TestCase):
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             autogradF.hessian(foo, inp, strict=True, vectorize=True)
+
+    @base_and_logging_tensor
+    def test_hessian_err_check_forward_mode_requires_vectorize(self, ctors):
+        def foo(x):
+            raise AssertionError("foo should not be called")
+
+        inp = ctors.rand(4)
+        with self.assertRaisesRegex(
+            ValueError, '`outer_jacobian_strategy="forward-mode"`'
+        ):
+            autogradF.hessian(foo, inp, outer_jacobian_strategy="forward-mode")
 
     @base_and_logging_tensor
     def test_hessian_no_grad(self, ctors):
