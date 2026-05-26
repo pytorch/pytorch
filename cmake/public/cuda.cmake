@@ -296,6 +296,27 @@ else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
 endif()
 
+# CUDA::nvperf_host fallback: kineto links it when present; upstream
+# FindCUDAToolkit does not register the target.
+if(USE_KINETO AND NOT TARGET CUDA::nvperf_host)
+  find_library(CUDA_nvperf_host_LIBRARY
+    NAMES nvperf_host
+    HINTS ${CUDAToolkit_LIBRARY_DIR} ENV CUDA_PATH
+    PATH_SUFFIXES extras/CUPTI/lib64 extras/CUPTI/lib/x64
+                  nvidia/current lib64 lib/x64 lib)
+  mark_as_advanced(CUDA_nvperf_host_LIBRARY)
+  if(CUDA_nvperf_host_LIBRARY)
+    add_library(CUDA::nvperf_host UNKNOWN IMPORTED)
+    set_target_properties(CUDA::nvperf_host PROPERTIES
+      IMPORTED_LOCATION "${CUDA_nvperf_host_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+  else()
+    message(WARNING
+      "libnvperf_host not found; kineto/CUPTI link will fail with "
+      "undefined references to NVPW_* symbols.")
+  endif()
+endif()
+
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
