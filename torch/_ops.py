@@ -35,6 +35,7 @@ _P = ParamSpec("_P", default=...)
 
 
 _redispatch_chain_tls = threading.local()
+_fast_redispatch_count: int = 0
 
 
 def _set_fast_redispatch(op: "OpOverload", chain: tuple):
@@ -895,11 +896,13 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
+        global _fast_redispatch_count
         entry = getattr(_redispatch_chain_tls, "entry", None)
         if entry is not None:
             target_op, chain, idx = entry
             if target_op is self and idx < len(chain):
                 entry[2] = idx + 1
+                _fast_redispatch_count += 1
                 return chain[idx](keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
