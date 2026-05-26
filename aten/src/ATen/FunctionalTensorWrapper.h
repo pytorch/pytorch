@@ -326,8 +326,9 @@ TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void freeze_functional_tensor(const Tensor& tensor);
 
-TORCH_API Tensor
-from_functional_tensor(const Tensor& tensor, bool assert_functional = true);
+TORCH_API const Tensor& from_functional_tensor(
+    const Tensor& tensor,
+    bool assert_functional = true);
 TORCH_API std::optional<Tensor> from_functional_tensor(
     const std::optional<Tensor>& t,
     bool assert_functional = true);
