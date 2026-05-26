@@ -173,8 +173,6 @@ ops_dde_xfail = {
     xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
