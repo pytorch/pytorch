@@ -975,10 +975,6 @@ class CustomOpDef:
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
-        if self._fast_path is not None:
-            result = self._fast_path(*args, **kwargs)
-            if result is not _DO_SLOW_PATH:
-                return result
         return self._opoverload(*args, **kwargs)
 
     def register_vmap(
