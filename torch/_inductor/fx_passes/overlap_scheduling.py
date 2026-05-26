@@ -1276,14 +1276,18 @@ class OverlapScheduler:
         ):
             return
 
-        # Compile candidates - limit by distance to bound compile time
+        # Compile candidates - limit by number of plausible candidates to bound
+        # compile time.  Do not stop after seeing max_node_distance raw entries:
+        # early entries may be filtered by PG/prefetch distance, while later
+        # entries can still use the current overlap window.
         candidates = []
-        for i, collective in enumerate(self.unscheduled_collectives):
-            if i > self.max_node_distance:
-                break
-
+        for collective in self.unscheduled_collectives:
             pg_name = get_group_name(collective)
             if pg_name == exclude_pg:
+                continue
+
+            pg_available_time = remaining_time_per_pg.get(pg_name, 0.0)
+            if pg_available_time <= 0:
                 continue
 
             if (
@@ -1295,6 +1299,8 @@ class OverlapScheduler:
                 continue
 
             candidates.append(collective)
+            if len(candidates) >= self.max_node_distance:
+                break
 
         def get_priority(n: fx.Node) -> int:
             dominates_next_compute = (
@@ -1309,13 +1315,18 @@ class OverlapScheduler:
             else:
                 return 3  # Off-path, doesn't block reduce_scatter
 
-        candidates.sort(
-            key=lambda n: (
+        def overlap_priority(n: fx.Node) -> object:
+            return (
                 get_priority(n),
                 self.compute_index_domination[n],
+                -min(
+                    remaining_time_per_pg.get(get_group_name(n), 0.0),
+                    self.collective_info[n].exposed_time_ms,
+                ),
                 self.node_idx[n],
-            ),
-        )
+            )
+
+        candidates.sort(key=overlap_priority)
 
         if self.prioritize_bucketing_during_scheduling:
             # group candidates by bucket key first so same-bucket
@@ -1329,7 +1340,7 @@ class OverlapScheduler:
             sorted_bucket_keys = sorted(
                 bucket_groups.keys(),
                 key=lambda k: (
-                    min(self.compute_index_domination[c] for c in bucket_groups[k]),
+                    min(overlap_priority(c) for c in bucket_groups[k]),
                     -len(bucket_groups[k]),
                 ),
             )
@@ -1338,9 +1349,7 @@ class OverlapScheduler:
             candidates = []
             for b_key in sorted_bucket_keys:
                 group = bucket_groups[b_key]
-                group.sort(
-                    key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
-                )
+                group.sort(key=overlap_priority)
                 candidates.extend(group)
 
         for collective in candidates:
