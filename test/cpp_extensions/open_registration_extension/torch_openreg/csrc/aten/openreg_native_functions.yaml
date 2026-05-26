@@ -5,3 +5,6 @@ device_guard: true
 supported:
   - maximum.out:
     structured: true
+  - minimum.out:
+    structured: true
+    ext_structured_meta: true
