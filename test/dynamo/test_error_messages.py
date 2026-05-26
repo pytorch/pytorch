@@ -44,6 +44,184 @@ class GenericCtxMgr:
         pass
 
 
+def _get_iter_has_positions() -> bool:
+    """Whether GET_ITER bytecodes have position info on this Python build.
+
+    This varies across Python 3.12 point releases / platforms — some builds
+    include positions for GET_ITER and some don't, which affects whether
+    RangeIteratorVariable gets source attribution.
+    """
+    code = compile("for x in range(1): pass", "<test>", "exec")
+    for inst in dis.get_instructions(code):
+        if inst.opname == "GET_ITER":
+            return inst.positions is not None and inst.positions.lineno is not None
+    return False
+
+
+def _generic_ctx_mgr_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11):
+        caret = "^^^^^^^^^^^^^^^\n"
+    else:
+        caret = ""
+    return (
+        "Stack variable source attribution:\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                with GenericCtxMgr():\n"
+        f"{caret}"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                    with GenericCtxMgr():\n"
+        f"{caret}"
+    )
+
+
+def _assert_failure_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11):
+        caret = "^^^^^^^^^^^^^^^\n"
+    else:
+        caret = ""
+    return (
+        "Stack variable source attribution:\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                with GenericCtxMgr():\n"
+        f"{caret}"
+    )
+
+
+@lru_cache(None)
+def _compile_wrapper_raise_source() -> str:
+    source = "def f():\n    raise RuntimeError(\n        None\n    )\n"
+    filename = "<compile_wrapper_raise_source>"
+    linecache.cache[filename] = (
+        len(source),
+        None,
+        source.splitlines(True),
+        filename,
+    )
+    namespace = {}
+    exec(compile(source, filename, "exec"), namespace)
+    try:
+        namespace["f"]()
+    except RuntimeError as e:
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    if "        None\n    )\n" in msg:
+        return (
+            "    raise e.with_traceback(\n"
+            "        None\n"
+            "    ) from e.__cause__  # User compiler error\n"
+        )
+    return "    raise e.with_traceback(\n"
+
+
+def _load_global_has_positions() -> bool:
+    """Whether LOAD_GLOBAL bytecodes have position info on this Python build.
+
+    This varies across Python 3.12 point releases / platforms — some builds
+    include positions for LOAD_GLOBAL and some don't, which affects whether
+    NullVariable (pushed as part of LOAD_GLOBAL's call convention) gets
+    source attribution.
+    """
+    code = compile("def f(): x()", "<test>", "exec")
+    for const in code.co_consts:
+        if hasattr(const, "co_code"):
+            for inst in dis.get_instructions(const):
+                if inst.opname == "LOAD_GLOBAL":
+                    return (
+                        inst.positions is not None and inst.positions.lineno is not None
+                    )
+    return False
+
+
+def _reconstruction_failure_gb_stack_source_attribution() -> str:
+    var_repr = "NullVariable originated from:"
+
+    if sys.version_info >= (3, 14):
+        return (
+            "Stack variable source attribution:\n"
+            f"  {var_repr}\n"
+            '  File "test_error_messages.py", line N\n'
+            "                torch._dynamo.graph_break()\n"
+            "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11) and _load_global_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            f"  {var_repr}\n"
+            '  File "test_error_messages.py", line N\n'
+            "                torch._dynamo.graph_break()\n"
+            "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        f"  {var_repr}\n"
+        '  File "test_error_messages.py", line N\n'
+        "                torch._dynamo.graph_break()\n"
+        "\n"
+    )
+
+
+def _graph_break_in_loop_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11) and _get_iter_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            "  RangeIteratorVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                for i in range(2):\n"
+            "^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        "  RangeIteratorVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                for i in range(2):\n"
+        "\n"
+    )
+
+
+def _skip_frame_in_loop_message_stack_source_attribution() -> str:
+    if sys.version_info >= (3, 11) and _get_iter_has_positions():
+        return (
+            "Stack variable source attribution:\n"
+            "  RangeIteratorVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                for i in range(2):\n"
+            "^^^^^^^^\n"
+            "  WithExitFunctionVariable() originated from:\n"
+            '  File "test_error_messages.py", line N\n'
+            "                    with GenericCtxMgr():\n"
+            "^^^^^^^^^^^^^^^\n"
+            "\n"
+        )
+
+    if sys.version_info >= (3, 11):
+        return ""
+
+    return (
+        "Stack variable source attribution:\n"
+        "  RangeIteratorVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                for i in range(2):\n"
+        "  WithExitFunctionVariable() originated from:\n"
+        '  File "test_error_messages.py", line N\n'
+        "                    with GenericCtxMgr():\n"
+        "\n"
+    )
+
+
 class ErrorMessagesTest(LoggingTestCase):
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():

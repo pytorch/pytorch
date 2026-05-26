@@ -2119,12 +2119,12 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-        getitem_6: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_7: "f32[4, 4]" = tag_activation_checkpoint[1]
-        getitem_8: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
+        getitem_3: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[1]
+        getitem_5: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
 
-        add: "f32[4, 4]" = getitem_6 + getitem_7;  getitem_6 = getitem_7 = None
-        return (add, getitem_8)
+        add: "f32[4, 4]" = getitem_3 + getitem_4;  getitem_3 = getitem_4 = None
+        return (add, getitem_5)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
@@ -2791,25 +2791,25 @@ def forward(self, arg0_1):
             gm_with.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    mm = torch.ops.aten.mm.default(arg2_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    mm_1 = torch.ops.aten.mm.default(arg0_1, arg2_1)
+    mm_1 = torch.ops.aten.mm.default(arg2_1, arg1_1)
     sigmoid = torch.ops.aten.sigmoid.default(mm_1);  mm_1 = None
     detach_4 = torch.ops.aten.detach.default(sigmoid)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg2_1, arg0_1);  arg2_1 = None
     cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
-    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
     mm_3 = torch.ops.aten.mm.default(mul, t);  mul = t = None
     ones_like_1 = torch.ops.aten.ones_like.default(sum_2, pin_memory = False, memory_format = torch.preserve_format);  sum_2 = None
     expand_1 = torch.ops.aten.expand.default(ones_like_1, [4, 4]);  ones_like_1 = None
     detach_5 = torch.ops.aten.detach.default(detach_4);  detach_4 = None
     sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_5);  expand_1 = detach_5 = None
-    t_1 = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_4 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
     add = torch.ops.aten.add.Tensor(mm_3, mm_4);  mm_3 = mm_4 = None
     detach_6 = torch.ops.aten.detach.default(add);  add = None

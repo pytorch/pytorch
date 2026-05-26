@@ -614,13 +614,13 @@ class GraphModule(torch.nn.Module):
 
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = l_x_.clone();  l_x_ = None
-            outs: "f32[]" = mul * clone;  mul = clone = None
+            outs: "f32[]" = mul * clone
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((outs,), (l_weird_b, l_weird_c))
+            return ((outs, mul, clone), (l_weird_b, l_weird_c))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, grad: "f32[]", unused_0, unused_1, l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
@@ -1135,13 +1135,13 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             t: "f32[3, 4]" = l_weight_.t()
-            y: "f32[5, 4]" = l_x_.matmul(t);  t = None
+            y: "f32[5, 4]" = l_x_.matmul(t)
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((y,), (l_weight_, l_x_))
+            return ((y, t), (l_weight_, l_x_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y: "f32[5, 4]", l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
+        def forward(self, y: "f32[5, 4]", unused_0, l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
@@ -1805,13 +1805,13 @@ class GraphModule(torch.nn.Module):
 
             result: "f32[s17, 8]" = a * b
 
-            out: "f32[s17, 8]" = a + b;  b = None
+            out: "f32[s17, 8]" = a + b
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((result, out), (s17, a, cos, result))
+            return ((result, out, a, b), (s17, a, cos, result))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
+        def forward(self, grad_a: "f32[s17, 8]", grad_b: "f32[s17, 8]", unused_0, unused_1, s17: "Sym(s17)", a: "f32[s17, 8]", arg: "f32[s17, 8]", result: "f32[s17, 8]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[s17, 8]" = a * grad_b;  a = grad_b = None
@@ -1948,13 +1948,19 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8, 8]"):
         l_x_ = L_x_
 
-        fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
         autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
-        y: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
+        getitem: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
 
-        sin: "f32[8, 8]" = torch.sin(y);  y = None
+        sin: "f32[8, 8]" = torch.sin(getitem);  getitem = None
         return (sin,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad_out: "f32[8, 8]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (grad_out,)
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
@@ -1963,12 +1969,6 @@ class GraphModule(torch.nn.Module):
 
             view_as: "f32[8, 8]" = l_x_.view_as(l_x_);  l_x_ = None
             return ((view_as,), ())
-
-    class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_out: "f32[8, 8]"):
-            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (grad_out,)
 """,
         )
 
@@ -2050,17 +2050,17 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = l_module_b * 5;  l_module_b = None
-            mul_1: "f32[4, 4]" = mul * l_input_data_values;  mul = None
-            output_tensor: "f32[4, 4]" = 4 + mul_1;  mul_1 = None
+            mul_1: "f32[4, 4]" = mul * l_input_data_values
+            output_tensor: "f32[4, 4]" = 4 + mul_1
 
-            out: "f32[4, 4]" = output_tensor + l_x_;  output_tensor = None
+            out: "f32[4, 4]" = output_tensor + l_x_
             out_1: "f32[4, 4]" = l_input_data_values + l_x_;  l_input_data_values = l_x_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((out, out_1), ())
+            return ((out, out_1, mul, mul_1, output_tensor), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]"):
+        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]", unused_0, unused_1, unused_2):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[4, 4]" = grad_output * 4;  mul = None
