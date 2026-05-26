@@ -41,7 +41,8 @@ struct InputBuffer {
       : buffer(size),
         opt_accum_streams(size),
         ready_events(size),
-        ready_streams(size) {}
+        ready_streams(size),
+        saved_versions_(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
@@ -64,6 +65,17 @@ struct InputBuffer {
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);
 
+  // Check that version counters haven't changed since the gradients were
+  // placed in the buffer. Errors if a gradient was modified in-place
+  // between production and consumption.
+  void check_versions(const Node& consumer) const;
+
+ private:
+  void save_version_at(size_t pos);
+  void check_version_at(size_t pos, const Node* fn);
+
+ public:
+
   std::vector<Variable> buffer;
   // The stream used for accumulation when a variable is used multiple times.
   std::vector<std::optional<c10::Stream>> opt_accum_streams;
@@ -83,6 +95,10 @@ struct InputBuffer {
   // is nullopt and Engine::evaluate_function falls back to the node's
   // func->stream().
   std::optional<c10::Stream> opt_overridden_consumer_stream;
+  // Version counters recorded when gradients are placed in the buffer (via
+  // add()) and updated after accumulation. Used to detect in-place
+  // modification of gradients between production and consumption.
+  std::vector<uint32_t> saved_versions_;
 };
 
 } // namespace torch::autograd
