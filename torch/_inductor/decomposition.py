@@ -62,6 +62,7 @@ inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
