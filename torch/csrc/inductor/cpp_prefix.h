@@ -192,7 +192,16 @@ Welford<T> welford_combine(
   if (b.index == 0) {
     return a;
   }
+  // Guard against inf - inf = NaN when both means are infinite and equal.
+  // This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
   auto delta = b.mean - a.mean;
+  if constexpr (IsVecType<T>::value) {
+    delta = T::blendv(delta, T(0), a.mean == b.mean);
+  } else {
+    if (std::isinf(a.mean) && a.mean == b.mean) {
+      delta = T(0);
+    }
+  }
   auto a_weight = use_index ? T(a.index) : a.weight;
   auto b_weight = use_index ? T(b.index) : b.weight;
   auto new_weight = a_weight + b_weight;
