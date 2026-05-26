@@ -37,15 +37,20 @@ _P = ParamSpec("_P", default=...)
 _redispatch_chain_tls = threading.local()
 
 
-@contextlib.contextmanager
-def _enable_fast_redispatch(op: "OpOverload", chain: tuple) -> Iterator[None]:
-    """While active, op.redispatch() pops from *chain* instead of C++ dispatch."""
+def _set_fast_redispatch(op: "OpOverload", chain: tuple):
+    """Set up fast redispatch chain. Returns previous entry for restore.
+
+    Split into set/unset instead of a context manager to avoid __enter__/__exit__
+    overhead on the custom_op fast path.
+    """
     prev = getattr(_redispatch_chain_tls, "entry", None)
     _redispatch_chain_tls.entry = [op, chain, 0]
-    try:
-        yield
-    finally:
-        _redispatch_chain_tls.entry = prev
+    return prev
+
+
+def _unset_fast_redispatch(prev):
+    """Restore previous redispatch chain entry."""
+    _redispatch_chain_tls.entry = prev
 
 
 # Query `hasattr` only once.

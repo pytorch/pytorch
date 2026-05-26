@@ -927,8 +927,11 @@ class CustomOpDef:
 
             opdef._fast_path_hits += 1
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
-            with _ops._enable_fast_redispatch(op, chain):
+            prev = _ops._set_fast_redispatch(op, chain)
+            try:
                 return op.redispatch(keyset, *args)
+            finally:
+                _ops._unset_fast_redispatch(prev)
 
         self._fast_path = fast_path
 
