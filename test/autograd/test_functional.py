@@ -691,6 +691,12 @@ class TestAutogradFunctional(TestCase):
             return 3 * a.narrow(0, 0, 3), "bar"
 
         inp = ctors.rand(4)
+        with self.assertRaisesRegex(ValueError, "requires `vectorize=True`"):
+        autogradF.jacobian(foo, inp, strategy="forward-mode", vectorize=False)
+
+        with self.assertRaisesRegex(
+        TypeError, "The inputs given to jacobian must be either a Tensor"
+        ):
         with self.assertRaisesRegex(
             TypeError, "The inputs given to jacobian must be either a Tensor"
         ):
@@ -1044,6 +1050,11 @@ class TestAutogradFunctional(TestCase):
             return 3 * a.narrow(0, 0, 3), 3 * a.narrow(0, 0, 3)
 
         inp = ctors.rand(4)
+        with self.assertRaisesRegex(ValueError, "requires `vectorize=True`"):
+            autogradF.hessian(
+                foo, inp, outer_jacobian_strategy="forward-mode", vectorize=False
+            )
+
         with self.assertRaisesRegex(
             TypeError, "The inputs given to hessian must be either a Tensor"
         ):
