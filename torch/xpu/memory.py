@@ -623,7 +623,7 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
 
 
 def list_gpu_processes(device: "Device" = None) -> str:
-    r"""Return a human-readable printout of the running processes and their GPU memory use for a given device.
+    r"""Return a printout of running processes and their GPU memory usage on a given device.
 
     Args:
         device (torch.device, str or int, optional): selected device. Uses the
