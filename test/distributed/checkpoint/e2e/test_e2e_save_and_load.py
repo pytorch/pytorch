@@ -520,7 +520,6 @@ class TestNoCPU(DTensorTestBase):
         )
 
     @with_comms
-    @requires_accelerator_dist_backend()
     def test_no_cpu(self):
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"

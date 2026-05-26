@@ -325,6 +325,7 @@ class MicrobatchTests(TestCase):
         ref = mod(x, y)
         out = pipe(x, y)[0]
 
+        # https://github.com/intel/torch-xpu-ops/issues/1682 - reason for different tolerance for xpu
         rtol, atol = None, None
         if self.device_type == "xpu":
             rtol, atol = 1e-4, 1e-4

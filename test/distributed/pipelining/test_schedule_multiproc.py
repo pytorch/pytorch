@@ -427,7 +427,8 @@ class ScheduleTest(MultiProcContinuousTest):
                 schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
-
+        dist.barrier(device_ids=[self.rank])
+        
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"

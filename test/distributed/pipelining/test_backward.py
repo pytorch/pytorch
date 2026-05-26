@@ -49,6 +49,7 @@ class StageBackwardTests(TestCase):
 
         torch.testing.assert_close(grad_inputs[0], ref_x.grad)
 
+        # https://github.com/intel/torch-xpu-ops/issues/1682 - reason for different tolerance for xpu
         rtol, atol = None, None
         if self.device_type == "xpu":
             rtol, atol = (
@@ -100,6 +101,7 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
+    # https://github.com/intel/torch-xpu-ops/issues/1682 - reason for different tolerance for xpu
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
