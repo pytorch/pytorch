@@ -18,9 +18,10 @@ def _create_fake_pg(common_opts, backend_opts):
     communication.  You can run a single rank with a fake process group
     without needing multiple processes (simulates per-rank behavior)
 
-    NOTE: This is not a real process group, and it would produce wrong results
-    for every collective. It should be used as a convenient tool when playing
-    with distributed but don't care about the actual data.
+    NOTE: Under the assumption that all ranks hold identical data,
+    reduce collectives (allreduce, reduce_scatter, etc.) now produce
+    numerically correct results (e.g. SUM multiplies by world_size).
+    Gather-style collectives replicate the local input.
     """
     return FakeProcessGroup._create_internal(
         common_opts.group_rank, common_opts.group_size, backend_opts
