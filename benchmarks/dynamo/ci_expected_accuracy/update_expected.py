@@ -293,6 +293,7 @@ if __name__ == "__main__":
             ["huggingface", "timm", "torchbench"],
         )
     }
+    suites.remove("dynamic_aot_eager_torchbench")
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
     if not os.path.exists(root_path):
