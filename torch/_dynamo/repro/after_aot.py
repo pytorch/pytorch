@@ -205,7 +205,9 @@ class ReproOptions:
             skip_saving_float64_intermediates=getattr(
                 options, "skip_saving_float64_intermediates", False
             ),
-            skip_check_deterministic=getattr(options, "skip_check_deterministic", False),
+            skip_check_deterministic=getattr(
+                options, "skip_check_deterministic", False
+            ),
         )
 
 
