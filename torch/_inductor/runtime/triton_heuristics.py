@@ -585,7 +585,7 @@ class CachingAutotuner(KernelInterface):
 
         configs = [result.config for result in self.compile_results]
 
-        (cached_configs, _, autotune_cache_info) = check_autotune_cache(
+        cached_configs, _, autotune_cache_info = check_autotune_cache(
             configs, self.filename, self.inductor_meta
         )
         self.autotune_cache_info = autotune_cache_info
@@ -798,7 +798,9 @@ class CachingAutotuner(KernelInterface):
         if not self._could_rblock_scale:
             return
         for new_config in self._iter_rblock_scale_candidates():
-            self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
+            self.compile_results.append(
+                self._precompile_config(new_config)
+            )  # noqa: B909
         self._make_launchers()
 
     def compile_by_disabling_pipelining(self, config):
@@ -929,9 +931,9 @@ class CachingAutotuner(KernelInterface):
                 result.kernel.cubin_raw = None
 
     def __getstate__(self) -> dict[str, Any]:
-        assert not self.launchers, (
-            "pickle should not be called with after make_launchers()"
-        )
+        assert (
+            not self.launchers
+        ), "pickle should not be called with after make_launchers()"
         return {
             **self.__dict__,
             "lock": None,
@@ -1235,7 +1237,9 @@ class CachingAutotuner(KernelInterface):
                         stream=stream,
                     )
                 except Exception as e:
-                    if isinstance(e, TypeError) and "got multiple values for argument" in str(e):
+                    if isinstance(
+                        e, TypeError
+                    ) and "got multiple values for argument" in str(e):
                         num_expected = len(self.triton_meta.get("signature", {}))
                         num_received = len(cloned_args) + len(cloned_kwargs)
                         raise TypeError(
@@ -1361,9 +1365,7 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
         for name, arg in kwargs.items():
@@ -1371,9 +1373,7 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                ), "self.reset_to_zero_arg_names should only contain valid argument names"
                 arg.zero_()
 
     def maybe_clone_args(
@@ -1854,9 +1854,7 @@ class CachingAutotuner(KernelInterface):
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "R0_BLOCK" in launcher.config.kwargs
-        ), (
-            "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
-        )
+        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -1952,7 +1950,7 @@ class CachingAutotuner(KernelInterface):
         stream,
         benchmark_run=False,
         **kwargs,
-    ):  # type:ignore[override]
+    ):  # type: ignore[override]
         """Launch triton kernel call and return result."""
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
@@ -2601,7 +2599,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         binary = self.kernel
         fn = binary.src.fn
         binary._init_handles()
-        (call_args, def_args, none_args) = self._get_arg_lists(
+        call_args, def_args, none_args = self._get_arg_lists(
             fn.arg_names, get_constexprs(fn)
         )
         binary_shared = (
@@ -3023,9 +3021,9 @@ def check_max_block(cfg: dict[str, int]):
         if block_suffix in var:
             prefix = var.removesuffix(block_suffix)
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert val <= max_block, (
-                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
-            )
+            assert (
+                val <= max_block
+            ), f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
 
 
 def _check_native_matmul_block_numel(
@@ -3078,9 +3076,9 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
-            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
-        )
+        assert not (
+            frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()
+        ), f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
         if not (has_xblock or has_rblock):
@@ -3304,20 +3302,20 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         prefix = f"r{idx}_"
         max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
         dim = min(max_size, remaining)
-        assert remaining % dim == 0, (
-            f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-        )
+        assert (
+            remaining % dim == 0
+        ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
         rnumels[prefix] = dim
         remaining //= dim
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
-    assert r == final_numel, (
-        f"Expected ND reduction size ({rnumels}) to have {r} elements."
-    )
-    assert all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels), (
-        f"rnumels exceed size_hints. {rnumels} > {size_hints}"
-    )
+    assert (
+        r == final_numel
+    ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
+    assert all(
+        rnumels[prefix] <= size_hints[prefix] for prefix in rnumels
+    ), f"rnumels exceed size_hints. {rnumels} > {size_hints}"
 
     return rnumels
 
@@ -3516,9 +3514,11 @@ def _handle_combo_kernel_per_subkernel_blocks(
             cfgs = pointwise(
                 size_hints_i,
                 triton_meta=triton_meta,
-                tile_hint=TileHint.SQUARE
-                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
-                else TileHint.DEFAULT,
+                tile_hint=(
+                    TileHint.SQUARE
+                    if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
+                    else TileHint.DEFAULT
+                ),
                 filename=filename,
                 min_elem_per_thread=min_elem_per_thread,
                 inductor_meta=inductor_meta_i,
@@ -4459,9 +4459,9 @@ def cooperative_reduction(
         size_hints["x"] = 1
 
     # Cooperative reductions currently only support a single reduction dimension.
-    assert len(size_hints) == 2, (
-        "Cooperative reductions don't support tiling reduction dims"
-    )
+    assert (
+        len(size_hints) == 2
+    ), "Cooperative reductions don't support tiling reduction dims"
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
     # Note that we must never create more CTAs than there are SMs, because we
@@ -5066,9 +5066,9 @@ class GridExpr:
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
-        assert inductor_meta is not None, (
-            "inductor_meta must be specified for lazy compile"
-        )
+        assert (
+            inductor_meta is not None
+        ), "inductor_meta must be specified for lazy compile"
         grid_type = inductor_meta.get("grid_type", None)
         assert grid_type is not None, "grid_type must be specified for lazy compile"
         grid_cls = globals()[grid_type]
