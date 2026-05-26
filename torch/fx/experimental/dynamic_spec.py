@@ -88,7 +88,7 @@ def _get_spec_shape_env() -> ShapeEnv:
                 # Allow everything during super().__init__.
                 object.__setattr__(self, "_init_done", False)
                 super().__init__()
-                object.__setattr__(self, "_sinit_done", True)
+                object.__setattr__(self, "_init_done", True)
 
             def __getattribute__(self, name: str) -> Any:
                 if name.startswith("_"):
@@ -190,25 +190,6 @@ class IntVar(SymInt):
             "max": self.max,
             "optimization_hint": self.optimization_hint,
         }
-
-
-def _validate_spec_value(v: Any, *, where: str) -> None:
-    """Assert a SymInt / SymBool entering a spec originates from spec IntVars.
-
-    Args:
-        v: value being validated.
-        where: description of the spec position (for error messages).
-    """
-    import torch as _torch
-
-    if isinstance(v, (SymInt, _torch.SymBool)):
-        env = v.node.shape_env
-        if env is not _get_spec_shape_env():
-            raise TypeError(
-                f"{where}: SymInt / SymBool spec values must originate from "
-                f"spec IntVar / ShapeVar (built against the singleton spec "
-                f"ShapeEnv). Got {v!r} backed by a different ShapeEnv: {env}."
-            )
 
 
 class ShapeVar(IntVar):
