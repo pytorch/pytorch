@@ -132,7 +132,7 @@ class SubprocPool:
         self,
         nprocs: int,
         pickler: SubprocPickler | None = None,
-        kind: SubprocKind = SubprocKind.SPAWN,
+        kind: SubprocKind = SubprocKind.FORK,
         quiesce: bool = False,
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
