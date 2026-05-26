@@ -933,7 +933,19 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
+    assert len(scale_a) >= 1 and len(scale_b) >= 1, (
+        "scale_a and scale_b must each have at least one entry"
+    )
+
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+
+    # Swizzling is not yet wired into any template here; reject anything other
+    # than NO_SWIZZLE (=0) so we don't silently produce wrong results once a
+    # caller starts passing real swizzle patterns.
+    assert all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b), (
+        "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
+        f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
+    )
 
     def check_supported_recipe(recipe: list[int]) -> bool:
         disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
@@ -1048,6 +1060,17 @@ def tuned_scaled_mm_v2(
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+        )
 
     # Early return for MX variants
     if (
