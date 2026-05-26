@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "use_torchcomms"]
+__all__ = ["compile_on_one_rank", "new_group_use_split_group", "use_torchcomms"]
 
 # When enabled, coordinates are computed at runtime via a custom op rather
 # than being baked in at compile time. This allows compiling on one rank
@@ -25,6 +25,14 @@ compile_on_one_rank: bool = bool(
 use_torchcomms: bool = Config(
     default=False,
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
+)
+
+# When enabled, `new_group` delegates to `split_group` instead of the
+# legacy per-backend creator path. The default is False so existing users
+# get a one-time deprecation warning before the migration completes.
+new_group_use_split_group: bool = Config(
+    default=False,
+    env_name_default="TORCH_DIST_NEW_GROUP_USE_SPLIT_GROUP",
 )
 
 

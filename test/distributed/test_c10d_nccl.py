@@ -1156,6 +1156,89 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_new_group_delegates_to_split_group_when_flag_set(self):
+        # When the migration flag is on, new_group should drive ncclCommSplit
+        # rather than constructing a fresh communicator.
+        from torch.distributed import config as dist_config
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+
+        subg_ranks = [0, 1]
+        with (
+            dist_config.patch(new_group_use_split_group=True),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always", FutureWarning)
+            ng = c10d.new_group(subg_ranks)
+        migration_warnings = [
+            w for w in caught
+            if issubclass(w.category, FutureWarning)
+            and "new_group_use_split_group" in str(w.message)
+        ]
+        self.assertEqual(migration_warnings, [])
+
+        # split happened eagerly under the split_group path.
+        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(
+            dist.get_process_group_ranks(ng),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
+
+        if dist.get_rank(ng) >= 0:
+            tensor = torch.full((1,), self.rank).cuda(device)
+            dist.broadcast(tensor, dist.get_global_rank(ng, 0), group=ng)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_new_group_warns_once_when_flag_unset(self):
+        import torch.distributed.distributed_c10d as c10d_module
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        # Reset the per-process latch so this test is order-independent.
+        c10d_module._warned_about_new_group_migration = False
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FutureWarning)
+            c10d.new_group([0, 1])
+            c10d.new_group([0, 1])
+
+        migration_warnings = [
+            w for w in caught
+            if issubclass(w.category, FutureWarning)
+            and "new_group_use_split_group" in str(w.message)
+        ]
+        self.assertEqual(len(migration_warnings), 1)
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_new_group_via_split_group_raises_on_unsupported_args(self):
+        from torch.distributed import config as dist_config
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        with dist_config.patch(new_group_use_split_group=True):
+            with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
+                c10d.new_group([0, 1], use_local_synchronization=True)
+            with self.assertRaisesRegex(NotImplementedError, "sort_ranks"):
+                c10d.new_group([0, 1], sort_ranks=False)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_mixed_backend(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.

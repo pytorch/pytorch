@@ -167,6 +167,16 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _use_split_group_for_new_group() -> bool:
+    """Check if `new_group` should delegate to `split_group`."""
+    return dist_config.new_group_use_split_group
+
+
+# Module-level latch so the new_group -> split_group migration warning is
+# emitted at most once per process.
+_warned_about_new_group_migration: bool = False
+
+
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
@@ -5780,7 +5790,41 @@ def new_group(
     N.B. use_local_synchronization=True can lead to deadlocks when each rank creates
     multiple overlapping process groups. To avoid that, make sure all ranks follow the
     same global creation order.
+
+    N.B. When ``torch.distributed.config.new_group_use_split_group`` is True
+    (or ``TORCH_DIST_NEW_GROUP_USE_SPLIT_GROUP=1``), this function delegates to
+    :func:`split_group` instead of running the legacy per-backend creator path.
+    The delegation path raises ``NotImplementedError`` for arguments that
+    :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
+    ``sort_ranks=False``, or an explicit ``backend`` / ``device_id`` that
+    diverges from the default group). When the flag is False, a one-time
+    ``FutureWarning`` is emitted advising callers to opt in.
     """
+    if _use_split_group_for_new_group():
+        return _new_group_via_split_group(
+            ranks=ranks,
+            timeout=timeout,
+            backend=backend,
+            pg_options=pg_options,
+            use_local_synchronization=use_local_synchronization,
+            group_desc=group_desc,
+            device_id=device_id,
+            sort_ranks=sort_ranks,
+        )
+
+    global _warned_about_new_group_migration
+    if not _warned_about_new_group_migration:
+        warnings.warn(
+            "torch.distributed.new_group is being migrated to delegate to "
+            "torch.distributed.split_group. Set "
+            "torch.distributed.config.new_group_use_split_group = True "
+            "(or export TORCH_DIST_NEW_GROUP_USE_SPLIT_GROUP=1) to opt in to "
+            "the new behavior. This warning is shown once per process.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        _warned_about_new_group_migration = True
+
     return _new_group_with_tag(
         ranks,
         timeout,
@@ -5792,6 +5836,65 @@ def new_group(
         device_id=device_id,
         sort_ranks=sort_ranks,
     )
+
+
+def _new_group_via_split_group(
+    ranks,
+    timeout,
+    backend,
+    pg_options,
+    use_local_synchronization,
+    group_desc,
+    device_id,
+    sort_ranks,
+):
+    """Implement `new_group` semantics on top of `split_group`.
+
+    Raises ``NotImplementedError`` (or ``ValueError`` for inconsistent args)
+    when the requested ``new_group`` configuration cannot be expressed through
+    ``split_group``. Backend-level limitations (e.g. Gloo / MPI not supporting
+    splitting) propagate as the ``RuntimeError`` raised by ``split_group``.
+    """
+    if use_local_synchronization:
+        raise NotImplementedError(
+            "new_group -> split_group delegation does not support "
+            "use_local_synchronization=True; split_group requires all ranks "
+            "in the parent group to participate."
+        )
+    if not sort_ranks:
+        raise NotImplementedError(
+            "new_group -> split_group delegation does not support "
+            "sort_ranks=False; split_group always sorts the ranks of each "
+            "subgroup."
+        )
+
+    default_pg = _get_default_group()
+    if device_id is not None:
+        bound = default_pg.bound_device_id
+        if bound is not None and device_id != bound:
+            raise ValueError(
+                f"device_id={device_id} does not match the default process "
+                f"group's bound_device_id={bound}; split_group inherits the "
+                "default group's device binding."
+            )
+
+    global_world_size = default_pg.size()
+    if ranks is None:
+        group_ranks = list(range(global_world_size))
+    else:
+        group_ranks = sorted(ranks)
+
+    split_pg = split_group(
+        parent_pg=default_pg,
+        split_ranks=[group_ranks],
+        timeout=timeout,
+        pg_options=pg_options,
+        group_desc=group_desc,
+        backend=backend,
+    )
+    if split_pg is None:
+        return GroupMember.NON_GROUP_MEMBER
+    return split_pg
 
 
 def _new_group_with_tag(
