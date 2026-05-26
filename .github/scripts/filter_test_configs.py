@@ -30,30 +30,11 @@ PREFIX = "test-config/"
 logging.basicConfig(level=logging.INFO)
 
 
-def is_cuda_or_rocm_job(
-    job_name: str | None, config: dict[str, Any] | None = None
-) -> bool:
-    if job_name and ("cuda" in job_name or "rocm" in job_name):
-        return True
-
-    # Also check the runner name in the config, since some workflows (e.g.
-    # inductor-unittest) use job names that don't include "cuda" even though
-    # they target CUDA runners.
-    if config:
-        runner = config.get("runner", "")
-        if "nvidia.gpu" in runner or "rocm.gpu" in runner:
-            return True
-
-    return False
-
-
 # Supported modes when running periodically. Only applying the mode when
 # its lambda condition returns true. Each callable receives (job_name, config).
 SUPPORTED_PERIODICAL_MODES: dict[
     str, Callable[[str | None, dict[str, Any] | None], bool]
 ] = {
-    # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
-    "mem_leak_check": is_cuda_or_rocm_job,
     "rerun_disabled_tests": lambda job_name, config=None: True,
 }
 
@@ -69,7 +50,6 @@ TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
-MEM_LEAK_LABEL = "enable-mem-leak-check"
 
 
 class IssueType(Enum):
@@ -569,12 +549,6 @@ def perform_misc_tasks(
 
     set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
 
-    if MEM_LEAK_LABEL in labels:
-        # Enable mem leak check if label is added
-        for config in test_matrix.get("include", []):
-            if is_cuda_or_rocm_job(job_name):
-                config["mem_leak_check"] = "mem_leak_check"
-
 
 def main() -> None:
     args = parse_args()
@@ -633,8 +607,8 @@ def main() -> None:
         )
 
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-        # we don't want to run the mem leak check or disabled tests on normal
-        # periodically scheduled jobs, only the ones at this time
+        # Only run rerun_disabled_tests on this dedicated periodic schedule,
+        # not on every periodically scheduled job.
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
