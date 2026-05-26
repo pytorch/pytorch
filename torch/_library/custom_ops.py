@@ -272,8 +272,6 @@ def custom_op(
 # Sentinel returned by fast_path when it can't handle the call.
 _DO_SLOW_PATH = object()
 
-# TLS for the fast dispatch chain: stores the resolved backend_impl for the current call.
-_backend_impl_tls = threading.local()
 
 
 class CustomOpDef:
@@ -887,17 +885,11 @@ class CustomOpDef:
 
         op = self._opoverload
         autograd_impl = self._autograd_impl
+        adinplaceorview_impl = self._adinplaceorview_impl
         disabled_kernel = self._disabled_kernel
         backend_impls = self._backend_impls
+        is_mutable = schema.is_mutable
         opdef = self
-
-        def backend_dispatch(keyset, *args, **kwargs):
-            return _backend_impl_tls.entry(*args, **kwargs)
-
-        if schema.is_mutable:
-            chain = (autograd_impl, self._adinplaceorview_impl, backend_dispatch)
-        else:
-            chain = (autograd_impl, backend_dispatch)
 
         def fast_path(*args, **kwargs):
             # Dynamo needs the real dispatcher graph
@@ -925,14 +917,18 @@ class CustomOpDef:
             if backend_impl is None:
                 return _DO_SLOW_PATH
 
+            def backend_dispatch(keyset, *args, **kwargs):
+                return backend_impl(*args, **kwargs)
+
+            if is_mutable:
+                chain = (autograd_impl, adinplaceorview_impl, backend_dispatch)
+            else:
+                chain = (autograd_impl, backend_dispatch)
+
             opdef._fast_path_hits += 1
-            _backend_impl_tls.entry = backend_impl
             keyset = _C.DispatchKeySet.from_raw_repr(check[1])
-            try:
-                with _ops._enable_fast_redispatch(op, chain):
-                    return op.redispatch(keyset, *args)
-            finally:
-                _backend_impl_tls.entry = None
+            with _ops._enable_fast_redispatch(op, chain):
+                return op.redispatch(keyset, *args)
 
         self._fast_path = fast_path
 
