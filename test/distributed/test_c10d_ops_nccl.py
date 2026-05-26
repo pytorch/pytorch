@@ -34,8 +34,8 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
 )
 
 
@@ -320,7 +320,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected_val *= self.world_size
             self.assertEqual(xs.item(), expected_val)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157896")
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/157896")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_nccl_watchdog_cudagraph(self):
