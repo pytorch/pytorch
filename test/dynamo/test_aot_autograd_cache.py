@@ -2585,6 +2585,46 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_memory_budget_metadata_causes_cache_miss(self):
+        """Changing per-node memory_budget via MemoryBudgetMode invalidates cache."""
+        from torch._functorch._activation_checkpointing.memory_budget import (
+            MemoryBudgetMode,
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.budget = budget
+
+            def forward(self, x):
+                with MemoryBudgetMode(self.budget):
+                    return self.linear(x).relu()
+
+        with fresh_cache():
+            model1 = Model(budget=0.3)
+            compiled_fn1 = torch.compile(model1, backend="inductor")
+            x1 = torch.randn(10, 10, requires_grad=True)
+            result1 = compiled_fn1(x1)
+            result1.sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            model2 = Model(budget=0.8)
+            compiled_fn2 = torch.compile(model2, backend="inductor")
+            x2 = torch.randn(10, 10, requires_grad=True)
+            result2 = compiled_fn2(x2)
+            result2.sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"activation_memory_budget": 0.5})
     def test_custom_estimator_bypasses_cache(self):
         """Test that cache is bypassed when custom estimator lacks proper uuid."""

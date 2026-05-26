@@ -3039,6 +3039,17 @@ class OutputGraph(OutputGraphCommon):
     ) -> CompiledFn:
         if self.compiler_fn is None:
             raise AssertionError("compiler_fn must not be None")
+
+        # Convert set_memory_budget / MemoryBudgetMode marker calls into
+        # node.meta["memory_budget"] annotations and strip the markers before
+        # any backend sees the graph. See
+        # torch/_functorch/_activation_checkpointing/memory_budget.py.
+        from torch._functorch._activation_checkpointing.memory_budget import (
+            propagate_memory_budgets_from_markers,
+        )
+
+        propagate_memory_budgets_from_markers(gm)
+
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:

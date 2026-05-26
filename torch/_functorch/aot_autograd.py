@@ -1160,6 +1160,24 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
+    # Convert set_memory_budget / MemoryBudgetMode marker calls into
+    # node.meta["memory_budget"] annotations and strip the markers before
+    # cache-key computation and joint-graph retrace. See
+    # torch/_functorch/_activation_checkpointing/memory_budget.py for details.
+    _mb_gm: torch.fx.GraphModule | None = None
+    if isinstance(mod, torch.fx.GraphModule):
+        _mb_gm = mod
+    elif isinstance(mod, torch._dynamo.utils.GmWrapper) and isinstance(
+        mod.gm, torch.fx.GraphModule
+    ):
+        _mb_gm = mod.gm
+    if _mb_gm is not None:
+        from torch._functorch._activation_checkpointing.memory_budget import (
+            propagate_memory_budgets_from_markers,
+        )
+
+        propagate_memory_budgets_from_markers(_mb_gm)
+
     pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
 
     if (

@@ -510,6 +510,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
+        # node.meta is stripped by GraphModule.__reduce__, so memory_budget
+        # values set via set_memory_budget()/MemoryBudgetMode would be invisible
+        # to the cache key. Extract them explicitly so that changing per-node
+        # budgets correctly invalidates the cache.
+        self.memory_budget_per_node: list[tuple[int, float]] = []
+        for i, node in enumerate(gm.graph.nodes):
+            budget = node.meta.get("memory_budget", None)
+            if isinstance(budget, (int, float)):
+                self.memory_budget_per_node.append((i, float(budget)))
+
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
         # activation_memory_budget_solver are excluded from save_config (in
