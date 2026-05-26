@@ -1129,6 +1129,47 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   }
 }
 
+void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+                                               MTLBuffer_t src_buf,
+                                               uint32_t src_offs_bytes,
+                                               c10::ScalarType src_dtype,
+                                               MTLBuffer_t dst_buf,
+                                               uint32_t dst_offs_bytes,
+                                               c10::ScalarType dst_dtype,
+                                               uint32_t numel,
+                                               std::optional<uint32_t> ilp_threshold) {
+  if (numel == 0) {
+    return;
+  }
+  const bool use_ilp = ilp_threshold.has_value() && numel >= ilp_threshold.value();
+  const std::string_view suffix = use_ilp ? "dense_castout_ilp" : "dense_castout";
+  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(src_dtype));
+  @autoreleasepool {
+    auto cplState = getPipelineStateForFunc(kernel_name);
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      [computeEncoder setComputePipelineState:cplState];
+      [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
+      [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
+      const auto out_type = static_cast<uint32_t>(dst_dtype);
+      const auto elem_size = static_cast<uint32_t>(c10::elementSize(dst_dtype));
+      if (use_ilp) {
+        std::array<uint32_t, 3> size_outtype_numel = {elem_size, out_type, numel};
+        mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (numel + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+      } else {
+        std::array<uint32_t, 2> size_outtype = {elem_size, out_type};
+        mtl_setBytes(computeEncoder, size_outtype, 2);
+        mtl_dispatch1DJob(computeEncoder, cplState, numel);
+      }
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+}
+
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha,

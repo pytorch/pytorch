@@ -37,6 +37,15 @@ struct copy_neg_functor {
   }
 };
 
+// Fused conj+neg: complex only. On real types conj is identity, so
+// conj+neg degenerates to plain neg and the caller routes there instead.
+struct copy_conj_neg_functor {
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(-x.x, x.y);
+  }
+};
+
 #define REGISTER_COPY_CASTOUT(DTYPE)              \
   REGISTER_UNARY_OP(copy_identity, DTYPE, DTYPE); \
   REGISTER_UNARY_OP(copy_conj, DTYPE, DTYPE);     \
@@ -53,3 +62,6 @@ REGISTER_COPY_CASTOUT(bfloat);
 REGISTER_COPY_CASTOUT(float);
 REGISTER_COPY_CASTOUT(float2);
 REGISTER_COPY_CASTOUT(half2);
+
+REGISTER_UNARY_OP(copy_conj_neg, float2, float2);
+REGISTER_UNARY_OP(copy_conj_neg, half2, half2);
