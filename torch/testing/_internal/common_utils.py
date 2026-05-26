@@ -3768,6 +3768,7 @@ class TestCase(expecttest.TestCase):
         self._prev_grad_state = torch.is_grad_enabled()
         self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
         self._prev_torch_function_state = torch._C._get_torch_function_state()
+        self._prev_fp32_precision = _snapshot_fp32_precision()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -3808,6 +3809,28 @@ class TestCase(expecttest.TestCase):
                 f"torch function state was leaked: "
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
+
+        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # legitimately mutate these globals must restore them themselves (e.g.
+        # via recover_orig_fp32_precision or setUpClass/tearDownClass).
+        # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
+        # the check globally; goal is zero callers.
+        if (
+            hasattr(self, '_prev_fp32_precision')
+            and os.environ.get('PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK') != '1'
+        ):
+            current = _snapshot_fp32_precision()
+            if current != self._prev_fp32_precision:
+                _restore_fp32_precision(self._prev_fp32_precision)
+                specs = _fp32_precision_flag_specs()
+                mismatches = [
+                    f"  {label}: was {prev!r}, became {cur!r}"
+                    for (label, _, _), prev, cur in zip(specs, self._prev_fp32_precision, current)
+                    if prev != cur
+                ]
+                raise AssertionError(
+                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches)
+                )
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -6218,54 +6241,61 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# Single source of truth for which globals count as "fp32 precision state".
+# Add a new flag here and both recover_orig_fp32_precision and the TestCase
+# leak detector pick it up automatically.
+def _fp32_precision_flag_specs():
+    return (
+        ("torch.backends.cuda.matmul.fp32_precision",
+            lambda: torch.backends.cuda.matmul.fp32_precision,
+            lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
+        ("torch.backends.cudnn.conv.fp32_precision",
+            lambda: torch.backends.cudnn.conv.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.cudnn.conv, "fp32_precision", v)),
+        ("torch.backends.cudnn.rnn.fp32_precision",
+            lambda: torch.backends.cudnn.rnn.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.cudnn.rnn, "fp32_precision", v)),
+        ("torch.backends.mkldnn.matmul.fp32_precision",
+            lambda: torch.backends.mkldnn.matmul.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.matmul, "fp32_precision", v)),
+        ("torch.backends.mkldnn.conv.fp32_precision",
+            lambda: torch.backends.mkldnn.conv.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.conv, "fp32_precision", v)),
+        ("torch.backends.mkldnn.rnn.fp32_precision",
+            lambda: torch.backends.mkldnn.rnn.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.rnn, "fp32_precision", v)),
+    )
+
+
+def _snapshot_fp32_precision():
+    return tuple(get() for _, get, _ in _fp32_precision_flag_specs())
+
+
+def _restore_fp32_precision(snapshot):
+    specs = _fp32_precision_flag_specs()
+    if not isinstance(snapshot, tuple) or len(snapshot) != len(specs):
+        # Catches accidental shadowing of self._prev_fp32_precision by a
+        # subclass (e.g. assigning a scalar); without this check zip() would
+        # silently iterate over the wrong sequence.
+        raise TypeError(
+            f"fp32 precision snapshot must be a {len(specs)}-tuple, "
+            f"got {type(snapshot).__name__} of length "
+            f"{len(snapshot) if hasattr(snapshot, '__len__') else 'unknown'}"
+        )
+    for (_, _, set_), value in zip(specs, snapshot):
+        set_(value)
+
+
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
-        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        snap = _snapshot_fp32_precision()
         try:
             yield
         finally:
-            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+            _restore_fp32_precision(snap)
 
     return recover()(fn)
-
-
-def with_ieee_matmul_precision(f):
-    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
-    the duration of the wrapped test. Save/restore across the call.
-
-    "ieee" is the default, so this decorator is defensive: it insulates
-    tests whose intent is FP32 numerical correctness of an algorithm
-    (e.g. a factorization) from any non-default matmul fp32_precision
-    left set in the process by the build, by global configuration, or
-    by a sibling test that didn't restore it.
-
-    Affects matmul only, not convolution. Tests that also need
-    reduced-precision conv disabled must additionally control the
-    relevant cudnn/mkldnn conv.fp32_precision knobs.
-    """
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        old_cuda = torch.backends.cuda.matmul.fp32_precision
-        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
-        try:
-            torch.backends.cuda.matmul.fp32_precision = "ieee"
-            torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
-            return f(*args, **kwargs)
-        finally:
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda
-    return wrapped
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info

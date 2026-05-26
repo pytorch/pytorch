@@ -89,7 +89,23 @@ running_on_a100_only = skipUnless(
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
+
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor

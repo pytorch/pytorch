@@ -23,7 +23,21 @@ from torch.testing._internal.common_utils import (
 )
 
 
-torch.backends.cuda.matmul.allow_tf32 = False
+_PRIOR_ALLOW_TF32: bool | None = None
+
+
+def setUpModule():
+    global _PRIOR_ALLOW_TF32
+    _PRIOR_ALLOW_TF32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def tearDownModule():
+    global _PRIOR_ALLOW_TF32
+    if _PRIOR_ALLOW_TF32 is not None:
+        torch.backends.cuda.matmul.allow_tf32 = _PRIOR_ALLOW_TF32
+        _PRIOR_ALLOW_TF32 = None
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)

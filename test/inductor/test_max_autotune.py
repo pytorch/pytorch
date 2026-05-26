@@ -111,19 +111,31 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-if torch.version.hip:
-    # Temporary addition to ensure inductor tests can be
-    # enabled. Currently TF32 accuracy issues cause these tests
-    # to fail. We will use FP32 as reference to ensure the generated
-    # triton kernels are adequately tested.
-    #
-    # Track in: https://github.com/pytorch/pytorch/issues/169392
-    torch.set_float32_matmul_precision("highest")
-else:
-    torch.set_float32_matmul_precision("high")
-
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if torch.version.hip:
+        # Temporary: TF32 accuracy issues on ROCm fail these tests; use FP32
+        # as reference to ensure the generated triton kernels are adequately
+        # tested. Track in: https://github.com/pytorch/pytorch/issues/169392
+        torch.set_float32_matmul_precision("highest")
+    else:
+        torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
+
 
 # Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
 _DECOMPOSE_K_PATCH_ROCM = (

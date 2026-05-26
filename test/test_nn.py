@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, with_ieee_matmul_precision
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     SM90OrLater, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -8763,13 +8763,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # affine_grid does a K=3 matmul; grid_sample's bilinear interp then
-    # amplifies any matmul drift by the input's contrast (up to ~90× near
-    # step-edge corners in this test). The test's intent is algorithmic
-    # correctness vs scipy's CPU affine_transform reference, not matmul
-    # precision — disable reduced-precision matmul on both CPU and GPU.
-    # See https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9021,10 +9014,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # See test_affine_2d_rotate90: reduced-precision matmul noise in
-    # affine_grid (K=3) is amplified by grid_sample's bilinear interp.
-    # https://github.com/jeffdaily/tf32_analysis
-    @with_ieee_matmul_precision
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9075,10 +9064,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    # See test_affine_2d_rotate90: reduced-precision matmul noise in
-    # affine_grid (K=3) is amplified by grid_sample's trilinear interp.
-    # https://github.com/jeffdaily/tf32_analysis
-    @with_ieee_matmul_precision
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -10052,12 +10037,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
-    # Test asserts GPU RNN slowpath (cudnn disabled) matches CPU. The
-    # gradient check uses a tight explicit atol=5e-5 designed for FP32;
-    # TF32 drift in the backward GEMMs (measured ~3e-3) exceeds that by
-    # ~50x but is unrelated to what the test verifies. See
-    # https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):

@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     with_ieee_matmul_precision, MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -40,7 +40,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -121,10 +121,14 @@ def get_tunableop_untuned_filename():
 class TestLinalg(TestCase):
     def setUp(self):
         super().setUp()
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
     @contextlib.contextmanager
@@ -785,12 +789,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    # Cholesky factorization itself runs in FP32 (no TF32 path). The
-    # assertion `||A - C @ C.T|| < tol` is a factorization-correctness check;
-    # enabling TF32 (or CPU mkldnn reduced-f32) on the reconstruct mm injects
-    # condition-amplified noise unrelated to what's being verified.
-    # See https://github.com/jeffdaily/tf32_analysis.
-    @with_ieee_matmul_precision
     def test_old_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -5937,7 +5935,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -5989,10 +5987,6 @@ class TestLinalg(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
-
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
@@ -6000,7 +5994,7 @@ class TestLinalg(TestCase):
         # This test is the offline version of test_tf32_tunableop
         import os
 
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
@@ -6058,10 +6052,6 @@ class TestLinalg(TestCase):
                 # Compare Param Signature of untuned and tuned results
                 ok = self._compare_untuned_tuned_entries()
                 self.assertTrue(ok)
-
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
 
 
     @onlyCUDA
