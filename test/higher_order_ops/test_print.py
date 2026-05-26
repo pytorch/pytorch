@@ -611,9 +611,9 @@ x = add_1, y = add_2);  getitem = None
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
-    res = l_x_ + l_x_;  l_x_ = None
-    print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
-    return (res,)""",
+    add = l_x_ + l_x_;  l_x_ = None
+    print_2 = torch.ops.higher_order.print('values {} {}', 3, add);  print_2 = None
+    return (add,)""",
             )
 
         # Check forward graph - should have with_effects wrapping print

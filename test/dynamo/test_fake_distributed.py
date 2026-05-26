@@ -61,23 +61,23 @@ class TestFakeDistributed(DynamoTestCase):
             normalize_graph(backend.fw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", primals_3: "f32[s77, s27]"):
-        floordiv: "Sym((s77//2))" = primals_1 // 2
+    def forward(self, primals_1: "f32[s77, s27]", primals_2: "Sym(s77)", primals_3: "Sym(s27)"):
+        floordiv: "Sym((s77//2))" = primals_2 // 2
 
-        all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_3, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_3 = None
+        all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_1, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_1 = None
 
         wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, floordiv)
+        return (wait_tensor, primals_2, primals_3, floordiv)
 """,
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", floordiv: "Sym((s77//2))", tangents_1: "f32[2*((s77//2)), s27]"):
+    def forward(self, primals_2: "Sym(s77)", primals_3: "Sym(s27)", floordiv: "Sym((s77//2))", tangents_1: "f32[2*((s77//2)), s27]"):
         all_to_all_single_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
-        return (None, None, wait_tensor_1)
+        return (wait_tensor_1, None, None)
 """,
         )
 
@@ -96,29 +96,29 @@ class GraphModule(torch.nn.Module):
             normalize_graph(backend.fw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", primals_4: "f32[u0, u1, u2]"):
-        ge: "Sym(u0 >= 0)" = primals_1 >= 0
+    def forward(self, primals_1: "f32[u0, u1, u2]", primals_2: "Sym(u0)", primals_3: "Sym(u1)", primals_4: "Sym(u2)"):
+        ge: "Sym(u0 >= 0)" = primals_2 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
-        ge_1: "Sym(u1 >= 0)" = primals_2 >= 0
+        ge_1: "Sym(u1 >= 0)" = primals_3 >= 0
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        ge_2: "Sym(u2 >= 0)" = primals_3 >= 0
+        ge_2: "Sym(u2 >= 0)" = primals_4 >= 0
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
-        floordiv: "Sym((u0//2))" = primals_1 // 2
+        floordiv: "Sym((u0//2))" = primals_2 // 2
 
-        all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_4 = None
+        all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_1, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_1 = None
 
         wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
+        return (wait_tensor, primals_2, primals_3, primals_4, floordiv)
 """,
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", floordiv: "Sym((u0//2))", tangents_1: "f32[2*((u0//2)), u1, u2]"):
+    def forward(self, primals_2: "Sym(u0)", primals_3: "Sym(u1)", primals_4: "Sym(u2)", floordiv: "Sym((u0//2))", tangents_1: "f32[2*((u0//2)), u1, u2]"):
         all_to_all_single_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
-        return (None, None, None, wait_tensor_1)
+        return (wait_tensor_1, None, None, None)
 """,
         )
 

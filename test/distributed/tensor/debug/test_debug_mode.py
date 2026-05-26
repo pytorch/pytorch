@@ -790,12 +790,12 @@ class TestDTensorDebugMode(TestCase):
         aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] exit
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
     aten::detach(t: f32[4])  ->  t: f32[4]
-    aten::detach(t: f32[4])  ->  t: f32[4]""",
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]""",
         )
 
     def test_record_function(self):

@@ -219,6 +219,393 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager1(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_across_graph_break(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            tcs = torch.cuda.stream(s)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
+            with tcs:
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager2(self):
+        def fn(x, s):
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s)
+            with torch.cuda.stream(current_stream):
+                x = torch.relu(x)
+
+            s2 = torch.cuda.Stream()
+            s2.wait_stream(current_stream)
+            with torch.cuda.stream(s2):
+                x = torch.relu(x)
+
+            current_stream.wait_stream(s2)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        s = torch.cuda.Stream()
+        ref = fn(x, s)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, s)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 18)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            new_stream = torch.cuda.Stream()
+            cur_stream = torch.cuda.current_stream()
+            new_stream.wait_stream(cur_stream)
+
+            with torch.cuda.stream(new_stream):
+                x = torch.sin(x)
+                x = torch.add(x, 3)
+
+            cur_stream.wait_stream(new_stream)
+
+            x = torch.add(x, 4)
+            cur_stream.query()
+            cur_stream.synchronize()
+
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 5)
+            new_stream.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_compared_with_constant(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            if cur_stream is not None:
+                return x + 1
+            return x - 1
+
+        def fn2(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            if cur_stream != "const_str":
+                return x + 1
+            return x - 1
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        res2 = opt_fn2(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref, res2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_compared_with_stream(self):
+        def fn(x, s0, s1):
+            if s0 == s1:
+                return x + 1
+            else:
+                return x - 1
+
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        x = torch.randn(2, 2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref0, res0)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        # We have a re-compilation because of changing inputs
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref1, res1)
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        ref1 = fn(x, s1, s1)
+        res1 = opt_fn(x, s1, s1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref1, res1)
+
+        ref0 = fn(x, s0, s1)
+        res0 = opt_fn(x, s0, s1)
+        # We have a re-compilation because of changing inputs
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref0, res0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
+    def test_cuda_event_reconstruct(self):
+        def fn(x):
+            e = torch.cuda.Event()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            return x, e
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
+    def test_cuda_event_across_graph_break(self):
+        def fn(x):
+            e = torch.cuda.Event()
+            e.record()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            torch.cuda.current_stream().wait_event(e)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x, e
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 10)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
+    def test_cuda_event_created_outside_of_graph(self):
+        user_stream = torch.cuda.Stream()
+        event = torch.cuda.Event()
+        foo = torch.empty((2, 2), device="cuda")
+
+        def func(foo):
+            event.wait()
+            return foo + 1, event
+
+        x = torch.randn((1024, 1024), device="cuda")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def run_iters(fn, compile=False):
+            if compile:
+                fn = torch.compile(fn, backend=cnts)
+            for _ in range(10):
+                with torch.cuda.stream(user_stream):
+                    torch.mm(x, x, out=foo)
+                    event.record()
+                out = fn(foo)
+                # let `fn` finish reading `foo` before writing to it in the next
+                # iteration or `run_iters` call.
+                torch.cuda.current_stream().synchronize()
+            return out
+
+        ref = run_iters(func, compile=False)
+        res = run_iters(func, compile=True)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 4)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
+    def test_cuda_event_method_create_stream_outside_of_compile(self):
+        def fn(x, cur_stream, new_stream):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            event.query()
+
+            new_stream.wait_event(event)
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.cuda.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            # use new event to sync
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        cur_stream = torch.cuda.current_stream()
+        new_stream = torch.cuda.Stream()
+        ref = fn(x, cur_stream, new_stream)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, cur_stream, new_stream)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            new_stream = torch.cuda.Stream()
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            event.query()
+
+            new_stream.wait_event(event)
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            # use new event to sync
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """17""")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_device(self):
+        def fn(x):
+            with torch.cuda.device(x.device.index - 1):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda__exchange_device_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(args, kwargs):
+            torch.cuda._exchange_device(*args, **kwargs)
+
+        initial_dev = torch.cuda.current_device()
+        for args, kwargs in (((), ()), ((0, 0), ()), ((), ("kwarg",))):
+            self.assertRaises(torch._dynamo.exc.Unsupported, fn, args, kwargs)
+            self.assertEqual(torch.cuda.current_device(), initial_dev)
+
     def test_autograd_profiler_enabled(self):
         def fn(x):
             if torch.autograd._profiler_enabled():
@@ -518,7 +905,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -531,7 +918,7 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -542,7 +929,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -563,7 +950,7 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -574,7 +961,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
             )
 
@@ -606,7 +993,7 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]", L_y_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)", L_y_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_y_ = L_y_
 
@@ -619,8 +1006,8 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[s77, s77]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
         else:
@@ -641,8 +1028,8 @@ class GraphModule(torch.nn.Module):
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-        return (x,)
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        return (matmul,)
 """,
             )
 
@@ -655,11 +1042,11 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "bf16[s77, s77]", L_z_: "f32[s77, s77]"):
+    def forward(self, L_x_: "bf16[s77, s77]", s77: "Sym(s77)", L_z_: "f32[s77, s77]"):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[s77, s77]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -670,7 +1057,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
 
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
         else:
@@ -682,7 +1069,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_z_ = L_z_
 
-        x: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_z_;  l_x_ = l_z_ = None
 
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
@@ -693,7 +1080,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
 
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        return (x,)
+        return (matmul,)
 """,
             )
 
@@ -787,10 +1174,10 @@ class GraphModule(torch.nn.Module):
 
         _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', None, True, None)
 
-        x: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+        matmul: "bf16[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
 
         _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -822,7 +1209,7 @@ class GraphModule(torch.nn.Module):
 
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
-        x: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
+        matmul: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
         autocast_decrement_nesting = torch.autocast_decrement_nesting();  autocast_decrement_nesting = None
 
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
@@ -832,7 +1219,7 @@ class GraphModule(torch.nn.Module):
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
 
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
-        return (x,)
+        return (matmul,)
 """,
         )
 
@@ -1116,11 +1503,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
@@ -1159,11 +1546,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
-        add: "f32[1]" = x + y;  x = y = None
+        add: "f32[1]" = ones + zeros;  ones = zeros = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
@@ -1208,17 +1595,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x: "f32[1]" = torch.ones(1)
+        ones: "f32[1]" = torch.ones(1)
 
-        y: "f32[1]" = torch.zeros(1)
+        zeros: "f32[1]" = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
-        add: "f32[1]" = x + y;  y = None
+        add: "f32[1]" = ones + zeros;  zeros = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
-        add_1: "f32[1]" = add + x;  add = x = None
+        add_1: "f32[1]" = add + ones;  add = ones = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
@@ -1251,10 +1638,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y,)
+        return (add,)
 """,
         )
 
@@ -1295,14 +1682,14 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
-        y: "f32[]" = l_x_ + 1;  l_x_ = None
+        add: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        y *= 2;  y_1: "f32[]" = y;  y = None
+        add *= 2;  imul: "f32[]" = add;  add = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y_1,)
+        return (imul,)
 """,
         )
 
@@ -3160,10 +3547,10 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
 
-        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+        tensor: "c128[2]" = torch.tensor([3.0, (3+5j)])
 
         set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
-        return (x,)
+        return (tensor,)
 """,
         )
 
@@ -4075,6 +4462,90 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
+
+    @parametrize("gb", (True, False))
+    def test_functorch_low_level(self, gb):
+        def f(x, gb):
+            level = torch._C._functorch._grad_increment_nesting()
+            torch._C._functorch.set_inplace_requires_grad_allowed(True)
+            torch._functorch.eager_transforms._set_tensor_requires_grad(x)
+            if gb:
+                torch._dynamo.graph_break()
+            torch._C._functorch.set_inplace_requires_grad_allowed(False)
+            torch._C._functorch._grad_decrement_nesting()
+            return x + level
+
+        prev_inplace = torch._C._functorch.get_inplace_requires_grad_allowed()
+        prev_level = torch._C._functorch.maybe_current_level()
+        opt_f = torch.compile(f, fullgraph=not gb, backend="eager")
+        x = torch.randn(3, 3, requires_grad=False)
+        opt_y = opt_f(x, gb)
+        self.assertTrue(x.requires_grad)
+        y = f(x, gb)
+        self.assertEqual(y, opt_y)
+        self.assertEqual(torch._C._functorch.maybe_current_level(), prev_level)
+        self.assertEqual(
+            torch._C._functorch.get_inplace_requires_grad_allowed(), prev_inplace
+        )
+
+    def test_retrace_grad(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
+        y = wrapper_fn(x)
+        opt_y = opt_f(x)
+        self.assertEqual(y, opt_y)
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertExpectedInline(
+            first_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3]"):
+        l_x_ = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
+
+        _wrap_for_grad: "f32[3, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+
+        _set_tensor_requires_grad: "f32[3, 3]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad);  _set_tensor_requires_grad = None
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+
+        sin: "f32[3, 3]" = _wrap_for_grad.sin()
+        sum_1: "f32[]" = sin.sum();  sin = None
+
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad((sum_1,), [_wrap_for_grad], create_graph = True);  _wrap_for_grad = None
+        getitem: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
+
+        _unwrap_for_grad: "f32[]" = torch._functorch.predispatch._unwrap_for_grad(sum_1, 1);  sum_1 = _unwrap_for_grad = None
+        _unwrap_for_grad_1: "f32[3, 3]" = torch._functorch.predispatch._unwrap_for_grad(getitem, 1);  getitem = None
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+        return (_unwrap_for_grad_1,)
+""",
+        )
+
+        d = {}
+        exec(first_graph, globals(), d)
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(y, retraced_out)
+        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertEqual(first_graph, retraced_graph)
 
 
 instantiate_parametrized_tests(CtxManagerTests)
