@@ -1067,10 +1067,6 @@ class CppOverrides(OpOverrides):
         return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed: sympy.Expr, offset: sympy.Expr):
-        return CppOverrides.rand(seed, offset)
-
-    @staticmethod
     def rand_eager(
         seed: sympy.Expr,
         base_offset: sympy.Expr,
@@ -1086,10 +1082,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr):
         return f"randn_cpu({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed: sympy.Expr, offset: sympy.Expr):
-        return CppOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
@@ -1428,19 +1420,11 @@ class CppVecOverrides(CppOverrides):
         return codegen_rand(offset, code, rand_function)
 
     @staticmethod
-    def rand4x(seed, offset):
-        return CppVecOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed, offset):
         assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
         rand_function = f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
         return codegen_rand(offset, code, rand_function)
-
-    @staticmethod
-    def randn4x(seed, offset):
-        return CppVecOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed, offset, low, high):
