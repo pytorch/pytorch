@@ -45,9 +45,9 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame = 0;
+  int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t oRow = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oFrame = 0;
   // used only for channels-first indexing
   int64_t slice = 0;
   // used only for channels-last indexing
@@ -193,10 +193,10 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t oRow = blockIdx.y * blockDim.y + threadIdx.y;
 
-  int oFrame = 0;
+  int64_t oFrame = 0;
   // used only for channels-first indexing
   int64_t slice = 0;
   // used only for channels-last indexing
