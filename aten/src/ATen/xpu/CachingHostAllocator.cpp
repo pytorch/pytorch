@@ -12,12 +12,21 @@ struct XPUCachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
   /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
+#if SYCL_COMPILER_VERSION >= 20260000
+    *ptr = sycl::ext::oneapi::experimental::aligned_alloc_host(
+        kHostAlignment, size);
+#else
     *ptr = sycl::aligned_alloc_host(
         kHostAlignment, size, c10::xpu::get_device_context());
+#endif
   }
 
   void free_block(Block* block) override {
+#if SYCL_COMPILER_VERSION >= 20260000
+    sycl::ext::oneapi::experimental::free(block->ptr_);
+#else
     sycl::free(block->ptr_, c10::xpu::get_device_context());
+#endif
   }
 
   void record_stream(

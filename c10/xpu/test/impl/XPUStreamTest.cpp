@@ -215,7 +215,11 @@ TEST(XPUStreamTest, StreamFunction) {
   c10::xpu::syncStreamsOnDevice();
 
   validateHostData(hostData, numel);
+#if SYCL_COMPILER_VERSION >= 20260000
+  sycl::ext::oneapi::experimental::free(deviceData);
+#else
   sycl::free(deviceData, c10::xpu::get_device_context());
+#endif
 }
 
 // Verifies external streams can be created and used

@@ -24,10 +24,18 @@ TEST(XpuDeviceTest, getDeviceFromPtr) {
   }
 
   sycl::device& raw_device = at::xpu::get_raw_device(0);
+#if SYCL_COMPILER_VERSION >= 20260000
+  void* ptr = sycl::ext::oneapi::experimental::aligned_alloc_device(8, raw_device);
+#else
   void* ptr = sycl::malloc_device(8, raw_device, at::xpu::get_device_context());
+#endif
 
   at::Device device = at::xpu::getDeviceFromPtr(ptr);
+#if SYCL_COMPILER_VERSION >= 20260000
+  sycl::ext::oneapi::experimental::free(ptr);
+#else
   sycl::free(ptr, at::xpu::get_device_context());
+#endif
   EXPECT_EQ(device.index(), 0);
   EXPECT_EQ(device.type(), at::kXPU);
 
@@ -45,9 +53,17 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   auto devices = sycl::device::get_devices();
   EXPECT_EQ(devices[global_index], at::xpu::get_raw_device(target_device));
 
+#if SYCL_COMPILER_VERSION >= 20260000
+  void* ptr = sycl::ext::oneapi::experimental::aligned_alloc_device(8, devices[global_index]);
+#else
   void* ptr = sycl::malloc_device(8, devices[global_index], at::xpu::get_device_context());
+#endif
   at::Device device = at::xpu::getDeviceFromPtr(ptr);
+#if SYCL_COMPILER_VERSION >= 20260000
+  sycl::ext::oneapi::experimental::free(ptr);
+#else
   sycl::free(ptr, at::xpu::get_device_context());
+#endif
   EXPECT_EQ(device.index(), target_device);
   EXPECT_EQ(device.type(), at::kXPU);
 
