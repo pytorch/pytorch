@@ -220,8 +220,6 @@ manual_torch_name_rule_map: dict[
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
-    # https://github.com/pytorch/pytorch/issues/178260
-    "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
@@ -376,6 +374,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
+    "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -578,6 +577,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_getCheckpointState",
         "torch._C._cuda_getCompiledVersion",
         "torch._C._cuda_getCurrentBlasHandle",
+        "torch._C._cuda_getCurrentSolverHandle",
         "torch._C._cuda_getCurrentRawStream",
         "torch._C._cuda_getCurrentStream",
         "torch._C._cuda_getDefaultStream",
@@ -2657,6 +2657,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
+        "torch.cuda.current_solver_handle",
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",

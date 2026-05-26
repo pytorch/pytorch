@@ -26,7 +26,9 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 
 using namespace at::mps;
 
