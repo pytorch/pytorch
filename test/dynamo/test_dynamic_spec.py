@@ -750,22 +750,21 @@ class TestShapeVarDedup(TestCase):
 
 
 class TestDerivedDimSpec(TestCase):
-    """Derived SymInt expressions (e.g. ``A * 2 + 1``) as leaf specs in
-    TensorSpec / ParamsSpec. The dim must equal the expression at runtime;
-    violation raises. Orphan IntVars (referenced in a derived expression but
-    never bound as a bare-IntVar slot) are caught at finalize and error"""
-
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
 
     def test_derived_dim(self):
         """y's dim 0 = 2 * x's dim 0: correct shape runs; mismatched shape
-        raises with the failed guard expression."""
+        raises with the failed guard expression. The derived spec also lets
+        ``y.size()[0] == 2 * x.size()[0]`` inside the compiled fn resolve
+        without DDE."""
         B = ShapeVar("batch")
 
         def fn(x, y):
-            return x.sum() + y.sum()
+            if y.size()[0] == 2 * x.size()[0]:
+                return x.sum() + y.sum()
+            return x.sum() - y.sum()
 
         compiled = torch.compile(
             fn,
@@ -785,14 +784,36 @@ class TestDerivedDimSpec(TestCase):
         with self.assertRaisesRegex(AssertionError, "Guard fail"):
             compiled(torch.randn(4, 3), torch.randn(7, 5))
 
+        # Sanity: WITHOUT the derived spec the same conditional DDEs.
+        torch._dynamo.reset()
+        Y = ShapeVar("y_dim")
+        compiled_no_derived = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([B, None]),
+                "y": TensorSpec([Y, None]),
+            },
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled_no_derived(torch.randn(4, 3), torch.randn(8, 5))
+
     def test_multi_var_derived(self):
         """Composite expression over multiple IntVars: z.shape[0] = A * B + 1.
-        Correct shape runs; mismatched shape raises with the failed guard."""
+        Correct shape runs; mismatched shape raises. The derived spec also
+        lets ``z.size()[0] == x.size()[0] * y.size()[0] + 1`` resolve
+        without DDE."""
         A = ShapeVar("a")
         B = ShapeVar("b")
 
         def fn(x, y, z):
-            return x.sum() + y.sum() + z.sum()
+            if z.size()[0] == x.size()[0] * y.size()[0] + 1:
+                return x.sum() + y.sum() + z.sum()
+            return x.sum() - y.sum() - z.sum()
 
         compiled = torch.compile(
             fn,
@@ -813,6 +834,27 @@ class TestDerivedDimSpec(TestCase):
         with self.assertRaisesRegex(AssertionError, "Guard fail"):
             compiled(torch.randn(3, 2), torch.randn(4, 2), torch.randn(99, 2))
 
+        # Sanity: WITHOUT the derived spec the same conditional DDEs.
+        torch._dynamo.reset()
+        Z = ShapeVar("z_dim")
+        compiled_no_derived = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([A, None]),
+                "y": TensorSpec([B, None]),
+                "z": TensorSpec([Z, None]),
+            },
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled_no_derived(
+                torch.randn(3, 2), torch.randn(4, 2), torch.randn(13, 2)
+            )
+
     def test_orphan_intvar_raises(self):
         """B is used in derived expression but never as a bare slot → finalize raises."""
         A = ShapeVar("a")
@@ -828,22 +870,26 @@ class TestDerivedDimSpec(TestCase):
             fullgraph=True,
             shapes_spec={"x": TensorSpec([A * B, None])},
         )
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            r"ValueError: shapes_spec: 1 pending check\(s\) reference unbound "
-            r"IntVar\(s\) \['a', 'b'\]\. Every IntVar used in a derived "
-            r"expression or assumption must also appear as a bare-IntVar slot "
-            r"somewhere in the spec\.",
-        ):
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as cm:
             compiled(torch.randn(4, 3))
+        self.assertIn(
+            "ValueError: shapes_spec: 1 pending check(s) reference unbound "
+            "IntVar(s) ['a', 'b']. Every IntVar used in a derived "
+            "expression or assumption must also appear as a bare-IntVar slot "
+            "somewhere in the spec.",
+            str(cm.exception),
+        )
 
     def test_derived_scalar_arg(self):
         """Scalar arg slot can be a derived expression: n must equal 2 * x.shape[0].
-        Correct value runs; mismatched value raises with the failed guard."""
+        Correct value runs; mismatched value raises. The derived spec also
+        lets ``n == 2 * x.size()[0]`` resolve without DDE."""
         B = ShapeVar("batch")
 
         def fn(x, n):
-            return x.sum() + n
+            if n == 2 * x.size()[0]:
+                return x.sum() + n
+            return x.sum() - n
 
         compiled = torch.compile(
             fn,
@@ -859,6 +905,21 @@ class TestDerivedDimSpec(TestCase):
         torch._dynamo.reset()
         with self.assertRaisesRegex(AssertionError, "Guard fail"):
             compiled(torch.randn(4, 3), 7)
+
+        # Sanity: WITHOUT the derived spec the same conditional DDEs.
+        torch._dynamo.reset()
+        N = IntVar("n_var")
+        compiled_no_derived = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={"x": TensorSpec([B, None]), "n": N},
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled_no_derived(torch.randn(4, 3), 8)
 
     def test_foreign_symint_rejected_at_construction(self):
         """A SymInt backed by a different ShapeEnv must be rejected at
@@ -898,7 +959,9 @@ class TestDerivedDimSpec(TestCase):
         def fn(z, x, y):
             # z processed first (dim references unbound A and B);
             # x binds A, y binds B; pending check then fires.
-            return z.sum() + x.sum() + y.sum()
+            if z.size()[0] == x.size()[0] * y.size()[0]:
+                return z.sum() + x.sum() + y.sum()
+            return z.sum() - x.sum() - y.sum()
 
         compiled = torch.compile(
             fn,
@@ -919,9 +982,35 @@ class TestDerivedDimSpec(TestCase):
         with self.assertRaisesRegex(AssertionError, "Guard fail"):
             compiled(torch.randn(99, 2), torch.randn(3, 2), torch.randn(4, 2))
 
+        # Sanity: WITHOUT the derived spec the same conditional DDEs.
+        torch._dynamo.reset()
+        Z = ShapeVar("z_dim")
+        compiled_no_derived = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "z": TensorSpec([Z, None]),
+                "x": TensorSpec([A, None]),
+                "y": TensorSpec([B, None]),
+            },
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled_no_derived(
+                torch.randn(12, 2), torch.randn(3, 2), torch.randn(4, 2)
+            )
+
     def test_same_derived_expr_in_two_slots(self):
         """Two tensor dims both spec'd as the same derived expression (B * 2)
-        must both equal each other at runtime."""
+        must both equal each other at runtime.
+
+        Note: the equality is enforced at runtime (each slot deferred-asserts
+        ``u_i == 2 * u_x``) but ShapeEnv doesn't transitively conclude
+        ``u_y == u_z`` at compile time, so ``if y.size()[0] == z.size()[0]``
+        would DDE."""
         B = ShapeVar("batch")
 
         def fn(x, y, z):
