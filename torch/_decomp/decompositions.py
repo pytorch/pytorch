@@ -3291,6 +3291,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3328,7 +3330,7 @@ def _index_copy(
         tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
     )
     torch._check(
-        x_sliced_shape == tensor_sliced_shape,
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
         lambda: (
             "index_copy_(): Source/destination tensor must have same slice shapes. "
             f"Destination slice shape: {x_sliced_shape} at dimension {dim} "
