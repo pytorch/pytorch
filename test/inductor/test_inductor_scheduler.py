@@ -11,6 +11,8 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.ir import GraphPartitionSignature
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -264,6 +266,151 @@ class TestScheduler(TestCase):
                 )
             )
 
+    def test_nested_reduction_axis_from_loop_body(self):
+        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
+        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
+            "grouped_x0 grouped_x1 grouped_r"
+        )
+
+        def make_body(index, iter_vars, reduce_vars):
+            body = Mock()
+            body.iter_vars = iter_vars
+            body.reduce_vars = reduce_vars
+            body.indexing_exprs = {"load": index}
+            body.memory_usage = {
+                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
+            }
+            return body
+
+        def make_reduction(index, iter_vars, reduce_vars):
+            node = Mock()
+            node.is_reduction.return_value = True
+            node.get_ranges.return_value = ([16, 16], [16])
+            node._body = make_body(index, iter_vars, reduce_vars)
+            return node
+
+        def classify(outer_index, grouped_index):
+            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
+            grouped = make_reduction(
+                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            )
+            outer_node = Mock()
+            outer_node.get_nodes.return_value = [outer]
+            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
+
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + 256 * outer_r,
+                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.X,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + outer_r,
+                grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            None,
+        )
+
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
@@ -481,6 +628,77 @@ class TestScheduler(TestCase):
             torch.allclose(expected, result),
             msg=f"Fusion bug detected! Expected {expected}, got {result}",
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_does_not_realize_before_reduction(self):
+        def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
+            input1_selected = torch.index_select(input1, 2, icrd1)
+            input2_selected = torch.index_select(input2, 2, icrd2)
+            weight_selected = torch.index_select(weight, 3, wcrd)
+
+            input1_expanded = input1_selected.view(B, U, 1, 1, -1)
+            input2_expanded = input2_selected.view(B, 1, V, 1, -1)
+            weight_expanded = weight_selected.view(1, U, V, W, -1)
+            meta_expanded = meta.view(1, 1, 1, 1, -1)
+
+            product = (
+                meta_expanded * input1_expanded * input2_expanded * weight_expanded
+            )
+            product = torch.sum(product, dim=(1, 2))
+            output.index_add_(2, ocrd, product)
+            return output
+
+        P = 20
+        M = 10
+        B = 10
+        L = 23
+        U = 4
+        V = 4
+        W = 4
+        device = "cuda"
+
+        torch.manual_seed(0)
+        input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
+        input2 = torch.rand((B, V, L), dtype=torch.float32, device=device)
+        weight = torch.rand((U, V, W, M), dtype=torch.float32, device=device)
+        output = torch.zeros((B, W, L), dtype=torch.float32, device=device)
+        meta = torch.rand((P,), dtype=torch.float32, device=device)
+        icrd1 = torch.randint(L, (P,), device=device)
+        icrd2 = torch.randint(L, (P,), device=device)
+        wcrd = torch.randint(M, (P,), device=device)
+        ocrd = torch.arange(P, device=device)
+
+        expected = fn(
+            icrd1,
+            icrd2,
+            wcrd,
+            ocrd,
+            meta,
+            input1,
+            input2,
+            weight,
+            output.clone(),
+        )
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                icrd1,
+                icrd2,
+                wcrd,
+                ocrd,
+                meta,
+                input1,
+                input2,
+                weight,
+                output.clone(),
+            )
+
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 class TestScoreFusionMemory(TestCase):
