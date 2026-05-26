@@ -14770,6 +14770,7 @@ class TestConsistency(TestCaseMPS):
     # indexing while still fitting in MPS memory. For float16 dtypes, the input
     # is a little larger than 8 GB. MPS allocations are capped at 16 GB, so it
     # cannot be run on float32.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_large_input(self, device, dtype, trigger_32bit_overflow):
@@ -14795,6 +14796,7 @@ class TestConsistency(TestCaseMPS):
     # Test large tensor inputs to `group_norm`. This test currently passes
     # because 64-bit indexing is supported. But if 64-bit is turned off, the
     # test fails.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
