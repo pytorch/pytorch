@@ -86,6 +86,29 @@ CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
 
+_FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS = frozenset(
+    {
+        # Recompute memo descriptor state when reconstructing from
+        # FakeTensor.__dict__.
+        "_nonzero_memo",
+        "_nonzero_memo_vc",
+        "_nonzero_memo_epoch",
+        "_item_memo",
+        "_item_memo_vc",
+        "_item_memo_epoch",
+        "_unique_memo",
+        "_unique_memo_vc",
+        "_unique_memo_epoch",
+        "_unique_consecutive_memo",
+        "_unique_consecutive_memo_vc",
+        "_unique_consecutive_memo_epoch",
+        "_nested_int_memo",
+        "_nested_int_memo_vc",
+        "_nested_int_memo_epoch",
+        "_debug_trace",
+    }
+)
+
 
 # Check if device type supports device index
 @functools.cache
@@ -805,18 +828,86 @@ class FakeTensor(Tensor):
     @staticmethod
     def __new__(
         cls,
-        fake_mode: FakeTensorMode,
-        elem: Tensor,
-        device: torch.device,
+        fake_mode_or_elem: FakeTensorMode | Tensor | None = None,
+        elem: Tensor | None = None,
+        device: torch.device | str | None = None,
         constant: Tensor | None = None,
         real_tensor: Tensor | None = None,
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
+        *,
+        fake_mode: FakeTensorMode | None = None,
+        fake_device: torch.device | str | None = None,
+        _fake_device: torch.device | str | None = None,
+        requires_grad: bool | None = None,
+        _is_param: bool = False,
+        **state: object,
     ) -> Self:
+        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+            state.pop(attr_name, None)
+        if state:
+            unexpected = next(iter(state))
+            raise TypeError(
+                "FakeTensor.__new__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+
+        if isinstance(fake_mode_or_elem, FakeTensorMode):
+            if fake_mode is not None and fake_mode is not fake_mode_or_elem:
+                raise TypeError("FakeTensor.__new__() got conflicting fake_mode values")
+            fake_mode = fake_mode_or_elem
+        else:
+            # Support bounded state-based reconstruction from known FakeTensor
+            # attrs, e.g. type(fake_tensor)(new_elem, **fake_tensor.__dict__).
+            if fake_mode_or_elem is not None:
+                if not isinstance(fake_mode_or_elem, Tensor):
+                    raise TypeError(
+                        "FakeTensor.__new__() expected a FakeTensorMode or Tensor "
+                        f"as the first argument, got {type(fake_mode_or_elem)}"
+                    )
+                if elem is not None:
+                    raise TypeError(
+                        "FakeTensor.__new__() expected either "
+                        "(fake_mode, elem, ...) or (elem, fake_mode=..., ...)"
+                    )
+                elem = fake_mode_or_elem
+            if fake_mode is None:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: 'fake_mode'"
+                )
+
+        if elem is None:
+            raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
+        if isinstance(elem, FakeTensor) and elem.fake_mode is not fake_mode:
+            raise AssertionError("elem must use the same FakeTensorMode as fake_mode")
+
+        specified_devices = [
+            (name, torch.device(value))
+            for name, value in (
+                ("device", device),
+                ("fake_device", fake_device),
+                ("_fake_device", _fake_device),
+            )
+            if value is not None
+        ]
+        if specified_devices:
+            first_name, device = specified_devices[0]
+            for name, candidate_device in specified_devices[1:]:
+                if device != candidate_device:
+                    raise ValueError(
+                        "FakeTensor.__new__() got conflicting device values: "
+                        f"{first_name}={device}, {name}={candidate_device}"
+                    )
+        else:
+            raise TypeError(
+                "FakeTensor.__new__() missing required argument: "
+                "'device' (or 'fake_device')"
+            )
+
         self = Tensor._make_subclass(
             cls,
             elem,
-            elem.requires_grad,
+            elem.requires_grad if requires_grad is None else requires_grad,
             dispatch_device=True,
             device_for_backend_keys=device,
         )
@@ -829,7 +920,6 @@ class FakeTensor(Tensor):
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
-        device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
@@ -855,6 +945,9 @@ class FakeTensor(Tensor):
         self.unique_memo = None
         self.unique_consecutive_memo = None
         self.nested_int_memo = None
+
+        if _is_param:
+            self._is_param = _is_param
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
