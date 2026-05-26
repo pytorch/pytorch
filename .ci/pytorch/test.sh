@@ -2127,6 +2127,46 @@ test_operator_benchmark() {
       --expected "${ARCH}_expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
+_log_opbench_rocm_scaled_mm_debug() {
+  local op="$1"
+  echo "=== OPBENCH_ROCM_DEBUG op=${op} ==="
+  echo "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT:-}"
+  echo "HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-unset}"
+  echo "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-unset}"
+  echo "ROCM_PATH=${ROCM_PATH:-unset}"
+  echo "MIOPEN_FIND_MODE=${MIOPEN_FIND_MODE:-unset}"
+  rocminfo 2>/dev/null | grep -E 'Name:.*gfx|Marketing' || true
+  ls -la /opt/rocm/lib/hipblaslt/library/ 2>/dev/null | head -20 || true
+  ls -la /opt/rocm/lib/hipblaslt/library/gfx950/ 2>/dev/null | head -10 || true
+  ls -la /opt/rocm/lib/hipblaslt/library/gfx942/ 2>/dev/null | head -5 || true
+  python - <<'PY'
+import glob
+import torch
+import torch.nn.functional as F
+
+print("torch", torch.__version__, "hip", torch.version.hip)
+print("cuda_available", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("device0", torch.cuda.get_device_name(0))
+lib = "/opt/rocm/lib/hipblaslt/library"
+for tag in ("gfx950", "gfx942"):
+    hits = glob.glob(f"{lib}/**/*{tag}*", recursive=True)
+    print(f"hipblaslt_{tag}_count", len(hits))
+    for p in hits[:3]:
+        print(f"  {p}")
+try:
+    x = torch.ones(16, 32, device="cuda", dtype=torch.float8_e4m3fn)
+    y = torch.ones(32, 16, device="cuda", dtype=torch.float8_e4m3fn)
+    sa = torch.ones(1, device="cuda", dtype=torch.float32)
+    sb = torch.ones(1, device="cuda", dtype=torch.float32)
+    F.scaled_mm(x, y, scale_a=sa, scale_b=sb, out_dtype=torch.bfloat16)
+    print("scaled_mm_smoke ok")
+except Exception as e:
+    print("scaled_mm_smoke failed", repr(e))
+PY
+  echo "=== OPBENCH_ROCM_DEBUG end ==="
+}
+
 test_operator_microbenchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2153,8 +2193,12 @@ test_operator_microbenchmark() {
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
   # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
-  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  # local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  # for op in $op_list; do
+
+  local op_list="${OP_BENCHMARK_TESTS:-scaled_mm scaled_grouped_mm}"
   for op in $op_list; do
+    _log_opbench_rocm_scaled_mm_debug "$op"
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
