@@ -1,14 +1,20 @@
 // Demonstrates the gen_backend_stubs structured-kernel + out-as-primary codegen
 // path for a PrivateUse1 backend (see csrc/aten/openreg_native_functions.yaml).
 //
-// maximum.out is registered as `structured: true`, so torchgen generates (into
-// the build tree) RegisterPrivateUse1.cpp + PrivateUse1NativeFunctions.h: the
-// out / functional wrappers drive op.meta() (reusing the native meta) and
-// op.impl(), and -- with use_out_as_primary: true -- the functional variant
+// Both maximum.out and minimum.out are registered as `structured: true`, so
+// torchgen generates (into the build tree) RegisterPrivateUse1.cpp +
+// PrivateUse1NativeFunctions.h: the out / functional wrappers drive op.meta()
+// and op.impl(), and -- with use_out_as_primary: true -- the functional variant
 // allocates an empty out and reuses it instead of doing a temp-copy. The backend
 // only has to provide impl(), which we delegate to CPU here (openreg tensors are
 // host-backed), mirroring abs_out in native/Extra.cpp.
+//
+// minimum.out additionally sets `ext_structured_meta: true`, so the generated
+// struct also declares a backend-defined meta(); we provide one that reuses the
+// native meta via the generated `base` alias (a real backend could add
+// hardware-specific shape/type checks here).
 #include <ATen/ops/maximum.h>
+#include <ATen/ops/minimum.h>
 
 #include <ATen/native/PrivateUse1NativeFunctionsHelper.h>
 
@@ -16,9 +22,22 @@
 
 namespace at::native::openreg {
 
+// structured: true, native meta -- only impl() is needed.
 TORCH_PRIV1_IMPL_FUNC(maximum_out)
 (const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
   out.copy_(at::maximum(self.cpu(), other.cpu()));
+}
+
+// structured: true + ext_structured_meta: true -- the backend provides its own
+// meta(); here we just reuse the native logic through the generated `base` alias.
+TORCH_PRIV1_META_FUNC(minimum_out)
+(const at::Tensor& self, const at::Tensor& other) {
+  base::meta(self, other);
+}
+
+TORCH_PRIV1_IMPL_FUNC(minimum_out)
+(const at::Tensor& self, const at::Tensor& other, const at::Tensor& out) {
+  out.copy_(at::minimum(self.cpu(), other.cpu()));
 }
 
 } // namespace at::native::openreg
