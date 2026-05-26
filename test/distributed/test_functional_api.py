@@ -528,7 +528,7 @@ elif TEST_XPU:
 def exit_if_lt_x_accelerators(x):
     if torch.accelerator.is_available():
         if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
 
 
 def with_comms(func=None):
@@ -540,7 +540,7 @@ def with_comms(func=None):
         if (
             BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
         ) and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
         self.pg = self.create_pg(device=DEVICE)
