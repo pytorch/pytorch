@@ -835,7 +835,6 @@ class TestConfigFilter(TestCase):
         pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
 
-
     def test_get_ghstack_below_count(self) -> None:
         # Not a ghstack body.
         self.assertEqual(get_ghstack_below_count(""), 0)
@@ -843,31 +842,19 @@ class TestConfigFilter(TestCase):
 
         # Top of a 4-deep stack: 3 entries below the marker.
         top_body = (
-            "Stack from ghstack (oldest at bottom):\n"
-            "* __->__ #4\n"
-            "* #3\n"
-            "* #2\n"
-            "* #1\n"
+            "Stack from ghstack (oldest at bottom):\n* __->__ #4\n* #3\n* #2\n* #1\n"
         )
         self.assertEqual(get_ghstack_below_count(top_body), 3)
 
         # Middle of the same stack: 1 entry below the marker.
         mid_body = (
-            "Stack from ghstack (oldest at bottom):\n"
-            "* #4\n"
-            "* #3\n"
-            "* __->__ #2\n"
-            "* #1\n"
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* __->__ #2\n* #1\n"
         )
         self.assertEqual(get_ghstack_below_count(mid_body), 1)
 
         # Bottom of the stack: 0 entries below the marker.
         bottom_body = (
-            "Stack from ghstack (oldest at bottom):\n"
-            "* #4\n"
-            "* #3\n"
-            "* #2\n"
-            "* __->__ #1\n"
+            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
         )
         self.assertEqual(get_ghstack_below_count(bottom_body), 0)
 
