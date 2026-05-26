@@ -3368,14 +3368,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         may not manifest in every run, this test verifies the pattern works
         correctly with overlap scheduling.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group()
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
-        torch._C._distributed_c10d._register_process_group(group_name, group)
         group_size = group.size()
 
         def overlap_pass(graph: torch.fx.Graph) -> torch.fx.GraphModule:

@@ -1682,46 +1682,6 @@ class OverlapScheduler:
         return self.compute_potential_hidden_nodes(wait_nodes)
 
 
-def _get_device_from_meta_value(value) -> torch.device | None:  # type: ignore[no-untyped-def]
-    if isinstance(value, torch.Tensor):
-        return value.device
-
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            device = _get_device_from_meta_value(item)
-            if device is not None:
-                return device
-
-    if isinstance(value, dict):
-        for item in value.values():
-            device = _get_device_from_meta_value(item)
-            if device is not None:
-                return device
-
-    return None
-
-
-def _node_device(node: fx.Node) -> torch.device | None:
-    return _get_device_from_meta_value(node.meta.get("val"))
-
-
-def _is_non_cuda_node(node: fx.Node) -> bool:
-    device = _node_device(node)
-    return device is not None and device.type != "cuda"
-
-
-def _require_custom_estimation_for_non_cuda(
-    node: fx.Node,
-    custom_est: float | None,
-) -> None:
-    if custom_est is None and _is_non_cuda_node(node):
-        raise RuntimeError(
-            "Overlap scheduling on non-CUDA devices requires "
-            "custom_runtime_estimation to provide an estimate for every "
-            f"relevant node. Missing estimate for node: {node}"
-        )
-
-
 def gather_node_runtime_estimations(
     gm: torch.fx.GraphModule,
     custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
@@ -1792,7 +1752,6 @@ def gather_node_runtime_estimations(
             if custom_est is not None:
                 est = custom_est
             else:
-                _require_custom_estimation_for_non_cuda(node, custom_est)
                 est = estimate_roofline_runtime_ms(node)
 
             estimations[node] = est
@@ -1807,12 +1766,11 @@ def gather_node_runtime_estimations(
             )
             if custom_est is not None:
                 estimations[node] = custom_est
-            else:
-                _require_custom_estimation_for_non_cuda(node, custom_est)
-                if custom_runtime_estimation is None:
-                    est = estimate_roofline_runtime_ms(node)
-                    if est > 0:
-                        estimations[node] = est
+
+            elif custom_runtime_estimation is None:
+                est = estimate_roofline_runtime_ms(node)
+                if est > 0:
+                    estimations[node] = est
 
     # Apply fused costs: replace individual I/O estimates with fusion-aware ones
     estimations.update(fused_costs)
