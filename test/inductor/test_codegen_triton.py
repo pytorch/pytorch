@@ -396,6 +396,38 @@ class TestCodegenTriton(InductorTestCase):
             "Expected at least one generated Triton kernel body to match",
         )
 
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_in_user_defined_triton_kernel(self):
+        """User-defined Triton kernels should not get pointer_range_32."""
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def fn(x, y):
+            out = torch.empty_like(x)
+            n = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+
+            add_kernel[grid](x, y, out, n, BLOCK_SIZE=128)
+            return out
+
+        x = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        _, code = run_and_get_code(torch.compile(fn), x, y)
+        code_str = " ".join(code)
+        self.assertNotIn("tt.pointer_range", code_str)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
