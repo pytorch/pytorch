@@ -1491,38 +1491,14 @@ class GraphLowering(torch.fx.Interpreter):
         assert result is not None
         return result[0], result[1]
 
-    @staticmethod
-    def _fx_arg_to_fake_arg(arg: Any) -> Any:
-        if isinstance(arg, torch.fx.Node):
-            return arg.meta.get("val")
-        if isinstance(arg, tuple):
-            return tuple(GraphLowering._fx_arg_to_fake_arg(x) for x in arg)
-        if isinstance(arg, list):
-            return [GraphLowering._fx_arg_to_fake_arg(x) for x in arg]
-        if isinstance(arg, dict):
-            return {
-                key: GraphLowering._fx_arg_to_fake_arg(value)
-                for key, value in arg.items()
-            }
-        return arg
-
     def _fake_args_kwargs_for_layout_constraints(
         self,
         target: torch._ops.OpOverload,
         node: torch.fx.Node,
-    ) -> tuple[Any, Any]:
-        if "eager_input_vals" in node.meta:
-            fake_args, fake_kwargs = node.meta["eager_input_vals"]
-        else:
-            fake_args, fake_kwargs = node.args, node.kwargs
-            fake_args, fake_kwargs = self._normalize_args_kwargs(
-                target, fake_args, fake_kwargs
-            )
-            return (
-                self._fx_arg_to_fake_arg(fake_args),
-                self._fx_arg_to_fake_arg(fake_kwargs),
-            )
-
+    ) -> tuple[Any, Any] | None:
+        if "eager_input_vals" not in node.meta:
+            return None
+        fake_args, fake_kwargs = node.meta["eager_input_vals"]
         return self._normalize_args_kwargs(target, fake_args, fake_kwargs)
 
     @staticmethod
@@ -1560,9 +1536,12 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(target, torch._ops.OpOverload):
                 return args, kwargs, None
 
-            fake_args, fake_kwargs = self._fake_args_kwargs_for_layout_constraints(
+            fake_args_kwargs = self._fake_args_kwargs_for_layout_constraints(
                 target, node
             )
+            if fake_args_kwargs is None:
+                return args, kwargs, None
+            fake_args, fake_kwargs = fake_args_kwargs
             args, kwargs = self._normalize_args_kwargs(target, args, kwargs)
             old_args, old_kwargs = self._normalize_args_kwargs(
                 target, old_args, old_kwargs
