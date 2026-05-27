@@ -13,6 +13,7 @@ from torch.fx.experimental.dynamic_spec import (
     IntVar,
     ObjectSpec,
     ParamsSpec,
+    SeqSpec,
     ShapesSpec,
     ShapeVar,
     STATIC,
@@ -1485,6 +1486,103 @@ class TestObjectSpecCompile(TestCase):
         # Captured weight placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
+
+
+class TestSeqSpec(TestCase):
+    """Construction and integration of SeqSpec."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_construction_basic(self):
+        B = ShapeVar("b")
+        sp = SeqSpec([TensorSpec([B, None]), TensorSpec([B, None])])
+        self.assertEqual(len(sp), 2)
+        self.assertIn(0, sp)
+        self.assertIn(1, sp)
+        self.assertNotIn(2, sp)
+        self.assertNotIn("x", sp)
+        self.assertIsInstance(sp[0], TensorSpec)
+
+    def test_accepts_tuple(self):
+        B = ShapeVar("b")
+        sp = SeqSpec((TensorSpec([B, None]), TensorSpec([B, None])))
+        self.assertEqual(len(sp), 2)
+
+    def test_empty(self):
+        sp = SeqSpec([])
+        self.assertEqual(len(sp), 0)
+        self.assertNotIn(0, sp)
+
+    def test_iter(self):
+        B = ShapeVar("b")
+        t0 = TensorSpec([B, None])
+        t1 = TensorSpec([B, None])
+        sp = SeqSpec([t0, t1])
+        self.assertEqual(list(sp), [t0, t1])
+
+    def test_repr(self):
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), None])])
+        self.assertEqual(
+            repr(sp),
+            """\
+seq_spec:
+  [0]:
+    Tensor:
+      0: ShapeVar(a#0, min=0)
+      1: None""",
+        )
+
+    def test_to_jsonable(self):
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), None])])
+        j = sp.to_jsonable()
+        self.assertEqual(j["type"], "SeqSpec")
+        self.assertEqual(len(j["entries"]), 1)
+        self.assertEqual(j["entries"][0]["type"], "TensorSpec")
+
+    def test_compile_list_arg_marks_dynamic(self):
+        """List arg of two tensors with dim 0 dynamic via SeqSpec; no
+        recompile on different dim-0 sizes."""
+        B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(xs):
+            return xs[0].sum() + xs[1].sum()
+
+        compiled = torch.compile(
+            fn,
+            backend=cnts,
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={
+                    "xs": SeqSpec(
+                        [TensorSpec([B, 3]), TensorSpec([B, 5])]
+                    )
+                }
+            ),
+        )
+        compiled([torch.ones(4, 3), torch.ones(4, 5)])
+        compiled([torch.ones(7, 3), torch.ones(7, 5)])  # same dim 0 dyn
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_compile_out_of_range_element_treated_static(self):
+        """Indices beyond the SeqSpec length are unspecified == static."""
+        B = ShapeVar("b")
+
+        def fn(xs):
+            return xs[0].sum() + xs[1].sum()
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params={"xs": SeqSpec([TensorSpec([B, None])])}
+            ),
+        )
+        out = compiled([torch.ones(4, 3), torch.ones(4, 3)])
+        self.assertTrue(torch.is_tensor(out))
 
 
 class TestDictSpecCompile(TestCase):

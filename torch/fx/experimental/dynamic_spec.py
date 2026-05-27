@@ -27,6 +27,7 @@ __all__ = [
     "TensorSpec",
     "ObjectSpec",
     "DictSpec",
+    "SeqSpec",
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
@@ -430,6 +431,58 @@ class DictSpec:
         }
 
 
+class SeqSpec:
+    """Spec for a Python ``list``- or ``tuple``-typed value.
+
+    Fixed-length, per-position.
+
+    Constructor::
+
+        SeqSpec([IntermediateSpec, ...])
+
+    Example::
+
+        SeqSpec([TensorSpec([ShapeVar("h"), 10]), None])
+        SeqSpec((TensorSpec([ShapeVar("a")]), TensorSpec([ShapeVar("b")])))
+    """
+
+    def __init__(self, entries: Sequence[IntermediateSpec]) -> None:
+        self._entries: list[IntermediateSpec] = list(entries)
+
+    def __contains__(self, index: object) -> bool:
+        return isinstance(index, int) and 0 <= index < len(self._entries)
+
+    def __iter__(self) -> Iterator[IntermediateSpec]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __getitem__(self, index: int) -> IntermediateSpec:
+        return self._entries[index]
+
+    def __repr__(self) -> str:
+        lines = ["seq_spec:"]
+        for i, spec in enumerate(self._entries):
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}[{i}]:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}[{i}]: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "SeqSpec",
+            "entries": [
+                spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for spec in self._entries
+            ],
+        }
+
+
 # Per-int-leaf spec type: union of valid values that can appear at a slot
 # where the runtime value is an int (tensor dim, scalar arg).
 #
@@ -444,9 +497,9 @@ class DictSpec:
 LeafIntSpec: TypeAlias = IntVar | SymInt | int | None
 # Leaf specs (individual argument specifications) — ints plus TensorSpec.
 LeafSpec: TypeAlias = LeafIntSpec | TensorSpec
-# Includes containers (``ObjectSpec`` / ``DictSpec``; future ``ListSpec``)
+# Includes containers (``ObjectSpec`` / ``DictSpec`` / ``SeqSpec``)
 # for nested specs reachable via dynamo source-chain walks.
-IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
+IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec | SeqSpec
 
 # Value type for the dict passed to ``ParamsSpec``/``ShapesSpec``:
 #   - named entries hold a single spec,

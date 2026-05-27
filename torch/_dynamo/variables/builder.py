@@ -85,6 +85,7 @@ from torch.fx.experimental.dynamic_spec import (
     IntVar,
     LeafSpec,
     ObjectSpec,
+    SeqSpec,
     ShapesSpec,
     TensorSpec,
 )
@@ -479,6 +480,22 @@ def _walk_spec(
                         f"({getattr(token, 'key', None)!r})"
                     )
                 current_spec = current_spec._entries.get(token.key)
+            case SeqSpec():
+                if not isinstance(token, _SubscriptToken) or not isinstance(
+                    token.key, int
+                ):
+                    raise RuntimeError(
+                        f"shapes_spec walk: SeqSpec at path {remaining_tokens!r} expects "
+                        f"an int subscript (_SubscriptToken), got "
+                        f"{type(token).__name__}"
+                        f"({getattr(token, 'key', None)!r})"
+                    )
+                # Out-of-range index: unspecified -> treat as static (None),
+                # matching DictSpec's behavior for missing keys.
+                if token.key in current_spec:
+                    current_spec = current_spec[token.key]
+                else:
+                    current_spec = None
             case _:
                 # leaf spec (TensorSpec / IntVar / int / None) but path still
                 # has tokens → the user spec is too shallow for the access.
