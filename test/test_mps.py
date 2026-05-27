@@ -10514,6 +10514,97 @@ class TestPad(TestCaseMPS):
         gi_ref = torch.ops.aten.replication_pad1d_backward(go.cpu(), x.cpu(), (1, 1))
         self.assertEqual(gi.cpu(), gi_ref)
 
+class TestConv3dChannelsLast3dMPS(NNTestCase):
+    def _run_conv3d_cl3d(self, *, input_shape, Cin, Cout, k, pad, with_bias, dtype, groups=1):
+        torch.manual_seed(0)
+        m_cpu = nn.Conv3d(Cin, Cout, k, stride=1, padding=pad, bias=with_bias,
+                          groups=groups, device="cpu")
+        x_cpu = torch.randn(*input_shape, device="cpu", requires_grad=True)
+
+        m_mps_cont = copy.deepcopy(m_cpu).to(device="mps", dtype=dtype)
+        x_mps_cont = x_cpu.detach().to(device="mps", dtype=dtype).requires_grad_(True)
+
+        m_mps_cl = copy.deepcopy(m_cpu).to(device="mps", dtype=dtype)
+        x_mps_cl = (x_cpu.detach().to(device="mps", dtype=dtype)
+                    .contiguous(memory_format=torch.channels_last_3d)
+                    .requires_grad_(True))
+
+        y_cpu = m_cpu(x_cpu)
+        y_mps_cont = m_mps_cont(x_mps_cont)
+        y_mps_cl = m_mps_cl(x_mps_cl)
+
+        # Fast-path invariant: CL output must match contiguous in same dtype.
+        cl_vs_cont = dict(atol=1e-5, rtol=1e-5) if dtype == torch.float32 else dict(atol=1e-3, rtol=1e-3)
+        self.assertEqual(y_mps_cont, y_mps_cl, **cl_vs_cont)
+        self.assertTrue(y_mps_cl.is_contiguous(memory_format=torch.channels_last_3d))
+        if dtype == torch.float32:
+            self.assertEqual(y_cpu, y_mps_cl.cpu(), atol=1e-4, rtol=1e-4)
+
+        grad_out_cpu = torch.randn_like(y_cpu)
+        grad_out_mps = grad_out_cpu.to(device="mps", dtype=dtype)
+        y_cpu.backward(grad_out_cpu)
+        y_mps_cont.backward(grad_out_mps)
+        y_mps_cl.backward(grad_out_mps.contiguous(memory_format=torch.channels_last_3d))
+
+        self.assertEqual(x_mps_cont.grad, x_mps_cl.grad, **cl_vs_cont)
+        self.assertTrue(x_mps_cl.grad.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(m_mps_cont.weight.grad, m_mps_cl.weight.grad, **cl_vs_cont)
+        if with_bias:
+            self.assertEqual(m_mps_cont.bias.grad, m_mps_cl.bias.grad, **cl_vs_cont)
+        if dtype == torch.float32:
+            self.assertEqual(x_cpu.grad, x_mps_cl.grad.cpu(), atol=1e-4, rtol=1e-4)
+            self.assertEqual(m_cpu.weight.grad, m_mps_cl.weight.grad.cpu(), atol=1e-4, rtol=1e-4)
+            if with_bias:
+                self.assertEqual(m_cpu.bias.grad, m_mps_cl.bias.grad.cpu(), atol=1e-4, rtol=1e-4)
+
+    # `factorized` (1,3,3) trips the DHWIO gate off; exercises the fallback.
+    @parametrize("with_bias", [True, False])
+    @parametrize("shape_kind", ["small", "production", "factorized"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv3d_channels_last_3d_fwd_bwd(self, dtype, shape_kind, with_bias):
+        if shape_kind == "small":
+            cfg = dict(input_shape=(2, 4, 8, 8, 8), Cin=4, Cout=8, k=3, pad=1)
+        elif shape_kind == "production":
+            # Reduced from issue's [4,32,64,64,64] for test runtime.
+            cfg = dict(input_shape=(2, 32, 16, 16, 16), Cin=32, Cout=64, k=3, pad=1)
+        else:
+            cfg = dict(input_shape=(2, 16, 8, 16, 16), Cin=16, Cout=32, k=(1, 3, 3), pad=(0, 1, 1))
+        self._run_conv3d_cl3d(**cfg, with_bias=with_bias, dtype=dtype)
+
+    # groups=2, Cin/groups=4: hits the DHWIO fast path.
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv3d_channels_last_3d_grouped(self, dtype):
+        self._run_conv3d_cl3d(input_shape=(2, 8, 8, 8, 8), Cin=8, Cout=16,
+                              k=3, pad=1, groups=2, with_bias=True, dtype=dtype)
+
+    # Depthwise (Cin/groups=1): gate bypasses DHWIO, exercises NCDHW fallback.
+    def test_conv3d_channels_last_3d_depthwise(self):
+        self._run_conv3d_cl3d(input_shape=(2, 4, 8, 8, 8), Cin=4, Cout=4,
+                              k=3, pad=1, groups=4, with_bias=True, dtype=torch.float32)
+
+    # ConvTranspose3d routes through _mps_convolution_impl; fp32 only since
+    # the op rejects bf16/fp16 for 3D.
+    def test_conv_transpose3d_channels_last_3d(self):
+        torch.manual_seed(0)
+        m_cpu = nn.ConvTranspose3d(8, 4, 3, stride=1, padding=1, device="cpu")
+        x_cpu = torch.randn(2, 8, 8, 8, 8, device="cpu", requires_grad=True)
+
+        m_mps = copy.deepcopy(m_cpu).to("mps")
+        x_mps = (x_cpu.detach().clone().to("mps")
+                 .contiguous(memory_format=torch.channels_last_3d)
+                 .requires_grad_(True))
+
+        y_cpu = m_cpu(x_cpu)
+        y_mps = m_mps(x_mps)
+        self.assertEqual(y_cpu, y_mps.cpu(), atol=1e-4, rtol=1e-4)
+
+        grad_out = torch.randn_like(y_cpu)
+        y_cpu.backward(grad_out)
+        y_mps.backward(grad_out.to("mps"))
+        self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-4, rtol=1e-4)
+        self.assertEqual(m_cpu.weight.grad, m_mps.weight.grad.cpu(), atol=1e-4, rtol=1e-4)
+
+
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
@@ -15395,6 +15486,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
 
 if __name__ == "__main__":
     run_tests()
