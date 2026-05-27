@@ -11839,6 +11839,11 @@
     CompositeExplicitAutograd: foreach_tensor_mm_list_kernel_slow
     CUDA: foreach_tensor_mm_list_kernel_cuda
 
+- func: _foreach_mm_from_ptrs(Tensor dispatch_dummy, Tensor a_ptrs, Tensor b_ptrs, int M, int N, int K, int G, int lda, int ldb) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _foreach_mm_from_ptrs_cuda
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
