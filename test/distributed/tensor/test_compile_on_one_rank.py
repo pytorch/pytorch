@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.nn as nn
+from torch._dynamo.exc import UserError
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
@@ -99,6 +100,50 @@ class TestCompileOnOneRank(DTensorTestBase):
 
         compiled_model = torch.compile(model, backend=aot_eager_graph)
         return compiled_model, fw_graph_cell
+
+    @with_comms
+    def test_rank_branch_graph_breaks_under_compile_on_one_rank(self):
+        def rank_branch(x):
+            if dist.get_rank() == 0:
+                return x + 123
+            return x - 456
+
+        with dist_config.patch(compile_on_one_rank=True):
+            opt_f = torch.compile(rank_branch, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                UserError,
+                "Could not guard on data-dependent expression",
+            ):
+                opt_f(torch.ones(()))
+
+    @with_comms
+    @dist_config.patch(compile_on_one_rank=True)
+    def test_get_rank_with_explicit_process_group_input(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        def f(x):
+            return x + dist.get_rank(pg)
+
+        x = torch.ones((), device=self.device_type)
+        opt = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), x + pg.rank())
+
+    @with_comms
+    def test_rank_branch_with_explicit_process_group_graph_breaks_under_coor(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        def rank_branch(x):
+            if dist.get_rank(pg) == 0:
+                return x + 123
+            return x - 456
+
+        with dist_config.patch(compile_on_one_rank=True):
+            opt_f = torch.compile(rank_branch, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                UserError,
+                "Could not guard on data-dependent expression",
+            ):
+                opt_f(torch.ones(()))
 
     @with_comms
     @dist_config.patch(compile_on_one_rank=True)
