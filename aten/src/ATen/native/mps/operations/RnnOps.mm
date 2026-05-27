@@ -2,12 +2,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_lstm_mps_native.h>
 #include <ATen/ops/lstm_mps_backward_native.h>
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
+#import <MetalPerformanceShadersGraph/MPSGraphRandomOps.h>
 
 namespace at::native {
 
@@ -126,8 +128,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList_ = nil;
     NSMutableArray<MPSGraphTensor*>* biasList_ = nil;
     NSMutableArray<MPSGraphTensor*>* recurrentBiasList_ = nil;
+    MPSGraphTensor* dropoutStateTensor_ = nil;
   };
 
+  const bool apply_dropout = dropout_p > 0.0 && train && num_layers > 1;
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
@@ -169,6 +173,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
           stateTensor,
           cellStateTensor,
       };
+      MPSGraphTensor* dropoutStateTensor = nil;
+      MPSGraphTensor* dropoutState = nil;
+      if (apply_dropout) {
+        dropoutStateTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
+        dropoutState = dropoutStateTensor;
+      }
 
       if (batch_first) {
         inputTensor = [mpsGraph transposeTensor:inputTensor dimension:0 withDimension:1 name:nil];
@@ -210,8 +221,35 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
         if (i != num_layers - 1) {
           [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_ axis:0 name:nil]];
         }
-        if (dropout_p > 0.0 && train && (i != num_layers - 1)) {
-          inputTensor_ = [mpsGraph dropoutTensor:inputTensor_ rate:dropout_p name:nil];
+        if (apply_dropout && (i != num_layers - 1)) {
+          // MPSGraph's dropoutTensor:rate:name: has no seed input, so the
+          // cached graph reuses the same mask on every forward. This builds
+          // dropout manually from a Philox-seeded uniform random tensor instead and
+          // chains the returned state into the next layer's call.
+          MPSDataType inputDType = getMPSDataType(input);
+          MPSGraphRandomOpDescriptor* randDesc =
+              [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionUniform
+                                                            dataType:MPSDataTypeFloat32];
+          randDesc.min = 0.0f;
+          randDesc.max = 1.0f;
+          MPSGraphTensor* shapeTensor = [mpsGraph shapeOfTensor:inputTensor_ name:nil];
+          NSArray<MPSGraphTensor*>* randResults = [mpsGraph randomTensorWithShapeTensor:shapeTensor
+                                                                             descriptor:randDesc
+                                                                            stateTensor:dropoutState
+                                                                                   name:nil];
+          MPSGraphTensor* randTensor = randResults[0];
+          dropoutState = randResults[1];
+
+          MPSGraphTensor* threshold = [mpsGraph constantWithScalar:dropout_p dataType:MPSDataTypeFloat32];
+          MPSGraphTensor* keepMask = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:randTensor
+                                                                     secondaryTensor:threshold
+                                                                                name:nil];
+          MPSGraphTensor* keepMaskCast = [mpsGraph castTensor:keepMask toType:inputDType name:nil];
+          MPSGraphTensor* invKeepProb = [mpsGraph constantWithScalar:(1.0 / (1.0 - dropout_p)) dataType:inputDType];
+          MPSGraphTensor* scaledMask = [mpsGraph multiplicationWithPrimaryTensor:keepMaskCast
+                                                                 secondaryTensor:invKeepProb
+                                                                            name:nil];
+          inputTensor_ = [mpsGraph multiplicationWithPrimaryTensor:inputTensor_ secondaryTensor:scaledMask name:nil];
         }
 
         if (bidirectional) {
@@ -278,6 +316,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       newCachedGraph->recurrentKernelWeightsList_ = recurrentKernelWeightsList;
       newCachedGraph->biasList_ = kernelBiasList;
       newCachedGraph->recurrentBiasList_ = recurrentBiasList;
+      newCachedGraph->dropoutStateTensor_ = dropoutStateTensor;
     });
 
     NSMutableArray<MPSGraphTensor*>* kernelWeightsList = cachedGraph->kernelWeightsList_;
@@ -305,6 +344,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     [feeds setObject:selfPlaceholder.getMPSGraphTensorData() forKey:selfPlaceholder.getMPSGraphTensor()];
     [feeds setObject:selfState.getMPSGraphTensorData() forKey:selfState.getMPSGraphTensor()];
     [feeds setObject:selfCellState.getMPSGraphTensorData() forKey:selfCellState.getMPSGraphTensor()];
+
+    if (cachedGraph->dropoutStateTensor_) {
+      auto mps_gen =
+          get_generator_or_default<at::MPSGeneratorImpl>(std::nullopt, at::mps::detail::getDefaultMPSGenerator());
+      MPSNDArrayDescriptor* stateDesc =
+          [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
+      MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device()
+                                                          descriptor:stateDesc] autorelease];
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+        mps_gen->update_philox_counters();
+        [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
+      }
+      MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
+      [feeds setObject:stateTensorData forKey:cachedGraph->dropoutStateTensor_];
+    }
 
     auto dims = getTensorShape(cachedGraph->outputTensors_[0]);
     Tensor output = at::empty(IntArrayRef(dims), input.options());
