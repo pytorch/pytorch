@@ -2901,10 +2901,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: dict[str, Any] | None = None
 
-        # When the seed-autotune cap config is active, this holds the
-        # bucketed cap which is emitted into inductor_meta
-        self._combo_seed_max_autotune_configs: int | None = None
-
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
 
@@ -5784,8 +5780,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             flops = self.estimate_flops()
             if flops is not None:
                 out["kernel_flop"] = flops
-        if self._combo_seed_max_autotune_configs:
-            out["max_autotune_configs"] = self._combo_seed_max_autotune_configs
         return out
 
     @functools.cached_property
