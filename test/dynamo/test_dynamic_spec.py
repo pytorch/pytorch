@@ -9,6 +9,7 @@ import torch.fx.experimental._config as _fx_experimental_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.dynamic_spec import (
+    DictSpec,
     IntVar,
     ObjectSpec,
     ParamsSpec,
@@ -236,6 +237,95 @@ shapes_spec:
         0: ShapeVar(batch#0, min=0)
         1: None""",
         )
+
+    def test_params_spec_repr_with_varargs_and_varkw(self):
+        sv = ShapeVar("batch")
+        ps = ParamsSpec(
+            {
+                "x": TensorSpec([sv]),
+                "*args": [TensorSpec([sv]), None],
+                "**kwargs": {"foo": IntVar("k")},
+            }
+        )
+        self.assertEqual(
+            repr(ps),
+            """\
+x:
+  Tensor:
+    0: ShapeVar(batch#0, min=0)
+*args:
+  0:
+    Tensor:
+      0: ShapeVar(batch#0, min=0)
+  1: None
+**kwargs:
+  foo: IntVar(k#1)""",
+        )
+
+    def test_params_spec_to_jsonable_with_varargs_and_varkw(self):
+        ps = ParamsSpec(
+            {
+                "x": TensorSpec([ShapeVar("batch")]),
+                "*args": [TensorSpec([ShapeVar("a")]), None],
+                "**kwargs": {"foo": IntVar("k")},
+            }
+        )
+        self.assertEqual(
+            ps.to_jsonable(),
+            {
+                "type": "ParamsSpec",
+                "params": {
+                    "x": {
+                        "type": "TensorSpec",
+                        "dims": [
+                            {
+                                "type": "ShapeVar",
+                                "name": "batch",
+                                "min": 0,
+                                "max": None,
+                                "optimization_hint": None,
+                            },
+                        ],
+                    },
+                    "*args": [
+                        {
+                            "type": "TensorSpec",
+                            "dims": [
+                                {
+                                    "type": "ShapeVar",
+                                    "name": "a",
+                                    "min": 0,
+                                    "max": None,
+                                    "optimization_hint": None,
+                                }
+                            ],
+                        },
+                        None,
+                    ],
+                    "**kwargs": {
+                        "foo": {
+                            "type": "IntVar",
+                            "name": "k",
+                            "min": None,
+                            "max": None,
+                            "optimization_hint": None,
+                        }
+                    },
+                },
+            },
+        )
+
+    def test_params_spec_rejects_unknown_sentinel(self):
+        with self.assertRaisesRegex(ValueError, r"Unknown sentinel key"):
+            ParamsSpec({"*unknown": TensorSpec([ShapeVar("a")])})
+
+    def test_params_spec_rejects_bad_varargs_value(self):
+        with self.assertRaisesRegex(ValueError, r"\*args.*must be a list"):
+            ParamsSpec({"*args": TensorSpec([ShapeVar("a")])})  # not a list
+
+    def test_params_spec_rejects_bad_varkw_value(self):
+        with self.assertRaisesRegex(ValueError, r"\*\*kwargs.*must be a dict"):
+            ParamsSpec({"**kwargs": [TensorSpec([ShapeVar("a")])]})  # not a dict
 
 
 class TestShapeVarCompile(TestCase):
@@ -661,6 +751,298 @@ class TestObjectSpecCompile(TestCase):
         # Captured weight placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
+
+
+class TestDictSpecCompile(TestCase):
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_dict_spec_value_marked_dynamic(self):
+        """A tensor reached via ``cfg["x"]`` honors the ``ShapeVar`` in
+        its ``DictSpec`` entry; varying that dim does not recompile."""
+
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
+        )
+
+        compiled({"x": torch.randn(4, 3)})
+        compiled({"x": torch.randn(8, 3)})
+
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Captured placeholder has a SymInt at dim 0.
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+
+    def test_dict_spec_missing_key_stays_static(self):
+        """A dict entry not present in ``DictSpec`` is all-static; each
+        new shape recompiles."""
+
+        def fn(cfg):
+            return cfg["x"].sum() + cfg["y"].sum()
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
+        )
+
+        x = torch.randn(4, 3)
+        compiled({"x": x, "y": torch.randn(4, 3)})
+        # y not in spec -> all static; changing y's shape recompiles each time
+        compiled({"x": x, "y": torch.randn(4, 5)})
+        compiled({"x": x, "y": torch.randn(4, 7)})
+        self.assertEqual(len(backend.graphs), 3)
+
+        # x dim 0 is SymInt (ShapeVar via DictSpec); y is fully static.
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 2)
+        x_shape = phs[0].meta["example_value"].shape
+        y_shape = phs[1].meta["example_value"].shape
+        self.assertIsInstance(x_shape[0], torch.SymInt)
+        self.assertIsInstance(x_shape[1], int)
+        self.assertIsInstance(y_shape[0], int)
+        self.assertIsInstance(y_shape[1], int)
+
+    def test_dict_spec_int_key_marked_dynamic(self):
+        """``DictSpec`` accepts int keys; ``cfg[0]`` honors the entry."""
+
+        def fn(cfg):
+            return cfg[0] + 1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec={"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), None])})},
+        )
+
+        compiled({0: torch.randn(4, 3)})
+        compiled({0: torch.randn(8, 3)})
+        self.assertEqual(len(backend.graphs), 1)
+
+        shape = _tensor_placeholder_shape(backend.graphs[-1])
+        self.assertIsInstance(shape[0], torch.SymInt)
+
+    def test_walk_terminal_container_raises(self):
+        """The spec declares ``x`` as a ``DictSpec`` (a container), but the
+        compiled function is called with a plain tensor for ``x``. Because the
+        spec walk terminates on the container instead of a ``TensorSpec`` leaf,
+        compilation must raise ``RuntimeError`` with ``"shapes_spec walk ended
+        on a container"``."""
+
+        def fn(x):
+            return x + 1
+
+        # Spec says ``x`` is a DictSpec, but the user passes a tensor.
+        # The spec walk terminates on the DictSpec container at the
+        # arg root, which is not a leaf.
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), None])})},
+        )
+
+        with self.assertRaisesRegex(
+            (torch._dynamo.exc.InternalTorchDynamoError, RuntimeError),
+            r"shapes_spec walk ended on a container",
+        ):
+            compiled(torch.randn(4, 3))
+
+
+class TestVarargsCompile(TestCase):
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_named_and_varargs_and_varkw(self):
+        """Combined: named tensor + ``*args`` tensor + ``**kwargs`` tensor.
+        ``ShapeVar`` dims become SymInts
+        """
+
+        def f(x, *args, **kwargs):
+            return x + args[0] + kwargs["foo"]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            f,
+            backend=backend,
+            shapes_spec={
+                "x": TensorSpec([ShapeVar("a"), None]),
+                "*args": [TensorSpec([ShapeVar("b"), None])],
+                "**kwargs": {"foo": TensorSpec([ShapeVar("c"), None])},
+            },
+        )
+
+        compiled(torch.randn(4, 3), torch.randn(4, 3), foo=torch.randn(4, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Vary only the ShapeVar-marked dims -> no recompile.
+        compiled(torch.randn(8, 3), torch.randn(8, 3), foo=torch.randn(8, 3))
+        compiled(torch.randn(16, 3), torch.randn(16, 3), foo=torch.randn(16, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # All three tensor placeholders have SymInt at dim 0 and static int at dim 1.
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 3)
+        for ph in phs:
+            shape = ph.meta["example_value"].shape
+            self.assertIsInstance(shape[0], torch.SymInt)
+            self.assertIsInstance(shape[1], int)
+
+    def test_pure_varargs(self):
+        """A ``*args``-only spec marks each positional tensor's dim 0 dynamic."""
+
+        def f(*args):
+            return args[0] + args[1]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            f,
+            backend=backend,
+            shapes_spec={
+                "*args": [
+                    TensorSpec([ShapeVar("a"), None]),
+                    TensorSpec([ShapeVar("b"), None]),
+                ],
+            },
+        )
+
+        compiled(torch.randn(4, 3), torch.randn(4, 3))
+        compiled(torch.randn(8, 3), torch.randn(8, 3))
+        compiled(torch.randn(16, 3), torch.randn(16, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 2)
+        for ph in phs:
+            shape = ph.meta["example_value"].shape
+            self.assertIsInstance(shape[0], torch.SymInt)
+            self.assertIsInstance(shape[1], int)
+
+    def test_varargs_extra_positions_are_static(self):
+        """Positional args past the end of the ``*args`` spec list are
+        treated as fully static — changing their shape triggers a recompile."""
+
+        def f(*args):
+            return args[0].sum() + args[1].sum() + args[2].sum()
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            f,
+            backend=backend,
+            shapes_spec={
+                # Spec covers only the first 2 *args entries.
+                "*args": [
+                    TensorSpec([ShapeVar("a"), None]),
+                    TensorSpec([ShapeVar("b"), None]),
+                ],
+            },
+        )
+
+        # Vary the third (unspecified) arg's shape — each new shape recompiles
+        # because it is treated as static.
+        compiled(torch.randn(4, 3), torch.randn(4, 3), torch.randn(4, 3))
+        compiled(torch.randn(8, 3), torch.randn(8, 3), torch.randn(4, 5))
+        compiled(torch.randn(16, 3), torch.randn(16, 3), torch.randn(4, 7))
+        self.assertEqual(len(backend.graphs), 3)
+
+        # First two *args have SymInt dim 0 (ShapeVar); third is fully static.
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 3)
+        self.assertIsInstance(phs[0].meta["example_value"].shape[0], torch.SymInt)
+        self.assertIsInstance(phs[1].meta["example_value"].shape[0], torch.SymInt)
+        self.assertIsInstance(phs[2].meta["example_value"].shape[0], int)
+        self.assertIsInstance(phs[2].meta["example_value"].shape[1], int)
+
+    def test_pure_varkw(self):
+        """A ``**kwargs``-only spec marks each keyword tensor's dim 0 dynamic."""
+
+        def f(**kwargs):
+            return kwargs["a"] + kwargs["b"]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(
+            f,
+            backend=backend,
+            shapes_spec={
+                "**kwargs": {
+                    "a": TensorSpec([ShapeVar("a"), None]),
+                    "b": TensorSpec([ShapeVar("b"), None]),
+                },
+            },
+        )
+
+        compiled(a=torch.randn(4, 3), b=torch.randn(4, 3))
+        compiled(a=torch.randn(8, 3), b=torch.randn(8, 3))
+        compiled(a=torch.randn(16, 3), b=torch.randn(16, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+        phs = _tensor_placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 2)
+        for ph in phs:
+            shape = ph.meta["example_value"].shape
+            self.assertIsInstance(shape[0], torch.SymInt)
+            self.assertIsInstance(shape[1], int)
+
+
+class TestWalkSpecRaises(TestCase):
+    """Unit-style tests for ``_walk_spec`` raising on type-mismatched
+    access paths (vs. silently returning None)."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_walk_object_spec_with_subscript_raises(self):
+        """``ObjectSpec`` paired with a subscript token must raise."""
+        from torch._dynamo.variables.builder import (
+            _AttrToken,
+            _SubscriptToken,
+            _walk_spec,
+        )
+
+        root = ObjectSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        with self.assertRaisesRegex(
+            RuntimeError, r"ObjectSpec.*expects an attribute access"
+        ):
+            _walk_spec(root, [_SubscriptToken("x")])
+        # sanity: the matching ``.x`` (AttrToken) form still resolves.
+        ts = _walk_spec(root, [_AttrToken("x")])
+        self.assertIsInstance(ts, TensorSpec)
+
+    def test_walk_dict_spec_with_attr_raises(self):
+        """``DictSpec`` paired with an attribute token must raise."""
+        from torch._dynamo.variables.builder import (
+            _AttrToken,
+            _SubscriptToken,
+            _walk_spec,
+        )
+
+        root = DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        with self.assertRaisesRegex(RuntimeError, r"DictSpec.*expects.*subscript"):
+            _walk_spec(root, [_AttrToken("x")])
+        # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
+        ts = _walk_spec(root, [_SubscriptToken("x")])
+        self.assertIsInstance(ts, TensorSpec)
+
+    def test_walk_leaf_with_remaining_token_raises(self):
+        """A leaf spec with remaining tokens in the path must raise."""
+        from torch._dynamo.variables.builder import _AttrToken, _walk_spec
+
+        root = TensorSpec([ShapeVar("h"), None])
+        with self.assertRaisesRegex(
+            RuntimeError, r"leaf spec.*cannot consume further token"
+        ):
+            _walk_spec(root, [_AttrToken("something")])
 
 
 if __name__ == "__main__":
