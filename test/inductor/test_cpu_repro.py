@@ -15,7 +15,7 @@ from unittest.mock import patch
 import torch
 from torch import nn
 from torch._C import FileCheck
-from torch._dynamo.testing import rand_strided
+from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
@@ -3099,6 +3099,34 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(_fn, (x,))
                 check_metrics_vec_kernel_count(1)
+
+    def test_adaptive_avg_pool2d_dynamic_input_output_sizes(self):
+        def fn(x, out_h, out_w):
+            return torch._adaptive_avg_pool2d(x, [out_h, out_w])
+
+        cnt = CompileCounterWithBackend("inductor")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+
+        x = torch.randn(2, 3, 19, 11)
+        for out_h, out_w in [(20, 13), (21, 14), (22, 15)]:
+            self.assertEqual(opt_fn(x, out_h, out_w), fn(x, out_h, out_w))
+        self.assertEqual(cnt.frame_count, 1)
+
+        for shape, output_size in [
+            ((2, 3, 23, 15), (24, 17)),
+            ((2, 3, 17, 9), (18, 11)),
+        ]:
+            x = torch.randn(shape)
+            out_h, out_w = output_size
+            self.assertEqual(opt_fn(x, out_h, out_w), fn(x, out_h, out_w))
+
+        large_window_cnt = CompileCounterWithBackend("inductor")
+        large_window_opt_fn = torch.compile(
+            fn, backend=large_window_cnt, fullgraph=True, dynamic=True
+        )
+        x = torch.randn(2, 3, 21, 21)
+        self.assertEqual(large_window_opt_fn(x, 4, 4), fn(x, 4, 4))
+        self.assertEqual(large_window_cnt.frame_count, 1)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
