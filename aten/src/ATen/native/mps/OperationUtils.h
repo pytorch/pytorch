@@ -26,7 +26,9 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 
 using namespace at::mps;
 
@@ -70,6 +72,9 @@ static inline std::string getMPSTypeString(const TensorBase& t, bool short_name 
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 static inline std::string scalarToMetalTypeString(const TensorBase& t) {
   return scalarToMetalTypeString(t.scalar_type());
+}
+static inline std::string scalarToMetalTypeString(const std::optional<Tensor>& t) {
+  return t.has_value() ? scalarToMetalTypeString(t.value()) : "void";
 }
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
@@ -670,11 +675,8 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
       if (!iter.is_contiguous()) {
-        mtl_setArgs<2>(computeEncoder,
-                       outputTensor.sizes(),
-                       inputTensor.strides(),
-                       outputTensor.strides(),
-                       inputTensor.ndimension());
+        mtl_setArgs<2>(
+            computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
       }
       detail::mtl_setArg(computeEncoder, params, iter.is_contiguous() ? 2 : 6);
       mtl_dispatch1DJob(computeEncoder, cplState, length);

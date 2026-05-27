@@ -468,18 +468,18 @@ const Tensor& indices) {
     return;
   }
 
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
 
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
 
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int padH = c10::checked_convert<int>(padding[0], "int");
+  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
 
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+  const int dilationH = c10::checked_convert<int>(dilation[0], "int");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::checked_convert<int>(dilation[1], "int");
 
   const auto memory_format = input_.suggest_memory_format();
 
@@ -513,13 +513,13 @@ const Tensor& indices) {
               at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+              {maxThreadsDim[0], lastPow2(nInputPlane), at::cuda::warp_size()});
           int block_y = std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
+              {maxThreadsDim[1], lastPow2(outputWidth), max_threads / block_x});
           int block_z = std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
+              {maxThreadsDim[2], lastPow2(outputHeight), max_threads / block_x / block_y});
           block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+              {maxThreadsDim[0], lastPow2(nInputPlane), max_threads / block_y / block_z});
           const dim3 block(block_x, block_y, block_z);
 
           bool use_int32 = can_use_int32_nhwc(
@@ -528,17 +528,17 @@ const Tensor& indices) {
               in_stride_n, in_stride_c, in_stride_h, in_stride_w);
 
           int kernel_stride_C = ceil_div(
-              safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
+              c10::checked_convert<int>(nInputPlane, "int"), block_x * 4);
           int kernel_size_C = ceil_div(
-              safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
+              c10::checked_convert<int>(nInputPlane, "int"), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE_FWD));
+              ceil_div(c10::checked_convert<int>(outputWidth, "int"), block_y*BLOCK_STRIDE_FWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE_FWD));
+              ceil_div(c10::checked_convert<int>(outputHeight, "int"), block_z*BLOCK_STRIDE_FWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size;
@@ -648,18 +648,18 @@ const Tensor& gradInput) {
     return;
   }
 
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
 
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
 
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int padH = c10::checked_convert<int>(padding[0], "int");
+  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
 
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+  const int dilationH = c10::checked_convert<int>(dilation[0], "int");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::checked_convert<int>(dilation[1], "int");
 
   const auto memory_format = input_.suggest_memory_format();
 
@@ -669,11 +669,6 @@ const Tensor& gradInput) {
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
-
-  const int64_t in_stride_n = input.ndimension() == 4 ? input.stride(-4) : 0;
-  const int64_t in_stride_c = input.stride(-3);
-  const int64_t in_stride_h = input.stride(-2);
-  const int64_t in_stride_w = input.stride(-1);
 
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
@@ -702,27 +697,27 @@ const Tensor& gradInput) {
           const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+              {maxThreadsDim[0], lastPow2(nInputPlane), at::cuda::warp_size()});
           int block_y = std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(inputWidth), max_threads / block_x));
+              {maxThreadsDim[1], lastPow2(inputWidth), max_threads / block_x});
           int block_z = std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(inputHeight), max_threads / block_x / block_y));
+              {maxThreadsDim[2], lastPow2(inputHeight), max_threads / block_x / block_y});
           block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+              {maxThreadsDim[0], lastPow2(nInputPlane), max_threads / block_y / block_z});
           const dim3 block(block_x, block_y, block_z);
 
           int kernel_stride_C = ceil_div(
-              safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
+              c10::checked_convert<int>(nInputPlane, "int"), block_x * 4);
           int kernel_size_C = ceil_div(
-              safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
+              c10::checked_convert<int>(nInputPlane, "int"), block_x * kernel_stride_C);
 
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE_BWD));
+              ceil_div(c10::checked_convert<int>(inputWidth, "int"), block_y*BLOCK_STRIDE_BWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE_BWD));
+              ceil_div(c10::checked_convert<int>(inputHeight, "int"), block_z*BLOCK_STRIDE_BWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);

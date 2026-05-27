@@ -515,12 +515,28 @@ def checkpoint(
         )
         # Runs pre-forward logic
         next(gen)
-        ret = function(*args, **kwargs)
+        try:
+            ret = function(*args, **kwargs)
+        except BaseException as e:
+            try:
+                gen.throw(e)
+            except StopIteration as stop:
+                raise RuntimeError(
+                    "torch.utils.checkpoint: the forward context provided by "
+                    "context_fn suppressed an exception raised during the "
+                    "checkpointed forward. This is not supported because "
+                    "checkpoint cannot return a value for a failed forward."
+                ) from stop
+            raise
         # Runs post-forward logic
         try:
             next(gen)
         except StopIteration:
             return ret
+        raise AssertionError(
+            "torch.utils.checkpoint: expected context_fn generator to yield "
+            "exactly twice, but it yielded more than twice."
+        )
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
@@ -1319,6 +1335,23 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+def _sac_storage_key(func, args):
+    """Compute the SAC storage key for a given op.
+
+    For inductor_compiled_code, each compiled region gets its own FIFO queue
+    keyed by the callable's unique idx.  Without this, all compiled regions
+    share one queue and a cache-hit that skips a region during recompute
+    causes the queue to return the wrong entry (see gh-175258).
+    """
+    from torch._higher_order_ops.wrap import (
+        _resolve_inductor_callable,
+        inductor_compiled_code as _inductor_compiled_code,
+    )
+    if func is _inductor_compiled_code and args:
+        return (func, _resolve_inductor_callable(args[0]).idx)
+    return func
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1352,8 +1385,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        key = _sac_storage_key(func, args)
+        idx = self.func_counter[key]
+        self.func_counter[key] += 1
 
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
                                 func, *args, **kwargs)
@@ -1368,9 +1402,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                     node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
+            self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
         else:
-            self.storage[func][idx] = _RECOMPUTE
+            self.storage[key][idx] = _RECOMPUTE
         return out
 
 _RECOMPUTE = object()
@@ -1404,10 +1438,11 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        key = _sac_storage_key(func, args)
+        idx = self.func_counter[key]
+        self.func_counter[key] += 1
 
-        func_storage = self.storage.get(func)
+        func_storage = self.storage.get(key)
         if func_storage is None:
             raise RuntimeError(
                 f"{func} encountered during backward but not found in "
@@ -1665,8 +1700,20 @@ def _checkpoint_without_reentrant_generator(
 
     new_frame.save_inputs(*args)
 
+    forward_context_suppressed_exc = False
     with _checkpoint_hook(new_frame), forward_context:
-        yield
+        try:
+            yield
+        except BaseException:
+            forward_context_suppressed_exc = True
+            raise
+    if forward_context_suppressed_exc:
+        raise RuntimeError(
+            "torch.utils.checkpoint: the forward context provided by "
+            "context_fn suppressed an exception raised during the "
+            "checkpointed forward. This is not supported because checkpoint "
+            "cannot return a value for a failed forward."
+        )
     new_frame.forward_completed = True
 
     if getattr(device_module, "_initialized", False) and \

@@ -8,7 +8,11 @@ import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    _dense_to_ordered,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -66,6 +70,21 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",
         )
+
+    def test_flex_attention_block_mask_fallback_to_eager(self):
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(
+            lambda x: _dense_to_ordered(x)[1], backend=backend, fullgraph=True
+        )
+        opt_fn(torch.randint(0, 2, (2, 3), dtype=torch.bool))
+
+        annotated_sorts = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.op == "call_function" and node.target == torch.argsort
+        ]
+        self.assertEqual(len(annotated_sorts), 1)
+        self.assertTrue(annotated_sorts[0].meta["custom"]["fallback_to_eager"])
 
     def test_activation_checkpointing(self):
         @checkpoint_wrapper
