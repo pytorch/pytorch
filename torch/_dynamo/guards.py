@@ -1081,14 +1081,46 @@ def check_subclass_metadata(value: Any, metadata: tuple[Any, ...]) -> bool:
     return value.__tensor_flatten__()[1] == saved_metadata
 
 
+def _dtensor_spec_guard_metadata(value: Any, copy_metadata: bool) -> Any:
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+    from torch.distributed.tensor.placement_types import _MaskPartial
+
+    if not isinstance(value, DTensorSpec):
+        return deepcopy(value) if copy_metadata else value
+
+    placements: list[Any] = []
+    for placement in value.placements:
+        if isinstance(placement, _MaskPartial):
+            placements.append(
+                (
+                    _MaskPartial,
+                    placement.reduce_op,
+                    placement.offset_shape,
+                    placement.offset_dim,
+                )
+            )
+        else:
+            placements.append(deepcopy(placement) if copy_metadata else placement)
+    return (
+        deepcopy(value.mesh) if copy_metadata else value.mesh,
+        tuple(placements),
+        deepcopy(value.shard_order) if copy_metadata else value.shard_order,
+        None if value.tensor_meta is None else value.tensor_meta.dtype,
+    )
+
+
 # Used by DTENSOR_SPEC_MATCH guard check spec
 def extract_dtensor_spec(guard: Any, value: Any) -> Any:
-    return deepcopy(value)
+    return _dtensor_spec_guard_metadata(value, copy_metadata=True)
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
 def check_dtensor_spec(value: Any, metadata: Any) -> bool:
-    return value._check_equals(metadata, skip_shapes=True)
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    if not isinstance(value, DTensorSpec):
+        return False
+    return _dtensor_spec_guard_metadata(value, copy_metadata=False) == metadata
 
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
