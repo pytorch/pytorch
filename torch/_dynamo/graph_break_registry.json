@@ -2110,6 +2110,16 @@
       ]
     }
   ],
+  "GB7190": [
+    {
+      "Gb_type": "torch.scan: direct operator call",
+      "Context": "missing scan partial keywords: {missing_keywords}",
+      "Explanation": "Direct calls to torch.ops.higher_order.scan are not supported. Call the scan frontend instead of the internal lowered operator.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB9522": [
     {
       "Gb_type": "hasattr() on unsupported type",
