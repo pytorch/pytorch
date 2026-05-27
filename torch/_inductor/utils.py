@@ -3151,9 +3151,7 @@ def get_device_tflops(
         return 0.0
 
     if not torch.cuda.is_available():
-        log.warning(
-            "get_device_tflops: CUDA is not available. Returning 0.0."
-        )
+        log.warning("get_device_tflops: CUDA is not available, returning 0.0.")
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
