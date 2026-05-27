@@ -595,6 +595,122 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(saved, ref_saved)
         self.assertEqual(x.grad, ref_x.grad)
 
+    def test_backward_mutation_saved_tensor_returned_as_aliased_outputs(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, saved):
+                ctx.save_for_backward(saved)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                saved.add_(grad_output)
+                return grad_output.clone(), None
+
+        def fn(x):
+            saved = x.clone()
+            out = Foo.apply(x, saved)
+            return out.clone(), saved, saved[:16], saved[16:]
+
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        x = torch.randn(32, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_()
+
+        ref_out, ref_saved, ref_saved_head, ref_saved_tail = fn(ref_x)
+        out, saved, saved_head, saved_tail = compiled_fn(x)
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(saved, ref_saved)
+        self.assertEqual(saved_head, ref_saved_head)
+        self.assertEqual(saved_tail, ref_saved_tail)
+        (ref_out.sum() + ref_saved_head.sum() + ref_saved_tail.sum()).backward()
+        (out.sum() + saved_head.sum() + saved_tail.sum()).backward()
+        self.assertEqual(saved, ref_saved)
+        self.assertEqual(saved_head, ref_saved_head)
+        self.assertEqual(saved_tail, ref_saved_tail)
+        self.assertEqual(x.grad, ref_x.grad)
+
+    def test_backward_storage_mutation_saved_tensor_returned_as_output_errors(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, saved):
+                ctx.save_for_backward(saved)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                saved.set_(torch.empty_like(saved))
+                return grad_output.clone(), None
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def fn(x):
+            saved = x.clone()
+            out = Foo.apply(x, saved)
+            return out.clone(), saved
+
+        x = torch.randn(32, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "metadata mutated in the backward",
+        ):
+            fn(x)
+
+    def test_backward_metadata_mutation_saved_tensor_returned_as_output_errors(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, saved):
+                ctx.save_for_backward(saved)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                saved.transpose_(0, 1)
+                return grad_output.clone(), None
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def fn(x):
+            saved = x.clone()
+            out = Foo.apply(x, saved)
+            return out.clone(), saved
+
+        x = torch.randn(2, 3, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "metadata mutated in the backward",
+        ):
+            fn(x)
+
+    def test_backward_storage_resize_saved_tensor_returned_as_output_errors(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, saved):
+                ctx.save_for_backward(saved)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                torch.ops.inductor.resize_storage_bytes_(saved, 0)
+                return grad_output.clone(), None
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def fn(x):
+            saved = x.clone()
+            out = Foo.apply(x, saved)
+            return out.clone(), saved
+
+        x = torch.randn(32, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "storage resizing in the backward",
+        ):
+            fn(x)
+
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
