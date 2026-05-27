@@ -14,7 +14,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -22,7 +22,11 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
@@ -87,6 +91,10 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+FOLD_EXPANDED_BMM_TO_MM_MAX_ROW_DIM = 64
+FOLD_EXPANDED_BMM_TO_MM_MIN_OUTER_DIM = 512
+FOLD_EXPANDED_BMM_TO_MM_MIN_GEMM_DIM = 2048
 
 
 def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
@@ -888,12 +896,135 @@ def register_lowering_pattern(
     )
 
 
+def _guarded_ge(value: int | torch.SymInt, minimum: int) -> bool:
+    return guard_or_false(value >= minimum)
+
+
+def _guarded_in_range(
+    value: int | torch.SymInt,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> bool:
+    if min_value is not None and not _guarded_ge(value, min_value):
+        return False
+    if max_value is not None and not guard_or_false(value <= max_value):
+        return False
+    return True
+
+
+def _is_batch_first_transpose_layout(tensor: torch.Tensor) -> bool:
+    if tensor.dim() != 3:
+        return False
+
+    m, _b, k = tensor.shape
+    stride_m, stride_b, stride_k = tensor.stride()
+    return (
+        statically_known_true(sym_eq(stride_m, k))
+        and statically_known_true(sym_eq(stride_b, m * k))
+        and statically_known_true(sym_eq(stride_k, 1))
+    )
+
+
+def _is_valid_expanded_bmm_to_mm(match: Match) -> bool:
+    mat1_node = match.kwargs["mat1"]
+    mat2_node = match.kwargs["mat2"]
+    bmm_node = match.output_node()
+    if (
+        not is_node_meta_valid(mat1_node)
+        or not is_node_meta_valid(mat2_node)
+        or not is_node_meta_valid(bmm_node)
+    ):
+        return False
+
+    mat1 = mat1_node.meta["val"]
+    mat2 = mat2_node.meta["val"]
+    bmm = bmm_node.meta["val"]
+    if (
+        not isinstance(mat1, torch.Tensor)
+        or not isinstance(mat2, torch.Tensor)
+        or not isinstance(bmm, torch.Tensor)
+    ):
+        return False
+    if mat1.dim() != 3 or mat2.dim() != 2 or bmm.dim() != 3:
+        return False
+    if mat1.device != mat2.device or not is_gpu(mat1.device.type):
+        return False
+    if mat1.dtype != mat2.dtype or mat1.dtype not in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+    ):
+        return False
+    if not _is_batch_first_transpose_layout(mat1):
+        return False
+
+    m, b, k = mat1.shape
+    k2, n = mat2.shape
+    if not (
+        statically_known_true(sym_eq(k, k2))
+        and statically_known_true(sym_eq(m, bmm.shape[0]))
+        and statically_known_true(sym_eq(b, bmm.shape[1]))
+        and statically_known_true(sym_eq(n, bmm.shape[2]))
+    ):
+        return False
+
+    # Guard dynamic dimensions so the fold decision is stable for cache reuse.
+    return (
+        _guarded_in_range(b, max_value=FOLD_EXPANDED_BMM_TO_MM_MAX_ROW_DIM)
+        and _guarded_in_range(m, min_value=FOLD_EXPANDED_BMM_TO_MM_MIN_OUTER_DIM)
+        and _guarded_in_range(k, min_value=FOLD_EXPANDED_BMM_TO_MM_MIN_GEMM_DIM)
+        and _guarded_in_range(n, min_value=FOLD_EXPANDED_BMM_TO_MM_MIN_GEMM_DIM)
+    )
+
+
 ################################################################################
 # Actual patterns below this point.
 # Priority of patterns is:
 #   - later output nodes first
 #   - order patterns are defined in
 ################################################################################
+
+
+_expanded_bmm_rhs_2d = CallFunction(
+    aten.expand.default,
+    KeywordArg("mat2"),
+    Ignored(),
+)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.bmm.default,
+        KeywordArg("mat1"),
+        _expanded_bmm_rhs_2d,
+    ),
+    extra_check=_is_valid_expanded_bmm_to_mm,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.bmm.default,
+        CallFunction(
+            aten.expand.default,
+            KeywordArg("mat1"),
+            Ignored(),
+        ),
+        _expanded_bmm_rhs_2d,
+    ),
+    extra_check=_is_valid_expanded_bmm_to_mm,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def fold_expanded_bmm_to_mm(match: Match, mat1, mat2):
+    def repl(mat1, mat2):
+        mat1_2d = mat1.reshape(mat1.shape[0] * mat1.shape[1], mat1.shape[2])
+        mm = torch.ops.aten.mm.default(mat1_2d, mat2)
+        return mm.reshape(mat1.shape[0], mat1.shape[1], mat2.shape[1])
+
+    counters["inductor"]["fold_expanded_bmm_to_mm"] += 1
+    match.replace_by_example(repl, [mat1, mat2])
 
 
 def is_valid_mm_plus_mm(match: Match):

@@ -689,6 +689,50 @@ class TestPatternMatcher(TestCase):
 
         FileCheck().check("extern_kernels.bmm(").run(code_multi)
 
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+        }
+    )
+    def test_transposed_linear_dynamic_batch_uses_guarded_mm(self):
+        def fn(x, w, b):
+            return F.linear(x.transpose(0, 1), w, b)
+
+        def make_x(batch):
+            return (
+                torch.randn(
+                    batch, seq, in_features, device=GPU_TYPE, dtype=torch.float16
+                )
+                * 0.1
+            )
+
+        seq, in_features, out_features = 512, 2048, 2048
+        w = (
+            torch.randn(out_features, in_features, device=GPU_TYPE, dtype=torch.float16)
+            * 0.1
+        )
+        b = torch.randn(out_features, device=GPU_TYPE, dtype=torch.float16) * 0.1
+
+        compiled = torch.compile(fn, dynamic=True, fullgraph=True)
+        x_large = make_x(128)
+        result, (code,) = run_and_get_code(compiled, x_large, w, b)
+        expected = fn(x_large, w, b)
+        torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
+        self.assertEqual(result.stride(), expected.stride())
+        FileCheck().check("extern_kernels.bmm(").check_not("extern_kernels.mm(").run(
+            code
+        )
+
+        x_small = make_x(4)
+        result, (code,) = run_and_get_code(compiled, x_small, w, b)
+        expected = fn(x_small, w, b)
+        torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
+        self.assertEqual(result.stride(), expected.stride())
+        FileCheck().check("extern_kernels.mm(").check_not("extern_kernels.bmm(").run(
+            code
+        )
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
