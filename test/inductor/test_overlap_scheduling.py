@@ -3,13 +3,10 @@ from unittest.mock import patch
 
 import torch
 import torch.fx as fx
-
 from torch._inductor.analysis import device_info
-from torch._inductor.fx_passes.overlap_scheduling import (
-    gather_node_runtime_estimations,
-)
+from torch._inductor.fx_passes.overlap_scheduling import gather_node_runtime_estimations
 from torch._inductor.utils import get_device_tflops
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestOverlapSchedulingRuntimeEstimation(TestCase):
