@@ -759,8 +759,6 @@ class OutputGraph(OutputGraphCommon):
 
         # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
         # assumption is appended to `_shape_spec_pending_assumptions`;
-        # entries get drained as input wiring binds bare-IntVar slots.
-        # See `_wire_spec_assumptions` in builder.py.
         if config._shapes_spec is not None:
             from torch._dynamo.variables.builder import _wire_spec_assumptions
 
