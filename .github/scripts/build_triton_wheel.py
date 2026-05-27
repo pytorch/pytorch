@@ -37,6 +37,22 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     return inp.replace(src, dst)
 
 
+def patch_python_requires(setup_dir: Path) -> None:
+    """Widen python_requires upper bound to allow Python 3.15+"""
+    for name in ("setup.py", "pyproject.toml", "setup.cfg"):
+        path = setup_dir / name
+        if not path.exists():
+            continue
+        with open(path) as f:
+            content = f.read()
+        if "<3.15" in content:
+            content = content.replace("<3.15", "<3.16")
+            with open(path, "w") as f:
+                f.write(content)
+            print(f"Patched python_requires in {name}: <3.15 -> <3.16")
+            return
+
+
 def patch_init_py(
     path: Path, *, version: str, expected_version: str | None = None
 ) -> None:
@@ -122,6 +138,8 @@ def build_triton(
             if (triton_basedir / "setup.py").exists()
             else triton_pythondir
         )
+
+        patch_python_requires(triton_setupdir)
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_setupdir, env=env
