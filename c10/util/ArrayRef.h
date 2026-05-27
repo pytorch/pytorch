@@ -281,6 +281,14 @@ ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
 // WARNING: Template instantiation will NOT be willing to do an implicit
 // conversions to get you to an c10::ArrayRef, which is why we need so
 // many overloads.
+//
+// NOTE: ArrayRef inherits operator==/!= from HeaderOnlyArrayRef via
+// derived-to-base deduction, so these ArrayRef-specific overloads are
+// technically redundant. We keep them because they are an *exact* match
+// for ArrayRef arguments, which makes overload resolution pick them over
+// the C++20 reversed candidates of cross-type operators like
+// operator==(OptionalIntArrayRef, IntArrayRef) — otherwise comparing two
+// ArrayRefs becomes ambiguous.
 
 template <typename T>
 bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
