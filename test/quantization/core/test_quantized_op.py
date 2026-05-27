@@ -4905,6 +4905,18 @@ class TestQuantizedLinear(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
+    def test_qlinear_prepack_meta(self):
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        N, K = 16, 8
+
+        w = torch.empty(N, K, dtype=torch.int8, device="meta")
+        packed = qlinear_prepack(w, [3, K])
+        self.assertEqual(packed.shape, torch.Size([K, N]))
+        self.assertEqual(packed.dtype, torch.int8)
+        self.assertEqual(packed.device.type, "meta")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
     def test_qlinear_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "relu")
