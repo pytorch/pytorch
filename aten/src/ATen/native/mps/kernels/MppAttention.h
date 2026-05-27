@@ -1020,47 +1020,32 @@ prefill_attention_mpp(
       is_a10,                                                             \
       mtype)
 
-#define instantiate_mpp_attn(                                              \
-    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)                \
-  instantiate_mpp_attn_arch(                                               \
-      "a10", true, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype) \
-      instantiate_mpp_attn_arch(                                           \
-          "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)
+#define instantiate_mpp_attn(                                               \
+    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)                 \
+  instantiate_mpp_attn_arch(                                                \
+      "a10", true, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype); \
+  instantiate_mpp_attn_arch(                                                \
+      "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype);
 
-#define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)       \
-  instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype) \
-      instantiate_mpp_attn(                                                   \
-          iname, itype, 64, 32, 128, 4, 1, hm, dc, mname, mtype)              \
-          instantiate_mpp_attn(                                               \
-              iname, itype, 64, 32, 96, 4, 1, hm, dc, mname, mtype)           \
-              instantiate_mpp_attn(                                           \
-                  iname, itype, 64, 32, 64, 4, 1, hm, dc, mname, mtype)       \
-                  instantiate_mpp_attn(                                       \
-                      iname, itype, 64, 64, 128, 4, 1, hm, dc, mname, mtype)  \
-                      instantiate_mpp_attn(                                   \
-                          iname,                                              \
-                          itype,                                              \
-                          64,                                                 \
-                          64,                                                 \
-                          64,                                                 \
-                          4,                                                  \
-                          1,                                                  \
-                          hm,                                                 \
-                          dc,                                                 \
-                          mname,                                              \
-                          mtype)
+#define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)        \
+  instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype); \
+  instantiate_mpp_attn(iname, itype, 64, 32, 128, 4, 1, hm, dc, mname, mtype); \
+  instantiate_mpp_attn(iname, itype, 64, 32, 96, 4, 1, hm, dc, mname, mtype);  \
+  instantiate_mpp_attn(iname, itype, 64, 32, 64, 4, 1, hm, dc, mname, mtype);  \
+  instantiate_mpp_attn(iname, itype, 64, 64, 128, 4, 1, hm, dc, mname, mtype); \
+  instantiate_mpp_attn(iname, itype, 64, 64, 64, 4, 1, hm, dc, mname, mtype);
 
-#define instantiate_mpp_attn_causal(iname, itype, mname, mtype)         \
-  instantiate_mpp_attn_shapes(iname, itype, 0, 0, mname, mtype)         \
-      instantiate_mpp_attn_shapes(iname, itype, 0, 1, mname, mtype)     \
-          instantiate_mpp_attn_shapes(iname, itype, 1, 0, mname, mtype) \
-              instantiate_mpp_attn_shapes(iname, itype, 1, 1, mname, mtype)
+#define instantiate_mpp_attn_causal(iname, itype, mname, mtype)  \
+  instantiate_mpp_attn_shapes(iname, itype, 0, 0, mname, mtype); \
+  instantiate_mpp_attn_shapes(iname, itype, 0, 1, mname, mtype); \
+  instantiate_mpp_attn_shapes(iname, itype, 1, 0, mname, mtype); \
+  instantiate_mpp_attn_shapes(iname, itype, 1, 1, mname, mtype);
 
-#define instantiate_mpp_attn_mask(iname, itype)           \
-  instantiate_mpp_attn_causal(iname, itype, iname, itype) \
-      instantiate_mpp_attn_causal(iname, itype, bool_, bool)
+#define instantiate_mpp_attn_mask(iname, itype)            \
+  instantiate_mpp_attn_causal(iname, itype, iname, itype); \
+  instantiate_mpp_attn_causal(iname, itype, bool_, bool);
 
-instantiate_mpp_attn_mask(float16, half)
-    instantiate_mpp_attn_mask(bfloat16, bfloat)
+instantiate_mpp_attn_mask(float16, half);
+instantiate_mpp_attn_mask(bfloat16, bfloat);
 
 #endif // __METAL_VERSION__ >= 400
