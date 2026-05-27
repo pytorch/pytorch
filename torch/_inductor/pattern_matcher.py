@@ -460,9 +460,11 @@ class MatchContext:
                 return Match(self, pattern)  # already checked this node
             else:
                 return FailedMatch("repeated pattern differs")
-        m = pattern._match(node, self)
+        m = pattern._match(typing.cast(Any, node), self)
         assert pattern not in self.pattern_to_node
-        self.pattern_to_node[pattern] = node if m else None
+        self.pattern_to_node[pattern] = typing.cast(
+            torch.fx.Node | None, node if m else None
+        )
         return m
 
     def filter_multi_user_patterns(self) -> dict[PatternExpr, torch.fx.Node]:
