@@ -17,7 +17,6 @@
 #include <c10/util/irange.h>
 
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -617,7 +616,7 @@ auto handle_torch_function_no_python_arg_parser(
   // (5) FakeTensorMode.__torch_dispatch__ (infra modes next highest)
   // (6) FakeTensor.__torch_fake_dispatch__ (infra subclasses next highest)
 
-  // Why does do FunctionalTensor and FakeTensor even need to be special-cased
+  // Why do FunctionalTensor and FakeTensor even need to be special-cased
   // in the ordering?
   // In theory we could remove their __torch_dispatch__, but both of these
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
@@ -1527,7 +1526,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 
   if (fmt.substr(last_offset) == "|deprecated") {
     hidden = true;
-    // TODO: raise warning when parsing deprecated signatures
     deprecated = true;
   } else if (fmt.substr(last_offset) == "|hidden") {
     hidden = true;
@@ -1994,7 +1992,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
             i,
             Py_TYPE(obj)->tp_name));
   }
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);

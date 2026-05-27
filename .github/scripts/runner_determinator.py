@@ -41,6 +41,15 @@ Example config:
         rollout_percent: 25
         all_branches: false
         default: true
+      arc:
+        rollout_perc: 50
+        all_branches: true
+        default: false
+        # Comma-separated allowlist of github.workflow names that are
+        # eligible for this experiment. rollout_perc is then applied within
+        # that set; non-listed workflows are 0%. Use the literal "ALL" (or
+        # leave empty) to make every workflow eligible.
+        workflows: pull,trunk
     ---
 
     # Opt-ins:
@@ -86,6 +95,9 @@ OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
+# Sentinel in the per-experiment ``workflows`` allowlist meaning "all workflows".
+WORKFLOW_ALLOWLIST_ALL = "ALL"
+
 LF_FLEET_EXPERIMENT = "lf"
 ARC_FLEET_EXPERIMENT = "arc"
 CANARY_FLEET_SUFFIX = ".c"
@@ -104,6 +116,12 @@ class Experiment(NamedTuple):
     default: bool = (
         True  # If True, the experiment is enabled by default for all queries
     )
+    # Per-experiment workflow eligibility. Comma-separated github.workflow
+    # names; when non-empty, only listed workflows are eligible for the
+    # experiment and rollout_perc is applied within that set. The literal
+    # "ALL" (or empty) makes every workflow eligible. Applied after user
+    # opt-in/out.
+    workflows: str = ""
 
     # Add more fields as needed
 
@@ -227,6 +245,13 @@ def parse_args() -> Any:
         default="",
         help="the optional PR number where this is run",
     )
+    parser.add_argument(
+        "--workflow-name",
+        type=str,
+        required=False,
+        default="",
+        help="the name of the calling workflow (github.workflow)",
+    )
 
     return parser.parse_args()
 
@@ -320,6 +345,14 @@ class UserOptins(dict[str, list[UserExperimentConfig]]):
     """
     Dictionary of users with a list of experiment configs they have opted into
     """
+
+
+def parse_workflow_list(workflows: str) -> set[str]:
+    """
+    Parse the per-experiment ``workflows`` setting into a set of allowlisted
+    workflow names. Empty entries are ignored.
+    """
+    return {entry.strip() for entry in workflows.split(",") if entry.strip()}
 
 
 def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
@@ -498,6 +531,7 @@ def get_runner_prefix(
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
+    workflow_name: str = "",
 ) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
@@ -587,13 +621,28 @@ def get_runner_prefix(
                     f"with 0% rollout. Not enabling."
                 )
 
-        elif experiment_settings.rollout_perc:
-            # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            if random.uniform(0, 100) <= experiment_settings.rollout_perc:
+        else:
+            # workflows: gates which workflows are eligible. rollout_perc is
+            # applied within that gate; non-listed workflows are 0%.
+            # The literal "ALL" (or empty) makes every workflow eligible.
+            workflow_list = parse_workflow_list(experiment_settings.workflows)
+            eligible = (
+                not workflow_list
+                or WORKFLOW_ALLOWLIST_ALL in workflow_list
+                or (workflow_name and workflow_name in workflow_list)
+            )
+            if not eligible:
                 log.info(
-                    f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
+                    f"Workflow '{workflow_name}' is not eligible for experiment "
+                    f"{experiment_name}. Skipping."
                 )
-                enabled = True
+                continue
+            if experiment_settings.rollout_perc:
+                if random.uniform(0, 100) <= experiment_settings.rollout_perc:
+                    log.info(
+                        f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
+                    )
+                    enabled = True
 
         if enabled:
             label = experiment_name
@@ -706,6 +755,9 @@ def main() -> None:
             set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
             sys.exit()
 
+    if args.workflow_name:
+        log.info(f"Workflow name: '{args.workflow_name}'")
+
     try:
         rollout_state = get_rollout_state_from_issue(
             args.github_token, args.github_issue_repo, args.github_issue
@@ -728,6 +780,7 @@ def main() -> None:
             args.eligible_experiments,
             args.opt_out_experiments,
             is_canary,
+            workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix
         set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())

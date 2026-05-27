@@ -338,7 +338,7 @@ class Distribution:
         return self.__new__(type(self)) if _instance is None else _instance
 
     def __repr__(self) -> str:
-        param_names = [k for k, _ in self.arg_constraints.items() if k in self.__dict__]
+        param_names = [k for k in self.arg_constraints if k in self.__dict__]
         args_string = ", ".join(
             [
                 f"{p}: {self.__dict__[p] if self.__dict__[p].numel() == 1 else self.__dict__[p].size()}"
