@@ -120,11 +120,9 @@ cdll.LoadLibrary("__lib_path__")
         shared library can be loaded.
 
         Compiles into the inductor codecache, then spawns a short-lived
-        subprocess to ``dlopen`` the ``.so``. A ``.load_ok`` marker file next
-        to the ``.so`` caches success across processes so the warm path skips
-        the subprocess entirely. Returns ``True`` if both build and load
-        succeed, ``False`` on compile error, load failure, or dlopen probe
-        timeout.
+        subprocess to ``dlopen`` the ``.so``. Returns ``True`` if both build
+        and load succeed, ``False`` on compile error, load failure, or dlopen
+        probe timeout.
         """
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import (
@@ -159,57 +157,45 @@ cdll.LoadLibrary("__lib_path__")
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
-                # Cache the subprocess load-check result with a marker
-                # file next to the compiled .so so subsequent processes
-                # skip the probe entirely (each spawn is still ~0.3s).
-                load_ok_marker = output_path + ".load_ok"
-                if not os.path.isfile(load_ok_marker):
-                    # Make libtorch_cpu (and other torch shlibs)
-                    # findable by the dynamic linker on Linux/macOS so
-                    # the probe child does not need to `import torch` to
-                    # bring them into its address space. Prepend rather
-                    # than append so a successful probe is guaranteed to
-                    # bind against the torch we are currently running,
-                    # not an older install on the user's loader path. On
-                    # Windows the equivalent registration happens inside
-                    # the child via os.add_dll_directory (see
-                    # _avx_py_load).
-                    lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
-                    env = python_subprocess_env()
-                    for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-                        existing = env.get(var, "")
-                        env[var] = (
-                            os.pathsep.join([lib_dir, existing])
-                            if existing
-                            else lib_dir
-                        )
+                # Make libtorch_cpu (and other torch shlibs) findable by
+                # the dynamic linker on Linux/macOS so the probe child does
+                # not need to `import torch` to bring them into its address
+                # space. Prepend rather than append so a successful probe is
+                # guaranteed to bind against the torch we are currently
+                # running, not an older install on the user's loader path. On
+                # Windows the equivalent registration happens inside the child
+                # via os.add_dll_directory (see _avx_py_load).
+                lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+                env = python_subprocess_env()
+                for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+                    existing = env.get(var, "")
+                    env[var] = (
+                        os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+                    )
 
-                    # Bound the dlopen probe so a stuck child cannot
-                    # hang the parent for the whole 30-minute outer
-                    # timeout (observed in CI). subprocess.run kills
-                    # the child on TimeoutExpired (check_call leaks
-                    # it).
-                    probe_cmd = [
-                        sys.executable,
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ]
-                    try:
-                        subprocess.run(
-                            probe_cmd,
-                            stderr=subprocess.DEVNULL,
-                            env=env,
-                            timeout=60,
-                            check=True,
-                        )
-                    except subprocess.TimeoutExpired:
-                        warnings.warn(
-                            f"VecISA dlopen probe for {self} hung after 60s",
-                            stacklevel=2,
-                        )
-                        return False
-                    with open(load_ok_marker, "w") as f:
-                        f.write("")
+                # Bound the dlopen probe so a stuck child cannot hang the
+                # parent for the whole 30-minute outer timeout (observed in
+                # CI). subprocess.run kills the child on TimeoutExpired
+                # (check_call leaks it).
+                probe_cmd = [
+                    sys.executable,
+                    "-c",
+                    VecISA._avx_py_load.replace("__lib_path__", output_path),
+                ]
+                try:
+                    subprocess.run(
+                        probe_cmd,
+                        stderr=subprocess.DEVNULL,
+                        env=env,
+                        timeout=60,
+                        check=True,
+                    )
+                except subprocess.TimeoutExpired:
+                    warnings.warn(
+                        f"VecISA dlopen probe for {self} hung after 60s",
+                        stacklevel=2,
+                    )
+                    return False
             except Exception:
                 return False
 
