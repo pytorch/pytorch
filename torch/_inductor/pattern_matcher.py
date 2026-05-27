@@ -52,7 +52,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, TypeVar
-from typing_extensions import Self, TypeIs
+from typing_extensions import Self, TypeAlias, TypeIs
 
 import torch
 import torch._guards
@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-Constant = Any
+Constant: TypeAlias = int | float | bool | str | None
 NodeOrConstant = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
