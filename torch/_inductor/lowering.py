@@ -1305,12 +1305,10 @@ def expand(x, sizes):
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
-            # Broadcast loop reuse is not graph fanout; keep the graph-fanout
-            # read-count heuristic from materializing cheap expanded producers.
+            # maybe realize input before broadcasting it
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
-                // x_size_product,
-                graph_reuse=False,
+                // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
