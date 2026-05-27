@@ -30,11 +30,13 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    IS_LINUX,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TestCase,
     unMarkDynamoStrictTest,
@@ -267,6 +269,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
@@ -600,6 +604,10 @@ class TestDecomp(TestCase):
                 torch.autograd.gradcheck(func, args)
             self.check_decomposed(aten_name, mode)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/131050"
+    )
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/76962")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
