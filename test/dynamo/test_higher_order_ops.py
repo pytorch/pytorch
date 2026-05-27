@@ -32,8 +32,10 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     munge_exc,
     parametrize,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
@@ -632,6 +634,9 @@ class GraphModule(torch.nn.Module):
         arg_count = ifdynstaticdefault(2, 3)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count, 3)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177003"
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True,
     )
@@ -810,6 +815,9 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184831"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
         capture_scalar_outputs=True,
@@ -861,6 +869,9 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184682"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
     )
@@ -929,6 +940,9 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183671"
+    )
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
     )
@@ -2183,6 +2197,9 @@ def forward(self, child : torch.Tensor, const_unused : int):
             subgraphs.append(getattr(gm, module_name).code.strip())
         return (graph, *subgraphs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/176204"
+    )
     def test_cond_branches_no_arguments(self):
         def fn(x):
             def true_fn():
@@ -2226,6 +2243,9 @@ def forward(self, l_x_):
     return (cos,)""",
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/183892"
+    )
     def test_cond_branches_no_arguments_no_closure(self):
         def fn(x):
             def true_fn():
@@ -2615,6 +2635,9 @@ class GraphModule(torch.nn.Module):
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/176969"
+    )
     def test_nested_tuple_output(self):
         def f(x):
             ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
@@ -3255,6 +3278,9 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         )
         self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/184537"
+    )
     def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y
@@ -4489,7 +4515,7 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.Unsupported,
             "Returning vjpfunc from a compiled region is not supported",
         ):
-            torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x)
+            torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
 
     def test_vjp_returning_graph_breaks_in_non_fullgraph(self):
         def fn(x):
@@ -4517,6 +4543,38 @@ class GraphModule(torch.nn.Module):
         graph_code = backend.graphs[0].code
         self.assertIn("cos", graph_code)
         self.assertNotIn("_wrap_for_grad", graph_code)
+
+    def test_vjp_returning_graph_breaks_at_offending_call_site(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x, cotangent):
+            vjp = torch.func.vjp
+            out1, vjpfunc1 = vjp(fn, x.cos())
+            grad1 = vjpfunc1(cotangent)[0]
+            out2, vjpfunc2 = vjp(fn, x)
+            return out1, grad1, out2, vjpfunc2
+
+        x = torch.randn(3, 3)
+        cotangent = torch.randn(())
+        backend = EagerAndRecordGraphs()
+        compiled_out1, compiled_grad1, compiled_out2, compiled_vjpfunc2 = torch.compile(
+            wrapper_fn, backend=backend, fullgraph=False
+        )(x, cotangent)
+        eager_out1, eager_grad1, eager_out2, eager_vjpfunc2 = wrapper_fn(x, cotangent)
+
+        self.assertEqual(compiled_out1, eager_out1)
+        self.assertEqual(compiled_grad1, eager_grad1)
+        self.assertEqual(compiled_out2, eager_out2)
+        self.assertEqual(
+            compiled_vjpfunc2(torch.ones_like(compiled_out2))[0],
+            eager_vjpfunc2(torch.ones_like(eager_out2))[0],
+        )
+
+        self.assertGreaterEqual(len(backend.graphs), 1)
+        graph_code = backend.graphs[0].code
+        self.assertIn("_autograd_grad", graph_code)
+        self.assertIn("cos", graph_code)
 
     def test_vjp_consumed_in_compiled_region_still_compiles(self):
         def fn(x):
@@ -4575,6 +4633,9 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177056"
+    )
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):

@@ -2701,12 +2701,11 @@ class OutputGraph(OutputGraphCommon):
             if not isinstance(example_value, torch.Tensor):
                 continue
 
-            # Dead TensorWrappers report level -2 after their functorch level exits.
-            if (
-                torch._C._functorch.is_gradtrackingtensor(example_value)
-                and torch._C._functorch.maybe_get_level(example_value) == -2
-            ):
-                wrapped_outputs.append(var.as_proxy().node.name)
+            if torch._C._functorch.is_dead_tensor_wrapper(example_value):
+                node_name = var.as_proxy().node.name
+                wrapped_outputs.append(node_name)
+                if call_site := var.as_proxy().node.meta.get("dynamo_vjp_call_site"):
+                    tx.speculation_log.vjp_offending_call_sites.add(call_site)
 
         if not wrapped_outputs:
             return
@@ -2729,7 +2728,11 @@ class OutputGraph(OutputGraphCommon):
                 ],
             )
         else:
-            tx.speculation_log.graph_break_on_vjp_wrapped_output = True
+            if not tx.speculation_log.vjp_offending_call_sites:
+                raise AssertionError(
+                    "Unable to find torch.func.vjp call site for wrapped "
+                    f"outputs: {node_names}"
+                )
             raise exc.VjpWrappedOutputRestartAnalysis(
                 restart_reason=(
                     "vjp deferred backward closure leaked wrapped tensors "
@@ -3151,7 +3154,9 @@ class OutputGraph(OutputGraphCommon):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")
-        except (TensorifyScalarRestartAnalysis, ShortenTraceback):
+        except (TensorifyScalarRestartAnalysis, ShortenTraceback, IndexError):
+            # Re-raise IndexError so dim out-of-range errors from tensor ops
+            # propagate to the user as IndexError, not BackendCompilerFailed.
             raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:

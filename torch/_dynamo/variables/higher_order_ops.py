@@ -535,7 +535,7 @@ class StorageAliasingTracker:
             else:
                 break
 
-    def collect_from_outputs(self, graph_output_vts: Sequence[VariableTracker]) -> None:
+    def collect_from_outputs(self, graph_output_vts: list[VariableTracker]) -> None:
         """Collect storages from existing graph outputs."""
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
@@ -606,7 +606,7 @@ def taint_filtered_vt(vt: VariableTracker) -> None:
 def collect_intermediate_outputs(
     tx: "InstructionTranslator",
     subtracer: "SubgraphTracer",
-    graph_output_vts: Sequence[VariableTracker],
+    graph_output_vts: list[VariableTracker],
     filter_aliased_intermediates: bool = False,
 ) -> list[VariableTracker]:
     extra_outputs = []
@@ -647,7 +647,7 @@ def collect_intermediate_outputs(
     return extra_outputs
 
 
-def _check_all_tensorvariable(args: Sequence[VariableTracker]) -> None:
+def _check_all_tensorvariable(args: list[VariableTracker]) -> None:
     if not all(type(a.realize()) is TensorVariable for a in args):
         unimplemented(
             gb_type="HOP: non torch.Tensor leaf",
@@ -681,7 +681,7 @@ def _call_while_loop(
         "WhileLoopHigherOrderVariable", "WhileLoopStackOutputHigherOrderVariable"
     ],
     tx: "InstructionTranslator",
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
     stack_output: bool,
     hop_name: str,
@@ -1469,7 +1469,7 @@ def trace_hop_function(
     subtracer: "SubgraphTracer",
     enable_grad: bool | None,
     restore_side_effects: bool,
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # For autograd.Function and other legacy HOPs, we do NOT couple
@@ -1540,7 +1540,7 @@ def trace_hop_function_with_auto_output_flattening(
     subtracer: "SubgraphTracer",
     enable_grad: bool | None,
     allow_side_effects: bool,
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     autograd_ctx = (
@@ -1605,7 +1605,7 @@ def get_hop_args(
 def speculate_subgraph_with_auto_output_flattening(
     tx: "InstructionTranslator",
     f: VariableTracker,
-    sub_args: Sequence[VariableTracker],
+    sub_args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker] | None,
     description: str,
     *,
@@ -1837,16 +1837,15 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
-            graph_output_vt_list = []
+            graph_output_vts: list[VariableTracker] = []
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
                     vt, (SymNodeVariable, TorchScriptObjectVariable)
                 ):
-                    graph_output_vt_list.append(vt)
+                    graph_output_vts.append(vt)
 
             VariableTracker.visit(visit, output, side_effects=tx.output.side_effects)
-            graph_output_vts = tuple(graph_output_vt_list)
 
             # NOTE - [Return subgraph intermediates as subgraph outputs]
             # This helps HOPs which allow side effects. Consider the
@@ -1896,7 +1895,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 extra_outputs = collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
-                graph_output_vts = graph_output_vts + tuple(extra_outputs)
+                graph_output_vts = graph_output_vts + extra_outputs
 
             tx.output.current_tracer.traced_with_externally_visible_side_effects = (
                 old_value
@@ -1908,7 +1907,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # (if they are free variables that were never lifted)
             # so lift them here.
             # output_proxies = output.as_proxy()
-            if isinstance(graph_output_vts, tuple):
+            if isinstance(graph_output_vts, list):
                 output_proxies = [a.as_proxy() for a in graph_output_vts]  # type: ignore[attr-defined]
                 output_proxies = pytree.tree_map(
                     subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
@@ -1957,7 +1956,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 output,
                 graph,
                 lifted_freevars,
-                graph_output_vts,
+                tuple(graph_output_vts),
                 tracing_info,
             )
     except Unsupported as ex:
@@ -1979,7 +1978,7 @@ def speculate_subgraph_with_auto_output_flattening(
 def speculate_subgraph(
     tx: "InstructionTranslator",
     f: VariableTracker,
-    sub_args: Sequence[VariableTracker],
+    sub_args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker] | None,
     description: str,
     *,
@@ -2288,7 +2287,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
@@ -2301,7 +2300,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(
@@ -2333,7 +2332,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.source is None:
@@ -2356,7 +2355,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from . import ListVariable
@@ -2604,7 +2603,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -2627,7 +2626,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 def validate_subgraph_output_types(
-    output: VariableTracker | Sequence[VariableTracker],
+    output: VariableTracker | list[VariableTracker],
 ) -> None:
     """Verify that the output of the subgraph is a tensor,
     int, bool, SymBool, or SymInt.
@@ -2667,7 +2666,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self._HOP_NAME is None:
@@ -2687,7 +2686,7 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self._HOP_NAME is None:
@@ -2706,7 +2705,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
@@ -2949,7 +2948,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.scan import _extract_carry_and_out
@@ -3196,7 +3195,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -3311,7 +3310,7 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -3337,7 +3336,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -3404,19 +3403,36 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 
 class FunctorchHigherOrderVariable(UserFunctionVariable):
+    def _vjp_call_site(
+        self, tx: "InstructionTranslator"
+    ) -> tuple[str, int, int | None]:
+        inst = tx.current_instruction
+        if inst.positions is not None and inst.positions.lineno is not None:
+            lineno = inst.positions.lineno
+        elif inst.starts_line is not None:
+            lineno = inst.starts_line
+        else:
+            lineno = tx.lineno
+        return tx.f_code.co_filename, lineno, inst.offset
+
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if (
-            tx.speculation_log.graph_break_on_vjp_wrapped_output
-            and self.fn is torch._functorch.eager_transforms.vjp
-        ):
+        is_vjp = self.fn is torch._functorch.eager_transforms.vjp
+        if not is_vjp:
+            return super().call_function(tx, args, kwargs)
+
+        call_site = self._vjp_call_site(tx)
+        if call_site in tx.speculation_log.vjp_offending_call_sites:
             unimplemented(
                 gb_type="vjp wrapped tensor leaked as output",
-                context=f"vjp call: {self.fn.__name__}",
+                context=(
+                    f"{self.fn.__name__} at "
+                    f"{call_site[0]}:{call_site[1]}:{call_site[2]}"
+                ),
                 explanation=(
                     "vjp returns a closure (vjpfunc) that captures tensors "
                     "still wrapped at a functorch level (TensorWrapper). "
@@ -3429,7 +3445,13 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
                     "instead of returning it.",
                 ],
             )
-        return super().call_function(tx, args, kwargs)
+
+        prior_nodes = set(tx.output.graph.nodes)
+        result = super().call_function(tx, args, kwargs)
+        for node in tx.output.graph.nodes:
+            if node not in prior_nodes:
+                node.meta["dynamo_vjp_call_site"] = call_site
+        return result
 
     def should_allow_nested_graph_breaks(self) -> bool:
         return False
@@ -3439,7 +3461,7 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return super().call_function(tx, args, kwargs)
@@ -3452,7 +3474,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
@@ -3469,7 +3491,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self,
         tx: "InstructionTranslator",
         fn_vt: VariableTracker,
-        fn_args_vt: Sequence[VariableTracker],
+        fn_args_vt: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         body_gmod: GraphModule,
         attr_name: str = "wrap_body",
@@ -3483,7 +3505,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self,
         tx: "InstructionTranslator",
         fn_vt: VariableTracker,
-        fn_args_vt: Sequence[VariableTracker],
+        fn_args_vt: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         description: str,
         *,
@@ -3569,7 +3591,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # This flattens the kwargs into lifted args
@@ -3616,7 +3638,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -3707,7 +3729,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -3803,7 +3825,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         self,
         tx: "InstructionTranslator",
         fn_vt: VariableTracker,
-        fn_args_vt: Sequence[VariableTracker],
+        fn_args_vt: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         body_gmod: GraphModule,
         attr_name: str = "wrap_body",
@@ -3816,7 +3838,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         _check_supported_callable_arg(tx, args[0], "body_fn")
@@ -3892,7 +3914,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -3937,7 +3959,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unpacked_sequence = args[1].unpack_var_sequence(tx)
@@ -4023,7 +4045,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
@@ -4088,7 +4110,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         func_var = args[0]
@@ -4142,7 +4164,7 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4167,7 +4189,7 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4192,7 +4214,7 @@ class InlineAsmElementwiseHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4217,7 +4239,7 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4275,7 +4297,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         query: VariableTracker,
         fn: VariableTracker,
         fn_name: str,
-        other_buffers: Sequence[VariableTracker],
+        other_buffers: list[VariableTracker],
     ) -> tuple[Proxy, tuple[Proxy, ...], torch.fx.GraphModule]:
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
@@ -4362,7 +4384,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4486,7 +4508,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function_fallback(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4530,7 +4552,7 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         kwargs = dict(kwargs)
@@ -4628,7 +4650,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -4718,7 +4740,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -5025,7 +5047,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_out: VariableTracker,
         fwd_fn: VariableTracker,
     ) -> tuple[
-        Sequence[VariableTracker],
+        list[VariableTracker],
         VariableTracker,
         torch.fx.Graph,
         dict[Proxy, Proxy],
@@ -5157,7 +5179,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         bwd_out: VariableTracker,
         bwd_graph: torch.fx.Graph,
         bwd_freevars: dict[Proxy, Proxy],
-        orig_fwd_args: Sequence[VariableTracker],
+        orig_fwd_args: list[VariableTracker],
     ) -> None:
         # ---------------------------------------------------------------------
         # Forward–Backward Input/Output Alignment
@@ -5327,7 +5349,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_out: VariableTracker,
         fwd_graph: torch.fx.Graph,
         fwd_freevars: dict[Proxy, Proxy],
-        fwd_graph_body_outputs: Sequence[VariableTracker],
+        fwd_graph_body_outputs: list[VariableTracker],
         bwd_graph: torch.fx.Graph,
         bwd_freevars: dict[Proxy, Proxy],
     ) -> tuple[torch.fx.Graph, torch.fx.Graph]:
@@ -5526,8 +5548,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         tx: "InstructionTranslator",
         ctx: "AutogradFunctionContextVariable",
         method_name: str,
-        args: Sequence[VariableTracker],
-    ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
+        args: list[VariableTracker],
+    ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
 
         source = None
@@ -5618,7 +5640,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         (
@@ -5703,7 +5725,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     def _call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
