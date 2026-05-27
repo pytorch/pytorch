@@ -54,6 +54,10 @@ PyObject* THPModule_DisableTorchFunctionSubclassType();
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* args);
 PyObject* THPModule_skip_one_hop_torch_function(PyObject* self, PyObject* args);
+PyObject* THPModule_peek_should_skip_torch_function(
+    PyObject* self,
+    PyObject* unused);
+PyObject* THPModule_set_skip_next_torch_function(PyObject* self, PyObject* arg);
 PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg);
 PyObject* THPModule_has_torch_function_unary(
     PyObject* /*unused*/,

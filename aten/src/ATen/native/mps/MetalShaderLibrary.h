@@ -1,6 +1,9 @@
 #pragma once
+#include <c10/macros/Macros.h>
 #ifdef __OBJC__
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 typedef id<MTLLibrary> MTLLibrary_t;
 typedef id<MTLFunction> MTLFunction_t;
 typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
@@ -19,6 +22,7 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -137,16 +141,37 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  // Returns whether the library exposes a kernel under the given host_name.
+  bool hasFunction(const std::string& fname);
+  // Dispatch is probe-then-fallback for non-alpha calls: first try the direct
+  // per-(out,in) kernel; if it isn't registered, fall back to the
+  // `_dense_castout_<in>` / `_strided_castout_<in>` variant registered for the
+  // input dtype by REGISTER_UNARY_OP. The castout kernel computes the functor
+  // in the input dtype and casts the result to the user-supplied output dtype
+  // on store, matching CPU semantics. Alpha kernels skip the fallback (no
+  // alpha castout variants are registered).
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+  // `ilp_threshold` lets callers tune when the dense ILP variant kicks in
+  // (numel >= threshold). When unspecified, the default is the same 256K
+  // crossover used by the unary path, but only for floating-point output;
+  // non-float outputs get UINT32_MAX (i.e. ILP off by default). Comparison
+  // and other ops with different memory-bandwidth profiles can override.
+  // `natural_output_dtype` is the dtype the kernel naturally produces (its
+  // registered DTYPEO). Defaults to `iter.common_dtype()`, which is right for
+  // arithmetic kernels where DTYPEO==compute precision. Comparison kernels
+  // produce bool and must pass `kBool` so the output-cast fallback allocates
+  // the right temp.
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<c10::ScalarType> natural_output_dtype = std::nullopt,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
 
   template <typename T>
@@ -184,6 +209,10 @@ class MetalShaderLibrary {
   // Cache for kernel functions returned by getCachedKernelFunctionPtr
   std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>>
       kernelCache;
+  // Lazily populated set of all kernel host_names in the library; used by
+  // hasFunction() to answer probes from exec_unary_kernel.
+  std::unordered_set<std::string> functionNames;
+  bool functionNamesPopulated = false;
 };
 
 class DynamicMetalShaderLibrary : public MetalShaderLibrary {
