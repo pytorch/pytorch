@@ -619,18 +619,41 @@ class TestCuteDSLSubprocessCompile(TestCase):
         sentinel_dev1 = object()
         runtime_key = ("shape", "dtype")
 
+        fake_cap = (9, 0)
         disk_cache_set(
-            mem_cache, "/fake.py", ("cfg",), runtime_key, sentinel_dev0, device_index=0
+            mem_cache,
+            "/fake.py",
+            ("cfg",),
+            runtime_key,
+            sentinel_dev0,
+            device_index=0,
+            device_capability=fake_cap,
         )
         disk_cache_set(
-            mem_cache, "/fake.py", ("cfg",), runtime_key, sentinel_dev1, device_index=1
+            mem_cache,
+            "/fake.py",
+            ("cfg",),
+            runtime_key,
+            sentinel_dev1,
+            device_index=1,
+            device_capability=fake_cap,
         )
 
         got0 = disk_cache_get(
-            mem_cache, "/fake.py", ("cfg",), runtime_key, device_index=0
+            mem_cache,
+            "/fake.py",
+            ("cfg",),
+            runtime_key,
+            device_index=0,
+            device_capability=fake_cap,
         )
         got1 = disk_cache_get(
-            mem_cache, "/fake.py", ("cfg",), runtime_key, device_index=1
+            mem_cache,
+            "/fake.py",
+            ("cfg",),
+            runtime_key,
+            device_index=1,
+            device_capability=fake_cap,
         )
 
         self.assertIs(
