@@ -1056,6 +1056,21 @@ def _default_formatter():
 DEFAULT_FORMATTER = _default_formatter()
 
 
+class _StderrHandler(logging.StreamHandler):
+    """A StreamHandler that always writes to the current sys.stderr."""
+
+    def __init__(self) -> None:
+        logging.Handler.__init__(self)
+        self.stream = None
+
+    def emit(self, record) -> None:
+        self.stream = sys.stderr
+        try:
+            super().emit(record)
+        finally:
+            self.stream = None
+
+
 def _setup_handlers(create_handler_fn, log) -> None:
     debug_handler = _track_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
@@ -1143,7 +1158,7 @@ def _init_logs(log_file_name=None) -> None:
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
         _setup_handlers(
-            logging.StreamHandler,
+            _StderrHandler,
             log,
         )
 
