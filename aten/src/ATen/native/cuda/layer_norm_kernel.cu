@@ -63,8 +63,8 @@ __global__ void RowwiseMomentsCUDAKernel(
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
-  __shared__ std::aligned_storage_t<sizeof(WelfordType), alignof(WelfordType)>
-      val_shared[C10_WARP_SIZE_UPPER_BOUND];
+  alignas(WelfordType) __shared__
+      char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -1289,7 +1289,7 @@ void cuComputePartGradGammaBeta(
     const int i2_off = blockIdx.x * blockDim.x + thr_load_col_off;
     alignas(sizeof(double)) extern __shared__ char shared[];
     T_ACC * buf = reinterpret_cast<T_ACC*>(&shared); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
-    T_ACC* warp_buf1 = (T_ACC*)buf;
+    T_ACC* warp_buf1 = buf;
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
@@ -1614,12 +1614,12 @@ void LayerNormBackwardKernelImplInternal(
   }
 
   if (dgamma->defined() || dbeta->defined()) {
-    T* dgamma_data =
-        dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
-
 #if defined(USE_ROCM)
     if (M < 128) {
+      T* dgamma_data =
+          dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
+      T* dbeta_data =
+          dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBetaBackwardSimpleCUDAKernel<T, T_ACC, rms_norm>
