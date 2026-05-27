@@ -278,6 +278,11 @@ def unlift_tokens(
     aot_config: "AOTConfig",
     bw_module: torch.fx.GraphModule | None = None,
 ) -> None:
+    from torch._higher_order_ops.cond import (
+        _COND_EFFECT_TOKEN_COUNT_ATTR,
+        _COND_EFFECT_TOKEN_COUNT_META_KEY,
+    )
+
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
@@ -348,7 +353,7 @@ def unlift_tokens(
 
     def replace_input_token_with_make_token(
         module: torch.fx.GraphModule, node: torch.fx.Node
-    ) -> None:
+    ) -> torch.fx.Node:
         with module.graph.inserting_before(node):
             new_token_node = module.graph.call_function(
                 torch.ops.prims._make_token.default, ()
@@ -357,22 +362,32 @@ def unlift_tokens(
             new_token_node.meta["tensor_meta"] = torch.tensor([])
             node.replace_all_uses_with(new_token_node)
             module.graph.erase_node(node)
+            return new_token_node
 
-    def get_output_tokens(node: torch.fx.Node) -> set[torch.fx.Node]:
+    def get_output_tokens(
+        node: torch.fx.Node, num_tokens: int = 1
+    ) -> set[torch.fx.Node]:
         output_tokens = set()
         for user in list(node.users.keys()):
-            # Check if this is a getitem accessing index 0 (the token)
+            # Check if this is a getitem accessing a token output.
             if (
                 user.op == "call_function"
                 and user.target is operator.getitem
                 and len(user.args) > 1
-                and user.args[1] == 0
+                and isinstance(user.args[1], int)
+                and user.args[1] < num_tokens
             ):
                 # Check if this getitem is used in an output
                 for user_user in list(user.users.keys()):
                     if user_user.op == "output":
                         output_tokens.add(user)
         return output_tokens
+
+    def get_output_node(module: torch.fx.GraphModule) -> torch.fx.Node:
+        output_node = next(reversed(module.graph.find_nodes(op="output")))
+        if output_node is None:
+            raise AssertionError("output node not found in graph")
+        return output_node
 
     def _unlift_tokens_from_module_helper(
         module: torch.fx.GraphModule,
@@ -381,6 +396,15 @@ def unlift_tokens(
     ) -> None:
         input_token_nodes = set()
         output_token_nodes = set()
+        replaced_input_tokens: dict[torch.fx.Node, torch.fx.Node] = {}
+
+        def replace_input_token(node: torch.fx.Node) -> torch.fx.Node:
+            if node not in replaced_input_tokens:
+                input_token_nodes.add(node)
+                replaced_input_tokens[node] = replace_input_token_with_make_token(
+                    module, node
+                )
+            return replaced_input_tokens[node]
 
         for node in module.graph.nodes:
             if (
@@ -388,8 +412,7 @@ def unlift_tokens(
                 and node.target is torch.ops.higher_order.with_effects
             ):
                 if node.args[0].op == "placeholder":
-                    input_token_nodes.add(node.args[0])
-                    replace_input_token_with_make_token(module, node.args[0])
+                    replace_input_token(node.args[0])
 
                 tokens_from_with_effects = get_output_tokens(node)
                 output_token_nodes = output_token_nodes | tokens_from_with_effects
@@ -426,13 +449,13 @@ def unlift_tokens(
                     # Note: The subgraph itself will be unlifted separately when we iterate
                     # through named_modules() below.
 
-                    num_tokens = len(effects)
-                    if num_tokens != 1:
+                    invoke_num_tokens = len(effects)
+                    if invoke_num_tokens != 1:
                         raise AssertionError(
-                            f"Multiple token subgraph NYI, got {num_tokens} tokens"
+                            f"Multiple token subgraph NYI, got {invoke_num_tokens} tokens"
                         )
-                    token_args = operands[:num_tokens]
-                    non_token_args = operands[num_tokens:]
+                    token_args = operands[:invoke_num_tokens]
+                    non_token_args = operands[invoke_num_tokens:]
 
                     # Create with_effects wrapper around invoke_subgraph
                     # with_effects(token, op, *args) where op is invoke_subgraph
@@ -455,8 +478,7 @@ def unlift_tokens(
 
                     for token in token_args:
                         if token.op == "placeholder":
-                            input_token_nodes.add(token)
-                            replace_input_token_with_make_token(module, token)
+                            replace_input_token(token)
 
                     # Get output tokens from the new with_effects node
                     tokens_from_invoke_subgraph = get_output_tokens(new_node)
@@ -464,20 +486,81 @@ def unlift_tokens(
                         output_token_nodes | tokens_from_invoke_subgraph
                     )
 
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.cond
+            ):
+                # `trace_cond` records this when functionalization has threaded
+                # effect tokens through the cond operands/results.
+                cond_num_tokens = node.meta.get(_COND_EFFECT_TOKEN_COUNT_META_KEY, 0)
+                if cond_num_tokens:
+                    if cond_num_tokens != 1:
+                        raise AssertionError(
+                            f"Multiple token cond NYI, got {cond_num_tokens} tokens"
+                        )
+                    pred, true_graph, false_graph, operands = node.args
+                    if not isinstance(operands, (tuple, list)):
+                        raise AssertionError(
+                            f"Cond operands must be a list or tuple, got {type(operands)}"
+                        )
+                    token_args = tuple(operands[:cond_num_tokens])
+                    non_token_args = tuple(operands[cond_num_tokens:])
+                    with module.graph.inserting_before(node):
+                        new_node = module.graph.call_function(
+                            torch.ops.higher_order.with_effects,
+                            # pyrefly: ignore[bad-argument-type]
+                            (
+                                token_args[0],
+                                torch.ops.higher_order.cond,
+                                pred,
+                                true_graph,
+                                false_graph,
+                                non_token_args,
+                            ),
+                        )
+                        node.replace_all_uses_with(new_node)
+                        new_node.meta = node.meta
+                        module.graph.erase_node(node)
+
+                    for token in token_args:
+                        if token.op == "placeholder":
+                            replace_input_token(token)
+
+                    tokens_from_cond = get_output_tokens(
+                        new_node, num_tokens=cond_num_tokens
+                    )
+                    output_token_nodes = output_token_nodes | tokens_from_cond
+
+        cond_subgraph_num_tokens = getattr(module, _COND_EFFECT_TOKEN_COUNT_ATTR, 0)
+        if cond_subgraph_num_tokens:
+            output_node = get_output_node(module)
+            outputs = output_node.args[0]
+            if not isinstance(outputs, (tuple, list)):
+                raise AssertionError(
+                    f"expected output args to be a tuple or list, got {type(outputs)}"
+                )
+            for output in list(outputs[:cond_subgraph_num_tokens]):
+                if not isinstance(output, torch.fx.Node):
+                    continue
+                if output.op == "placeholder":
+                    output = replace_input_token(output)
+                output_token_nodes.add(output)
+
         if not output_token_nodes and not input_token_nodes:
             return
 
-        output_node = next(reversed(module.graph.find_nodes(op="output")))
-        if output_node is None:
-            raise AssertionError("output node not found in graph")
+        output_node = get_output_node(module)
         with module.graph.inserting_before(output_node):
             module.graph.call_function(
                 torch.ops.prims._sink_tokens.default,
                 (list(output_token_nodes),),
             )
-        new_out_args = tuple(
-            [out for out in output_node.args[0] if out not in output_token_nodes]
-        )
+        outputs = output_node.args[0]
+        if not isinstance(outputs, (tuple, list)):
+            raise AssertionError(
+                f"expected output args to be a tuple or list, got {type(outputs)}"
+            )
+        new_out_args = tuple(out for out in outputs if out not in output_token_nodes)
         output_node.args = (new_out_args,)
 
         if expected_num_erased:

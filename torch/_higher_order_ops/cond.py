@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
+import copy
 import functools
 import logging
 import warnings
@@ -17,6 +18,7 @@ from torch._C._functorch import (
     maybe_get_bdim,
 )
 from torch._functorch.utils import exposed_in
+from torch._higher_order_ops.effects import _get_effect, new_token_tensor
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -30,7 +32,7 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     validate_subgraph_args_types,
 )
-from torch._ops import HigherOrderOperator
+from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -49,7 +51,28 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
-        validate_subgraph_args_types(operands)
+        if any(o is None for o in operands):
+            if not isinstance(true_fn, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"Cond operands must be a list of tensors and ints {operands}"
+                )
+            placeholders = list(true_fn.graph.find_nodes(op="placeholder"))
+            if len(placeholders) != len(operands):
+                raise AssertionError(
+                    f"Expected {len(operands)} cond branch placeholders, "
+                    f"got {len(placeholders)}"
+                )
+            for operand, placeholder in zip(operands, placeholders):
+                if operand is not None:
+                    continue
+                val = placeholder.meta.get("val")
+                if not isinstance(val, torch.Tensor) or val.numel() != 0:
+                    raise AssertionError(
+                        "None cond operands are only allowed for internal "
+                        f"effect tokens, got placeholder metadata {val}"
+                    )
+        else:
+            validate_subgraph_args_types(operands)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(pred, true_fn, false_fn, operands)
 
@@ -90,6 +113,109 @@ class CondOp(HigherOrderOperator):
 
 
 cond_op = CondOp()
+
+# Effectful cond functionalization ABI:
+# - Branch wrappers carry the ordered effect tuple on `_cond_effects`.
+# - `trace_cond` copies the token count to each branch GraphModule and records
+#   both the effects and token count on the outer cond node metadata.
+# - AOTAutograd token unlifting and Inductor consume this metadata to remove
+#   synthetic token inputs/outputs while preserving the cond's ordering effect.
+_COND_EFFECTS_ATTR = "_cond_effects"
+_COND_EFFECTS_META_KEY = "cond_effects"
+_COND_EFFECT_TOKEN_COUNT_ATTR = "_cond_effect_token_count"
+_COND_EFFECT_TOKEN_COUNT_META_KEY = "cond_effect_token_count"
+
+
+def _remove_unused_effectful_ops(gm: torch.fx.GraphModule) -> None:
+    # CondAutogradOp traces branch backward graphs through a joint branch
+    # function, which replays forward branch code. Forward-only effects that do
+    # not feed a gradient must not be executed again from the backward graph.
+    output_node = next(reversed(gm.graph.find_nodes(op="output")))
+    live_nodes: set[torch.fx.Node] = set()
+
+    def mark_live(value) -> None:
+        if not isinstance(value, torch.fx.Node) or value in live_nodes:
+            return
+        live_nodes.add(value)
+        pytree.tree_map(mark_live, (value.args, value.kwargs))
+
+    pytree.tree_map(mark_live, output_node.args)
+
+    has_dead_effect = False
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node in live_nodes:
+            continue
+        if not isinstance(node.target, (HigherOrderOperator, OpOverload)):
+            continue
+        if _get_effect(node.target) is None:
+            continue
+        has_dead_effect = True
+        break
+
+    if not has_dead_effect:
+        return
+
+    erased_node = False
+    for node in reversed(gm.graph.nodes):
+        if node.op in ("placeholder", "output") or node in live_nodes:
+            continue
+        gm.graph.erase_node(node)
+        erased_node = True
+
+    if erased_node:
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+
+
+def _unlift_effect_tokens_from_cond_branch_for_autograd(
+    fn: Callable,
+) -> tuple[Callable, int]:
+    num_tokens = getattr(fn, _COND_EFFECT_TOKEN_COUNT_ATTR, 0)
+    if not num_tokens:
+        return fn, 0
+    if num_tokens != 1:
+        raise AssertionError(f"Multiple token cond NYI, got {num_tokens} tokens")
+    if not isinstance(fn, torch.fx.GraphModule):
+        raise AssertionError(f"expected cond branch GraphModule, got {type(fn)}")
+
+    gm: torch.fx.GraphModule = copy.deepcopy(fn)
+    placeholders = list(gm.graph.find_nodes(op="placeholder"))
+    if len(placeholders) < num_tokens:
+        raise AssertionError(
+            f"expected at least {num_tokens} branch placeholders, got {len(placeholders)}"
+        )
+
+    token_nodes = placeholders[:num_tokens]
+    for token_node in token_nodes:
+        with gm.graph.inserting_before(token_node):
+            new_token_node = gm.graph.call_function(
+                torch.ops.prims._make_token.default, ()
+            )
+            new_token_node.meta["val"] = torch.tensor([])
+            new_token_node.meta["tensor_meta"] = torch.tensor([])
+        token_node.replace_all_uses_with(new_token_node)
+        gm.graph.erase_node(token_node)
+
+    output_node = next(reversed(gm.graph.find_nodes(op="output")))
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (tuple, list)):
+        raise AssertionError(
+            f"expected output args to be a tuple or list, got {type(outputs)}"
+        )
+    output_tokens = [
+        output for output in outputs[:num_tokens] if isinstance(output, torch.fx.Node)
+    ]
+    with gm.graph.inserting_before(output_node):
+        gm.graph.call_function(
+            torch.ops.prims._sink_tokens.default,
+            (output_tokens,),
+        )
+    output_node.args = (tuple(outputs[num_tokens:]),)
+
+    delattr(gm, _COND_EFFECT_TOKEN_COUNT_ATTR)
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm, num_tokens
 
 
 @exposed_in("torch")
@@ -252,8 +378,21 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
         )
 
+    cond_effects = getattr(true_fn, _COND_EFFECTS_ATTR, ())
+    cond_effect_token_count = len(cond_effects)
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
+    if cond_effect_token_count:
+        setattr(
+            true_graph,
+            _COND_EFFECT_TOKEN_COUNT_ATTR,
+            cond_effect_token_count,
+        )
+        setattr(
+            false_graph,
+            _COND_EFFECT_TOKEN_COUNT_ATTR,
+            cond_effect_token_count,
+        )
 
     true_outs = []
     false_outs = []
@@ -292,6 +431,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}
     )
+    if cond_effect_token_count:
+        out_proxy.node.meta[_COND_EFFECTS_META_KEY] = cond_effects
+        out_proxy.node.meta[_COND_EFFECT_TOKEN_COUNT_META_KEY] = cond_effect_token_count
 
     out = func_overload(pred, true_graph, false_graph, operands)
 
@@ -300,7 +442,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
-    if not all(isinstance(o, (torch.Tensor, int)) for o in operands):
+    if not all(isinstance(o, (torch.Tensor, int)) or o is None for o in operands):
         raise AssertionError(
             f"Dense implementation operands must be a list of tensors and ints {operands}"
         )
@@ -323,26 +465,45 @@ class CondAutogradOp(torch.autograd.Function):
         false_fn,
         *operands,
     ):
+        true_bw_fn, true_num_tokens = (
+            _unlift_effect_tokens_from_cond_branch_for_autograd(true_fn)
+        )
+        (
+            false_bw_fn,
+            false_num_tokens,
+        ) = _unlift_effect_tokens_from_cond_branch_for_autograd(false_fn)
+        if true_num_tokens != false_num_tokens:
+            raise AssertionError(
+                f"cond branches have mismatched token counts: {true_num_tokens} "
+                f"and {false_num_tokens}"
+            )
+        cond_effect_token_count = true_num_tokens
+        bw_operands = operands[cond_effect_token_count:]
+
         ctx._pred = pred
+        ctx._cond_effect_token_count = cond_effect_token_count
         ctx._true_bw_fn = create_bw_fn(
-            true_fn,
-            operands,
+            true_bw_fn,
+            bw_operands,
         )
         ctx._false_bw_fn = create_bw_fn(
-            false_fn,
-            operands,
+            false_bw_fn,
+            bw_operands,
         )
         # We snapshot the dispatch keys in forward for materializing the
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        save_values_for_backward(ctx, operands)
+        save_values_for_backward(ctx, bw_operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
+        cond_effect_token_count = ctx._cond_effect_token_count
+        if cond_effect_token_count:
+            flat_grads = flat_grads[cond_effect_token_count:]
         operands = saved_values(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
@@ -377,13 +538,26 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        _remove_unused_effectful_ops(true_bw_gm)
+        _remove_unused_effectful_ops(false_bw_gm)
         grads = cond_op(
             ctx._pred,
             true_bw_gm,
             false_bw_gm,
             args,
         )
-        return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
+        if isinstance(grads, tuple) and len(grads) == 1 and isinstance(grads[0], list):
+            # Effectful cond functionalization wraps non-tuple outputs as a
+            # single result. Cond backward graphs return a filtered gradient
+            # list, so undo that wrapper before restoring None gradients.
+            grads = grads[0]
+        return (
+            None,
+            None,
+            None,
+            *([None] * cond_effect_token_count),
+            *fill_none_with_masks(grads, grads_tensor_masks),
+        )
 
 
 # Note:
@@ -715,6 +889,66 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     )
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
+    def get_node_effect(node):
+        target = node.target
+        if target is torch.ops.higher_order.with_effects and len(node.args) > 1:
+            op = node.args[1]
+        elif isinstance(target, (HigherOrderOperator, OpOverload)):
+            op = target
+        else:
+            return None
+
+        if not isinstance(op, (HigherOrderOperator, OpOverload)):
+            return None
+        return _get_effect(op)
+
+    def resolve_subgraph(root, arg):
+        if isinstance(arg, torch.fx.GraphModule):
+            return arg
+        if (
+            isinstance(arg, torch.fx.Node)
+            and arg.op == "get_attr"
+            and isinstance(arg.target, str)
+        ):
+            try:
+                subgraph = root.get_submodule(arg.target)
+            except AttributeError:
+                return None
+            if isinstance(subgraph, torch.fx.GraphModule):
+                return subgraph
+        return None
+
+    def collect_effects(fn, seen=None):
+        seen = seen if seen is not None else set()
+        subgraph = getattr(fn, "subgraph", fn)
+        if not isinstance(subgraph, torch.fx.GraphModule):
+            return set()
+        if id(subgraph) in seen:
+            return set()
+        seen.add(id(subgraph))
+
+        effects = set()
+        for node in subgraph.graph.nodes:
+            if node.op != "call_function":
+                continue
+
+            effect = get_node_effect(node)
+            if effect is not None:
+                effects.add(effect)
+
+            if node.target is cond_op:
+                _, true_branch, false_branch, _ = node.args
+                for branch in (true_branch, false_branch):
+                    branch_gm = resolve_subgraph(subgraph, branch)
+                    if branch_gm is not None:
+                        effects.update(collect_effects(branch_gm, seen))
+            elif node.target is torch.ops.higher_order.invoke_subgraph and node.args:
+                invoke_gm = resolve_subgraph(subgraph, node.args[0])
+                if invoke_gm is not None:
+                    effects.update(collect_effects(invoke_gm, seen))
+
+        return effects
+
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
@@ -728,14 +962,84 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
+    mode = getattr(ctx, "mode", None)
+    branch_effects = collect_effects(true_fn) | collect_effects(false_fn)
+    effects = []
+    if branch_effects and mode is not None:
+        effects = [effect for effect in mode._tokens if effect in branch_effects]
+        effects.extend(
+            sorted(
+                (effect for effect in branch_effects if effect not in mode._tokens),
+                key=str,
+            )
+        )
+        for effect in effects:
+            if effect not in mode._tokens:
+                if not mode._allow_token_discovery:
+                    raise AssertionError(
+                        f"Could not find a token for effect {effect} in torch.cond"
+                    )
+                mode._tokens[effect] = new_token_tensor()
+
+    def wrap_branch_with_effect_tokens(branch, active_mode):
+        @functools.wraps(branch)
+        def wrapped(*operands):
+            token_operands = operands[: len(effects)]
+            branch_operands = operands[len(effects) :]
+            wrapped_tokens = ctx.wrap_tensors(tuple(token_operands))
+            for effect, token in zip(effects, wrapped_tokens):
+                active_mode._tokens[effect] = token
+
+            branch_out = branch(*branch_operands)
+            out_tokens = ctx.unwrap_tensors(
+                tuple(active_mode._tokens[effect] for effect in effects)
+            )
+            if isinstance(branch_out, tuple):
+                return (*out_tokens, *branch_out)
+            return (*out_tokens, branch_out)
+
+        setattr(wrapped, _COND_EFFECTS_ATTR, tuple(effects))
+        return wrapped
+
     with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        # Token wrappers below only add synthetic effect token inputs/outputs; alias
+        # and mutation validation belongs to the original user branches.
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
             _check_alias_and_mutation(
                 branch, unwrapped_inputs, branch_name, pre_dispatch
             )
+
+        if effects:
+            if mode is None:
+                raise AssertionError("mode must be set for effectful torch.cond")
+            active_mode = mode
+            token_inputs = tuple(active_mode._tokens[effect] for effect in effects)
+            unwrapped_token_inputs = ctx.unwrap_tensors(token_inputs)
+            functional_true = wrap_branch_with_effect_tokens(
+                functional_true, active_mode
+            )
+            functional_false = wrap_branch_with_effect_tokens(
+                functional_false, active_mode
+            )
+            cond_return = cond_op(
+                unwrapped_pred,
+                functional_true,
+                functional_false,
+                (*unwrapped_token_inputs, *unwrapped_inputs),
+            )
+            if not isinstance(cond_return, tuple):
+                raise AssertionError(
+                    f"expected effectful cond to return a tuple, got {type(cond_return)}"
+                )
+            token_outputs = cond_return[: len(effects)]
+            cond_return = cond_return[len(effects) :]
+            wrapped_tokens = ctx.wrap_tensors(tuple(token_outputs))
+            for effect, token in zip(effects, wrapped_tokens):
+                active_mode._tokens[effect] = token
+            return ctx.wrap_tensors(cond_return)
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
