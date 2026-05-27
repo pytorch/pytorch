@@ -31,11 +31,11 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype, raise_args_mismatch
-
-
-_RICHCOMPARE_OPS = frozenset(
-    {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
+from ..utils import (
+    cmp_name_to_op_mapping,
+    format_source_range,
+    istype,
+    raise_args_mismatch,
 )
 
 
@@ -515,34 +515,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
-    def richcompare_impl(
-        self,
-        tx: InstructionTranslator,
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        """Per-VT tp_richcompare slot. Subclasses must override.
-
-        Analogous to CPython's tp_richcompare function pointer on PyTypeObject.
-        Returns ConstantVariable(NotImplemented) when the type does not handle
-        the comparison (signaling do_richcompare to try the other operand).
-
-        Called from two paths:
-        - call_method("__eq__") calls richcompare_impl directly (like CPython's
-          a.__eq__(b) calling tp_richcompare without do_richcompare).
-        - generic_richcompare calls richcompare_impl as part of the 4-step
-          do_richcompare algorithm (subclass priority, forward, reflected,
-          fallback).
-        """
-        unimplemented(
-            gb_type="Missing richcompare_impl override",
-            context=f"richcompare_impl {self} {op}",
-            explanation=f"{type(self).__name__} does not implement "
-            f"richcompare_impl. Add a richcompare_impl override to "
-            f"{type(self).__name__}.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
-        )
-
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -968,18 +940,45 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_subtract_impl(tx, args[0], reverse=True)
         elif name == "__isub__":
             return self.nb_inplace_subtract_impl(tx, args[0])
-        elif name in _RICHCOMPARE_OPS and not kwargs:
-            if len(args) != 1:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[f"expected 1 argument, got {len(args)}"],
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            other = args[0]
+            if not isinstance(self, type(other)) and not (
+                isinstance(self, variables.GetAttrVariable)
+                or isinstance(other, variables.GetAttrVariable)
+            ):
+                # NB: GetAttrVariable is a special case because sometimes an
+                # object can map to GetAttrVariable but other time as
+                # SkipFunctionVariable if it is an input to the compiled
+                # function, e.g. tensor.data_ptr
+                return variables.ConstantVariable.create(NotImplemented)
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            if (
+                not self.is_python_constant()
+                or not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(self)
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
+                unimplemented(
+                    gb_type="Builtin `operator.*` comparison with constant `self` failed",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=f"Failed to compare {self} with {other}, "
+                    + f"because {other} is not a Python constant or its mutation check fails.",
+                    hints=[],
                 )
-            # a.__eq__(b) calls the type's tp_richcompare directly, without
-            # do_richcompare's reflected-operand protocol.  This matches
-            # CPython where a.__eq__(b) can return NotImplemented.
-            # See object_protocol.py for the full dispatch architecture.
-            return self.richcompare_impl(tx, args[0], name)
+
+            try:
+                return variables.ConstantVariable.create(
+                    cmp_name_to_op_mapping[name](
+                        self.as_python_constant(), other.as_python_constant()
+                    )
+                )
+            except Exception as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
         elif name == "__subclasscheck__" and len(args) == 1 and not kwargs:
             if (self_py := self.as_python_constant()) and (
                 derived_py := args[0].as_python_constant()
