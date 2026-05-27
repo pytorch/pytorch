@@ -17,7 +17,6 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -30,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyMPS,
     onlyNativeDeviceTypes,
+    onlyOn,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -127,27 +127,19 @@ class TestAvgPool(TestCase):
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
                         self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
-    def test_avg_pool1d_ceil_mode(self):
+
+class TestAvgPoolDeviceType(TestCase):
+    def test_avg_pool1d_ceil_mode(self, device):
         # Regression test for gh-36977
-        x = 10 * torch.randn((1, 16, 4))
+        x = 10 * torch.randn((1, 16, 4), device=device)
         y = torch.nn.functional.avg_pool1d(
             x, ceil_mode=True, count_include_pad=True, kernel_size=1, stride=2
         )
         self.assertTrue(not torch.isnan(y).any())
 
-        if TEST_CUDA:
-            y = torch.nn.functional.avg_pool1d(
-                x.to("cuda"),
-                ceil_mode=True,
-                count_include_pad=True,
-                kernel_size=1,
-                stride=2,
-            )
-            self.assertTrue(not torch.isnan(y).any())
-
-    def test_avg_pool2d_ceil_mode(self):
+    def test_avg_pool2d_ceil_mode(self, device):
         # Regression test for gh-36977
-        x = 10 * torch.randn((1, 16, 4, 4))
+        x = 10 * torch.randn((1, 16, 4, 4), device=device)
         y = torch.nn.functional.avg_pool2d(
             x,
             ceil_mode=True,
@@ -158,34 +150,13 @@ class TestAvgPool(TestCase):
         )
         self.assertTrue(not torch.isnan(y).any())
 
-        if TEST_CUDA:
-            y = torch.nn.functional.avg_pool2d(
-                x.to("cuda"),
-                ceil_mode=True,
-                count_include_pad=True,
-                kernel_size=(1, 2),
-                padding=(0, 1),
-                stride=2,
-            )
-            self.assertTrue(not torch.isnan(y).any())
-
-    def test_avg_pool3d_ceil_mode(self):
+    def test_avg_pool3d_ceil_mode(self, device):
         # Regression test for gh-36977
-        x = 10 * torch.randn((1, 16, 4, 4, 4))
+        x = 10 * torch.randn((1, 16, 4, 4, 4), device=device)
         y = torch.nn.functional.avg_pool3d(
             x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2
         )
         self.assertTrue(not torch.isnan(y).any())
-
-        if TEST_CUDA:
-            y = torch.nn.functional.avg_pool3d(
-                x.to("cuda"),
-                ceil_mode=True,
-                count_include_pad=True,
-                kernel_size=(1, 2, 3),
-                stride=2,
-            )
-            self.assertTrue(not torch.isnan(y).any())
 
 
 class TestPoolingNN(NNTestCase):
@@ -214,58 +185,6 @@ class TestPoolingNN(NNTestCase):
                 torch.empty([2, 2, 2])
             ),
         )
-
-    def test_adaptive_pooling_avg_nhwc(self):
-        device_list = ["cpu"]
-        if TEST_CUDA:
-            device_list.append("cuda")
-
-        for device in device_list:
-            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
-            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
-            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
-
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
-
-            out = pool(input)
-            out.backward(grad)
-            ref_out = ref_pool(ref_input)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(input.grad, ref_input.grad)
-
-    def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
-        device_list = ["cpu"]
-        if TEST_CUDA:
-            device_list.append("cuda")
-
-        for device in device_list:
-            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
-            input = input.contiguous(memory_format=torch.channels_last)
-            input = input[:, ::2, :, :].requires_grad_()
-            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
-            grad = grad[:, ::2, :, :]
-            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
-
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
-
-            out = pool(input)
-            out.backward(grad)
-            ref_out = ref_pool(ref_input)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out)
-            self.assertEqual(input.grad, ref_input.grad)
 
     def test_adaptive_pooling_lower_precision(self):
         def _test_adaptive_pooling_lower_precision(
@@ -311,71 +230,6 @@ class TestPoolingNN(NNTestCase):
                 _test_adaptive_pooling_lower_precision(
                     self, device, dtype, torch.nn.AdaptiveMaxPool2d, torch.channels_last
                 )
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @largeTensorTest("12GB", device="cuda")
-    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
-        input = torch.randint(
-            1, 10, (1, 32, 2**17 + 1, 32), dtype=torch.float32, device="cuda"
-        )
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device="cuda")
-
-        pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
-
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
-
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
-
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @largeTensorTest("12GB", device="cuda")
-    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
-        input = torch.randint(
-            1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda"
-        )
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        pool = torch.nn.AdaptiveAvgPool2d((2**17 + 1, 32)).cuda()
-
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_pool = torch.nn.AdaptiveAvgPool2d((2**17 + 1, 32)).cuda()
-
-        out = pool(input)
-        ref_out = ref_pool(ref_input)
-
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_adaptive_avg_pooling_overflow(self):
-        input = torch.randint(
-            -256, 256, (20, 32, 256, 256), dtype=torch.half, device="cuda"
-        )
-        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
-        out = avg_pool(input)
-        self.assertFalse(torch.isinf(out).any())
-        self.assertFalse(torch.isnan(out).any())
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_adaptive_avg_pooling_nhwc_overflow(self):
-        input = torch.randint(
-            -256, 256, (20, 32, 256, 256), dtype=torch.half, device="cuda"
-        )
-        input = input.contiguous(memory_format=torch.channels_last)
-        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
-        out = avg_pool(input)
-        self.assertFalse(torch.isinf(out).any())
-        self.assertFalse(torch.isnan(out).any())
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
@@ -505,6 +359,115 @@ class TestPoolingNN(NNTestCase):
 
 
 class TestPoolingNNDeviceType(NNTestCase):
+    @onlyOn(["cpu", "cuda"])
+    def test_adaptive_pooling_avg_nhwc(self, device):
+        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @onlyOn(["cpu", "cuda"])
+    def test_adaptive_pooling_avg_nhwc_non_contiguous(self, device):
+        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+        input = input.contiguous(memory_format=torch.channels_last)
+        input = input[:, ::2, :, :].requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+        grad = grad[:, ::2, :, :]
+        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @onlyCUDA
+    @largeTensorTest("12GB")
+    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, device):
+        input = torch.randint(
+            1, 10, (1, 32, 2**17 + 1, 32), dtype=torch.float32, device=device
+        )
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device=device)
+
+        pool = torch.nn.AdaptiveAvgPool2d((10, 32)).to(device)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((10, 32)).to(device)
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @onlyCUDA
+    @largeTensorTest("12GB")
+    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, device):
+        input = torch.randint(
+            1, 10, (1, 32, 16, 16), dtype=torch.float32, device=device
+        )
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        pool = torch.nn.AdaptiveAvgPool2d((2**17 + 1, 32)).to(device)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_pool = torch.nn.AdaptiveAvgPool2d((2**17 + 1, 32)).to(device)
+
+        out = pool(input)
+        ref_out = ref_pool(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+
+    @onlyCUDA
+    def test_adaptive_avg_pooling_overflow(self, device):
+        input = torch.randint(
+            -256, 256, (20, 32, 256, 256), dtype=torch.half, device=device
+        )
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
+    @onlyCUDA
+    def test_adaptive_avg_pooling_nhwc_overflow(self, device):
+        input = torch.randint(
+            -256, 256, (20, 32, 256, 256), dtype=torch.half, device=device
+        )
+        input = input.contiguous(memory_format=torch.channels_last)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
     @expectedFailureMPS  # No double, float shape prop does not work
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
@@ -2250,6 +2213,9 @@ torch.cuda.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
+instantiate_device_type_tests(
+    TestAvgPoolDeviceType, globals(), only_for=("cpu", "cuda")
+)
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestPoolingNN)
 
