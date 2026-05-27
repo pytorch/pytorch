@@ -3887,6 +3887,21 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _is_tracing_exception_table_protected_bytecode(
+    tx: InstructionTranslatorBase,
+) -> bool:
+    if sys.version_info < (3, 11):
+        return False
+
+    current_tx: Any | None = tx
+    while current_tx is not None:
+        inst = getattr(current_tx, "current_instruction", None)
+        if getattr(inst, "exn_tab_entry", None) is not None:
+            return True
+        current_tx = getattr(current_tx, "parent", None)
+    return False
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4086,6 +4101,16 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        # User code may catch RuntimeError in bytecode protected by an
+        # exception table. Let graph-break fallback run that region eagerly.
+        if _is_tracing_exception_table_protected_bytecode(tx):
+            unimplemented(
+                gb_type="RuntimeError when making fake tensor call",
+                context="",
+                explanation=msg,
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
         _wrap_graph_break_with_torch_runtime_err(
             lambda: unimplemented(
                 gb_type="RuntimeError when making fake tensor call",

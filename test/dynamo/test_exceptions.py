@@ -168,6 +168,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager")(x)
         self.assertEqual(ref, res)
 
+    def test_fake_tensor_runtime_error_in_try_except(self):
+        def fn(x):
+            try:
+                return x.view(3, 3, 3, 3, 3)
+            except RuntimeError:
+                return x + 1
+
+        x = torch.zeros(512)
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager")(x)
+        self.assertEqual(ref, res)
+
+    def test_fake_tensor_runtime_error_in_inlined_call_try_except(self):
+        def inner(x):
+            return x.view(3, 3, 3, 3, 3)
+
+        def outer(x):
+            try:
+                return inner(x)
+            except RuntimeError:
+                return x + 1
+
+        x = torch.zeros(512)
+        ref = outer(x)
+        res = torch.compile(outer, backend="aot_eager")(x)
+        self.assertEqual(ref, res)
+
     def test_autocast_with_exception(self):
         class Optimizer(torch.autograd.Function):
             @staticmethod
