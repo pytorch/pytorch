@@ -5365,6 +5365,24 @@ class ShapeEnv:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
         return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
+    def _add_shape_id_eq_check(self, sym_int: SymInt, shape_id: str | None) -> None:
+        """
+        Dedup unbacked symbols sharing a `shape_id` via a runtime equality
+        check. The first symbol for a `shape_id` is recorded; subsequent
+        symbols emit `torch._check(new == existing)` so the ShapeEnv learns
+        the equality without changing symbol identity.
+
+        No-op when `shape_id` is None.
+        """
+        if shape_id is None:
+            return
+        existing_sym = self._shape_id_to_unbacked_symbol.get(shape_id)
+        if existing_sym is None:
+            self._shape_id_to_unbacked_symbol[shape_id] = sym_int.node.expr
+            return
+        existing_symint = self.create_symintnode(existing_sym, hint=None)
+        torch._check(sym_int == existing_symint)
+
     @record_shapeenv_event()
     def create_unbacked_symbool(self) -> SymBool:
         """Create a symbolic boolean without a hint value"""
@@ -5521,14 +5539,10 @@ class ShapeEnv:
 
             # Add runtime equality check for shape_id if applicable
             if shape_id is not None:
-                if shape_id in self._shape_id_to_unbacked_symbol:
-                    # Add runtime equality check instead of reusing the same symbol
-                    existing_sym = self._shape_id_to_unbacked_symbol[shape_id]
-                    existing_symint = self.create_symintnode(existing_sym, hint=None)
-                    out_symint = self.create_symintnode(out, hint=None)
-                    torch._check(out_symint == existing_symint)
-                else:
-                    self._shape_id_to_unbacked_symbol[shape_id] = out
+                # `out` is freshly created from an unbacked symbol, so
+                # create_symintnode always wraps it as a SymInt (never an int).
+                out_sym = cast(SymInt, self.create_symintnode(out, hint=None))
+                self._add_shape_id_eq_check(out_sym, shape_id)
 
             self.unbacked_inputs.add(out)
 

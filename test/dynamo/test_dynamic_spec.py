@@ -593,6 +593,104 @@ class TestShapeVarCompile(TestCase):
         self.assertEqual(sym.node.shape_env.var_to_hint_override.get(expr), 128)
 
 
+class TestShapeVarDedup(TestCase):
+    """Sharing the same ShapeVar / IntVar across spec positions emits a
+    runtime equality check between the resulting unbacked SymInts, so
+    comparisons inside the compiled fn don't raise DDE.
+    """
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_tensor_dim_vs_tensor_dim(self):
+        """Two tensor dims sharing one ShapeVar: x.shape[0] == y.shape[0]
+        must not DDE inside the compiled fn."""
+        B = ShapeVar("batch")
+
+        def fn(x, y):
+            if x.shape[0] == y.shape[0]:
+                return x.sum() + y.sum()
+            return x.sum() - y.sum()
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([B, None]),
+                "y": TensorSpec([B, None]),
+            },
+        )
+        out = compiled(torch.randn(8, 3), torch.randn(8, 4))
+        self.assertTrue(torch.is_tensor(out))
+
+    def test_tensor_dim_vs_int(self):
+        """A tensor dim and a scalar int sharing one ShapeVar: comparing
+        them inside the compiled fn must not DDE."""
+        B = ShapeVar("batch")
+
+        def fn(x, n):
+            if x.shape[0] == n:
+                return x.sum() + n
+            return x.sum() - n
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([B, None]),
+                "n": B,
+            },
+        )
+        out = compiled(torch.randn(8, 3), 8)
+        self.assertTrue(torch.is_tensor(out))
+
+    def test_int_vs_int(self):
+        """Two scalar int args sharing one IntVar: a == b must not DDE."""
+        S = IntVar("size")
+
+        def fn(a, b):
+            if a == b:
+                return a + b
+            return a - b
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={"a": S, "b": S},
+        )
+        self.assertEqual(compiled(4, 4), 8)
+
+    def test_distinct_shape_vars_still_dde(self):
+        """Sanity check: distinct ShapeVars do not share a symbol, so
+        comparing them still DDEs (no dedup contamination across vars)."""
+        A = ShapeVar("a")
+        B = ShapeVar("b")
+
+        def fn(x, y):
+            if x.shape[0] == y.shape[0]:
+                return x.sum() + y.sum()
+            return x.sum() - y.sum()
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([A, None]),
+                "y": TensorSpec([B, None]),
+            },
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Could not guard on data-dependent expression",
+        ):
+            compiled(torch.randn(8, 3), torch.randn(8, 4))
+
+
 class TestObjectSpec(TestCase):
     """``ObjectSpec`` data class — construction, access, repr."""
 

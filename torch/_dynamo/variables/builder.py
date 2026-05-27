@@ -2556,6 +2556,14 @@ class VariableBuilder:
                         sym_val.node.shape_env.var_to_hint_override[expr] = (
                             int_spec.optimization_hint
                         )
+                    # Dedup multiple uses of the same IntVar via runtime
+                    # equality check. `_uid` distinguishes IntVars with
+                    # the same name (including default `anon`). The
+                    # `__intvar__:` prefix keeps these from colliding
+                    # with user-supplied `shape_id` strings.
+                    sym_val.node.shape_env._add_shape_id_eq_check(
+                        sym_val, f"__intvar__:{int_spec._uid}"
+                    )
                     return result
                 else:
                     raise ValueError(
@@ -4714,6 +4722,13 @@ def _wrap_to_fake_tensor_and_record_impl(
                 size_sym = fake_e.size(dim_i)
                 if not isinstance(size_sym, torch.SymInt):
                     continue
+                # Dedup multiple uses of the same IntVar via runtime equality
+                # check. `_uid` distinguishes IntVars with the same name
+                # (including default `anon`). The `__intvar__:` prefix keeps
+                # these from colliding with user-supplied `shape_id` strings.
+                size_sym.node.shape_env._add_shape_id_eq_check(
+                    size_sym, f"__intvar__:{dim_spec._uid}"
+                )
                 if dim_spec.min is not None:
                     torch._check(size_sym >= dim_spec.min)
                 if dim_spec.max is not None:
