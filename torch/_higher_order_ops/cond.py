@@ -358,7 +358,8 @@ class CondAutogradOp(torch.autograd.Function):
                 true_outputs = fn(*args)
                 grads_tensor_masks = [
                     # pyrefly: ignore [unnecessary-type-conversion]
-                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
+                    bool(isinstance(out, torch.Tensor))
+                    for out in true_outputs
                 ]
                 return filter_with_masks(true_outputs, grads_tensor_masks)
 

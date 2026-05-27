@@ -97,7 +97,8 @@ class _BucketCapacityConfig:
                 )
             per_bucket_bytes_caps = tuple(
                 # pyrefly: ignore [unnecessary-type-conversion]
-                int(cap_mb * _MB_TO_BYTES) for cap_mb in bucket_cap_mb_list
+                int(cap_mb * _MB_TO_BYTES)
+                for cap_mb in bucket_cap_mb_list
             )
             effective_bucket_cap_mb = max(bucket_cap_mb_list)
             is_using_default = False

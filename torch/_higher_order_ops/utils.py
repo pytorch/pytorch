@@ -577,7 +577,8 @@ def prepare_fw_with_masks(fn):
         fw_out = fn(*args)
         return fw_out, [
             # pyrefly: ignore [unnecessary-type-conversion]
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
+            for ret in fw_out
         ]
 
     return fw_with_masks

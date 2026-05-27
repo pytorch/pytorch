@@ -569,7 +569,9 @@ def grad(
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
     grad_outputs_ = _make_grads(
         # pyrefly: ignore [bad-argument-type]
-        outputs, grad_outputs_, is_grads_batched=is_grads_batched
+        outputs,
+        grad_outputs_,
+        is_grads_batched=is_grads_batched,
     )
 
     if retain_graph is None:

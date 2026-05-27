@@ -1849,7 +1849,9 @@ def quantized_decomposed_quantize_per_tensor_default(
         dtype=dtype,
         inner_fn=functools.partial(
             # pyrefly: ignore [unnecessary-type-conversion]
-            inner_fn, scale=float(scale), zero_point=int(zero_point)
+            inner_fn,
+            scale=float(scale),
+            zero_point=int(zero_point),
         ),
         ranges=input.get_size(),
     )
@@ -1889,7 +1891,9 @@ def quantized_decomposed_dequantize_per_tensor_default(
         dtype=out_dtype,
         inner_fn=functools.partial(
             # pyrefly: ignore [unnecessary-type-conversion]
-            inner_fn, scale=float(scale), zero_point=int(zero_point)
+            inner_fn,
+            scale=float(scale),
+            zero_point=int(zero_point),
         ),
         ranges=input.get_size(),
     )

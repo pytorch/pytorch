@@ -226,7 +226,8 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                     ]
                     field_strs = [
                         # pyrefly: ignore [unnecessary-type-conversion]
-                        f"/* {fname} */ {str(field)}" for fname, field in fields
+                        f"/* {fname} */ {str(field)}"
+                        for fname, field in fields
                     ]
                     buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
 

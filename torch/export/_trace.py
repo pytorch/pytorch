@@ -1971,8 +1971,8 @@ def _export_to_aten_ir_make_fx(
             # pyrefly: ignore[bad-argument-type]
             user_inputs=input_names[params_len:],
             user_outputs=output_names,
-            inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
+            inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
             inputs_to_buffers=dict(
                 zip(input_names[param_len : param_len + buffer_len], named_buffers)

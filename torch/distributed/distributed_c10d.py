@@ -1358,7 +1358,9 @@ def _check_single_backend_availability(backend_name: str) -> bool:
     """
     available_func = getattr(
         # pyrefly: ignore [unnecessary-type-conversion]
-        torch.distributed, f"is_{str(backend_name).lower()}_available", None
+        torch.distributed,
+        f"is_{str(backend_name).lower()}_available",
+        None,
     )
     if available_func:
         return available_func()
