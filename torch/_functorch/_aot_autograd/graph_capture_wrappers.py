@@ -1457,6 +1457,7 @@ def aot_dispatch_subclass(
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
             meta.static_input_indices,  # type: ignore[arg-type]
+            subclass_metas=meta.subclass_inp_meta,
         )
 
         primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]
@@ -1475,6 +1476,7 @@ def aot_dispatch_subclass(
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
             meta.static_input_indices,  # type: ignore[arg-type]
+            subclass_metas=meta.subclass_inp_meta,
         )
 
         primals_unwrapped = args_unwrapped  # type: ignore[assignment]

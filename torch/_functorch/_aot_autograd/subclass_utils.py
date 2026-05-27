@@ -497,19 +497,34 @@ def unwrap_tensor_subclasses_with_indices_to_original(
 
 
 def remap_unwrapped_subclass_arg_indices(
-    wrapped_args: list[Any], static_input_indices: list[int]
+    wrapped_args: list[Any],
+    static_input_indices: list[int],
+    *,
+    subclass_metas: Sequence[PlainTensorMeta | SubclassCreationMeta] | None = None,
 ) -> list[int]:
     static_input_indices_set = set(static_input_indices)
     new_ind = 0
     remapped_static_indices = []
+
+    if subclass_metas is not None and len(wrapped_args) != len(subclass_metas):
+        raise AssertionError(
+            f"subclass_metas length ({len(subclass_metas)}) != wrapped_args length ({len(wrapped_args)})"
+        )
+
     for i, arg in enumerate(wrapped_args):
-        num_indices = 1
-        if is_traceable_wrapper_subclass(arg):
+        subclass_meta = None if subclass_metas is None else subclass_metas[i]
+        if isinstance(subclass_meta, SubclassCreationMeta):
+            num_indices = subclass_meta.arg_count
+        elif subclass_meta is not None:
+            num_indices = 1
+        elif is_traceable_wrapper_subclass(arg):
             num_indices = (
                 len(get_plain_tensors(arg, out=[]))
                 + len(enumerate_filter_symints(arg.size()))
                 + len(enumerate_filter_symints(arg.stride()))
             )
+        else:
+            num_indices = 1
 
         for _ in range(num_indices):
             if i in static_input_indices_set:
