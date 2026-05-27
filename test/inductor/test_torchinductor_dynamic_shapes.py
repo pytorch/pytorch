@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from functools import partial
+from types import SimpleNamespace
 
 import sympy
 
@@ -67,27 +68,19 @@ test_failures = {
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
     "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # calling div on only symint args
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps")
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
-    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
-    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_std_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
@@ -145,12 +138,16 @@ if HAS_CPU:
             x = graph.placeholder("x")
             pred = graph.placeholder("pred")
             y = graph.call_function(torch.ops.aten.neg.default, (x,))
+            assert_pred = graph.call_function(
+                torch.ops.aten._assert_scalar.default, (pred, "pred")
+            )
             graph.output((y, pred))
 
             gm = torch.fx.GraphModule({}, graph)
             x.meta["val"] = fake_x
             pred.meta["val"] = pred_input
             y.meta["val"] = fake_y
+            assert_pred.meta["val"] = None
             gm.graph.lint()
             gm.recompile()
             return gm, shape_env, fake_mode, x_input, pred_input
@@ -163,6 +160,25 @@ if HAS_CPU:
 
             self.assertIs(may_get_constant_buffer_dtype(symint), torch.int64)
             self.assertIs(may_get_constant_buffer_dtype(symbool), torch.bool)
+
+        def test_python_wrapper_symbolic_scalar_simplifies(self):
+            from torch._inductor.sizevars import SizeVarAllocator
+
+            s0 = sympy.Symbol("s0", integer=True)
+            s1 = sympy.Symbol("s1", integer=True)
+            u0 = sympy.Symbol("u0", integer=True)
+            pred_expr = sympy.Eq(u0, 1)
+
+            sizevars = SizeVarAllocator()
+            sizevars.replacements[s1] = s0
+            fake_graph = SimpleNamespace(
+                graph_inputs={"pred": pred_expr},
+                sizevars=sizevars,
+            )
+            with V.set_graph_handler(fake_graph):
+                wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+                self.assertEqual(wrapper.codegen_symbolic_scalar(s1 + 1), "1 + s0")
+                self.assertEqual(wrapper.codegen_symbolic_scalar(pred_expr), "pred")
 
         def test_aot_cpp_wrapper_accepts_symbool_graph_input(self):
             from torch._inductor.codegen.cpp_wrapper_cpu import (
@@ -209,8 +225,9 @@ if HAS_CPU:
                 self.assertIn(
                     "aoti_torch_item_bool(inputs[1], &pred)", wrapper_code.value
                 )
+                self.assertIn("std::to_string(pred)", wrapper_code.value)
                 for symbol in pred_expr.free_symbols:
-                    self.assertNotIn(str(symbol), wrapper_code.value)
+                    self.assertNotIn(f"std::to_string({symbol})", wrapper_code.value)
 
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:

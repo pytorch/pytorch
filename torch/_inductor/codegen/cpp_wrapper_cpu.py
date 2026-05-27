@@ -301,6 +301,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        self.needs_vec_isa = self.device == "cpu"
 
     @staticmethod
     def create(
@@ -1450,6 +1451,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
             return
         if cpp_definition is not None:
+            self.needs_vec_isa = True
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
         else:
@@ -1572,7 +1574,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Close the wrapper code block
             result.splice('"""\n)')
 
-        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+        if config.cpp_wrapper_build_separate:
+            kernel_code = "kernel_src"
+            needs_vec_isa = "False"
+            kernel_needs_vec_isa = str(self.needs_vec_isa)
+        else:
+            kernel_code = "None"
+            needs_vec_isa = str(self.needs_vec_isa)
+            kernel_needs_vec_isa = "None"
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1580,6 +1589,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
+                needs_vec_isa={needs_vec_isa},
+                kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
@@ -1936,15 +1947,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
             V.graph.sizevars.simplify(replaced_x) if simplify else replaced_x
         )
         # In AOT mode, emit runtime checks for potential division/modulo by zero
-        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0.
         if V.graph.aot_mode:
-            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
-            for divisor, op_name in divisors:
-                divisor_str = cexpr(divisor)
-                self.writeline(
-                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
-                )
+            for divisor, op_name in self._extract_divisors_from_expr(
+                maybe_simplified_x
+            ):
+                self.write_assert_div_by_zero(cexpr(divisor), op_name)
         return cexpr(maybe_simplified_x)
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target)."""
+        code.writeline(
+            f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+        )
 
     def codegen_cpp_symbolic_scalar(self, x: sympy.Expr | SympyBoolean) -> str:
         return cexpr(self.replace_symbolic_scalar_graph_inputs(x))
@@ -2106,16 +2123,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
-    def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
     ) -> None:
+        if V.graph.aot_mode and V.graph.is_const_graph:
+            return
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
         if V.graph.aot_mode:
-            if V.graph.is_const_graph:
-                return
-            self.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
+            code.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
         else:
-            self.writeline(stmt)
+            code.writeline(stmt)
 
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (

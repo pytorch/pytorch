@@ -13,6 +13,9 @@
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
+#include <fstream>
+#include <iterator>
+#include <vector>
 #endif
 
 /**
@@ -102,6 +105,19 @@ CUdeviceptr getPointer(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
+#if defined(USE_ROCM)
+std::vector<char> readKernelImage(const std::string& filePath) {
+  std::ifstream file(filePath, std::ios::binary);
+  TORCH_CHECK(file, "Failed to open kernel image: ", filePath);
+
+  auto begin = std::istreambuf_iterator<char>(file);
+  auto end = std::istreambuf_iterator<char>();
+  std::vector<char> image(begin, end);
+  TORCH_CHECK(!image.empty(), "Kernel image is empty: ", filePath);
+  return image;
+}
+#endif
+
 CUfunction loadKernel(
     std::string filePath,
     const std::string& funcName,
@@ -117,7 +133,10 @@ CUfunction loadKernel(
   CUfunction func = nullptr;
 
 #if defined(USE_ROCM)
-  AT_CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
+  // HSACO. Load from memory to avoid retaining one FD per static launcher.
+  auto image = readKernelImage(filePath);
+  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
@@ -627,7 +646,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
     return THPUtils_unpackUInt64(obj);
 #endif
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return 0;
   }
   // Fast type check: inductor-generated tensors are always exact THPVariable
