@@ -31,6 +31,7 @@ from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _apply_kernel_options,
+    _are_blocks_contiguous,
     _compute_dq_write_order_from_block_mask,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -5427,6 +5428,12 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         self.assertEqual(len(cnt.graphs), 1)
         graph = cnt.graphs[0]
         norm_graph = normalize_gm(graph.print_readable(print_output=False))
+        # Normalize ROCm auto-detected BLOCKS_ARE_CONTIGUOUS for snapshot
+        # comparison; dedicated test_auto_detect_contiguous_compile covers
+        # the flag propagation.
+        norm_graph = norm_graph.replace(
+            "'BLOCKS_ARE_CONTIGUOUS': True", "'BLOCKS_ARE_CONTIGUOUS': False"
+        )
         self.assertExpectedInline(
             norm_graph,
             """\
@@ -6613,6 +6620,59 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    def test_auto_detect_contiguous(self, device):
+        B, H, S = 2, 2, 1024
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        bm_noop = create_block_mask(noop_mask, B, H, S, S, device=device)
+        self.assertTrue(_are_blocks_contiguous(bm_noop))
+        self.assertTrue(bm_noop._blocks_are_contiguous)
+
+        bm_causal = create_block_mask(causal, B, H, S, S, device=device)
+        self.assertTrue(_are_blocks_contiguous(bm_causal))
+        self.assertTrue(bm_causal._blocks_are_contiguous)
+
+        def checkerboard(b, h, q_idx, kv_idx):
+            q_blk = q_idx // _DEFAULT_SPARSE_BLOCK_SIZE
+            kv_blk = kv_idx // _DEFAULT_SPARSE_BLOCK_SIZE
+            return (q_blk + kv_blk) % 2 == 0
+
+        bm_checker = create_block_mask(checkerboard, 1, 1, 512, 512, device=device)
+        self.assertFalse(_are_blocks_contiguous(bm_checker))
+        self.assertFalse(bm_checker._blocks_are_contiguous)
+
+        bm_empty = _create_empty_block_mask(
+            torch.randn(1, 1, 1, 64, device=device),
+            torch.randn(1, 1, 1, 64, device=device),
+        )
+        self.assertTrue(_are_blocks_contiguous(bm_empty))
+
+    @supported_platform
+    @unittest.skipIf(not torch.version.hip, "ROCm-only auto-detection")
+    def test_auto_detect_contiguous_compile(self, device):
+        """Verify _blocks_are_contiguous propagates through torch.compile."""
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q = torch.randn(1, 2, 256, 64, device=device, dtype=torch.bfloat16)
+        k = torch.randn(1, 2, 256, 64, device=device, dtype=torch.bfloat16)
+        v = torch.randn(1, 2, 256, 64, device=device, dtype=torch.bfloat16)
+        bm = create_block_mask(causal, 1, 2, 256, 256, device=device)
+        self.assertTrue(bm._blocks_are_contiguous)
+
+        _, code = run_and_get_code(
+            torch.compile(flex_attention, fullgraph=True),
+            q,
+            k,
+            v,
+            block_mask=bm,
+        )
+        self.assertIn("BLOCKS_ARE_CONTIGUOUS : tl.constexpr = True", str(code))
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
