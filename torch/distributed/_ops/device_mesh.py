@@ -13,23 +13,6 @@ torch.library.define(
     tags=torch.Tag.pt2_compliant_tag,
 )
 
-torch.library.define(
-    "device_mesh::_runtime_get_rank",
-    "() -> SymInt",
-    tags=torch.Tag.pt2_compliant_tag,
-)
-
-
-@torch.library.register_fake("device_mesh::_runtime_get_rank")
-def _runtime_get_rank_fake() -> SymInt:
-    ctx = torch._custom_op.impl.get_ctx()
-    return ctx._shape_env.create_unbacked_symint()
-
-
-@torch.library.impl("device_mesh::_runtime_get_rank", "CompositeExplicitAutograd")
-def _runtime_get_rank_impl() -> int:
-    return torch.distributed.get_rank()
-
 
 @torch.library.register_fake("device_mesh::_runtime_compute_coordinate_on_dim")
 def _runtime_compute_coordinate_on_dim_fake(

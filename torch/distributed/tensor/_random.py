@@ -7,8 +7,13 @@ from logging import getLogger
 from typing import Optional
 
 import torch
-from torch.distributed._local_tensor import maybe_run_for_local_tensor
+import torch.distributed.config as dist_config
+from torch.distributed._local_tensor import (
+    enabled_local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
+from torch.distributed.distributed_c10d import _get_rank
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
 from torch.types import IntLikeType
@@ -471,7 +476,12 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_handle = _get_device_handle(device_type)
     if device_handle is None:
         raise AssertionError
-    device_idx = device_mesh.get_rank() % device_handle.device_count()
+    rank = (
+        _get_rank()
+        if enabled_local_tensor_mode() is None and dist_config.compile_on_one_rank
+        else device_mesh.get_rank()
+    )
+    device_idx = rank % device_handle.device_count()
 
     @maybe_run_for_local_tensor
     def get_device(device_idx):
