@@ -2361,7 +2361,9 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
-    @requires_cuda
+
+@requires_cuda
+class TestStreamsCUDA(torch._dynamo.test_case.TestCase):
     def test_stream_pointer_extraction_edge_cases(self):
         def get_ptrs(stream_a, stream_b, default_stream):
             return (
