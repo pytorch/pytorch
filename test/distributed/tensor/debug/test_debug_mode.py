@@ -1136,6 +1136,140 @@ class TestDebugModeUtils(TestCase):
         out = torch.utils._debug_mode.hash_tensor_fn(t, use_scalar=True)
         self.assertTrue(isinstance(out, int))
 
+    def test_check_hash_mismatches_fuzzy_inserted_ops(self):
+        def run(x, insert_extra_op):
+            y = x.sin()
+            if insert_extra_op:
+                _ = torch.zeros_like(x)
+            y = y.cos()
+            return y.sum()
+
+        x1 = torch.arange(32, dtype=torch.float32).reshape(4, 8) / 10
+        x2 = x1 + 0.125
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            run(x1, insert_extra_op=True)
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            run(x2, insert_extra_op=False)
+
+        with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs, fuzzy=True)
+
+        missing_calls = [
+            mismatch
+            for mismatch in mismatches
+            if mismatch["mismatch_type"] == "missing_call"
+        ]
+        self.assertEqual(len(missing_calls), 1)
+        self.assertEqual(missing_calls[0]["only_in"], "logs1")
+        self.assertEqual(missing_calls[0]["log1_index"], 1)
+        self.assertIsNone(missing_calls[0]["log2_index"])
+        self.assertEqual(missing_calls[0]["call"], "aten::zeros_like")
+
+        reverse_mismatches = DebugMode.check_hash_mismatches(
+            dm2.logs, dm1.logs, fuzzy=True
+        )
+        reverse_missing_calls = [
+            mismatch
+            for mismatch in reverse_mismatches
+            if mismatch["mismatch_type"] == "missing_call"
+        ]
+        self.assertEqual(len(reverse_missing_calls), 1)
+        self.assertEqual(reverse_missing_calls[0]["only_in"], "logs2")
+        self.assertIsNone(reverse_missing_calls[0]["log1_index"])
+        self.assertEqual(reverse_missing_calls[0]["log2_index"], 1)
+        self.assertEqual(reverse_missing_calls[0]["call"], "aten::zeros_like")
+
+        hash_mismatches = [
+            mismatch for mismatch in mismatches if mismatch["mismatch_type"] == "hash"
+        ]
+        self.assertEqual(
+            [mismatch["call"] for mismatch in hash_mismatches],
+            ["aten::sin", "aten::cos", "aten::sum"],
+        )
+        self.assertEqual(
+            [
+                (mismatch["log1_index"], mismatch["log2_index"])
+                for mismatch in hash_mismatches
+            ],
+            [(0, 0), (2, 1), (3, 2)],
+        )
+        self.assertTrue(all("rel_diff" in mismatch for mismatch in hash_mismatches))
+
+    def test_check_hash_mismatches_fuzzy_operator_misalignment(self):
+        x = torch.arange(32, dtype=torch.float32).reshape(4, 8)
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            x.sin()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            x.cos()
+
+        with self.assertRaisesRegex(ValueError, "Operators don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs, fuzzy=True)
+
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0]["mismatch_type"], "structure")
+        self.assertEqual(mismatches[0]["reason"], "calls_do_not_align")
+        self.assertEqual(mismatches[0]["log1_index"], 0)
+        self.assertEqual(mismatches[0]["log2_index"], 0)
+        self.assertEqual(mismatches[0]["call1"], "aten::sin")
+        self.assertEqual(mismatches[0]["call2"], "aten::cos")
+
+    def test_check_hash_mismatches_fuzzy_annotation_tags(self):
+        x = torch.arange(8, dtype=torch.float32)
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            DebugMode._annotate("before left")
+            x.sin()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            DebugMode._annotate("before right")
+            x.sin()
+
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs, fuzzy=True)
+
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0]["mismatch_type"], "structure")
+        self.assertEqual(mismatches[0]["reason"], "calls_do_not_align")
+        self.assertEqual(mismatches[0]["call_type1"], "annotation")
+        self.assertEqual(mismatches[0]["call_type2"], "annotation")
+        self.assertEqual(mismatches[0]["call1"], "[annotate] before left")
+        self.assertEqual(mismatches[0]["call2"], "[annotate] before right")
+
+    def test_check_hash_mismatches_fuzzy_compare_inputs(self):
+        x1 = torch.arange(8, dtype=torch.float32)
+        x2 = x1 + 0.5
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes(hash_inputs=True):
+            x1.sin().sum()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes(hash_inputs=True):
+            x2.sin().sum()
+
+        mismatches = DebugMode.check_hash_mismatches(
+            dm1.logs, dm2.logs, compare_inputs=True, fuzzy=True
+        )
+
+        input_mismatches = [
+            mismatch for mismatch in mismatches if mismatch["is_input_hash"]
+        ]
+        self.assertEqual(
+            [mismatch["call"] for mismatch in input_mismatches],
+            ["aten::sin", "aten::sum"],
+        )
+        self.assertEqual(
+            [
+                (mismatch["log1_index"], mismatch["log2_index"])
+                for mismatch in input_mismatches
+            ],
+            [(0, 0), (1, 1)],
+        )
+        self.assertTrue(
+            all(mismatch["mismatch_type"] == "hash" for mismatch in input_mismatches)
+        )
+
 
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
     @property
