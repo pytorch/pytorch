@@ -265,7 +265,11 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   // matrixMultiplicationWithPrimaryTensor: directly with K = batch*... and
   // silently produced wrong gradients for K > 32768. See pytorch/pytorch#177116.
   Tensor grad_weight = at::mm(grad_output_2d.t(), input_2d.contiguous());
-  Tensor grad_bias = bias_defined ? grad_output_2d.sum(0) : Tensor();
+  // sum() is promoted to float32 by autocast, but linear_backward's meta types
+  // grad_bias as grad_output's dtype, under torch.compile inductor bakes that dtype
+  // into downstream kernels and would reinterpret a float32 buffer byte-wise. Cast
+  // back so the runtime dtype matches the meta
+  Tensor grad_bias = bias_defined ? grad_output_2d.sum(0).to(grad_output.scalar_type()) : Tensor();
   return {grad_weight, grad_bias};
 }
 
