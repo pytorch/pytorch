@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -407,6 +408,49 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(mod.buf, mod2.buf)
 
             self.assertIsNotNone(self.get_manager())
+
+        def test_input_storage_mutation_skips_cudagraphs(self):
+            class Mod(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = nn.Parameter(torch.randn(4, 4, device="cuda"))
+                    self.register_buffer(
+                        "mask",
+                        torch.tril(torch.ones(4, 4, device="cuda")),
+                    )
+
+                def forward(self, x):
+                    with torch.no_grad():
+                        self.weight.data *= self.mask
+                    return x @ self.weight
+
+            torch.manual_seed(0)
+            model = Mod().eval()
+            x = torch.randn(4, 4, device="cuda")
+
+            with torch.no_grad():
+                expected = model(x)
+
+            counters.clear()
+            compiled_model = torch.compile(
+                model,
+                mode="reduce-overhead",
+                dynamic=True,
+            )
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx(), torch.no_grad():
+                actual = compiled_model(x)
+                actual_again = compiled_model(x)
+
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual_again)
+            FileCheck().check("skipping cudagraphs due to input storage mutation").run(
+                log_stream.getvalue()
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertIsNone(self.get_manager())
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -1253,6 +1297,12 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
         def test_topk_skips_cudagraph_on_hip(self):
             # rocm workaround: topk kernels fault under cudagraph trees
             # on the 2nd replay of a recorded graph.
@@ -2337,6 +2387,29 @@ if HAS_CUDA_AND_TRITON:
                 out2 + out2
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+
+        def test_grad_accumulation_dealloc_error_message(self):
+            model = torch.nn.Linear(10, 1, device="cuda")
+            compiled_model = torch.compile(
+                model, fullgraph=True, mode="reduce-overhead"
+            )
+
+            def run_iter():
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(
+                    (10,), dtype=torch.float32, requires_grad=True, device="cuda"
+                )
+                loss = compiled_model(x).clone().sum().clone()
+                loss.backward()
+
+            run_iter()
+
+            with self.assertRaises(RuntimeError) as exc:
+                run_iter()
+
+            FileCheck().check("gradient tensor output of CUDAGraphs").check(
+                "gradient accumulation"
+            ).check(".grad tensor").run(str(exc.exception))
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
@@ -4467,11 +4540,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -4481,7 +4554,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -4490,22 +4563,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
@@ -4980,6 +5056,10 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_SLOW,
+            "https://github.com/pytorch/pytorch/issues/176144",
+        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
