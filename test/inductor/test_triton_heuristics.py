@@ -26,6 +26,7 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu_with_enough_memory,
 )
 
+
 try:
     import triton  # @manual
     import triton.language as tl  # @manual
