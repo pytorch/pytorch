@@ -1183,7 +1183,10 @@ def slice_forward(
     end: int | None = None,
     step: int = 1,
 ) -> FakeTensor:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
 
     shape_env = fake_mode.shape_env
     ndim = self.dim()
@@ -1207,16 +1210,23 @@ def slice_forward(
     # size
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
-        if statically_known_true(end_index >= start_index):
-            new_size = (end_index - start_index + step - 1) // step
-        elif statically_known_true(start_index >= end_index):
-            new_size = 0
+        if isinstance(start, torch.SymInt) or isinstance(end, torch.SymInt):
+            if guard_or_false(end_index >= start_index):
+                new_size = (end_index - start_index + step - 1) // step
+            elif guard_or_false(start_index >= end_index):
+                new_size = 0
         else:
-            # Both indices are resolved but we can't statically determine their
-            # ordering (e.g., when they involve Min/Max). Compute the size via
-            # max(end - start, 0) to avoid creating an unbacked symint.
-            diff = torch.sym_max(end_index - start_index, 0)
-            new_size = (diff + step - 1) // step
+            if statically_known_true(end_index >= start_index):
+                new_size = (end_index - start_index + step - 1) // step
+            elif statically_known_true(start_index >= end_index):
+                new_size = 0
+            else:
+                # Both indices are resolved but we can't statically determine
+                # their ordering (e.g., when they involve Min/Max). Compute the
+                # size via max(end - start, 0) to avoid creating an unbacked
+                # symint.
+                diff = torch.sym_max(end_index - start_index, 0)
+                new_size = (diff + step - 1) // step
 
     # create unbacked if case unknown
     if new_size is None:
