@@ -4,6 +4,7 @@ import json
 import os
 import pprint
 import sys
+import unittest
 from unittest import mock
 from unittest.mock import patch
 
@@ -14,6 +15,13 @@ import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -193,11 +201,11 @@ class TestUtils(TestCase):
         self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
 
         # === graph break occurs during inlining ===
+        @torch._dynamo.disable_nested_graph_breaks
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            with torch._dynamo.disable_nested_graph_breaks():
-                y = break_it(z)
+            y = break_it(z)
             return y * 2
 
         x = torch.randn(3)
@@ -453,6 +461,10 @@ class TestDynamoTimed(TestCase):
             "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148093",
+    )
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
