@@ -71,9 +71,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
+    IS_LINUX,
     MI200_ARCH,
     skipIfRocm,
     skipIfRocmArch,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
@@ -2560,6 +2563,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out_only, out_legacy, atol=1e-6, rtol=1e-6)
         torch.testing.assert_close(aux_lse.lse, lse_legacy, atol=1e-6, rtol=1e-6)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/162464",
+    )
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -7297,13 +7304,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         tensors_with_keys, context_with_keys = block_mask._flatten_with_keys()
 
-        self.assertEqual(
-            len(tensors_with_keys),
-            sum(
-                getattr(block_mask, attr) is not None
-                for attr in BlockMask._TENSOR_ATTRS
-            ),
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
         )
+        self.assertEqual(len(tensors_with_keys), n_regular)
         self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS) + 1)
 
         from torch.utils._pytree import GetAttrKey
@@ -7331,18 +7335,19 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         tensors, context = block_mask._flatten()
         reconstructed_mask = BlockMask._unflatten(tensors, context)
 
+        # Verify the number of tensors and context values matches the present attributes
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
         self.assertEqual(
             len(tensors),
-            sum(
-                getattr(block_mask, attr) is not None
-                for attr in BlockMask._TENSOR_ATTRS
-            ),
-            "Number of tensors should match non-None _TENSOR_ATTRS values",
+            n_regular,
+            "Number of tensors should match present tensor attributes",
         )
         self.assertEqual(
             len(context),
             len(BlockMask._CONTEXT_ATTRS) + 1,
-            "Context should include tensor None mask and _CONTEXT_ATTRS values",
+            "Context values should include optional_tensor_attrs",
         )
 
         # Verify all attributes from the lists exist and are equal after reconstruction

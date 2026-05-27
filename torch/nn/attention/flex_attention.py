@@ -1454,26 +1454,33 @@ class BlockMask:
 
     def _flatten(
         self,
-    ) -> tuple[tuple[BaseArgumentTypes, ...], tuple[Any, ...]]:
+    ) -> tuple[tuple[BaseArgumentTypes | None, ...], tuple[Any, ...]]:
         """Flatten BlockMask into a list of tensors and context.
 
         Closure tensors from mask_mod are extracted into the leaves via
         _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
-        tensor_values = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        optional_tensor_attrs = tuple(
+            attr for attr in self._TENSOR_ATTRS if getattr(self, attr) is None
+        )
+        tensors = tuple(
+            getattr(self, attr)
+            for attr in self._TENSOR_ATTRS
+            if attr not in optional_tensor_attrs
+        )
         closure_leaves, callable_spec, stripped = _extract_callable_pytree(
             self.mask_mod
         )
-        all_leaves = tuple(t for t in tensor_values if t is not None) + closure_leaves
+        all_leaves = tensors + closure_leaves
         context = (
-            tuple(t is None for t in tensor_values),
             *(
                 self._wrap_context_value(attr, getattr(self, attr))
                 if attr != "mask_mod"
                 else _MaskModWrapper(stripped, callable_spec)
                 for attr in self._CONTEXT_ATTRS
             ),
+            optional_tensor_attrs,
         )
         return all_leaves, context
 
@@ -1484,24 +1491,42 @@ class BlockMask:
         context: tuple[Any, ...],
     ) -> Self:
         """Unflatten leaves and context back into a BlockMask."""
-        tensor_none_mask = context[0]
-        n_regular = sum(not is_none for is_none in tensor_none_mask)
+        optional_tensor_attrs = context[-1]
+        tensor_attrs = tuple(
+            attr for attr in cls._TENSOR_ATTRS if attr not in optional_tensor_attrs
+        )
+        n_regular = len(tensor_attrs)
         regular_leaves = leaves[:n_regular]
         closure_leaves = leaves[n_regular:]
-        kwargs = {}
-        for attr, val in zip(cls._CONTEXT_ATTRS, context[1:], strict=True):
+        tensor_values = dict.fromkeys(optional_tensor_attrs)
+        tensor_values.update(zip(tensor_attrs, regular_leaves))
+        context_values = {}
+        for attr, val in zip(cls._CONTEXT_ATTRS, context[:-1]):
             if attr == "mask_mod" and isinstance(val, _MaskModWrapper):
-                kwargs[attr] = _reconstruct_closure_fn(
+                context_values[attr] = _reconstruct_closure_fn(
                     val.fn, closure_leaves, val.callable_spec
                 )
             else:
-                kwargs[attr] = cls._unwrap_context_value(attr, val)
-        leaf_iter = iter(regular_leaves)
-        kwargs.update(
-            (attr, None if is_none else next(leaf_iter))
-            for attr, is_none in zip(cls._TENSOR_ATTRS, tensor_none_mask, strict=True)
+                context_values[attr] = cls._unwrap_context_value(attr, val)
+        return cls(
+            seq_lengths=cast(tuple[int, int], context_values["seq_lengths"]),
+            kv_num_blocks=cast(Tensor, tensor_values["kv_num_blocks"]),
+            kv_indices=cast(Tensor, tensor_values["kv_indices"]),
+            full_kv_num_blocks=cast(Tensor | None, tensor_values["full_kv_num_blocks"]),
+            full_kv_indices=cast(Tensor | None, tensor_values["full_kv_indices"]),
+            q_num_blocks=cast(Tensor | None, tensor_values["q_num_blocks"]),
+            q_indices=cast(Tensor | None, tensor_values["q_indices"]),
+            full_q_num_blocks=cast(Tensor | None, tensor_values["full_q_num_blocks"]),
+            full_q_indices=cast(Tensor | None, tensor_values["full_q_indices"]),
+            BLOCK_SIZE=cast(tuple[int, int], context_values["BLOCK_SIZE"]),
+            mask_mod=cast(_mask_mod_signature, context_values["mask_mod"]),
+            dq_write_order=cast(Tensor | None, tensor_values["dq_write_order"]),
+            dq_write_order_full=cast(
+                Tensor | None, tensor_values["dq_write_order_full"]
+            ),
+            dq_kv_order=cast(Tensor | None, tensor_values["dq_kv_order"]),
+            dq_kv_order_spt=cast(bool | None, context_values["dq_kv_order_spt"]),
         )
-        return cls(**kwargs)
 
     def _flatten_with_keys(
         self,
@@ -1512,11 +1537,13 @@ class BlockMask:
         _extract_callable_pytree so they are visible to the tracing
         infrastructure (instead of being hidden in the pytree context).
         """
-        tensor_values = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        optional_tensor_attrs = tuple(
+            attr for attr in self._TENSOR_ATTRS if getattr(self, attr) is None
+        )
         tensors = tuple(
-            (GetAttrKey(attr), value)
-            for attr, value in zip(self._TENSOR_ATTRS, tensor_values, strict=True)
-            if value is not None
+            (GetAttrKey(attr), getattr(self, attr))
+            for attr in self._TENSOR_ATTRS
+            if attr not in optional_tensor_attrs
         )
         closure_leaves, callable_spec, stripped = _extract_callable_pytree(
             self.mask_mod
@@ -1526,13 +1553,13 @@ class BlockMask:
         )
         all_leaves = tensors + closure_with_keys
         context = (
-            tuple(t is None for t in tensor_values),
             *(
                 self._wrap_context_value(attr, getattr(self, attr))
                 if attr != "mask_mod"
                 else _MaskModWrapper(stripped, callable_spec)
                 for attr in self._CONTEXT_ATTRS
             ),
+            optional_tensor_attrs,
         )
         return all_leaves, context
 
