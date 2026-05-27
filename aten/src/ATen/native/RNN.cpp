@@ -608,11 +608,13 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 5);
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
     } else {
       TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 4);
       for (size_t i = 0; i < params.size(); i += 4) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
       }
@@ -620,11 +622,13 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   } else {
     if (has_projections) {
       TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 3);
       for (size_t i = 0; i < params.size(); i += 3) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
       }
     } else {
       TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 2);
       for (size_t i = 0; i < params.size(); i += 2) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
       }
