@@ -4316,9 +4316,12 @@ def _wire_spec_slot(
             shape_env.var_to_hint_override[compile_expr] = spec.optimization_hint
         if spec_sym not in shape_env._spec_symbol_to_compile_symbol:
             shape_env._spec_symbol_to_compile_symbol[spec_sym] = compile_expr
-            # Bounds apply on the canonical (first) symbol. Subsequent
-            # occurrences are tied to this one via the eq-check below, so
-            # the shape env propagates bounds via equivalence.
+            # Bounds apply ONLY on the canonical (first) symbol. Subsequent
+            # occurrences are tied to this one via the Eq runtime assert
+            # below; ShapeEnv._set_replacement / _refine_ranges intersect
+            # var_to_range across both sides of an integer Eq, so the
+            # bounds propagate to every other occurrence's symbol
+            # automatically.
             if spec.min is not None:
                 torch._check(size_sym >= spec.min)
             if spec.max is not None:
@@ -4395,11 +4398,12 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
 
     subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
 
-    # Spec symbol names are "name#uid"; strip the "#uid" suffix for user-facing
-    # error messages so callers see the original IntVar name ("a") rather than
-    # the disambiguated internal form ("a#0").
-    def _pretty(s: sympy.Symbol) -> str:
-        return str(s).split("#", 1)[0]
+    # Strip "#N" uid suffixes for user-facing error messages so callers see
+    # the original IntVar name ("a") rather than the disambiguated internal
+    # form ("a#0"). Works on both single sympy.Symbols and stringified
+    # expressions (e.g. "a#0 > b#1" -> "a > b").
+    def _pretty(s: object) -> str:
+        return re.sub(r"#\d+", "", str(s))
 
     # Build a "expr (unbound: [...])" line per pending check that still
     # has unbound deps.
@@ -4414,9 +4418,8 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
                 f"have removed it before finalize."
             )
         all_unbound |= missing
-        pretty_expr = re.sub(r"#\d+", "", str(bool_expr))
         missing_names = sorted(_pretty(s) for s in missing)
-        lines.append(f"  - {pretty_expr}  (unbound: {missing_names})")
+        lines.append(f"  - {_pretty(bool_expr)}  (unbound: {missing_names})")
     raise ValueError(
         f"shapes_spec: {len(lines)} pending check(s) reference unbound "
         f"IntVar(s) {sorted(_pretty(s) for s in all_unbound)}. Every IntVar "
