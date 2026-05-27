@@ -168,13 +168,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 480
     outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image || steps.set-rhel-image.outputs.docker-image }}
       test-matrix: ${{ steps.strip-runner-prefix.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -182,6 +182,7 @@ jobs:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       - name: Setup Linux
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
@@ -191,7 +192,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to ECR
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         uses: ./.github/actions/ecr-login
         with:
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -210,14 +211,21 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
           ci-docker-hash: ${{ inputs.ci-docker-hash }}
 
+      - name: Set RHEL docker image
+        id: set-rhel-image
+        if: contains(inputs.build-environment, 'rhel')
+        shell: bash
+        run: |
+          echo "docker-image=${{ inputs.docker-image-name }}" >> "$GITHUB_OUTPUT"
+
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel') && steps.use-old-whl.outputs.reuse != 'true'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -227,7 +235,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel') && steps.use-old-whl.outputs.reuse != 'true'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -297,7 +305,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || steps.set-rhel-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
@@ -305,6 +313,28 @@ jobs:
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
           RUNNER: ${{ inputs.runner }}
         run: |
+          # Import RHEL Docker image from persistent storage if needed
+          if [[ ${BUILD_ENVIRONMENT} == *"rhel"* ]]; then
+            IMAGE_TAR_PATH="/mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar"
+            READY_MARKER="${IMAGE_TAR_PATH}.ready"
+            docker rmi localhost/ci-image:pytorch-rhel-9.6-py3.12-gcc11 2>/dev/null || true
+            docker rmi ci-image:pytorch-rhel-9.6-py3.12-gcc11 2>/dev/null || true
+            for i in {1..12}; do
+              if [ -f "${READY_MARKER}" ]; then break; fi
+              echo "Waiting for Docker image... (attempt $i/12)" && sleep 5
+            done
+            if [ -f "${IMAGE_TAR_PATH}" ]; then
+              docker load -i "${IMAGE_TAR_PATH}"
+              docker images | grep ci-image
+            fi
+            mkdir -p ~/.config/containers
+            echo 'short-name-mode = "permissive"' > ~/.config/containers/registries.conf
+
+            # Create env file since setup-linux is skipped for RHEL
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          fi
+
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -354,13 +384,20 @@ jobs:
             RISCV_DOCKER_ARGS=
           fi
 
+          # Set MAX_JOBS based on environment
+          if [[ ${BUILD_ENVIRONMENT} == *"rhel"* ]]; then
+            MAX_JOBS_VALUE=16
+          else
+            MAX_JOBS_VALUE="$(nproc --ignore=2)"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
           container_name=$(docker run \
             ${RISCV_DOCKER_ARGS} \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e MAX_JOBS="${MAX_JOBS_VALUE}" \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
@@ -398,7 +435,11 @@ jobs:
                 (sleep 300 && python3 -m pip install -r requirements.txt)"
           fi
 
-          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
+          if [[ ${BUILD_ENVIRONMENT} == *"rhel"* ]]; then
+            docker exec -t "${container_name}" bash -l -c '. /opt/conda/etc/profile.d/conda.sh && conda activate pytorch_build && .ci/pytorch/build.sh'
+          else
+            docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
+          fi
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
@@ -409,7 +450,7 @@ jobs:
         uses: ./.github/actions/build-external-packages
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image || steps.set-rhel-image.outputs.docker-image }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
@@ -439,7 +480,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -456,9 +497,18 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
+      - name: Store PyTorch Build Artifacts for RHEL
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && contains(inputs.build-environment, 'rhel')
+        with:
+          name: ${{ inputs.build-environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
       - name: Copy logs
         shell: bash
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')}}
         continue-on-error: true
         run: |
           rm -f ./usage_logs
@@ -466,8 +516,8 @@ jobs:
           cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
 
       - name: Upload raw usage log to s3
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')}}
+        uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
@@ -476,14 +526,14 @@ jobs:
           path: usage_logs/usage_log_build_*.txt
 
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         uses: ./.github/actions/upload-sccache-stats
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel') }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -496,7 +546,7 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
 
       - name: Cleanup docker
         if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'

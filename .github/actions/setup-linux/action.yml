@@ -112,6 +112,8 @@ runs:
             echo "ARC Runner, no info on ec2 metadata"
           elif [[ $runner_name_str == *"gcp"* || $runner_name_str == *"google"* ]]; then
             echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+          elif [[ $runner_name_str == *"git-runner"* ]] || [[ $runner_name_str == *"pytorch-team-ci"* ]]; then
+            echo "Self-hosted runner, no info on ec2 metadata"
           else
             curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           fi
@@ -127,16 +129,31 @@ runs:
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
-    - name: Start docker if docker daemon is not running
+    - name: Start docker/podman service if not running
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
-        if ! docker version >/dev/null 2>/dev/null; then
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker daemon..." && sudo systemctl start docker;
-          fi
+        # First check if docker command is already available (covers rootless podman)
+        if command -v docker &> /dev/null && docker ps &> /dev/null; then
+            echo "Docker/Podman is already running and accessible";
+        # Check if podman service exists (RHEL/Fedora systems with systemd podman)
+        elif systemctl list-unit-files | grep -q podman.service; then
+            if systemctl is-active --quiet podman; then
+                echo "Podman service is running...";
+            else
+                echo "Starting podman service..." && systemctl --user start podman;
+            fi
+        # Otherwise check for docker service
+        elif systemctl is-active --quiet docker; then
+            echo "Docker daemon is running...";
+        else
+            echo "Starting docker daemon..." && sudo systemctl start docker;
+        fi
+
+        # Configure podman short-name mode to permissive if podman is available
+        if command -v podman &> /dev/null; then
+            mkdir -p ~/.config/containers
+            echo 'short-name-mode = "permissive"' > ~/.config/containers/registries.conf
         fi
 
     - name: Install uv (EC2)
