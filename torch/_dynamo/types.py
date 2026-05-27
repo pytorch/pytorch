@@ -13,7 +13,7 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
@@ -105,12 +105,7 @@ class DynamoCallbackFn(Protocol):
 DynamoCallback = DynamoCallbackFn | None | bool
 
 
-class CompilerConfig(Protocol):
-    def __getitem__(self, key: str) -> Any: ...
-
-    def __iter__(self) -> Iterator[str]: ...
-
-    def __len__(self) -> int: ...
+CompilerConfig = Mapping[str, Any]
 
 
 @runtime_checkable

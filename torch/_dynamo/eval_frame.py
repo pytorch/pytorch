@@ -72,7 +72,6 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import (
     CompilerConfig,
-    CompilerConfigProvider,
     ConvertFrameReturn,
     FrameAction,
     FrameExecStrategy,
@@ -1801,11 +1800,7 @@ def _optimize(
         error_on_graph_break=error_on_graph_break
         and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
-        compiler_config=(
-            backend.get_compiler_config()
-            if isinstance(backend, CompilerConfigProvider)
-            else None
-        ),
+        compiler_config=backend.get_compiler_config(),
         rebuild_ctx=rebuild_ctx,
         package=package,
         isolate_recompiles=isolate_recompiles,
