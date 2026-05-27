@@ -122,7 +122,7 @@ def fix_rpath(libtorch_lib: Path, platform: str) -> None:
         )
 
     for item in libtorch_lib.iterdir():
-        if item.is_file() and ".so" in item.name:
+        if item.is_file() and (item.name.endswith(".so") or ".so." in item.name):
             result = subprocess.run(
                 [patchelf, "--set-rpath", "$ORIGIN", "--force-rpath", str(item)],
                 capture_output=True,
