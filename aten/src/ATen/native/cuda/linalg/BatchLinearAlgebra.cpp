@@ -866,7 +866,7 @@ enum class SolverBackend : char {
 #ifndef USE_ROCM
 namespace {
 
-  // Based on benchmarks across H100, A100, L40, RTX5090 with about 3200 points:
+  // Based on benchmarks across H100, A100, L40, RTX5090 with about 3800 points:
   // - with batch dims in the range 2^i, with i in 0-8;
   // - square matrices of dim 2^i and (2^{i+1} + 2^i)/2, with 2^k <= 8192;
   // - square matrices of dim 2^i-/+1;
@@ -897,9 +897,7 @@ namespace {
   // ratios are less regular. The lower multiplier (5200 vs 16600) reflects
   // that cuSOLVER overtakes cuBLAS at smaller N for complex128.
   //
-  // FIXME: test on Blackwell with float32 via half emulation enabled (CUDA 13.2+).
-  //
-  // Authored with Claude.
+  // FIXME: test on Blackwell with FP emulation enabled (CUDA 13.2+).
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype) {
     // cuBLAS does not support rectangular inputs.
     if (m != n) {
