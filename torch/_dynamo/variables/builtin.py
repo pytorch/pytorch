@@ -257,6 +257,11 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
+# Sentinel for `inspect.getattr_static` lookups that must distinguish
+# "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
+# opt-out).
+_MISSING_SENTINEL = object()
+
 
 def populate_builtin_to_tensor_fn_map() -> None:
     global BUILTIN_TO_TENSOR_FN_MAP
@@ -2568,7 +2573,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslator", obj: VariableTracker
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         # Mirrors CPython's builtin_reversed_impl (Python/enumobject.c)
         # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/enumobject.c#L353-L395
         # 1. Look up __reversed__ via _PyObject_LookupSpecial. If found, call it.
@@ -2581,11 +2586,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         # getattr_static skips descriptors / metaclass. CPython treats
         # `__reversed__ = None` on the type as an explicit opt-out, raising
         # TypeError even if the sequence protocol would otherwise work.
-        _missing = object()
-        reversed_attr = inspect.getattr_static(obj_type, "__reversed__", _missing)
+        reversed_attr = inspect.getattr_static(
+            obj_type, "__reversed__", _MISSING_SENTINEL
+        )
         if reversed_attr is None:
             raise_type_error(tx, f"'{obj_type.__name__}' object is not reversible")
-        if reversed_attr is not _missing:
+        if reversed_attr is not _MISSING_SENTINEL:
             return obj.call_method(tx, "__reversed__", [], {})
 
         if not pysequence_check(obj_type):
