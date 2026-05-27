@@ -367,12 +367,14 @@ class BaseListVariable(VariableTracker):
                     return generic_richcompare(tx, a, b, op)
             elif eq_result.is_symnode_like():
                 if cmp_op not in (operator.eq, operator.ne):
-                    unimplemented(
-                        gb_type="list_richcompare_ordering_symbolic",
-                        context="lexicographic ordering with symbolic element comparison",
-                        explanation="Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
+                    # Ordering requires branching on element equality, which
+                    # can't be expressed as a single symbolic expression.
+                    # Specialize: install a guard on the equality result and
+                    # proceed with the concrete value.
+                    eq_bool = guard_if_dyn(eq_result)
+                    if not eq_bool:
+                        return generic_richcompare(tx, a, b, op)
+                    continue
                 if sym_eq_acc is None:
                     sym_eq_acc = eq_result
                 else:
