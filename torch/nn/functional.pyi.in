@@ -18,6 +18,8 @@ from .common_types import (
     _size_any_t,
 )
 
+from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
+
 __all__ = [
     "GRID_SAMPLE_INTERPOLATION_MODES",
     "GRID_SAMPLE_PADDING_MODES",
@@ -465,6 +467,7 @@ def linear_cross_entropy(
     reduction: str = ...,
     ignore_index: int | None = ...,
     label_smoothing: float = ...,
+    options: LinearCrossEntropyOptions | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["linear_cross_entropy"]
