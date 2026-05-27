@@ -114,14 +114,8 @@ class Vectorized<float> {
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0.0;
-    }
+    // Zero tail past `count`.
+    __at_align__ float tmp_values[size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float*>(ptr),
