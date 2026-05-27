@@ -8562,11 +8562,14 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.fx_wrapper:
             # TODO fix
             pass
         elif V.graph.cpp_wrapper:
+            scalar = V.graph.wrapper_code.replace_symbolic_scalar_graph_inputs(
+                self.scalar
+            )
+            symbol = next(iter(get_free_symbols(scalar, unbacked_only=False)))
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
