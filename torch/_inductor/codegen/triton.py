@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Min,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -3464,7 +3465,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         sizevars.lookup_precomputed_size(slice_numels[0]),
                     )
                 ] + [
-                    sympy.Min(
+                    Min(
                         CeilDiv(
                             linear_block_size, sizevars.lookup_precomputed_size(numel)
                         ),

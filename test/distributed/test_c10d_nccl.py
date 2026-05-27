@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -67,12 +68,14 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     IS_SANDCASTLE,
     parametrize,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -548,6 +551,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176975")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177007")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166067")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177006")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164426")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
@@ -4620,6 +4629,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_into_tensor(output, t)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(
