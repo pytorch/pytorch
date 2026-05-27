@@ -3435,7 +3435,15 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
+    if isinstance(x, FakeTensor):
+        return False
+    if not isinstance(x, Tensor):
+        return False
+
     x_type = type(x)
+    if x_type is Tensor:
+        return False
+
     # Use the concrete type instead of isinstance because wrapper subclasses
     # marked as Parameters (e.g. Parameter(TwoTensor(...))) still need subclass
     # dispatch. Only metadata-only Parameter subclasses that inherit Tensor's
@@ -3444,12 +3452,10 @@ def _check_for_subclass_arg(x: object) -> bool:
         issubclass(x_type, torch.nn.Parameter)
         and x_type.__torch_dispatch__ is Tensor.__torch_dispatch__
     )
-    return (
-        not isinstance(x, FakeTensor)
-        and isinstance(x, Tensor)
-        and x_type is not Tensor
-        and not is_metadata_only_parameter_subclass
-    )
+    if is_metadata_only_parameter_subclass:
+        return False
+
+    return True
 
 
 _DISPATCH_META_HANDLERS = {
