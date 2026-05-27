@@ -1043,9 +1043,13 @@ class CachingAutotuner(KernelInterface):
 
         return options
 
-    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
+    def _precompile_config(
+        self, cfg: Config, *, cc_override: str | int | None = None
+    ) -> CompileResult[_KernelType]:
         """Ahead of time compile a given autotuner config."""
         compile_meta = self._create_compile_meta(cfg)
+        if cc_override is not None:
+            compile_meta["cc"] = cc_override
 
         if self.device_props.type == "cpu":
             triton_helpers.set_driver_to_cpu()
@@ -1646,23 +1650,58 @@ class CachingAutotuner(KernelInterface):
         return launcher
 
     def save_gpu_kernel(self, stream, launcher):
+        """Save the selected GPU kernel binary and assembly for AOTI packaging."""
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
+        binary = launcher.bin
+
+        from torch._inductor import config
+
+        target_cc = None
+        if (
+            self.device_props.type == "cuda"
+            and torch.version.hip is None
+            and config.aot_inductor.emit_multi_arch_kernel
+            and config.cuda.arch is not None
+        ):
+            from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
+
+            cuda_arch = cuda_compile_utils._aoti_cuda_target_arch()
+            target_cc = cuda_compile_utils._cuda_arch_number(cuda_arch)
+            device_cc = cuda_compile_utils._cuda_arch_number(str(self.device_props.cc))
+            if target_cc == device_cc:
+                target_cc = None
+        else:
+            cuda_arch = None
+
+        if target_cc is not None:
+            # Autotuning must run kernels compiled for the actual GPU, but AOTI
+            # needs to package PTX/cubin for the requested deployment target.
+            # Recompile the selected config for the target arch without loading
+            # or benchmarking that binary on the current device.
+            target_result = self._precompile_config(
+                launcher.config, cc_override=target_cc
+            )
+            if isinstance(target_result, TritonCompileResult):
+                binary = target_result.kernel
+            else:
+                raise RuntimeError(
+                    "AOTI CUDA target-arch packaging requires a Triton binary"
+                )
+
         params = {
             "mangled_name": (
-                launcher.bin.metadata.name
-                if hasattr(launcher.bin.metadata, "name")
-                else launcher.bin.metadata["name"]
+                binary.metadata.name
+                if hasattr(binary.metadata, "name")
+                else binary.metadata["name"]
             ),
             "num_warps": (
-                launcher.bin.num_warps
-                if hasattr(launcher.bin, "num_warps")
-                else launcher.bin.metadata.num_warps
+                binary.num_warps
+                if hasattr(binary, "num_warps")
+                else binary.metadata.num_warps
             ),
             "shared_mem": (
-                launcher.bin.shared
-                if hasattr(launcher.bin, "shared")
-                else launcher.bin.metadata.shared
+                binary.shared if hasattr(binary, "shared") else binary.metadata.shared
             ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
@@ -1673,15 +1712,15 @@ class CachingAutotuner(KernelInterface):
             "call_args": launcher.call_args,
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
+            "cuda_arch": cuda_arch,
         }
 
-        from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": XPU_KERNEL_FORMAT}.get(
             self.device_props.type, "cubin"
         )
-        binary = launcher.bin.asm[bin_type]
+        kernel_binary = binary.asm[bin_type]
 
         # ROCm multi-arch: capture LLVM IR
         if torch.version.hip and config.aot_inductor.emit_multi_arch_kernel:
@@ -1706,9 +1745,9 @@ class CachingAutotuner(KernelInterface):
             asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
                 self.device_props.type
             )
-            asm = launcher.bin.asm.get(asm_type, None)
+            asm = binary.asm.get(asm_type, None)
 
-        CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
+        CudaKernelParamCache.set(key, params, kernel_binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
     def save_cpu_kernel(self, launcher):

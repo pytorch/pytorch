@@ -2295,9 +2295,11 @@ class aot_inductor:
     # Embed generated kernel binary files into model.so
     embed_kernel_binary: bool | None = None
 
-    # Generate kernel files that support multiple archs
-    # For CUDA, this means generating fatbin files for kernels, and the fatbin files
-    # contains PTX and SASS for the current architecture.
+    # Generate kernel files that support multiple archs.
+    # For CUDA, this means generating fatbin files for kernels. The fatbin files
+    # contain PTX for the compile target architecture (config.cuda.arch, or the
+    # current GPU when unset), plus SASS for the compile target and compatible
+    # TORCH_CUDA_ARCH_LIST architectures.
     # For XPU, this means generating SPIR-V files for kernels, and the SPIR-V files
     # will be compiled to target different XPU architectures at runtime.
     emit_multi_arch_kernel: bool | None = None
