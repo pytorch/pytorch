@@ -20,6 +20,7 @@ from torch._dynamo.testing import (
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import dispatch_functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
 from torch.testing import FileCheck
@@ -90,6 +91,52 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         aot_fn = torch.compile(fn, backend="aot_eager")
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
+
+    def test_prims_broadcast_in_dim_functionalize(self):
+        def fn(x):
+            return torch.ops.prims.broadcast_in_dim.default(
+                x, [x.shape[0], x.shape[1], 1], [0, 1]
+            )
+
+        x = torch.randn(3, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(
+            actual.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+
+    def test_prims_view_functionalize_preserves_meta_validation(self):
+        def fn(x):
+            return torch.ops.prims.squeeze.default(x, [1])
+
+        x = torch.randn(2, 3)
+        msg = "Cannot squeeze dimension 1 with size 3"
+
+        with self.assertRaisesRegex(AssertionError, msg):
+            fn(x)
+        with self.assertRaisesRegex(AssertionError, msg):
+            dispatch_functionalize(fn)(x)
+
+    def test_prims_as_strided_functionalize_not_silent_wrong_result(self):
+        def fn(x):
+            return torch.ops.prims.as_strided.default(x, [2, 2], [3, 1], 1)
+
+        x = torch.randn(8)
+        expected = fn(x)
+
+        # prims.as_strided uses mutable alias annotations, so it is deliberately
+        # excluded from the generic non-mutating view Functionalize rule.
+        try:
+            actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        except torch._dynamo.exc.BackendCompilerFailed as e:
+            self.assertIn("alias annotations: prims::as_strided", str(e))
+            return
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
 
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):

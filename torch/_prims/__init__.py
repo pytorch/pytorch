@@ -38,6 +38,7 @@ prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
+prim_functionalize_impl = torch.library.Library("prims", "IMPL", "Functionalize")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
@@ -343,6 +344,23 @@ def _make_prim(
         if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
+
+    if return_type == RETURN_TYPE.VIEW and is_functional_schema(
+        cpp_schema, allow_valid_view=True
+    ):
+
+        def _functionalize_impl(*args, **kwargs):
+            meta(*args, **kwargs)
+            return impl_aten(*args, **kwargs)
+
+        # The Functionalize fallback cannot handle custom ops with view alias
+        # annotations. Non-mutating view prims can reuse their ATen view
+        # implementation after prim meta validation; schemas with mutable alias
+        # annotations need a custom rule because alias correction will otherwise
+        # treat them as mutations.
+        # In particular, prims.as_strided has Tensor(a!) -> Tensor(a!) schema
+        # annotations and must not use this generic non-mutating view rule.
+        prim_functionalize_impl.impl(name, _functionalize_impl)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
