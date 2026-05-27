@@ -17,7 +17,7 @@ dictionaries with None values.
 
 import functools
 import operator
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
@@ -27,7 +27,13 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
+from ..utils import (
+    cmp_name_to_op_mapping,
+    istype,
+    raise_args_mismatch,
+    set_methods,
+    unpack_iterable,
+)
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
@@ -573,14 +579,6 @@ class SetVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
-            if self.source and not is_constant_source(self.source):
-                tx.output.guard_on_key_order.add(self.source)
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
         return super().call_method(tx, name, args, kwargs)
 
     def python_type_var(self) -> "BuiltinVariable":
@@ -625,6 +623,32 @@ class SetVariable(VariableTracker):
 
         tx.output.side_effects.mutation(self)
         self.items.update(other.items)  # type: ignore[missing-attribute]
+        return self
+
+    def nb_subtract_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1801-L1812
+        self_, other_ = (other, self) if reverse else (self, other)
+
+        if not pyanyset_check(self_) or not pyanyset_check(other_):
+            return ConstantVariable.create(NotImplemented)
+
+        result = self_.call_method(tx, "copy", [], {})
+        for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
+            result.items.pop(k, None)  # type: ignore[missing-attribute]
+        return result
+
+    def nb_inplace_subtract_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1814-L1828
+        if not pyanyset_check(other):
+            return ConstantVariable.create(NotImplemented)
+
+        tx.output.side_effects.mutation(self)
+        for k in list(other.items.keys()):  # type: ignore[missing-attribute]
+            self.items.pop(k, None)
         return self
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -681,7 +705,7 @@ class OrderedSetClassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "OrderedSetVariable":
         if len(args) > 1 or kwargs:
@@ -696,7 +720,7 @@ class OrderedSetClassVariable(VariableTracker):
             # pyrefly: ignore [implicit-any]
             items = []
         else:
-            items = args[0].force_unpack_var_sequence(tx)
+            items = unpack_iterable(tx, args[0])
         return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
 
 
@@ -741,10 +765,25 @@ class OrderedSetVariable(SetVariable):
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
 
+    def nb_subtract_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, reverse: bool = False
+    ) -> VariableTracker:
+        self_, other_ = (other, self) if reverse else (self, other)
+        return self_.call_method(tx, "difference", [other_], {})
+
+    def nb_inplace_subtract_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        tx.output.side_effects.mutation(self)
+        self.call_method(tx, "difference_update", [other], {})
+        return self
+
 
 class FrozensetVariable(SetVariable):
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
+
+    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def debug_repr(self) -> str:
         if not self.items:

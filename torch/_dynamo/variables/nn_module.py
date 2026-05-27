@@ -26,7 +26,7 @@ import inspect
 import itertools
 import re
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 from typing import Any, TYPE_CHECKING
 
@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 def initialize_lazy_module(
     tx: "InstructionTranslatorBase",
     mod: torch.nn.Module,
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> None:
     """
@@ -496,7 +496,7 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
@@ -712,7 +712,7 @@ class NNModuleVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
@@ -1092,7 +1092,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = self.value
@@ -1178,7 +1178,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Ideally we would have just used VariableTracker.build(tx, fn,
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we dont need this guard.
+                # forward not present in generic dict, we don't need this guard.
                 return variables.UserFunctionVariable(fn, source=source).call_function(
                     tx, [self] + list(args), kwargs
                 )
@@ -1187,7 +1187,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx: "InstructionTranslatorBase",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ["_call_impl", "_wrapped_call_impl"]:

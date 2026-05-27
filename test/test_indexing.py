@@ -2127,6 +2127,42 @@ class TestIndexing(TestCase):
 
     @serialTest()
     @onlyCUDA
+    @toleranceOverride(
+        {
+            # Tolerances follow test_index_add_fast_path: this shape does
+            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
+            # 7-bit mantissa accumulates noise quickly under non-
+            # deterministic atomicAdd ordering. fp32 stays tight.
+            torch.float32: tol(atol=1e-4, rtol=1e-3),
+            torch.bfloat16: tol(atol=20.0, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
+        # Regression for SEV S664741: the original D104669063 was reverted
+        # when this delegation surfaced a latent scatter_add TMA smem
+        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
+        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
+        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
+        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
+        # rounding the stage stride to 128 bytes. This test pins the
+        # prod shape (small D + high M_src) at the index_add layer so a
+        # future refactor of the delegation re-exposing the same shape
+        # class is caught here, not in prod.
+        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
+        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
+        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
+        m, n, D = 13, sm * 64 + 256, 8
+        src = make_tensor((n, D), device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
+    @serialTest()
+    @onlyCUDA
     @dtypes(torch.complex64, torch.complex128, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
