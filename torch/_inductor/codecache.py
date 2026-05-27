@@ -3502,8 +3502,6 @@ class CppCodeCache:
         optimized_code: str | None = None,
         needs_vec_isa: bool | None = None,
         kernel_needs_vec_isa: bool | None = None,
-        output_code_log_name: str | None = None,
-        optimized_code_log_name: str | None = None,
     ) -> Any:
         """Compile and load a C++ library.  Returns a callable that returns the loaded
         library."""
@@ -3567,27 +3565,15 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        if output_code_log_name is not None:
-            output_code_log.debug("%s: \n%s", output_code_log_name, main_code)
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
-        if output_code_log_name is not None:
-            output_code_log.info("%s written to: %s", output_code_log_name, main_path)
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
-            if optimized_code_log_name is not None:
-                output_code_log.debug(
-                    "%s: \n%s", optimized_code_log_name, optimized_code
-                )
             _, optimized_path = write(
                 optimized_code, "optimized.cpp", extra=optimized_cmd_line
             )
-            if optimized_code_log_name is not None:
-                output_code_log.info(
-                    "%s written to: %s", optimized_code_log_name, optimized_path
-                )
         else:
             # Unused, but makes type checkers happy.
             optimized_path = os.devnull
@@ -3847,8 +3833,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
         kernel_code: str | None = None,
-        output_code_log_name: str | None = None,
-        kernel_code_log_name: str | None = None,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -3888,8 +3872,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             optimized_code=kernel_code,
             needs_vec_isa=needs_vec_isa,
             kernel_needs_vec_isa=kernel_needs_vec_isa,
-            output_code_log_name=output_code_log_name,
-            optimized_code_log_name=kernel_code_log_name,
         )
         result = None
 
