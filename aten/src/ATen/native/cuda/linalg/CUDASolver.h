@@ -2,8 +2,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
-// cuSOLVER version >= 11000 includes 64-bit API
+#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000) || defined(USE_ROCM)
+// cuSOLVER version >= 11000 includes 64-bit API; hipsolver on ROCm always provides the 64-bit API
 #define USE_CUSOLVER_64_BIT
 #endif
 

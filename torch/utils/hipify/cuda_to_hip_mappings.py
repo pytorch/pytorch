@@ -3349,6 +3349,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict([
     ("cusolverDnSsytrf", "hipsolverDnSsytrf"),
     ("cusolverDnZsytrf", "hipsolverDnZsytrf"),
     ("cusolverDnCsytrf", "hipsolverDnCsytrf"),
+    ("cusolverDnXsytrs_bufferSize", "hipsolverDnXsytrs_bufferSize"),
+    ("cusolverDnXsytrs", "hipsolverDnXsytrs"),
     ("cusolverDnSgesvdaStridedBatched_bufferSize", "hipsolverDnSgesvdaStridedBatched_bufferSize"),
     ("cusolverDnDgesvdaStridedBatched_bufferSize", "hipsolverDnDgesvdaStridedBatched_bufferSize"),
     ("cusolverDnCgesvdaStridedBatched_bufferSize", "hipsolverDnCgesvdaStridedBatched_bufferSize"),
