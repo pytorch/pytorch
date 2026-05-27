@@ -38,6 +38,11 @@ def wrapped_gemm_bias_mul_with_c(a, b, bias, c):
     return lin_res, mul_res
 
 
+@torch.fx.wrap
+def wrapped_cat(tensors, dim):
+    return torch.cat(tensors, dim=dim)
+
+
 class TestSubgraphRewriter(JitTestCase):
     def test_subgraph_rewriter_preserves_logic(self):
         class M(torch.nn.Module):
@@ -548,6 +553,38 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_replace_back_to_back_list_arg_matches(self):
+        class M(torch.nn.Module):
+            def forward(self, x1, x2, x3):
+                y1 = torch.cat([x1, x2], dim=1)
+                return torch.cat([y1, x3], dim=2)
+
+        def pattern(tensors, dim):
+            return torch.cat(tensors, dim=dim)
+
+        def replacement(tensors, dim):
+            return wrapped_cat(tensors, dim)
+
+        traced = symbolic_trace(M())
+
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        self.assertEqual(len(matches), 2)
+        replacement_nodes = [
+            node
+            for node in traced.graph.nodes
+            if node.op == "call_function" and node.target is wrapped_cat
+        ]
+        self.assertEqual(len(replacement_nodes), 2)
+        self.assertIs(replacement_nodes[1].args[0][0], replacement_nodes[0])
+
+        x1 = torch.randn(1, 30, 16)
+        x2 = torch.randn(1, 10, 16)
+        x3 = torch.randn(1, 40, 16)
+        self.assertEqual(M()(x1, x2, x3), traced.forward(x1, x2, x3))
 
     def test_subgraph_rewriter_with_overlapping_matches(self):
         def f(x):
