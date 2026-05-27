@@ -223,22 +223,31 @@ class DictSpec:
 
         DictSpec({key: IntermediateSpec, ...})
 
+    Keys may be ``str`` or ``int``.
+
     Example::
 
         DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
         DictSpec({"config": DictSpec({"batch": IntVar()})})
+        DictSpec({0: TensorSpec([ShapeVar("h"), None])})
     """
 
-    def __init__(self, entries: dict[str, IntermediateSpec] | None = None) -> None:
-        self._entries: dict[str, IntermediateSpec] = dict(entries) if entries else {}
-
-    def __getitem__(self, key: str) -> IntermediateSpec:
-        return self._entries[key]
+    def __init__(
+        self, entries: dict[str | int, IntermediateSpec] | None = None
+    ) -> None:
+        self._entries: dict[str | int, IntermediateSpec] = (
+            dict(entries) if entries else {}
+        )
+        for k in self._entries:
+            if not isinstance(k, (str, int)):
+                raise TypeError(
+                    f"DictSpec entries must have str or int keys, got {type(k).__name__}: {k!r}"
+                )
 
     def __contains__(self, key: object) -> bool:
         return key in self._entries
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[str | int]:
         return iter(self._entries)
 
     def __len__(self) -> int:
@@ -263,7 +272,7 @@ class DictSpec:
         return {
             "type": "DictSpec",
             "entries": {
-                key: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                str(key): spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
                 for key, spec in self._entries.items()
             },
         }
@@ -347,7 +356,7 @@ class ShapesSpec:
 
     def __init__(
         self,
-        params: ParamsSpec | None = None,
+        params: ParamsSpec | dict[str, Any] | None = None,
         *,
         globals: Any = None,
         assumptions: Any = None,
@@ -356,6 +365,16 @@ class ShapesSpec:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
         if assumptions is not None:
             raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
+        # Auto-wrap a bare dict so callers can write
+        # ``ShapesSpec({"x": ...})`` instead of
+        # ``ShapesSpec(params=ParamsSpec({"x": ...}))``.
+        if isinstance(params, dict):
+            params = ParamsSpec(params)
+        elif params is not None and not isinstance(params, ParamsSpec):
+            raise TypeError(
+                f"shapes_spec must be ParamsSpec, dict, or None, "
+                f"got {type(params).__name__}"
+            )
         self._params = params
 
     def __repr__(self) -> str:
