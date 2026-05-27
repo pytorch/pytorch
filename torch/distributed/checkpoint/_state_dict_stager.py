@@ -174,6 +174,7 @@ class StateDictStager:
             )
             # This makes sure that the finalizer is not called after
             # cuda context is destroyed.
+            # pyrefly: ignore [missing-attribute]
             f.atexit = False
 
         new_storage.copy_(storage, non_blocking=non_blocking)

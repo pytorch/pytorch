@@ -128,9 +128,12 @@ def dp_knapsack_sliding_hirschberg(
     S = 10000
 
     # q_ prefix stands for quantized
+    # pyrefly: ignore [unnecessary-type-conversion]
     q_memory = [int(round(m * S)) for m in memory]
+    # pyrefly: ignore [unnecessary-type-conversion]
     runtimes = [float(v) for v in runtime]
 
+    # pyrefly: ignore [unnecessary-type-conversion]
     q_max_memory = int(round(max_memory * S))
 
     q_memory_length = len(q_memory)

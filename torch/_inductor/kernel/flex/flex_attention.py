@@ -418,6 +418,7 @@ def flex_attention(
             )
 
         # Intel GPU enables TMA by default
+        # pyrefly: ignore [unnecessary-type-conversion]
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
@@ -948,6 +949,7 @@ def flex_attention_backward(*args, **kwargs):
             )
 
         # Intel GPU enables TMA by default
+        # pyrefly: ignore [unnecessary-type-conversion]
         cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):

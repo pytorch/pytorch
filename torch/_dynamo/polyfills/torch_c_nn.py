@@ -11,6 +11,7 @@ from ..decorators import substitute_in_graph
 
 
 @substitute_in_graph(torch._C._nn._parse_to, skip_signature_check=True)
+# pyrefly: ignore [invalid-overload]
 def _parse_to_polyfill(
     *args: Any, **kwargs: Any
 ) -> tuple[torch.device, torch.dtype, bool, torch.memory_format]:

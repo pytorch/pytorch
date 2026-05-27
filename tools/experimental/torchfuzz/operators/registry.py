@@ -188,12 +188,14 @@ def set_operator_weight(op_name: str, weight: float) -> None:
     # Try by registry key
     op = _global_registry.get(op_name)
     if op is not None:
+        # pyrefly: ignore [unnecessary-type-conversion]
         op.weight = float(weight)
         return
 
     # Fallback: try to locate by fully-qualified torch op name
     for candidate in _global_registry.list_operators().values():
         if getattr(candidate, "torch_op_name", None) == op_name:
+            # pyrefly: ignore [unnecessary-type-conversion]
             candidate.weight = float(weight)
             return
 
@@ -212,6 +214,7 @@ def set_operator_weight_by_torch_op(torch_op_name: str, weight: float) -> None:
         raise ValueError("Operator weight must be > 0")
     for candidate in _global_registry.list_operators().values():
         if getattr(candidate, "torch_op_name", None) == torch_op_name:
+            # pyrefly: ignore [unnecessary-type-conversion]
             candidate.weight = float(weight)
             return
     raise KeyError(f"Torch op '{torch_op_name}' not found in registry")

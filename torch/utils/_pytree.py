@@ -1047,7 +1047,7 @@ _private_register_pytree_node(
 
 
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
-# pyrefly: ignore [no-matching-overload]
+# pyrefly: ignore [bad-assignment, no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
     # pyrefly: ignore [bad-argument-type]
     {

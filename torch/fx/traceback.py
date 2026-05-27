@@ -583,6 +583,7 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
                 provenance_tracking_json[node.name] = (
                     [source.to_dict() for source in node.meta["from_node"]]
                     if "from_node" in node.meta
+                    # pyrefly: ignore [implicit-any-empty-container]
                     else []
                 )
         return provenance_tracking_json

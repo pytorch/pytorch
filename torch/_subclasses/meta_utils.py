@@ -883,6 +883,7 @@ class MetaConverter(Generic[_TensorT]):
         )
         self.hit = 0
         self.miss = 0
+        # pyrefly: ignore [implicit-any-attribute]
         self.del_hook = None
         self.arg_cnt = 0
         # Ensures real_storage/real_tensor are populated on the resulting

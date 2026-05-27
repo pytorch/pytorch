@@ -416,6 +416,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 outer_name=WorkspaceArg.unique_name(),
             )
             wrapper.generate_workspace_allocation(ws)
+            # pyrefly: ignore [unnecessary-type-conversion]
             workspace = str(ws.outer_name)
             call_args.append(
                 workspace

@@ -373,6 +373,7 @@ class IndexingOptions:
         return self._has_rindex
 
     def has_tmpmask(self) -> bool:
+        # pyrefly: ignore [unnecessary-type-conversion]
         return any(str(mask).startswith("tmp") for mask in self.mask_vars)
 
     def has_rmask(self) -> bool:
@@ -3620,6 +3621,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(copy_shape, str):
                     return f"{copy_shape}.shape", None
                 else:
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     return "[" + ", ".join(str(c) for c in copy_shape) + "]", copy_shape
             else:
                 return self.dense_size_str(), tuple(self.dense_size_list())
@@ -6107,6 +6109,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 continue
 
             numel_hint = V.graph.sizevars.optimization_hint(numel)
+            # pyrefly: ignore [unnecessary-type-conversion]
             size_hint = next_power_of_2(int(numel_hint))
             size_hints[prefix] = size_hint
 

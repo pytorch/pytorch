@@ -54,6 +54,7 @@ class _BreakpointMarker:
         codegen.extend_output(create_breakpoint())
     """
 
+    # pyrefly: ignore [implicit-any-attribute]
     __slots__ = ()
     _instance: _BreakpointMarker | None = None
 

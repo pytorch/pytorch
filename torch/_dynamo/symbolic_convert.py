@@ -5046,6 +5046,7 @@ class InstructionTranslatorBase(
                 "function, which Dynamo intercepts as a top-level frame.\n"
             )
         else:
+            # pyrefly: ignore [unnecessary-type-conversion]
             user_stack_trace += str(user_stack_formatted)
 
         torch._logging.trace_structured(

@@ -3187,12 +3187,16 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def deserialize_constant_input(self, inp: ConstantValue) -> Any:
         if inp.type == "as_int":
+            # pyrefly: ignore [unnecessary-type-conversion]
             return int(inp.as_int)
         elif inp.type == "as_float":
+            # pyrefly: ignore [unnecessary-type-conversion]
             return float(inp.as_float)
         elif inp.type == "as_string":
+            # pyrefly: ignore [unnecessary-type-conversion]
             return str(inp.as_string)
         elif inp.type == "as_bool":
+            # pyrefly: ignore [unnecessary-type-conversion]
             return bool(inp.as_bool)
         elif inp.type == "as_none":
             return None

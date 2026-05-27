@@ -47,7 +47,9 @@ class CustomFunctionHigherOrderOperator(HigherOrderOperator):
     def __call__(
         self,
         autograd_function: type[torch.autograd.Function],
+        # pyrefly: ignore [not-a-type]
         *args: _P.args,
+        # pyrefly: ignore [not-a-type]
         **kwargs: _P.kwargs,
     ) -> Any:
         # When custom_function_call is done dispatching through functorch,

@@ -324,5 +324,5 @@ class DecompShardingStrategy:
                         options |= {Shard(i) for i in range(spec.ndim)}
                 candidates.append(list(options))
 
-        # pyrefly: ignore [bad-argument-type, no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, bad-return, no-matching-overload]
         return list(itertools.product(*candidates))

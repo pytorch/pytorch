@@ -160,8 +160,10 @@ class Upsample(Module):
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
+            # pyrefly: ignore [unnecessary-type-conversion]
             self.scale_factor = tuple(float(factor) for factor in scale_factor)
         else:
+            # pyrefly: ignore [unnecessary-type-conversion]
             self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners

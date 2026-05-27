@@ -618,6 +618,7 @@ class CompilePackage:
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
     ) -> None:
+        # pyrefly: ignore [implicit-any-attribute]
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 

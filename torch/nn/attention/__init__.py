@@ -106,6 +106,7 @@ def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
         previous_priority = torch._C._get_sdp_priority_order()
         for backend in previous_priority:
             if backend not in user_priority:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 user_priority.append(int(backend))
         torch._C._set_sdp_priority_order(user_priority)
 

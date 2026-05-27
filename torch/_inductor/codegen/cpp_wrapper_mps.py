@@ -98,6 +98,7 @@ class CppWrapperMps(CppWrapperGpu):
             raise NotImplementedError("No threads or group_size provided")
 
         # Check if threads is a single value or an array-like structure
+        # pyrefly: ignore [unnecessary-type-conversion]
         threads_str = str(threads)
         is_single_value = (
             threads_str.startswith("{")
@@ -118,6 +119,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
             else:
                 # Extract group size value if it's also in braces
+                # pyrefly: ignore [unnecessary-type-conversion]
                 group_size_str = str(group_size)
                 if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
@@ -165,6 +167,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
                 new_args.append("}")
             else:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 group_size_str = str(group_size)
                 group_size_size = get_array_size(group_size_str)
                 new_args.append("{")

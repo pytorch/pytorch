@@ -1252,11 +1252,13 @@ class _PipelineStage(_PipelineStageBase):
             if not isinstance(args, tuple):
                 raise AssertionError("First stage requires real tensor args")
             n_positional = len(args)
+            # pyrefly: ignore [bad-assignment]
             self._stage_meta.inputs = tuple(
                 info.tensor_meta  # type: ignore[misc]
                 for info in recv_infos[:n_positional]
             )
         else:
+            # pyrefly: ignore [bad-assignment]
             self._stage_meta.inputs = tuple(
                 info.tensor_meta  # type: ignore[misc]
                 for info in recv_infos

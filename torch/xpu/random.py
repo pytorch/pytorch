@@ -84,6 +84,7 @@ def manual_seed(seed: int) -> None:
         If you are working with a multi-GPU model, this function is insufficient
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
     """
+    # pyrefly: ignore [unnecessary-type-conversion]
     seed = int(seed)
 
     def cb() -> None:
@@ -102,6 +103,7 @@ def manual_seed_all(seed: int) -> None:
     Args:
         seed (int): The desired seed.
     """
+    # pyrefly: ignore [unnecessary-type-conversion]
     seed = int(seed)
 
     def cb() -> None:

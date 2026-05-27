@@ -4522,6 +4522,7 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     weight = (
         (w_ih, w_hh, b_ih, b_hh) if symbolic_helper._is_tensor(b_ih) else (w_ih, w_hh)
     )
+    # pyrefly: ignore [unnecessary-type-conversion]
     has_biases = bool(symbolic_helper._is_tensor(b_ih))
     _, h_outs, c_outs = _generic_rnn(
         g,

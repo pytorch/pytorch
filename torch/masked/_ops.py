@@ -680,6 +680,7 @@ def _sparse_coo_scatter_reduction_helper(
     if len(reduced_dense_dims) > 0:
         if reduce == "sum":
             new_values = values
+            # pyrefly: ignore [unnecessary-type-conversion]
             new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
         else:
             # FIXME: Implement reductions for dense dimensions for ops with non-zero reduction identities

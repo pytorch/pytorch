@@ -24,6 +24,7 @@ class _UnionTag(str):
     def __eq__(self, cmp) -> bool:
         if not isinstance(cmp, str):
             raise AssertionError(f"expected str, got {type(cmp)}")
+        # pyrefly: ignore [unnecessary-type-conversion]
         other = str(cmp)
         if other not in _get_field_names(self._cls):
             raise AssertionError(

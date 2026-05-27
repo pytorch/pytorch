@@ -3446,9 +3446,11 @@ def _check_for_subclass_arg(x: object) -> bool:
 _DISPATCH_META_HANDLERS = {
     torch.ops.prim.device.default: _device_handler,
     torch.ops.aten.size.default: lambda args: tuple(
+        # pyrefly: ignore [unnecessary-type-conversion]
         int(s) for s in cast(Tensor, args[0]).size()
     ),
     torch.ops.aten.stride.default: lambda args: tuple(
+        # pyrefly: ignore [unnecessary-type-conversion]
         int(s) for s in cast(Tensor, args[0]).stride()
     ),
     torch.ops.aten.storage_offset.default: lambda args: int(

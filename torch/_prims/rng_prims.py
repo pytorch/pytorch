@@ -30,6 +30,7 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
         "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
     )
 
+    # pyrefly: ignore [missing-attribute]
     rngprim_def.register_fake(impl_meta)
 
     prim_packet = getattr(torch._ops.ops.rngprims, name)
@@ -418,6 +419,7 @@ register_graphsafe_rng_dispatch(DispatchKey.CUDA)
 from torch._opaque_base import OpaqueBaseMeta
 
 
+# pyrefly: ignore [missing-attribute]
 torch._C._set_generator_metaclass(OpaqueBaseMeta)
 
 torch._library.opaque_object.register_opaque_type(

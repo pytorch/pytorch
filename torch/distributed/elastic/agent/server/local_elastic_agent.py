@@ -198,6 +198,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         watchdog_enabled = os.getenv(enable_watchdog_env_name)
         watchdog_file_env_name = TORCHELASTIC_TIMER_FILE
         watchdog_file_path = os.getenv(watchdog_file_env_name)
+        # pyrefly: ignore [unnecessary-type-conversion]
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
                 watchdog_file_path = os.path.join(

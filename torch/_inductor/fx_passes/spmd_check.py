@@ -84,8 +84,10 @@ def _format_val_metadata(val: object, extract_fn: object) -> str | None:
             if isinstance(v, torch.Tensor):
                 parts.append(str(extract_fn(v)))  # type: ignore[operator]
             else:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 parts.append(str(type(v).__name__))
         return f"({', '.join(parts)})"
+    # pyrefly: ignore [unnecessary-type-conversion]
     return str(type(val).__name__)
 
 

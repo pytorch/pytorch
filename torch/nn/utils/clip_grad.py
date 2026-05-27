@@ -77,6 +77,7 @@ def _get_total_norm(
         tensors = [tensors]
     else:
         tensors = list(tensors)
+    # pyrefly: ignore [unnecessary-type-conversion]
     norm_type = float(norm_type)
     if len(tensors) == 0:
         return torch.tensor(0.0)
@@ -154,6 +155,7 @@ def _clip_grads_with_norm_(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     grads = [p.grad for p in parameters if p.grad is not None]
+    # pyrefly: ignore [unnecessary-type-conversion]
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
@@ -276,6 +278,7 @@ def clip_grad_value_(
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
+    # pyrefly: ignore [unnecessary-type-conversion]
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]

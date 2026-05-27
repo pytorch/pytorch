@@ -107,6 +107,7 @@ class StrobelightCLIFunctionProfiler:
             "--sample-interval",
             f"{int(self.sample_each)}",
             "--duration-ms",
+            # pyrefly: ignore [unnecessary-type-conversion]
             f"{int(self.max_profile_duration_sec * 1000)}",
             "--pid",
             f"{namespace}:{processId}",

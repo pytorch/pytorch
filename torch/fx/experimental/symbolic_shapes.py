@@ -3344,6 +3344,7 @@ class DimConstraints:
                 ):
                     if self._is_supported_congruence(congruence):
                         base, divisor = congruence.args
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         tmp_name = "_" + str(
                             self._dcp.source_name_to_debug_name.get(
                                 self._dcp.symbol_to_source[s][0].name,
@@ -3534,6 +3535,7 @@ class DimConstraints:
                     and isinstance(c["eq"], sympy.Expr)
                     and str(symbol := next(iter(c["eq"].free_symbols))) == old_root
                 ):  # derived dim with root = old_root
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     new_root_expr = results[str(old_root)]["eq"]  # dx=3*_dx+1
 
                     new_expr = c["eq"].subs({symbol: new_root_expr})  # dy=(3*_dx+1)+1

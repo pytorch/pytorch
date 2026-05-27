@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._C import (
+    # pyrefly: ignore [missing-module-attribute]
     _TensorIterator as _CTensorIterator,
+    # pyrefly: ignore [missing-module-attribute]
     _TensorIteratorSpec as _CTensorIteratorSpec,
 )
 

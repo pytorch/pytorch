@@ -79,6 +79,7 @@ def flatten(t: IntTuple) -> tuple[int, ...]:
 
 
 def signum(a: int) -> int:
+    # pyrefly: ignore [unnecessary-type-conversion]
     return bool(a > 0) - bool(a < 0)
 
 

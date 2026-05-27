@@ -433,6 +433,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
+        # pyrefly: ignore [unnecessary-type-conversion]
         return sympy_index_symbol(str(index_var))
 
     # pyrefly: ignore [bad-override]

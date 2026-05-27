@@ -592,6 +592,7 @@ def _flatten_optim_state(
 
     # Check if these unflattened parameters have any optimizer state
     has_state = [
+        # pyrefly: ignore [unnecessary-type-conversion]
         bool(unflat_param_name in unflat_osd_state)
         for unflat_param_name in unflat_param_names
     ]

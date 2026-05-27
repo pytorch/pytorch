@@ -43,6 +43,7 @@ def interpreter_version(interpreter: str) -> str:
         .stdout.decode("utf-8")
         .strip()
     )
+    # pyrefly: ignore [unnecessary-type-conversion]
     return str(version_string.split(" ")[1])
 
 

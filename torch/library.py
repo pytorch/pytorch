@@ -305,8 +305,10 @@ class Library:
             getattr(torch.ops, self.ns), packet_name
         )
 
+        # pyrefly: ignore [missing-attribute]
         if torch.Tag.out in tags:
             _validate_out_schema(schema)
+        # pyrefly: ignore [missing-attribute]
         if torch.Tag.inplace in tags:
             _validate_inplace_schema(schema)
 

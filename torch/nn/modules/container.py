@@ -1013,9 +1013,11 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
+                # pyrefly: ignore [unnecessary-type-conversion]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

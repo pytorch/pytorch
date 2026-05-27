@@ -239,6 +239,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 

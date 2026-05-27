@@ -671,6 +671,7 @@ def create_fx_graph_from_captured_output(
             if graph_module._wrapped_call.cls_call is not None:
                 raise AssertionError("graph_module._wrapped_call.cls_call must be None")
 
+            # pyrefly: ignore [implicit-any-parameter]
             def dynamo_wrapped_call(self, *args: object, **kwargs: object) -> object:
                 if "forward" in self.__dict__:
                     raise AssertionError("'forward' should not be in self.__dict__")
@@ -679,6 +680,7 @@ def create_fx_graph_from_captured_output(
                 fwd_pre_hooks = self._forward_pre_hooks
                 original_forward = type(self).forward
 
+                # pyrefly: ignore [implicit-any-parameter]
                 def patched_forward(self, *args: object, **kwargs: object) -> object:
                     self._forward_hooks = fwd_hooks
                     self._forward_pre_hooks = fwd_pre_hooks

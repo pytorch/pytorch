@@ -458,6 +458,7 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
+        # pyrefly: ignore [unnecessary-type-conversion]
         return builtins.bool(self != 0)
 
     def __int__(self):
@@ -1739,6 +1740,7 @@ def _check_with(
         if not callable(message):
             raise TypeError("message must be a callable")
 
+        # pyrefly: ignore [unnecessary-type-conversion]
         message_evaluated = str(message())
 
     raise error_type(message_evaluated)

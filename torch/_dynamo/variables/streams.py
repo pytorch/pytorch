@@ -506,6 +506,7 @@ class StreamVariable(StreamContextVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from ..guards import GuardBuilder, install_guard
         from ..utils import cmp_name_to_op_mapping
@@ -623,6 +624,7 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -691,6 +693,7 @@ class EventVariable(VariableTracker):
             )
             unimplemented(
                 gb_type="Unsupported event method",
+                # pyrefly: ignore [unnecessary-type-conversion]
                 context=str(name),
                 explanation=f"Dynamo doesn't support tracing the {method_name} method. "
                 f"We currently support wait, record, synchronize, and query.",

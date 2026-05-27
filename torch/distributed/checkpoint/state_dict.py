@@ -706,6 +706,7 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, Value
 
         for key, value in nested_dict.items():
             # Convert all keys to strings for flattening
+            # pyrefly: ignore [unnecessary-type-conversion]
             str_key = str(key)
             full_key = f"{prefix}.{str_key}" if prefix else str_key
 

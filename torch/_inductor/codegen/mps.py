@@ -1062,6 +1062,7 @@ class MetalKernel(SIMDKernel):
 
         _, call_args, _, arg_types = self.args.python_argdefs()
         arg_name_to_type = {
+            # pyrefly: ignore [unnecessary-type-conversion]
             str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
         }
 

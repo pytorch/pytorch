@@ -66,6 +66,7 @@ def manual_seed(seed: int) -> None:
     # erroring out)
     if not torch._C._has_mps:
         return
+    # pyrefly: ignore [unnecessary-type-conversion]
     seed = int(seed)
     _get_default_mps_generator().manual_seed(seed)
 
@@ -228,6 +229,7 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
         the host writes). Failure to do so can produce stale reads,
         torn writes, or data corruption.
     """
+    # pyrefly: ignore [missing-attribute]
     return torch._C._mps_host_alias_storage(storage)
 
 

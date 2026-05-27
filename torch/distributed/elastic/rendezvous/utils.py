@@ -264,6 +264,7 @@ class _PeriodicTimer:
 
         # We do not attempt to stop our background thread during the interpreter
         # shutdown. At that point we do not even know whether it still exists.
+        # pyrefly: ignore [missing-attribute]
         self._finalizer.atexit = False
 
         self._thread.start()

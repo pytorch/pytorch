@@ -180,6 +180,7 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
 
     device_coords = {
         int(device_index.item()): list(coord)
+        # pyrefly: ignore [not-iterable]
         for coord, device_index in np.ndenumerate(
             np.array(dtensor.device_mesh.mesh.tolist())
         )

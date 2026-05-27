@@ -2320,6 +2320,7 @@ def _aot_stage2b_bw_compile(
                     for k in range(len(ph_arg.stride())):
                         # real_stride can't be symbolic.
 
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
                             stride_different = True
                             break

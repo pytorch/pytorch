@@ -479,6 +479,7 @@ def instantiate_user_defined_class_object(
 
 
 def mutable_mapping_update(
+    # pyrefly: ignore [implicit-any-parameter]
     self,
     data: Mapping[T, U] | Iterable[tuple[T, U]] = (),
     /,
@@ -552,6 +553,7 @@ def foreach_map_fn(*args: Any) -> Any:
 
 
 def foreach_lerp_inplace(
+    # pyrefly: ignore [implicit-any-parameter]
     self,
     end: list[torch.Tensor] | tuple[torch.Tensor, ...],
     weight: float | int | torch.Tensor,

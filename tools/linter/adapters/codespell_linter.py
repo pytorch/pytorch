@@ -157,6 +157,7 @@ def check_dictionary(filename: str) -> list[LintMessage]:
                 "inline comment instead."
             )
     except Exception as err:
+        # pyrefly: ignore [unnecessary-type-conversion]
         return [format_error_message(str(filename), err)]
     return []
 

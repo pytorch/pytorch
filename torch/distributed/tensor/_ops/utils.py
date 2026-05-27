@@ -214,11 +214,13 @@ def is_tensor_shardable(
             if isinstance(placement, _StridedShard):
                 # make sure tensor dim `shard_dim` is shardable after splitting
                 # with split_factor
+                # pyrefly: ignore [unnecessary-type-conversion]
                 if guard_fn(
                     shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
                 ):
                     return False
             else:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
                     return False
 

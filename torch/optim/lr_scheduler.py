@@ -2431,6 +2431,7 @@ class OneCycleLR(LRScheduler):
         if three_phase:
             self._schedule_phases = [
                 {
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     "end_step": float(pct_start * self.total_steps) - 1,
                     "start_lr": "initial_lr",
                     "end_lr": "max_lr",
@@ -2438,6 +2439,7 @@ class OneCycleLR(LRScheduler):
                     "end_momentum": "base_momentum",
                 },
                 {
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     "end_step": float(2 * pct_start * self.total_steps) - 2,
                     "start_lr": "max_lr",
                     "end_lr": "initial_lr",
@@ -2455,6 +2457,7 @@ class OneCycleLR(LRScheduler):
         else:
             self._schedule_phases = [
                 {
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     "end_step": float(pct_start * self.total_steps) - 1,
                     "start_lr": "initial_lr",
                     "end_lr": "max_lr",

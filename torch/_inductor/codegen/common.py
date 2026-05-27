@@ -1071,6 +1071,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
+        # pyrefly: ignore [unnecessary-type-conversion]
         return sympy_index_symbol(str(var))
 
     def check_bounds(

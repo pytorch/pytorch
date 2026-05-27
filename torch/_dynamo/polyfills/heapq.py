@@ -79,26 +79,31 @@ def _heapreplace_max(heap: list[_T], item: _T) -> _T:
     return py_heapq._heapreplace_max(heap, item)
 
 
+# pyrefly: ignore [bad-specialization]
 @substitute_in_graph(heapq.heapify)
 def heapify(heap: list[_T], /) -> None:
     return py_heapq.heapify(heap)
 
 
+# pyrefly: ignore [bad-specialization]
 @substitute_in_graph(heapq.heappop)
 def heappop(heap: list[_T], /) -> _T:
     return py_heapq.heappop(heap)
 
 
+# pyrefly: ignore [bad-specialization]
 @substitute_in_graph(heapq.heappush)
 def heappush(heap: list[_T], item: _T) -> None:
     return py_heapq.heappush(heap, item)
 
 
+# pyrefly: ignore [bad-specialization]
 @substitute_in_graph(heapq.heappushpop)
 def heappushpop(heap: list[_T], item: _T) -> _T:
     return py_heapq.heappushpop(heap, item)
 
 
+# pyrefly: ignore [bad-specialization]
 @substitute_in_graph(heapq.heapreplace)
 def heapreplace(heap: list[_T], item: _T) -> _T:
     return py_heapq.heapreplace(heap, item)

@@ -65,6 +65,7 @@ def traverse_state_dict(
                 _traverse_obj(path + (i,), v)
 
     for key, value in state_dict.items():
+        # pyrefly: ignore [unnecessary-type-conversion]
         _traverse_obj((str(key),), value)
 
     # release reference cycle to prevent memory leaks in async_save
@@ -111,6 +112,7 @@ def traverse_state_dict_v_2_3(
                 _traverse_obj(path + (i,), v)
 
     for key, value in state_dict.items():
+        # pyrefly: ignore [unnecessary-type-conversion]
         _traverse_obj((str(key),), value)
 
     # release reference cycle to prevent memory leaks in async_save

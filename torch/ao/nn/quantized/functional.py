@@ -579,6 +579,7 @@ def leaky_relu(
         if inplace:
             raise AssertionError("Cannot rescale with `inplace`")
         output = torch._empty_affine_quantized(
+            # pyrefly: ignore [unnecessary-type-conversion]
             input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype
         )
         torch._C._nn.leaky_relu(input, negative_slope, out=output)

@@ -337,6 +337,7 @@ def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
 
         return tabulate(rank_values, headers=headers)
     row_str = "\n".join([str(row) for row in rank_values])
+    # pyrefly: ignore [unnecessary-type-conversion]
     return str(f"{headers}\n{row_str}")
 
 

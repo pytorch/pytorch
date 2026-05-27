@@ -983,6 +983,7 @@ def _create_runtime_wrapper(
         )
         import types
 
+        # pyrefly: ignore [implicit-any-parameter]
         def _replay_alias(self, orig_inputs, fw_outs):
             return _codegen_alias_fn(orig_inputs, fw_outs)
 

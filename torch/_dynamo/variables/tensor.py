@@ -181,6 +181,7 @@ class TensorVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen) -> str:
         if id(self.proxy) in codegen.graph_outputs:
             return f"__graph_out[{codegen.graph_outputs[id(self.proxy)].index}]"
@@ -328,6 +329,7 @@ class TensorVariable(VariableTracker):
             "dtype": value.dtype,
             "device": value.device,
             "layout": value.layout,
+            # pyrefly: ignore [unnecessary-type-conversion]
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_nested": value.is_nested,
@@ -3048,6 +3050,7 @@ class UntypedStorageVariable(VariableTracker):
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
+                # pyrefly: ignore [unnecessary-type-conversion]
                 return VariableTracker.build(tx, int(result))
             else:
                 from ..external_utils import untyped_storage_size

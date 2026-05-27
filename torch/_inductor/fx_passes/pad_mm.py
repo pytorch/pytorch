@@ -183,6 +183,7 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
     if x == 1:
         return 0
 
+    # pyrefly: ignore [unnecessary-type-conversion]
     return int((x // alignment_size + 1) * alignment_size) - x
 
 

@@ -1035,6 +1035,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                         f"relative jump instruction {inst.opname} has no offset"
                     )
                 inst.arg = abs(
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
                 # pyrefly: ignore [unsupported-operation]

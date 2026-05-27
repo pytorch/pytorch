@@ -157,9 +157,11 @@ def warn_and_trace_duplicate_backward(
         summary.update(
             {
                 "shape": [
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     int(s) if isinstance(s, int) else str(s) for s in tangent.shape
                 ],
                 "stride": [
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     int(s) if isinstance(s, int) else str(s) for s in tangent.stride()
                 ],
                 "dtype": str(tangent.dtype),

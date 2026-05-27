@@ -752,6 +752,7 @@ class CustomOpDef:
         self._register_adinplaceorview_dispatcher_impl()
 
     def _validate_schema(self, schema: _C.FunctionSchema, schema_str: str) -> None:
+        # pyrefly: ignore [missing-attribute]
         if utils.has_kwarg_only_tensors(schema) and torch.Tag.out not in self._tags:
             # If you want to support this, the progression is:
             # - supporting kwarg-only Tensors that are non-differentiable

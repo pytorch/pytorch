@@ -393,6 +393,7 @@ def _check_symint(
                 # sympy.Eq(symint.node.expr, arg) would evaluate to False
                 # purely because symbol is constrained to be size-like,
                 # e.g., when symint.node.expr = symbol and arg = 0.
+                # pyrefly: ignore [unnecessary-type-conversion]
                 unification_map[symbol] = int(arg)
             else:
                 solution = try_solve(sympy.Eq(symint.node.expr, arg), symbol)

@@ -49,6 +49,7 @@ def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.accumulate
 @substitute_in_graph(itertools.accumulate, is_embedded_type=True)  # type: ignore[arg-type]
+# pyrefly: ignore [invalid-overload]
 def accumulate(
     iterable: Iterable[_T],
     func: Callable[[_T, _T], _T] | None = None,
@@ -197,6 +198,7 @@ def filterfalse(function: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
 @substitute_in_graph(itertools.islice, is_embedded_type=True)  # type: ignore[arg-type]
+# pyrefly: ignore [invalid-overload]
 def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
     s = slice(*args)
     start = 0 if s.start is None else s.start
@@ -312,6 +314,7 @@ def zip_longest(
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.zip_longest
 @substitute_in_graph(itertools.zip_longest, is_embedded_type=True)  # type: ignore[arg-type,misc]
+# pyrefly: ignore [invalid-overload]
 def zip_longest(
     *iterables: Iterable[_T],
     fillvalue: _U = None,  # type: ignore[assignment]
@@ -327,6 +330,7 @@ def zip_longest(
         values = []
         for i, iterator in enumerate(iterators):
             try:
+                # pyrefly: ignore [bad-argument-type]
                 value = next(iterator)
             except StopIteration:
                 num_active -= 1

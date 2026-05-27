@@ -395,6 +395,7 @@ class BaseUserFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.dict_vt: DunderDictVariable | None = dict_vt
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -591,6 +592,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -2175,6 +2177,7 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -2412,6 +2415,7 @@ class SkipFunctionVariable(VariableTracker):
                 hints=hints,
             )
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -2546,6 +2550,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                     user_stack_formatted = "".join(traceback.format_list(user_stack))
                     user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     user_stack_trace += str(user_stack_formatted)
                     dynamo_logger.debug(user_stack_trace)
 
@@ -2872,6 +2877,7 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 

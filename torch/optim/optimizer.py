@@ -463,6 +463,7 @@ class Optimizer:
         accelerator = torch.accelerator.current_accelerator(check_available=True)
 
         if accelerator and accelerator.type in {"cuda", "xpu"}:
+            # pyrefly: ignore [missing-attribute]
             capturing = torch.accelerator.current_stream().is_capturing()
 
             if capturing and not all(

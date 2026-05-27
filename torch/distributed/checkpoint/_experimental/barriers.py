@@ -225,6 +225,7 @@ class TCPStoreBarrier(Barrier):
         # Create a single TCP store for all barrier operations
         self._tcp_store = dist.TCPStore(
             master_address,
+            # pyrefly: ignore [unnecessary-type-conversion]
             int(tcpstore_port),
             world_size=self._global_world_size,
             timeout=timedelta(seconds=timeout_barrier_init_secs),

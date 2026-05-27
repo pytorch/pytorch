@@ -174,7 +174,7 @@ def normal(
         >>> torch.func._random.normal(key, (1000,))  # doctest: +SKIP
     """
     if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         shape = tuple(shape[0])
     if dtype is None:
         dtype = torch.float32
@@ -254,7 +254,7 @@ def uniform(
         >>> torch.func._random.uniform(key, (1000,))  # doctest: +SKIP
     """
     if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         shape = tuple(shape[0])
     if dtype is None:
         dtype = torch.float32

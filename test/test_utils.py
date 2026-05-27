@@ -664,6 +664,7 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
 
+# pyrefly: ignore [unnecessary-type-conversion]
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 

@@ -1919,6 +1919,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
+            # pyrefly: ignore [unnecessary-type-conversion]
             check = bool(evaluate_guards(graph.guards_expr, symints))
             assert check is True
             log.debug(
@@ -2622,6 +2623,7 @@ end
                 use_relative_path=use_relative_path,
             )
             object_builder = CppBuilder(
+                # pyrefly: ignore [unnecessary-type-conversion]
                 name=str(consts_s.stem),
                 sources=str(consts_s),
                 output_dir=str(consts_s.parent),
@@ -2861,6 +2863,7 @@ end
                         )
 
             wrapper_builder = CppBuilder(
+                # pyrefly: ignore [unnecessary-type-conversion]
                 name=str(wrapper_path_operator.stem),
                 sources=wrapper_path,
                 output_dir=str(wrapper_path_operator.parent),
@@ -2870,6 +2873,7 @@ end
             wrapper_o = wrapper_builder.get_target_file_path()
 
             kernel_builder = CppBuilder(
+                # pyrefly: ignore [unnecessary-type-conversion]
                 name=str(kernel_path_operator.stem),
                 sources=kernel_path,
                 output_dir=str(wrapper_path_operator.parent),

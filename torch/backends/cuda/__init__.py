@@ -348,7 +348,9 @@ def cublas_workspace_size(size: None | int = None) -> int:
         int: the current (or newly set) workspace size in bytes.
     """
     if size is not None:
+        # pyrefly: ignore [missing-attribute]
         torch._C._cuda_setCublasWorkspaceSize(size)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getCublasWorkspaceSize()
 
 
@@ -367,7 +369,9 @@ def cublaslt_workspace_size(size: None | int = None) -> int:
         int: the current (or newly set) workspace size in bytes.
     """
     if size is not None:
+        # pyrefly: ignore [missing-attribute]
         torch._C._cuda_setCublasLtWorkspaceSize(size)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getCublasLtWorkspaceSize()
 
 
@@ -426,6 +430,7 @@ def blas_workspace_size(
         raise RuntimeError("Unknown backend type.")
 
     if resolved == torch._C._BlasBackend.Default:
+        # pyrefly: ignore [missing-attribute]
         resolved = torch._C._get_blas_default_backend()
 
     if resolved == torch._C._BlasBackend.Ck:

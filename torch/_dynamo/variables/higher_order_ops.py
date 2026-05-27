@@ -2211,6 +2211,7 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
     original_call_function = cls.call_function
 
     @functools.wraps(original_call_function)
+    # pyrefly: ignore [implicit-any-parameter]
     def wrapped_call_function(self, *args: Any, **kwargs: Any) -> VariableTracker:
         try:
             return original_call_function(self, *args, **kwargs)
@@ -2284,6 +2285,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import python_constant_richcompare_impl
 
@@ -4697,6 +4699,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -5120,6 +5123,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
                 with mock.patch(
                     "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                    # pyrefly: ignore [implicit-any-empty-container]
                     [],
                 ):
                     bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts, _ = (
