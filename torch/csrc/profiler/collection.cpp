@@ -457,7 +457,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     auto& second = (++it)->basic_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+        first.name_.starts_with("autograd::engine::evaluate_function: ")) {
       first.sequence_number_ = second.sequence_number_;
       first.forward_tid_ = second.forward_tid_;
     }
@@ -912,13 +912,11 @@ void passEventsToKineto(
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
 
-      // There is a longstanding regression for initializing
-      // on-demand Kineto activity handling. Enabling this path
-      // for Profiler API could cause side effects as much has changed since.
-      // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path fragmentation, which has been snowballing in complexity
-      // and thus flakiness.
-      if (config.global()) {
+      // In the normal (synchronous) path, kineto_activity_ is set later
+      // by TransferEvents::reassociate(). For global (async) profiling
+      // and trace_only mode the reassociation path diverges, so we also
+      // set it here while the raw pointer from addCPUActivity is valid.
+      if (config.global() || config.experimental_config.trace_only) {
         e->kineto_activity_ = activity;
       }
     }
@@ -1251,7 +1249,9 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace, config};
+  if (!config.experimental_config.trace_only) {
+    TransferEvents transfer{results, trace, config};
+  }
   return trace;
 }
 

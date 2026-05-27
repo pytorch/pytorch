@@ -121,7 +121,7 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) != 1:
@@ -572,7 +572,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     @staticmethod
     def create(
         tx: "InstructionTranslatorBase",
-        target_values: Sequence[VariableTracker],
+        target_values: list[VariableTracker],
         **kwargs: Any,
     ) -> "VmapIncrementNestingCtxManagerVariable":
         var = VmapIncrementNestingCtxManagerVariable(
@@ -661,7 +661,7 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self._call_func(tx, self.initial_values)  # undo eager initialization
@@ -1199,7 +1199,7 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(
         func: Any,
-        record_args: Sequence[VariableTracker],
+        record_args: list[VariableTracker],
         record_kwargs: "dict[str, VariableTracker]",
         **kwargs: Any,
     ) -> "ProfilerRecordFunctionContextVariable":
@@ -1421,7 +1421,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # undo eager initialization
@@ -1743,7 +1743,7 @@ class WithEnterFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if args:
@@ -1806,7 +1806,7 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if kwargs:
