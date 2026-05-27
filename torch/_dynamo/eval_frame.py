@@ -1083,14 +1083,29 @@ class _TorchDynamoContext:
             # due to additional overhead costs.
             prior = set_eval_frame(None)
             prior_error_on_nested_compile: bool | None = None
+            prior_isolated_fullgraph_count: int | None = None
+            prior_skip_reasons: list[str] | None = None
             fullgraph_count_enabled = False
+            fullgraph_count_isolated = False
             if self.fullgraph:
                 prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
                     torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
                 )
                 if not self.export:
-                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
+                    prior_fullgraph_count = set_fullgraph_compiled_frame_count(0)
+                    fullgraph_count_enabled = prior_fullgraph_count < 0
                     if fullgraph_count_enabled:
+                        reset_skip_reasons()
+                    elif prior_fullgraph_count > 0:
+                        # Keep nested torch.compile(fullgraph=True) calls from
+                        # contributing frames to the outer fullgraph count, but
+                        # leave a local counter active so compiled nested code
+                        # still masks recursive Dynamo callbacks as before.
+                        prior_isolated_fullgraph_count = prior_fullgraph_count
+                        prior_skip_reasons = dynamo_tls.skip_reasons
+                        fullgraph_count_isolated = True
+                        set_fullgraph_compiled_frame_count(-1)
+                        set_fullgraph_compiled_frame_count(0)
                         reset_skip_reasons()
             try:
                 # We shouldn't compile inside kernel invocation.
@@ -1185,7 +1200,9 @@ class _TorchDynamoContext:
                         # Restore the dynamic layer stack depth if necessary.
                         set_eval_frame(None)
                         fullgraph_error: RuntimeError | None = None
-                        if fullgraph_count_enabled and call_succeeded:
+                        if (
+                            fullgraph_count_enabled or fullgraph_count_isolated
+                        ) and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
                             if _stance.stance == "default":
                                 if count == 0:
@@ -1209,10 +1226,6 @@ class _TorchDynamoContext:
                                     )
                         if prior_error_on_graph_break is not None:
                             _set_error_on_graph_break(prior_error_on_graph_break)
-                        if prior_error_on_nested_compile is not None:
-                            set_fullgraph_error_on_nested_compile(
-                                prior_error_on_nested_compile
-                            )
                         torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                             saved_dynamic_layer_stack_depth
                         )
@@ -1230,6 +1243,12 @@ class _TorchDynamoContext:
                 if fullgraph_count_enabled:
                     set_fullgraph_compiled_frame_count(-1)
                     dynamo_tls.skip_reasons = None
+                elif prior_isolated_fullgraph_count is not None:
+                    set_fullgraph_compiled_frame_count(-1)
+                    set_fullgraph_compiled_frame_count(prior_isolated_fullgraph_count)
+                    dynamo_tls.skip_reasons = prior_skip_reasons
+                if prior_error_on_nested_compile is not None:
+                    set_fullgraph_error_on_nested_compile(prior_error_on_nested_compile)
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining

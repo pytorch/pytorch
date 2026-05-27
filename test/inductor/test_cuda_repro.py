@@ -71,6 +71,12 @@ from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
+def _strip_triton_static_asserts(code):
+    return "\n".join(
+        line for line in code.splitlines() if "tl.static_assert" not in line
+    )
+
+
 try:
     try:
         import triton  # @manual
@@ -634,6 +640,7 @@ class CudaReproTests(TestCase):
 
         # fwd, backward
         for code in codes:
+            code = _strip_triton_static_asserts(code)
             f = FileCheck()
             # in eager, there are two down casts
             for _ in range(2):
@@ -1165,7 +1172,7 @@ class CudaReproTests(TestCase):
         # tmp0 - not wrapping of negative numbers
         FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
             "atomic_add"
-        ).run(code[0])
+        ).run(_strip_triton_static_asserts(code[0]))
         self.assertEqual(
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
@@ -1641,6 +1648,7 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
@@ -1756,6 +1764,7 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2416,7 +2425,7 @@ foo(torch.rand([256], device=\"{device_type}\"))
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        lines = code[0].split("\n")
+        lines = _strip_triton_static_asserts(code[0]).split("\n")
         start = lines.index("@triton.jit")
         kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(
@@ -2664,6 +2673,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2885,6 +2895,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )

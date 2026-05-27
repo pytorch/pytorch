@@ -441,6 +441,58 @@ class FullgraphTests(TestCase):
             second_thread_done.set()
             torch._dynamo.eval_frame.reset_code(f.__code__)
 
+    @torch._dynamo.config.patch(
+        error_on_dynamo_callback_in_fullgraph_compiled_code=True
+    )
+    def test_fullgraph_nested_compile_policy_restored_after_fx_trace_skip(self):
+        def f(x):
+            return x + 1
+
+        set_policy = torch._dynamo.eval_frame.set_fullgraph_error_on_nested_compile
+        prior = set_policy(False)
+        try:
+            self.assertFalse(prior)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "FX to symbolically trace a dynamo-optimized function",
+            ):
+                torch.fx.symbolic_trace(
+                    torch.compile(f, backend="eager", fullgraph=True)
+                )
+            self.assertFalse(set_policy(False))
+        finally:
+            set_policy(prior)
+
+    def test_fullgraph_nested_active_counter_validates_local_call(self):
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            return g(x) + h(x)
+
+        set_count = torch._dynamo.eval_frame.set_fullgraph_compiled_frame_count
+        prior = set_count(-1)
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        try:
+            self.assertLess(prior, 0)
+            set_count(1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "fullgraph=True expected exactly one compiled frame, but found 2",
+            ):
+                torch.compile(f, backend=cnt, fullgraph=True)(torch.ones(3))
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(set_count(-1), 1)
+        finally:
+            set_count(-1)
+            if prior >= 0:
+                set_count(prior)
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+
     def test_fullgraph_skip_reason_message(self):
         def my_function(x):
             return x + 1

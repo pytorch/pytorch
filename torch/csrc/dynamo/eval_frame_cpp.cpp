@@ -506,7 +506,7 @@ PyObject* dynamo__custom_eval_frame(
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();
       ctx.attr("_stop_at_new_code") = false;
-      debug_guard.emplace(std::move(ctx));
+      debug_guard.emplace(ctx);
     }
     // Call bytecode debugger callback if set, to allow instruction-level
     // debugging of the Dynamo-generated code
