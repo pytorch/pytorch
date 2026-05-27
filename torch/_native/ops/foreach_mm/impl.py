@@ -81,10 +81,11 @@ def _try_as_3d_view(tensors: list[torch.Tensor]) -> torch.Tensor | None:
     )
 
 
-def _foreach_mm_impl(
+def _foreach_mm_impl_stack(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
+    """Stacking path: stack into 3D, call _grouped_mm."""
     A = _try_as_3d_view(self)
     if A is None:
         A = torch.stack(self)
@@ -95,6 +96,42 @@ def _foreach_mm_impl(
 
     out_3d = torch._grouped_mm(A, B)
     return list(out_3d.unbind(0))
+
+
+def _foreach_mm_impl_ptrs(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> list[torch.Tensor]:
+    """Pointer-packing path: one C++ call does from_blob + stack + _grouped_mm.
+
+    Reduces Python-to-C++ roundtrips from 3 (stack A, stack B, grouped_mm)
+    to 1 (_grouped_mm_from_ptrs). Data copy is the same as stacking, but
+    the Python overhead is lower.
+    """
+    G = len(self)
+    M, K = self[0].shape
+    N = mat2[0].size(1)
+    lda = self[0].stride(0)
+    ldb = mat2[0].stride(0)
+
+    a_ptrs = torch.tensor(
+        [t.data_ptr() for t in self], dtype=torch.int64, device=self[0].device
+    )
+    b_ptrs = torch.tensor(
+        [t.data_ptr() for t in mat2], dtype=torch.int64, device=self[0].device
+    )
+
+    return list(torch._grouped_mm_from_ptrs(a_ptrs, b_ptrs, M, N, K, G, lda, ldb))
+
+
+def _foreach_mm_impl(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> list[torch.Tensor]:
+    try:
+        return _foreach_mm_impl_ptrs(self, mat2)
+    except Exception:
+        return _foreach_mm_impl_stack(self, mat2)
 
 
 def register_to_dispatch() -> None:
