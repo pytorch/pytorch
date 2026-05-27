@@ -1,10 +1,16 @@
 """Annotate CUDA graph kernel nodes during capture.
 
-During CUDA graph capture, ``mark_kernels`` uses ``cudaGraphGetNodes``
-to count nodes before and after the wrapped region.  Nodes at indices
-``[before, after)`` are the ones added within the scope.  Each kernel
-or memcpy node found is annotated by its ``toolsId`` so it can later
-be matched to profiler trace events.
+During CUDA graph capture, ``mark_kernels`` records the current capture
+frontier and the direct dependents already attached to that frontier.
+On scope exit it walks only the newly added dependent edges to find the
+nodes created within the scope. Each kernel or memcpy node found is
+annotated by its ``toolsId`` so it can later be matched to profiler
+trace events.
+
+``mark_kernels`` now snapshots capture state from whatever stream is
+current on scope entry, so that stream must already be participating in
+the capture. ``mark_stream`` handles this by starting ``mark_kernels``
+before switching to the target stream.
 
 The annotations can be pickled and later merged into a Chrome profiler
 trace using ``torch.cuda._annotate_cuda_graph_trace``.
@@ -37,7 +43,7 @@ Usage during capture::
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
-from typing import Any
+from typing import Any, TypeAlias
 
 import torch
 from torch.cuda._utils import _check_cuda_bindings, _HAS_CUDA_BINDINGS
@@ -52,6 +58,10 @@ except ImportError:
 
 
 logger = getLogger(__name__)
+
+
+_CaptureState: TypeAlias = tuple[Any, list[Any]]
+_ExistingDirectDependents: TypeAlias = dict[int, set[int]]
 
 
 # Tri-state: None = not probed, True = available, False = unavailable.
@@ -110,8 +120,8 @@ def _is_tools_id_unavailable() -> bool:
     return not _tools_id_available
 
 
-def _get_capture_graph(stream: Any) -> Any:
-    """Return the graph handle for the active capture, or None."""
+def _get_capture_state(stream: Any) -> _CaptureState | None:
+    """Return ``(graph, frontier)`` for an active capture, else ``None``."""
     status, _id, graph, _deps, _edge_data, _num_deps = _check_cuda_bindings(
         _cuda_runtime.cudaStreamGetCaptureInfo(  # pyrefly: ignore[missing-attribute]
             stream
@@ -122,17 +132,77 @@ def _get_capture_graph(stream: Any) -> Any:
         != _cuda_runtime.cudaStreamCaptureStatus.cudaStreamCaptureStatusActive  # pyrefly: ignore[missing-attribute]
     ):
         return None
-    return graph
+    return graph, list(_deps[:_num_deps])
 
 
-def _get_node_count(graph: Any) -> int:
-    """Return the number of nodes currently in the graph."""
-    _, num = _check_cuda_bindings(
-        _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
-            graph, numNodes=0
+def _get_root_nodes(graph: Any) -> list[Any]:
+    """Return the current root nodes for the graph."""
+    _, num_roots = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphGetRootNodes(  # pyrefly: ignore[missing-attribute]
+            graph
         )
     )
-    return num
+    if num_roots == 0:
+        return []
+    roots, num_roots = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphGetRootNodes(  # pyrefly: ignore[missing-attribute]
+            graph, pNumRootNodes=num_roots
+        )
+    )
+    return list(roots[:num_roots])
+
+
+def _get_dependent_nodes(node: Any) -> list[Any]:
+    """Return the direct dependents of a graph node."""
+    _, _, num_dependents = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphNodeGetDependentNodes(  # pyrefly: ignore[missing-attribute]
+            node
+        )
+    )
+    if num_dependents == 0:
+        return []
+    dependents, _edge_data, num_dependents = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphNodeGetDependentNodes(  # pyrefly: ignore[missing-attribute]
+            node, pNumDependentNodes=num_dependents
+        )
+    )
+    return list(dependents[:num_dependents])
+
+
+def _collect_descendants(
+    start_nodes: list[Any],
+    *,
+    existing_direct_dependents: _ExistingDirectDependents | None = None,
+    include_start_nodes: bool = False,
+) -> dict[int, Any]:
+    """Walk dependent edges starting at ``start_nodes``.
+
+    ``existing_direct_dependents`` maps each node in ``start_nodes`` to
+    the direct dependent node keys that were already present at scope
+    entry. Those edges are skipped so the traversal only follows nodes
+    added after scope entry.
+    """
+    existing_direct_dependents = existing_direct_dependents or {}
+    seen = {int(node) for node in start_nodes}
+    descendants: dict[int, Any] = {}
+    stack = list(start_nodes)
+
+    if include_start_nodes:
+        for node in start_nodes:
+            descendants[int(node)] = node
+
+    while stack:
+        node = stack.pop()
+        old_dependents = existing_direct_dependents.get(int(node), set())
+        for dependent in _get_dependent_nodes(node):
+            dependent_key = int(dependent)
+            if dependent_key in old_dependents or dependent_key in seen:
+                continue
+            seen.add(dependent_key)
+            descendants[dependent_key] = dependent
+            stack.append(dependent)
+
+    return descendants
 
 
 # toolsId -> list of annotation objects.
@@ -153,11 +223,8 @@ def _get_annotatable_types() -> set[Any]:
     return _ANNOTATABLE_TYPES
 
 
-# Pending scopes: (annotation, start_node_index, end_node_index).
-_pending_scopes: list[tuple[Any, int, int]] = []
-
-# Graph handle saved during capture for post-capture resolution.
-_capture_graph: Any = None
+# Pending scopes: (annotation, toolsIds discovered for the scope).
+_pending_scopes: list[tuple[Any, list[int]]] = []
 
 # Capture graph ID saved by resolve_pending_annotations for remap_to_exec_graph.
 _last_capture_graph_id: int | None = None
@@ -165,20 +232,26 @@ _last_capture_graph_id: int | None = None
 
 @contextmanager  # type: ignore[arg-type]
 def mark_kernels(annotation: str | dict[str, Any]):
-    """Context manager that records node index ranges for later annotation.
+    """Context manager that records new scope nodes for later annotation.
 
-    During capture, calls ``cudaGraphGetNodes`` to count graph nodes before
-    and after the scope.  Nodes at indices ``[before, after)`` were added
-    inside the scope.  After capture, ``resolve_pending_annotations``
-    enumerates all nodes and annotates kernel/memcpy nodes in those ranges.
+    During capture, records the current stream frontier and its existing
+    direct dependents on entry. On scope exit, traces only the dependent
+    nodes added since entry. After capture, ``resolve_pending_annotations``
+    merges overlapping scopes and stores the final toolsId annotations.
+    If the scope is the first captured work, the entry frontier is empty,
+    so ``mark_kernels`` falls back to the newly created graph roots.
 
-    Must be called inside an active ``torch.cuda.graph()`` capture.  If the
-    current stream is not capturing, or if ``cudaGraphNodeGetToolsId`` is not
-    available, the context manager is a no-op.
+    Must be called inside an active ``torch.cuda.graph()`` capture. The
+    nodes you expect to annotate must be reachable from the stream frontier
+    that is current on entry. If work runs on a different already-capturing
+    branch, it must first be synchronized with the current stream so that
+    branch becomes reachable from the entry frontier. If the current stream
+    is not capturing, or if ``cudaGraphNodeGetToolsId`` is not available,
+    the context manager is a no-op.
 
     Args:
         annotation: Arbitrary object appended to the annotation list for
-            every kernel/memcpy node whose index falls within this scope.
+            every kernel/memcpy node captured within this scope.
     """
     if not _annotations_enabled or _is_tools_id_unavailable():
         yield
@@ -190,140 +263,91 @@ def mark_kernels(annotation: str | dict[str, Any]):
     stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
         init_value=torch.cuda.current_stream().cuda_stream
     )
-    graph = _get_capture_graph(stream)
-    if graph is None:
+    capture_state = _get_capture_state(stream)
+    if capture_state is None:
         yield
         return
+    graph, frontier = capture_state
 
-    global _capture_graph
-    _capture_graph = graph
-
-    start_count = _get_node_count(graph)
+    entry_root_keys: set[int] | None = None
+    entry_direct_dependents = {
+        int(node): {int(dep) for dep in _get_dependent_nodes(node)} for node in frontier
+    }
+    if not frontier:
+        entry_root_keys = {int(node) for node in _get_root_nodes(graph)}
 
     yield
 
-    end_count = _get_node_count(graph)
+    if frontier:
+        scope_nodes = _collect_descendants(
+            frontier,
+            existing_direct_dependents=entry_direct_dependents,
+        )
+    else:
+        new_roots = [
+            node
+            for node in _get_root_nodes(graph)
+            if int(node) not in (entry_root_keys or set())
+        ]
+        scope_nodes = _collect_descendants(new_roots, include_start_nodes=True)
 
-    if end_count > start_count:
-        _pending_scopes.append((annotation, start_count, end_count))
+    if not scope_nodes:
+        return
+
+    annotatable = _get_annotatable_types()
+    tools_ids: list[int] = []
+    for node in scope_nodes.values():
+        node_type = _check_cuda_bindings(
+            _cuda_runtime.cudaGraphNodeGetType(  # pyrefly: ignore[missing-attribute]
+                node
+            )
+        )
+        if node_type not in annotatable:
+            continue
+        tools_ids.append(
+            _check_cuda_bindings(
+                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
+                    node
+                )
+            )
+        )
+
+    if tools_ids:
+        _pending_scopes.append((annotation, tools_ids))
 
 
 def resolve_pending_annotations() -> None:
-    """Resolve pending scope index ranges into kernel annotations.
-
-    Enumerates all graph nodes and annotates kernel/memcpy nodes whose
-    indices fall within recorded scope ranges. Must be called while still
-    inside the ``torch.cuda.graph()`` capture context.
-    """
-    global _capture_graph
+    """Resolve pending scope toolsIds into kernel annotations."""
     if not _pending_scopes:
-        _capture_graph = None
-        return
-
-    # Get a fresh graph handle from the active capture.
-    stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=torch.cuda.current_stream().cuda_stream
-    )
-    graph = _get_capture_graph(stream)
-    if graph is None:
-        graph = _capture_graph
-    if graph is None:
-        logger.warning("resolve_pending_annotations: no graph handle available")
-        _pending_scopes.clear()
         return
 
     try:
-        num = _get_node_count(graph)
-        if num == 0:
-            _pending_scopes.clear()
-            _capture_graph = None
-            return
+        per_tools_id: defaultdict[int, list[Any]] = defaultdict(list)
+        for annotation, tools_ids in _pending_scopes:
+            for tools_id in tools_ids:
+                per_tools_id[tools_id].append(annotation)
 
-        nodes, num = _check_cuda_bindings(
-            _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
-                graph, numNodes=num
-            )
-        )
-
-        # Save capture graph ID for remap_to_exec_graph.
         global _last_capture_graph_id
-        if num > 0:
-            first_tid = _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-                    nodes[0]
-                )
-            )
-            _last_capture_graph_id = first_tid >> 32
+        if per_tools_id:
+            _last_capture_graph_id = next(iter(per_tools_id)) >> 32
 
-        annotatable = _get_annotatable_types()
-
-        # Sort by (start, -end, -append_index). The append index encodes
-        # nesting depth: inner context managers exit first, so they are
-        # appended to _pending_scopes first (smaller index). Using
-        # -append_index as tiebreaker ensures that for same-range scopes
-        # the outer scope (larger index) sorts first and is pushed onto
-        # the stack first, leaving the inner scope on top.
-        sorted_scopes = sorted(
-            (
-                (ann, start, end, i)
-                for i, (ann, start, end) in enumerate(_pending_scopes)
-            ),
-            key=lambda s: (s[1], -s[2], -s[3]),
-        )
-        scope_ptr = 0
-        active_stack: list[tuple[int, Any]] = []  # (end_idx, annotation)
-
-        for i in range(num):
-            # Pop scopes whose range ended.
-            while active_stack and active_stack[-1][0] <= i:
-                active_stack.pop()
-
-            # Push scopes that start at or before this index.
-            while scope_ptr < len(sorted_scopes) and sorted_scopes[scope_ptr][1] <= i:
-                ann, _start_idx, end_idx, _idx = sorted_scopes[scope_ptr]
-                if end_idx > i:
-                    active_stack.append((end_idx, ann))
-                scope_ptr += 1
-
-            if not active_stack:
+        for tools_id, annotations in per_tools_id.items():
+            if len(annotations) == 1:
+                _kernel_annotations[tools_id].append(annotations[0])
                 continue
 
-            node = nodes[i]
-            node_type = _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetType(  # pyrefly: ignore[missing-attribute]
-                    node
-                )
-            )
-            if node_type not in annotatable:
-                continue
-
-            tools_id = _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-                    node
-                )
-            )
-
-            if len(active_stack) == 1:
-                _kernel_annotations[tools_id].append(active_stack[0][1])
-            else:
-                # Merge all active scopes into one dict. Inner scopes sit
-                # on top of the stack. Iterating reversed (inner first)
-                # with setdefault lets the inner scope's values win for
-                # overlapping keys (e.g. name, stream) while outer scopes
-                # fill in any missing keys.
-                merged: dict[str, Any] = {}
-                for _, ann in reversed(active_stack):
-                    if isinstance(ann, dict):
-                        for ak, av in ann.items():
-                            merged.setdefault(ak, av)
-                    else:
-                        merged.setdefault("name", ann)
-                _kernel_annotations[tools_id].append(merged)
+            merged: dict[str, Any] = {}
+            for annotation in annotations:
+                if isinstance(annotation, dict):
+                    for key, value in annotation.items():
+                        merged.setdefault(key, value)
+                else:
+                    merged.setdefault("name", annotation)
+            _kernel_annotations[tools_id].append(merged)
     except Exception:
         logger.exception("resolve_pending_annotations failed")
     finally:
         _pending_scopes.clear()
-        _capture_graph = None
 
 
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
@@ -376,10 +400,8 @@ def get_kernel_annotations() -> dict[int, list[Any]]:
 
 def clear_kernel_annotations() -> None:
     """Clear all recorded kernel annotations and pending scopes."""
-    global _capture_graph
     _kernel_annotations.clear()
     _pending_scopes.clear()
-    _capture_graph = None
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest
@@ -415,7 +437,11 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
     If *stream* is already the current stream, no stream switch or stream ID
     injection happens — the kernels stay on whatever stream is active (which
     keeps the trace faithful when e.g. FSDP uses the current stream for
-    copy-in instead of a separate one).
+    copy-in instead of a separate one). When switching to a different stream,
+    this snapshots the current capturing branch before the target stream
+    runs marked work. If the target stream is already capturing, the marked
+    work must still be synchronized with the current stream so it is
+    reachable from that snapped frontier.
     """
     if not _annotations_enabled:
         with torch.cuda.stream(stream):
@@ -429,6 +455,6 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
             annotation = {"str": annotation}
         if isinstance(annotation, dict):
             annotation["stream"] = _get_stream_id(stream)
-        with torch.cuda.stream(stream):
-            with mark_kernels(annotation):
+        with mark_kernels(annotation):
+            with torch.cuda.stream(stream):
                 yield
