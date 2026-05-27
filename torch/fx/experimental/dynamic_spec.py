@@ -6,7 +6,8 @@ Currently only supports unbacked dynamic shapes.
 from __future__ import annotations
 
 import itertools
-from typing import Any, TYPE_CHECKING, TypeAlias
+import threading
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import sympy
 
@@ -54,16 +55,22 @@ STATIC = None
 # ---------------------------------------------------------------------------
 
 
-_SPEC_SHAPE_ENV = None  # populated lazily by _get_spec_shape_env()
-
-# Maps each spec sympy.Symbol back to the IntVar that created it.
-_intvar_symbol_registry: dict[sympy.Symbol, IntVar] = {}
+_SPEC_SHAPE_ENV: ShapeEnv | None = None
+# Lock guarding the lazy init of _SPEC_SHAPE_ENV so concurrent IntVar()
+# calls observe the same singleton. We cannot construct eagerly at module
+# import time because ShapeEnv.__init__ pulls in modules that
+# transitively import this one.
+_SPEC_SHAPE_ENV_LOCK = threading.Lock()
 
 
 def _get_spec_shape_env() -> ShapeEnv:
-    """Lazily build the singleton spec ShapeEnv."""
+    """Lazily build the singleton spec ShapeEnv (thread-safe)."""
     global _SPEC_SHAPE_ENV
-    if _SPEC_SHAPE_ENV is None:
+    if _SPEC_SHAPE_ENV is not None:
+        return _SPEC_SHAPE_ENV
+    with _SPEC_SHAPE_ENV_LOCK:
+        if _SPEC_SHAPE_ENV is not None:
+            return _SPEC_SHAPE_ENV
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         class _SpecShapeEnv(ShapeEnv):
@@ -89,6 +96,12 @@ def _get_spec_shape_env() -> ShapeEnv:
                     "should_record_events",
                     "is_recording",
                     "fx_node_cache",
+                    # bound_sympy is read-only (no guards/asserts/mutation).
+                    # Needed for `%` (mod) which inspects symbol ranges to
+                    # pick between Mod and PythonMod. var_to_range is the
+                    # field bound_sympy reads to compute ranges.
+                    "bound_sympy",
+                    "var_to_range",
                 }
             )
 
@@ -112,7 +125,7 @@ def _get_spec_shape_env() -> ShapeEnv:
                 )
 
         _SPEC_SHAPE_ENV = _SpecShapeEnv()
-    return _SPEC_SHAPE_ENV
+        return _SPEC_SHAPE_ENV
 
 
 class IntVar(SymInt):
@@ -157,6 +170,8 @@ class IntVar(SymInt):
         optimization_hint: int | None = None,
     ) -> None:
         from torch.fx.experimental.sym_node import _NO_HINT, SymNode
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import ValueRanges
 
         self.name = name if name is not None else "anon"
         self._uid = next(IntVar._uid_counter)
@@ -164,14 +179,20 @@ class IntVar(SymInt):
         self.max = max
         self.optimization_hint = optimization_hint
         self.sympy_sym = sympy.Symbol(f"{self.name}#{self._uid}")
+        env = _get_spec_shape_env()
         node = SymNode(
             self.sympy_sym,
-            shape_env=_get_spec_shape_env(),
+            shape_env=env,
             pytype=int,
             hint=_NO_HINT,
         )
         super().__init__(node)
-        _intvar_symbol_registry[self.sympy_sym] = self
+        # Register the user-supplied (or unbounded) range so
+        # range-dependent ops like `%` get correct ValueRanges info.
+        env.var_to_range[self.sympy_sym] = ValueRanges(
+            min if min is not None else -int_oo,
+            max if max is not None else int_oo,
+        )
 
     def __repr__(self) -> str:
         # Always include uid so two same-named (or anonymous) instances
@@ -202,8 +223,7 @@ class IntVar(SymInt):
 
 def _validate_spec_sym(v: Any, *, where: str) -> None:
     """If ``v`` is a SymInt or SymBool, validate it originates from the
-    spec ShapeEnv. No-op for any other type — callers do their own
-    type-shape checking (e.g. TensorSpec rejects SymBool as a dim).
+    spec ShapeEnv.
     """
     if isinstance(v, SymInt):
         kind = "SymInt"
@@ -264,8 +284,7 @@ class TensorSpec:
         for i, d in enumerate(dims):
             if d is not None and not isinstance(d, (int, SymInt)):
                 raise TypeError(
-                    f"TensorSpec dim {i}: expected LeafIntSpec "
-                    f"(IntVar | SymInt | int | None), got "
+                    f"TensorSpec dim {i}: expected LeafIntSpec, got "
                     f"{type(d).__name__}: {d!r}"
                 )
             _validate_spec_sym(d, where=f"TensorSpec dim {i}")
@@ -429,6 +448,14 @@ LeafSpec: TypeAlias = LeafIntSpec | TensorSpec
 # for nested specs reachable via dynamo source-chain walks.
 IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
 
+# Value type for the dict passed to ``ParamsSpec``/``ShapesSpec``:
+#   - named entries hold a single spec,
+#   - ``"*args"`` holds a list of specs,
+#   - ``"**kwargs"`` holds a dict of specs.
+ParamsSpecValue: TypeAlias = (
+    IntermediateSpec | list[IntermediateSpec] | dict[str, IntermediateSpec]
+)
+
 
 class ParamsSpec:
     """Specification for the arguments of a compiled function.
@@ -461,7 +488,7 @@ class ParamsSpec:
 
     def __init__(
         self,
-        params: dict[str, Any] | None = None,
+        params: dict[str, ParamsSpecValue] | None = None,
     ) -> None:
         self._named_args: dict[str, IntermediateSpec] = {}
         self._varargs: list[IntermediateSpec] | None = None
@@ -494,7 +521,7 @@ class ParamsSpec:
                 )
             else:
                 _validate_spec_sym(value, where=f"ParamsSpec[{key!r}]")
-                self._named_args[key] = value
+                self._named_args[key] = cast(IntermediateSpec, value)
 
     def __repr__(self) -> str:
         def _indent_lines(text: str, prefix: str = _INDENT) -> str:
@@ -563,11 +590,16 @@ class ShapesSpec:
 
     def __init__(
         self,
-        params: ParamsSpec | dict[str, Any] | None = None,
+        params: ParamsSpec | dict[str, ParamsSpecValue] | None = None,
         *,
         globals: Any = None,
         assumptions: Sequence[SymBool] | None = None,
     ) -> None:
+        # Normalize attributes up front so partially-constructed instances
+        # (e.g. when a later check raises) still have a stable shape.
+        self._params: ParamsSpec | None = None
+        self._assumptions: list[SymBool] = []
+
         if globals is not None:
             raise NotImplementedError("ShapesSpec.globals is not supported yet")
         # Auto-wrap a bare dict so callers can write
@@ -582,7 +614,6 @@ class ShapesSpec:
             )
         self._params = params
 
-        self._assumptions: list[SymBool] = []
         if assumptions is not None:
             for i, a in enumerate(assumptions):
                 if not isinstance(a, SymBool):
@@ -594,7 +625,7 @@ class ShapesSpec:
                 self._assumptions.append(a)
 
     @property
-    def assumptions(self) -> list[Any]:
+    def assumptions(self) -> list[SymBool]:
         return list(self._assumptions)
 
     def __repr__(self) -> str:

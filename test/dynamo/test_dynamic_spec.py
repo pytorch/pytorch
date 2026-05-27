@@ -169,6 +169,91 @@ class TestIntVarConstruction(TestCase):
         self.assertEqual(repr(s), "IntVar(x#0)")
 
 
+class TestIntVarArithmetic(TestCase):
+    """Arithmetic, comparison, and bitwise ops on IntVar/ShapeVar must
+    compose without touching the spec ShapeEnv beyond its allowlist.
+
+    The spec env blocks most ShapeEnv public APIs, so any op whose
+    sympy lowering reaches blocked APIs (e.g. ``bound_sympy``,
+    ``evaluate_sym_node``) must fail loudly here rather than silently
+    returning garbage.
+    """
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_supported_ops_compose(self):
+        """Build a large expression mixing every supported op and
+        verify it produces a well-formed SymInt/SymBool without
+        crashing or hitting the spec-env allowlist.
+        """
+        A = IntVar("a")
+        B = IntVar("b")
+        C = IntVar("c")
+
+        # Arithmetic: +, -, *, **, //, /, %, abs, unary -/+
+        arith = (
+            abs(-A + B)
+            + (A * 2 + 3 * B - 1)
+            + (A**2)
+            + (A // 2)
+            + (A // B)
+            + (A % 8)
+            + (A % B)  # pyright: ignore[reportOperatorIssue]
+            + (+A)
+        )
+        self.assertIsInstance(arith, torch.SymInt)
+        self.assertIn("a#0", str(arith))
+        self.assertIn("b#1", str(arith))
+
+        # True division returns a SymFloat (IntTrueDiv lowering).
+        truediv = A / 2
+        self.assertIn("IntTrueDiv", str(truediv))
+
+        # Bitwise: &, |, ^, <<, >> (NOTE: ~A is not supported on IntVar)
+        bitwise = ((A & B) | (A ^ C)) + (A << 2) + (A >> 2)  # pyright: ignore[reportOperatorIssue]
+        self.assertIsInstance(bitwise, torch.SymInt)
+
+        # sym_min / sym_max compose with any IntVar.
+        mm = torch.sym_max(A, B) + torch.sym_min(C, 5) + torch.sym_max(5, A)
+        self.assertIsInstance(mm, torch.SymInt)
+        self.assertIn("Max", str(mm))
+        self.assertIn("Min", str(mm))
+
+        # Comparisons (each returns a SymBool)
+        for cmp in (A == B, A != B, A < B, A <= B, A > B, A >= B, A == 5, A < 5):
+            self.assertIsInstance(cmp, torch.SymBool)
+
+        # rsub / radd / rmul against Python ints
+        self.assertIsInstance(1 + A, torch.SymInt)
+        self.assertIsInstance(1 - A, torch.SymInt)
+        self.assertIsInstance(2 * A, torch.SymInt)
+        self.assertIsInstance(2 // A, torch.SymInt)
+
+    def test_mod_uses_registered_range(self):
+        """``%`` calls ``ShapeEnv.bound_sympy`` to choose between ``Mod``
+        (when both sides are non-negative) and ``PythonMod`` (otherwise).
+        IntVar registers its min/max into ``var_to_range`` so this
+        selection works without exploding on missing range info.
+        """
+        # Non-negative IntVar uses Mod.
+        Apos = IntVar("apos", min=0)
+        self.assertIn("Mod", str(Apos % 8))
+        # Unbounded IntVar (min=None) defaults to (-int_oo, int_oo)
+        # so the lower bound is negative → PythonMod.
+        Aany = IntVar("aany")
+        self.assertIn("PythonMod", str(Aany % 8))
+
+    def test_rpow_fails_loudly(self):
+        """``int ** IntVar`` lowers through ``evaluate_sym_node``,
+        which is blocked. Must raise rather than silently mis-evaluate.
+        """
+        A = IntVar("a")
+        with self.assertRaisesRegex(TypeError, "evaluate_sym_node"):
+            2**A  # pyright: ignore[reportUnusedExpression]
+
+
 class TestTensorSpecConstruction(TestCase):
     """Construction and list-like interface."""
 
@@ -723,6 +808,68 @@ class TestShapeVarDedup(TestCase):
         )
         self.assertEqual(compiled(4, 4), 8)
 
+    def test_min_max_propagate_to_repeat_occurrence(self):
+        """ShapeVar bounds are applied only on the FIRST occurrence (via
+        torch._check in ``_wire_spec_slot``); subsequent occurrences rely
+        on the dedup ``Eq(new, existing)`` runtime assert + ShapeEnv's
+        ``_set_replacement`` / ``_refine_ranges`` to propagate the
+        refined range to every other occurrence's symbol. This test
+        guards that propagation by inspecting ``var_to_range`` for both
+        of two tensor positions sharing one ShapeVar.
+        """
+        B = ShapeVar("b", min=4, max=16)
+        from typing import cast
+
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        captured_env = None
+
+        def grab_env(gm, _example_inputs):
+            nonlocal captured_env
+            for node in gm.graph.nodes:
+                if node.op != "placeholder":
+                    continue
+                ev = node.meta.get("example_value")
+                if (
+                    isinstance(ev, torch.Tensor)
+                    and len(ev.shape) > 0
+                    and hasattr(ev.shape[0], "node")
+                ):
+                    captured_env = ev.shape[0].node.shape_env  # type: ignore[attr-defined]
+                    break
+            return gm.forward
+
+        def fn(x, y):
+            return x.sum() + y.sum()
+
+        compiled = torch.compile(
+            fn,
+            backend=grab_env,
+            fullgraph=True,
+            shapes_spec={
+                "x": TensorSpec([B, None]),
+                "y": TensorSpec([B, None]),
+            },
+        )
+        compiled(torch.randn(8, 3), torch.randn(8, 4))
+        env = cast(ShapeEnv, captured_env)
+        self.assertIsNotNone(env, "expected to capture the compile-time ShapeEnv")
+        # Every symbol corresponding to ShapeVar B should have the
+        # refined range [4, 16] — the second occurrence inherits it
+        # via _set_replacement/_refine_ranges across the Eq runtime
+        # assert in _wire_spec_slot.
+        refined = [
+            (sym, vr)
+            for sym, vr in env.var_to_range.items()
+            if vr.lower == 4 and vr.upper == 16
+        ]
+        self.assertGreaterEqual(
+            len(refined),
+            2,
+            f"min/max [4,16] did not propagate to repeat occurrence; "
+            f"var_to_range={dict(env.var_to_range)}",
+        )
+
     def test_distinct_shape_vars_still_dde(self):
         """Sanity check: distinct ShapeVars do not share a symbol, so
         comparing them still DDEs (no dedup contamination across vars)."""
@@ -940,14 +1087,18 @@ class TestDerivedDimSpec(TestCase):
         """Using a spec IntVar in a Python bool context raises (don't allow
         accidental guards on spec-time values)."""
         A = ShapeVar("a")
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            TypeError, r"_SpecShapeEnv:.*not allowed at spec-definition time"
+        ):
             if A > 1:
                 pass
 
     def test_misuse_torch_check_outside_assumptions_raises(self):
         """torch._check on a spec IntVar outside the assumptions context raises."""
         A = ShapeVar("a")
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            TypeError, r"_SpecShapeEnv:.*not allowed at spec-definition time"
+        ):
             torch._check(A > 1)
 
     def test_order_independence(self):
@@ -1069,9 +1220,7 @@ class TestAssumptionsSpec(TestCase):
 
         # Violation: A=2 not > B=3.
         torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            (RuntimeError, AssertionError), "(Runtime assertion failed|Guard fail)"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
             compiled(torch.ones(2, 2), torch.ones(3, 2))
 
         # Sanity check: same fn WITHOUT the assumption DDEs on the
