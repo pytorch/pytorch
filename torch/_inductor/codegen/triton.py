@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Min,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -1364,6 +1365,21 @@ class TritonOverrides(OpOverrides):
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
 
+    @staticmethod
+    def sub(x, y):
+        if (
+            isinstance(x, CSEVariable)
+            and x == y
+            and x.dtype is not None
+            and x.dtype.is_floating_point
+        ):
+            # Avoid giving LLVM a tmp - tmp pattern that it can reassociate
+            # through tmp's producer. A plain 0.0 is only valid for finite
+            # inputs; nan/inf inputs should still produce nan like x - x.
+            non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
+            return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
+        return f"{x} - {y}"
+
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
         if isinstance(arg, torch._prims_common.Number):
@@ -1837,10 +1853,106 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
-    @maybe_upcast_float32()
+    def _f32_const_from_bits(bits: int) -> str:
+        return f"tl.full([], 0x{bits:08X}, tl.uint32).to(tl.float32, bitcast=True)"
+
+    @staticmethod
+    def _inline_asm_f32(asm: str, args: Sequence[Any], shape: BlockShapeType) -> Any:
+        constraints = ", ".join(["=f"] + ["f"] * len(args))
+        args_str = ", ".join(map(str, args))
+        return V.kernel.cse.generate(
+            V.kernel.compute,
+            f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
+            f"[{args_str}], dtype=tl.float32, is_pure=True, pack=1)",
+            dtype=torch.float32,
+            shape=shape,
+        )
+
+    @staticmethod
+    def _cuda_atanf(x: CSEVariable) -> CSEVariable:
+        # Match CUDA's device atanf implementation.  This sequence mirrors
+        # nvcc-generated PTX for `atan(float)`: abs/reciprocal range reduction,
+        # a Horner polynomial in exact f32 hex constants using fma.rn, pi/2
+        # reconstruction for |x| > 1, sign-bit restoration, and NaN handling.
+        # Triton's bundled libdevice uses a different approximation, and a
+        # 1 ULP atan difference can be amplified by steep consumers such as
+        # digamma near zero.
+        shape = x.shape
+
+        def gen(expr: str, dtype: torch.dtype = torch.float32) -> TritonCSEVariable:
+            return V.kernel.cse.generate(
+                V.kernel.compute, expr, dtype=dtype, shape=shape
+            )
+
+        def fma(a: Any, b: Any, c: Any) -> Any:
+            return TritonOverrides._inline_asm_f32(
+                "fma.rn.f32 $0, $1, $2, $3;", [a, b, c], shape
+            )
+
+        c = TritonOverrides._f32_const_from_bits
+        one = c(0x3F800000)
+        inf = c(0x7F800000)
+
+        abs_x = gen(f"tl_math.abs({x})")
+        large = gen(f"{abs_x} > {one}", torch.bool)
+        rcp = TritonOverrides._inline_asm_f32(
+            "rcp.approx.ftz.f32 $0, $1;", [abs_x], shape
+        )
+        z = gen(f"tl.where({large}, {rcp}, {abs_x})")
+        z2 = gen(f"{z} * {z}")
+
+        poly = fma(c(0x3B2090AA), z2, c(0xBC6BE14F))
+        poly = fma(poly, z2, c(0x3D23397E))
+        poly = fma(poly, z2, c(0xBD948A7A))
+        poly = fma(poly, z2, c(0x3DD76B21))
+        poly = fma(poly, z2, c(0xBE111E88))
+        poly = fma(poly, z2, c(0x3E4CAF60))
+        poly = fma(poly, z2, c(0xBEAAAA27))
+
+        correction = gen(f"{z2} * {poly}")
+        result = fma(correction, z, z)
+        neg_result = gen(f"-{result}")
+        pi_over_two_minus_result = fma(c(0x3F6EE581), c(0x3FD774EB), neg_result)
+        result = gen(f"tl.where({large}, {pi_over_two_minus_result}, {result})")
+
+        sign_mask = "tl.full([], 0x80000000, tl.uint32)"
+        sign = gen(f"{x}.to(tl.uint32, bitcast=True) & {sign_mask}", torch.uint32)
+        result_bits = gen(f"{result}.to(tl.uint32, bitcast=True)", torch.uint32)
+        signed_bits = gen(f"{sign} | {result_bits}", torch.uint32)
+        signed_result = gen(f"{signed_bits}.to(tl.float32, bitcast=True)")
+        not_nan = gen(f"{abs_x} <= {inf}", torch.bool)
+        return gen(f"tl.where({not_nan}, {signed_result}, {result})")
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def atan(x):
-        return f"libdevice.atan({x})"
+        dtype = triton_arg_dtype(x)
+        needs_upcast = needs_upcast_to_float32(x)
+        if (
+            not torch.version.hip
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and isinstance(x, CSEVariable)
+            and (dtype == torch.float32 or needs_upcast)
+        ):
+            result_dtype = None
+            if needs_upcast:
+                result_dtype = dtype
+                x = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    f"{x}.to(tl.float32)",
+                    dtype=torch.float32,
+                    shape=x.shape,
+                )
+            result = TritonOverrides._cuda_atanf(x)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+            return result
+
+        upcast = ".to(tl.float32)" if needs_upcast else ""
+        result = f"libdevice.atan({x}{upcast})"
+        if needs_upcast and dtype is not None and dtype != torch.float32:
+            return f"{result}.to({triton_type(dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2159,6 +2271,7 @@ class TritonOverrides(OpOverrides):
 
 # Register the custom pow override after class creation so type checkers see
 # a plain callable instead of the class-body staticmethod descriptor.
+OpDtypeSupport.register_upcast(TritonOverrides.atan, True)
 OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
@@ -2239,51 +2352,20 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # Our sympy expr printing casts to the current kernel index dtype.
-        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
+        # index_expr is the materialization point for SymPy expressions on the
+        # indexing path. int32/int64 requests are normalized to the kernel's
+        # selected index dtype; smaller integer and non-integer requests still
+        # use the requested dtype as the logical cast dtype.
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
-
-        # after we emit this var we cast it to the correct dtype
-        orig = config.test_configs.runtime_triton_dtype_assert
-        try:
-            config.test_configs.runtime_triton_dtype_assert = False
-            var = V.kernel.cse.generate(
-                V.kernel.compute,
-                indexing.index_str,
-                bounds=get_bounds_index_expr(expr),
-                dtype=dtype,
-                shape=shape,
-            )
-        finally:
-            config.test_configs.runtime_triton_dtype_assert = orig
-
-        if dtype not in (torch.int32, torch.int64):
-            var = V.kernel.cse.generate(
-                V.kernel.compute,
-                cls.to_dtype(var, dtype),
-                dtype=upcast_compute_type(dtype),
-                shape=var.shape,
-            )
-        else:
-            # TODO: we are not always consistent in enforcing that the output of the index expr printing
-            # results in the indexing dtype. So if we detect that we have an input which might type promote
-            # to a dtype other than indexing dtype, add a cast.
-            # Trying to avoid
-            dtype = index_dtype
-            for index_var in expr.free_symbols:
-                if symbol_is_type(index_var, SymT.TMP):
-                    dtype = torch.promote_types(
-                        dtype, V.kernel.cse.varname_map[index_var.name].dtype
-                    )
-
-            if dtype != index_dtype:
-                var = V.kernel.cse.generate(
-                    V.kernel.compute,
-                    cls.to_dtype(var, index_dtype),
-                    dtype=index_dtype,
-                    shape=var.shape,
-                )
+        cast_dtype = index_dtype if dtype in (torch.int32, torch.int64) else dtype
+        output_dtype = upcast_compute_type(cast_dtype)
+        var = V.kernel.cse.generate(
+            V.kernel.compute,
+            cls.to_dtype(f"({indexing.index_str})", cast_dtype),
+            bounds=get_bounds_index_expr(expr),
+            dtype=output_dtype,
+            shape=shape,
+        )
 
         var.mask_vars = indexing.mask_vars
         return var
@@ -2671,6 +2753,7 @@ class TMACompatibilityChecker:
     def are_block_parameters_compatible(
         self,
         block_params: BlockParameters,
+        constant_offset: sympy.Expr | int = 0,
     ) -> bool:
         """
         Check if the block parameters are valid for TMA.
@@ -2682,8 +2765,12 @@ class TMACompatibilityChecker:
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
                 for st in block_params.strides
             ]
+            constant_offset_expr = V.graph.sizevars.replace_backed_symbols_with_hints(
+                sympy.sympify(constant_offset)
+            )
         else:
             strides = block_params.strides
+            constant_offset_expr = sympy.sympify(constant_offset)
 
         # The TMA API requires that the innermost stride is 1
         # and that the outer strides are 16 byte aligned
@@ -2708,6 +2795,24 @@ class TMACompatibilityChecker:
                     strides,
                 )
                 return False
+
+        # Ensure the TMA descriptor base pointer maintains 16-byte alignment.
+        # The actual kernel-side base pointer is computed as `in_ptr + constant_offset`.
+        # While `in_ptr` is handled to be 16-byte aligned (see assume_aligned_inputs and copy_if_misaligned),
+        # adding a constant element offset may break that alignment requirement.
+        # We must verify that the resulting address remains 16-byte aligned after applying constant_offset.
+        if not V.graph.sizevars.statically_known_equals(
+            ModularIndexing(constant_offset_expr * element_size, 1, sympy.Integer(16)),
+            sympy.Integer(0),
+        ):
+            log.debug(
+                "%s TMA descriptor base must be 16 byte aligned but constant_offset=%s "
+                "with %d-byte dtype yields a non-16-byte aligned base.",
+                self.failed_debug_prefix,
+                constant_offset_expr,
+                element_size,
+            )
+            return False
 
         # Now compute the minimum value of the block type that is used
         # in the innermost block size that can guarantee that 16 bytes of data
@@ -3329,7 +3434,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         sizevars.lookup_precomputed_size(slice_numels[0]),
                     )
                 ] + [
-                    sympy.Min(
+                    Min(
                         CeilDiv(
                             linear_block_size, sizevars.lookup_precomputed_size(numel)
                         ),
@@ -3464,7 +3569,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
                     if not tma_compatibility_checker.are_block_parameters_compatible(
-                        options.params
+                        options.params,
+                        constant_offset=options.constant_offset,
                     ):
                         return None
 
@@ -3812,6 +3918,34 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
+    def _range_tree_mask_shape(self, mask: str) -> BlockShapeType:
+        for tree in self.active_range_trees():
+            if tree.owns_mask(mask):
+                return tree.mask_shape(self.triton_tensor_ndim())
+        return None
+
+    def _mask_shape(self, mask: str | TritonCSEVariable) -> BlockShapeType:
+        if isinstance(mask, TritonCSEVariable):
+            return mask.shape
+        return self._range_tree_mask_shape(mask)
+
+    def _broadcast_shape_with_masks(
+        self,
+        shape: BlockShapeType,
+        mask_vars: OrderedSet[str | TritonCSEVariable],
+    ) -> BlockShapeType:
+        if shape is None:
+            return None
+
+        result_shape = tuple(shape)
+        for mask in mask_vars:
+            mask_shape = self._mask_shape(mask)
+            if mask_shape is None:
+                return None
+            result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
+
+        return result_shape
+
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
@@ -3934,9 +4068,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #  2) It is a non-coalesced load. The intuition is that if it's
         #  non-coalesced, we will likely load each element multiple times in
         #  practice.
-        #  3) It will be used later and it won't be CSE'd. Equiv., if all the following hold
-        #   3.1) We are in a reduction loop
-        #   3.2) Its not its last use
+        #  3) The buffer will be loaded later and it won't be CSE'd. Equiv.,
+        #  if all the following hold
+        #   3.1) We are in a looped or persistent reduction
+        #   3.2) Its not its last load
         #   3.3) This load will not be lifted to the body
         #
         is_coalesced = any(
@@ -3946,7 +4081,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ep = ", eviction_policy='evict_last'"
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
-        elif self.inside_reduction and self.range_trees[-1].is_loop:
+        elif self.inside_reduction and (
+            self.persistent_reduction or self.range_trees[-1].is_loop
+        ):
 
             def decide_later():
                 if load_counts[name] > expected_count and (
@@ -4080,7 +4217,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 line = f"tl.where({indexing.mask_str}, {result_var}, {other_val})"
                 result_var = self.cse.generate(
-                    load_buffer, line, dtype=dtype, shape=result_var.shape
+                    load_buffer,
+                    line,
+                    dtype=dtype,
+                    shape=self._broadcast_shape_with_masks(
+                        result_var.shape, indexing.mask_vars
+                    ),
                 )
 
         if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
@@ -4452,11 +4594,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
+        index_dtype = (
+            self.features.select_index_dtype()
+            if reduction_type in ("argmax", "argmin")
+            else None
+        )
+        result_dtype = index_dtype if index_dtype is not None else torch_acc_type
         result_shape = list(self.dense_size_list())
         result_shape[dim] = "1"
-        result_var: Any = self.cse.newvar(
-            dtype=torch_acc_type, shape=tuple(result_shape)
-        )
+        result_var: Any = self.cse.newvar(dtype=result_dtype, shape=tuple(result_shape))
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
@@ -4519,15 +4665,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
-                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+                assert index_dtype is not None
                 if logical_index:
-                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
+                    accumulator_index = (
+                        f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    )
                 else:
                     accumulator_index = str(
                         self.cse.generate(
                             self.compute,
                             f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                            dtype=accumulator_dtype,
+                            dtype=index_dtype,
                             shape=masked_value.shape,
                         )
                     )
@@ -4535,7 +4683,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
-                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4608,7 +4755,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
-                index_dtype = self.features.select_index_dtype()
+                assert index_dtype is not None
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, "
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"

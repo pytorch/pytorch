@@ -11,7 +11,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 from unittest import mock
 
 
@@ -1120,7 +1120,9 @@ def _export_to_torch_ir(
                     )
 
                     if use_legacy_dynamo_graph_capture():
-                        if constraints or dynamic_shapes:
+                        if (constraints or dynamic_shapes) and not isinstance(
+                            f, torch.fx.GraphModule
+                        ):
                             # Dynamic export needs bytecode-flattened capture here:
                             # the transformer capture keeps the public signature
                             # and does not preserve TensorPropertySource on the
@@ -1875,6 +1877,9 @@ def _strict_export(
     # to update "val"
     for node in gm_torch_level.graph.nodes:
         if node.op == "get_attr" and "val" not in node.meta:
+            if "example_value" in node.meta:
+                node.meta["val"] = node.meta["example_value"]
+                continue
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
@@ -1917,12 +1922,25 @@ def _strict_export(
         # Since we're using bytecode codegen, we need to separately apply tuple
         # output instead of modifying pytree spec inplace.
         orig_arg_names = gm_torch_level.graph._codegen.orig_arg_names
-        if dynamo_fake_mode is None:
-            raise AssertionError("dynamo_fake_mode must not be None")
-        with dynamo_fake_mode:
-            _, orig_out_spec = pytree.tree_flatten(
-                gm_torch_level(*fake_args, **fake_kwargs)
+        output_node = next(
+            (node for node in gm_torch_level.graph.nodes if node.op == "output"),
+            None,
+        )
+        if output_node is None:
+            raise AssertionError("output_node must not be None")
+        flat_outputs = output_node.args[0]
+        if not isinstance(flat_outputs, (tuple, list)):
+            flat_outputs = (flat_outputs,)
+        dummy_outputs = tuple(object() for _ in flat_outputs)
+        unflatten_output = cast(
+            Callable[..., object], gm_torch_level._dynamo_bytecode_unflatten
+        )
+        _, orig_out_spec = pytree.tree_flatten(
+            unflatten_output(
+                dummy_outputs,
+                _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
             )
+        )
         out_spec = orig_out_spec
         if out_spec.type not in (list, tuple):
             wrap_tuple = gm_torch_level.graph._codegen.wrap_tuple = True

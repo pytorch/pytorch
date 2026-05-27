@@ -715,6 +715,88 @@ graph():
             any(placeholders[0] in node.all_input_nodes for node in gm.graph.nodes)
         )
 
+    def test_unlift_symbolic_placeholders_handles_stride_and_storage_offset(self):
+        from torch._dynamo.source import (
+            ConstantSource,
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
+        from torch._functorch._aot_autograd.schemas import GraphSignature
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        with FakeTensorMode(shape_env=shape_env):
+            s0 = shape_env.create_symintnode(
+                shape_env.create_symbol(
+                    val=3,
+                    source=ConstantSource("s0"),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                ),
+                hint=3,
+            )
+            x_meta = torch.empty((s0, 2), device="meta")
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = x_meta
+        lifted_stride = graph.placeholder("lifted_stride")
+        lifted_stride.meta["val"] = s0
+        lifted_storage_offset = graph.placeholder("lifted_storage_offset")
+        lifted_storage_offset.meta["val"] = s0
+        graph.output((lifted_stride, lifted_storage_offset))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        leaf_spec = pytree.tree_flatten((None,))[1]
+        graph_signature = GraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=["x", "lifted_stride", "lifted_storage_offset"],
+            user_outputs=["lifted_stride", "lifted_storage_offset"],
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            parameters_to_mutate={},
+            user_inputs_to_mutate={},
+            in_spec=leaf_spec,
+            out_spec=leaf_spec,
+            backward_signature=None,
+            input_tokens=[],
+            output_tokens=[],
+        )
+        x_source = LocalSource("x", is_input=True)
+
+        _unlift_symbolic_placeholders(
+            gm,
+            graph_signature,
+            [
+                x_source,
+                TensorPropertySource(x_source, TensorProperty.STRIDE, 0),
+                TensorPropertySource(x_source, TensorProperty.STORAGE_OFFSET),
+            ],
+        )
+
+        placeholders = list(gm.graph.find_nodes(op="placeholder"))
+        sym_stride_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.sym_stride.int
+        ]
+        sym_storage_offset_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.sym_storage_offset.default
+        ]
+
+        self.assertEqual([node.name for node in placeholders], ["x"])
+        self.assertEqual(graph_signature.user_inputs, ["x"])
+        self.assertEqual(len(sym_stride_nodes), 1)
+        self.assertIs(sym_stride_nodes[0].args[0], placeholders[0])
+        self.assertEqual(sym_stride_nodes[0].args[1], 0)
+        self.assertEqual(len(sym_storage_offset_nodes), 1)
+        self.assertIs(sym_storage_offset_nodes[0].args[0], placeholders[0])
+
     def test_export_strict_narrow_unbacked_expr(self):
         # Tests that we are able to handle 0/1 specialization on sizes represented
         # by unbacked int expressions by transforming them into an unbacked int.
