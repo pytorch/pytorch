@@ -4828,6 +4828,64 @@ def forward(self, tangents_1):
         self.assertEqual(outer_size, (4, 6))
         self.assertEqual(outer_stride, (6, 1))
 
+    def test_unwrap_subclass_outputs_uses_symints_from_meta(self):
+        from torch._functorch._aot_autograd.descriptors import (
+            PlainAOTOutput,
+            SubclassSizeAOTOutput,
+            SubclassStrideAOTOutput,
+        )
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+        from torch._functorch._aot_autograd.subclass_utils import (
+            unwrap_tensor_subclasses,
+        )
+
+        # Simulate metadata that recorded dynamic outer size/stride slots, while
+        # the current wrapper instance reports concrete Python ints.
+        marked_a = torch.randn(4, 6)
+        marked_b = torch.randn(4, 6)
+        torch._dynamo.mark_dynamic(marked_a, 0)
+        torch._dynamo.mark_dynamic(marked_a, 1)
+        torch._dynamo.mark_dynamic(marked_b, 0)
+        torch._dynamo.mark_dynamic(marked_b, 1)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_a = fake_mode.from_tensor(marked_a)
+            fake_b = fake_mode.from_tensor(marked_b)
+            fake_two_tensor = TwoTensor(fake_a, fake_b)
+        meta = SubclassCreationMeta(
+            flat_tensor_start_idx=0,
+            arg_count=5,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=fake_two_tensor.size(),
+            outer_stride=fake_two_tensor.stride(),
+            meta=None,
+            original_subclass=fake_two_tensor,
+        )
+
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        out, descs = unwrap_tensor_subclasses(
+            [TwoTensor(a, b)],
+            [PlainAOTOutput(0)],
+            append_symints=True,
+            subclass_metas=[meta],
+        )
+
+        self.assertEqual(out, [a, b, 4, 6, 6])
+        self.assertIsInstance(descs[2], SubclassSizeAOTOutput)
+        self.assertEqual(descs[2].idx, 0)
+        self.assertIsInstance(descs[3], SubclassSizeAOTOutput)
+        self.assertEqual(descs[3].idx, 1)
+        self.assertIsInstance(descs[4], SubclassStrideAOTOutput)
+        self.assertEqual(descs[4].idx, 0)
+
     def test_subclass_dynamic_stride(self):
         @torch.compile(backend="aot_eager", dynamic=True)
         def f(x):
