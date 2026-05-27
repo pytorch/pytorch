@@ -372,7 +372,10 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 class StreamVariable(StreamContextVariable):
     """Represents the device-agnostic torch.Stream class"""
 
-    _cpython_type = torch.Stream
+    _cpython_type: type = torch.Stream  # pyrefly: ignore [bad-override]
+    # Subclasses set this to the device-specific handle attribute name
+    # (e.g. "cuda_stream", "sycl_queue").  None means no special handling.
+    _device_handle_attr: str | None = None
 
     def __init__(
         self,
@@ -397,7 +400,22 @@ class StreamVariable(StreamContextVariable):
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
-        return torch.Stream
+        return self._cpython_type
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        if self._device_handle_attr is not None and name == self._device_handle_attr:
+            from ..guards import GuardBuilder, install_guard
+
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+            if hasattr(self.value, name):
+                return ConstantVariable.create(getattr(self.value, name))
+
+            if hasattr(self.value, "native_handle"):
+                return ConstantVariable.create(self.value.native_handle)
+
+        return super().var_getattr(tx, name)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -412,7 +430,7 @@ class StreamVariable(StreamContextVariable):
         if not hasattr(self.value, name):
             raise AssertionError(f"no stream method found named {name}")
 
-        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
+        from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name == "wait_event":
@@ -486,30 +504,26 @@ class StreamVariable(StreamContextVariable):
                     {},
                 ),
             )
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            from ..guards import GuardBuilder, install_guard
-
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-
-            # NB : Checking for mutation is necessary because we compare
-            # constant values
-            other = args[0]
-            if not isinstance(other, StreamVariable):
-                return VariableTracker.build(tx, NotImplemented)
-
-            if other.source:
-                if self.source is None:
-                    raise AssertionError(
-                        "Expected self.source to be set for stream comparison guard"
-                    )
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            return VariableTracker.build(
-                tx,
-                cmp_name_to_op_mapping[name](self.value, other.value),  # type: ignore[arg-type]
-            )
-
         return super().call_method(tx, name, args, kwargs)
+
+    def richcompare_impl(self, tx, other, op):
+        from ..guards import GuardBuilder, install_guard
+        from ..utils import cmp_name_to_op_mapping
+        from .constant import ConstantVariable
+
+        if not isinstance(other, StreamVariable):
+            # Stream's tp_richcompare never returns NotImplemented.
+            # Non-Stream: eq->False, ne->True, ordering->False.
+            return ConstantVariable.create(op == "__ne__")
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        if other.source:
+            install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        op_fn = cmp_name_to_op_mapping[op]
+        return VariableTracker.build(
+            tx,
+            op_fn(self.value, other.value),  # pyrefly: ignore[bad-argument-type]
+        )
 
     def as_proxy(self) -> Proxy:
         return self.proxy
@@ -571,26 +585,24 @@ class CudaStreamVariable(StreamVariable):
     """Represents torch.cuda.Stream, preserving device-specific type and attributes."""
 
     _cpython_type = torch.cuda.Stream
+    _device_handle_attr = "cuda_stream"
 
-    def python_type(self) -> type:
-        return torch.cuda.Stream
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from . import ConstantVariable
+class XpuStreamVariable(StreamVariable):
+    """Represents torch.xpu.Stream, preserving device-specific type and attributes."""
 
-        if name == "cuda_stream":
-            from ..guards import GuardBuilder, install_guard
+    _cpython_type = torch.xpu.Stream
+    _device_handle_attr = "sycl_queue"
 
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
 
-            if hasattr(self.value, "cuda_stream"):
-                return ConstantVariable.create(self.value.cuda_stream)
+_stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {
+    torch.cuda.current_stream: CudaStreamVariable,
+    torch.xpu.current_stream: XpuStreamVariable,
+}
 
-            if hasattr(self.value, "native_handle"):
-                return ConstantVariable.create(self.value.native_handle)
 
-        return super().var_getattr(tx, name)
+def _get_stream_variable_cls(stream_fn: object) -> type[StreamVariable] | None:
+    return _stream_fn_to_variable_cls.get(stream_fn)
 
 
 class EventVariable(VariableTracker):
@@ -610,6 +622,11 @@ class EventVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
         return torch.Event

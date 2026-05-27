@@ -2333,20 +2333,26 @@ def _new_process_group_helper(
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    _world.pg_map[pg] = (backend, prefix_store)
-    _world.pg_names[pg] = group_name
-    _register_process_group(group_name, pg)
-
-    _world.pg_backend_config[pg] = str(backend_config)
-    # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
-        pg_tag = f"ptd:{group_name}"
-        _world.tags_to_pg.setdefault("", []).append(pg)
+        # Default-tagged PG: also added to the "" default tag.
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=prefix_store,
+            group_name=group_name,
+            backend_config=str(backend_config),
+            add_to_default_tag=True,
+        )
     else:
-        pg_tag = f"user:{pg_tag}"
-
-    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
-    _world.pg_to_tag[pg] = pg_tag
+        # User-tagged PG: only added to the "user:{pg_tag}" tag.
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=prefix_store,
+            group_name=group_name,
+            backend_config=str(backend_config),
+            pg_tag=f"user:{pg_tag}",
+        )
     return pg, prefix_store
 
 
@@ -2990,9 +2996,16 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is
-            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
-            matters and it needs to match with corresponding isend/irecv on the
-            remote end.
+            ``torch.distributed.P2POp``). All operations in the list are treated as
+            a single batch -- the relative ordering of sends vs. receives in the
+            list does not matter and will not cause deadlocks. For example,
+            ``[recv_from_1, send_to_1]`` is equivalent to ``[send_to_1, recv_from_1]``.
+
+            The ordering **does** matter for multiple operations between the same
+            pair of ranks in the same direction: if rank 0 calls
+            ``[send_to_1(A), send_to_1(B)]``, rank 1 must call
+            ``[recv_from_0(A), recv_from_0(B)]`` in the same order to ensure
+            the correct tensors are matched.
 
     Returns:
         A list of distributed request objects returned by calling the corresponding
@@ -5666,19 +5679,17 @@ def split_group(
         )
 
     # update global state
-    _world.pg_map[split_pg] = (pg_backend, split_pg.get_group_store())
-    _world.pg_names[split_pg] = group_name
-    _register_process_group(group_name, split_pg)
-    _world.pg_backend_config[split_pg] = str(backend_config)
-    pg_tag = f"ptd:{group_name}"
-    _world.tags_to_pg.setdefault(pg_tag, []).append(split_pg)
-    _world.pg_to_tag[split_pg] = pg_tag
-
-    # Create the global rank to group rank mapping
-    _world.pg_group_ranks[split_pg] = {
-        global_rank: group_rank
-        for group_rank, global_rank in enumerate(global_ranks_in_my_group)
-    }
+    _register_pg_in_world(
+        split_pg,
+        backend_name=pg_backend,
+        store=split_pg.get_group_store(),
+        group_name=group_name,
+        backend_config=str(backend_config),
+        rank_mapping={
+            global_rank: group_rank
+            for group_rank, global_rank in enumerate(global_ranks_in_my_group)
+        },
+    )
 
     if _use_torchcomms_enabled():
         # pyrefly: ignore [missing-attribute]
@@ -5867,6 +5878,34 @@ def _new_group_with_tag(
         group_rank = global_rank
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
+
+    # If the default PG implements new_group, delegate to it. This allows
+    # custom Python PG subclasses to handle subgroup creation in a single
+    # call, avoiding the per-device creator iteration in
+    # _new_process_group_helper.
+    if hasattr(default_pg, "new_group") and callable(default_pg.new_group):
+        pg_or_none = default_pg.new_group(
+            ranks,
+            timeout=timeout,
+            pg_options=backend_options,
+            group_name=group_name,
+            group_desc=group_desc,
+        )
+        if pg_or_none is None:
+            return GroupMember.NON_GROUP_MEMBER
+
+        pg: ProcessGroup = pg_or_none  # pyrefly: ignore[bad-assignment]
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=PrefixStore(f"{group_name}/", default_store),
+            group_name=group_name,
+            backend_config=str(BackendConfig(backend)),
+            rank_mapping={
+                global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
+            },
+        )
+        return pg
 
     pg, pg_store = _new_process_group_helper(
         group_world_size,
@@ -6420,7 +6459,7 @@ def _finalize_shrunk_group(
         global_rank: group_rank
         for group_rank, global_rank in enumerate(remaining_ranks)
     }
-    _update_process_group_global_state(
+    _register_pg_in_world(
         pg=new_pg,
         backend_name=original_group_metadata["backend_name"],
         store=original_group_metadata["store"],
@@ -6634,7 +6673,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
         )
 
 
-def _update_process_group_global_state(
+def _register_pg_in_world(
     pg: ProcessGroup,
     backend_name: str,
     store: Store,
@@ -6643,6 +6682,7 @@ def _update_process_group_global_state(
     rank_mapping: dict[int, int] | None = None,
     pg_tag: str | None = None,
     user_tag: str | None = None,
+    add_to_default_tag: bool = False,
 ) -> None:
     """
     Update all global state dictionaries for a process group.
@@ -6661,6 +6701,9 @@ def _update_process_group_global_state(
         pg_tag (str, optional): Process group tag. If None, defaults to f"ptd:{group_name}".
         user_tag (str, optional): User-provided tag for special tag handling.
             If provided, creates "user:{user_tag}" tag and also adds to default "".
+        add_to_default_tag (bool): When True and user_tag is None, also appends
+            pg to the default "" tag in addition to pg_tag. Ignored when
+            user_tag is set (the "" tag is always appended in that case).
     """
     # Update main process group mappings
     _world.pg_map[pg] = (backend_name, store)
@@ -6688,6 +6731,8 @@ def _update_process_group_global_state(
         _world.pg_to_tag[pg] = user_pg_tag
     else:
         # Standard process group tag
+        if add_to_default_tag:
+            _world.tags_to_pg.setdefault("", []).append(pg)
         _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
         _world.pg_to_tag[pg] = pg_tag
 

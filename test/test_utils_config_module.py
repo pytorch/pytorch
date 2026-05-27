@@ -27,7 +27,7 @@ class TestConfigModule(TestCase):
         for k in config._config:
             config._config[k].user_override.set(_UNSET_SENTINEL)
             config._config[k].hide = False
-        config._hash_digest = None
+        config._hash_cache_var.set(None)
         config._get_dict_dirty_keys_var.set(None)
         config._get_dict_cache_var.set(None)
         # Reset deprecation warning flags
@@ -287,8 +287,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 hash_value,
             )
 
-        config._hash_digest = "fake"
-        self.assertEqual(config.get_hash(), "fake")
+        config._hash_cache_var.set(b"fake")
+        self.assertEqual(config.get_hash(), b"fake")
 
         config.e_bool = False
         self.assertNotEqual(
@@ -765,6 +765,78 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             revert()
         d3 = config._get_dict(readonly_values=True)
         self.assertEqual(d3["e_int"], 1)
+
+    def test_get_hash_per_thread_isolation(self):
+        """Each thread should compute its own hash based on its own config values."""
+        import threading
+
+        base_hash = config.get_hash()
+
+        thread_hash = [None]
+        error = [None]
+
+        def thread_fn():
+            try:
+                config.e_int = 999
+                thread_hash[0] = config.get_hash()
+            except Exception as e:
+                error[0] = e
+
+        t = threading.Thread(target=thread_fn)
+        t.start()
+        t.join()
+        if error[0] is not None:
+            raise error[0]
+
+        # The main thread's hash should be unchanged (e_int still at default)
+        self.assertEqual(config.get_hash(), base_hash)
+        # The child thread should have gotten a different hash
+        self.assertNotEqual(thread_hash[0], base_hash)
+
+    def test_hash_dirty_on_setattr(self):
+        """Direct config assignment should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        config.e_int = 42
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_delattr(self):
+        """Deleting a config key should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        del config.e_int
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_patch(self):
+        """Entering and exiting a patch should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        with config.patch(e_int=42):
+            self.assertTrue(config._hash_dirty_var.get())
+            config.get_hash()
+            self.assertFalse(config._hash_dirty_var.get())
+        # Exiting the patch restores old values via __setattr__, which marks dirty
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_closure_patcher(self):
+        """_make_closure_patcher should mark the hash dirty on apply and revert."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        change_fn = config._make_closure_patcher(e_int=42)
+        revert = change_fn()
+        self.assertTrue(config._hash_dirty_var.get())
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        revert()
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_load_config(self):
+        """Loading a saved config should mark the hash dirty."""
+        saved = config.save_config()
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        config.load_config(saved)
+        self.assertTrue(config._hash_dirty_var.get())
 
 
 if __name__ == "__main__":
