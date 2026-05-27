@@ -45,7 +45,9 @@ from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import NotRequired, override, Self, TypedDict
 
 import torch
+import torch._library.custom_ops as custom_ops
 import torch._library.opaque_object as opaque_object
+import torch._library.simple_registry as simple_registry
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
@@ -1181,6 +1183,24 @@ class HashableOpaqueValue:
     ordinal: int
 
 
+def _has_torch_library_fake_impl(target: object) -> bool:
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+
+    if custom_ops._maybe_get_opdef(target) is not None:
+        return True
+
+    entry = simple_registry.singleton.get(target._name)
+    return entry is not None and entry.fake_impl.kernel is not None
+
+
+def _custom_op_meta_for_cache_key(node: torch.fx.Node) -> object:
+    for key in ("val", "example_value", "tensor_meta"):
+        if key in node.meta:
+            return node.meta[key]
+    return None
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -1237,13 +1257,28 @@ class FxGraphHashDetails:
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
-        # Node meta will not be part of gm's reduce function, so lets remember
-        # the kernel source code separately
+        # Node meta will not be part of gm's reduce function, so remember the
+        # user-provided pieces of metadata/source that affect codegen separately.
         self.user_defined_triton_source: list[Any] = []
+        self.user_custom_op_output_metadata: list[tuple[str, object]] = []
         if gm is not None:
             for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
+                for node in module.graph.nodes:
+                    target = node.target
+                    if (
+                        node.op != "call_function"
+                        or not isinstance(target, torch._ops.OpOverload)
+                        or not _has_torch_library_fake_impl(target)
+                    ):
+                        continue
+                    self.user_custom_op_output_metadata.append(
+                        (
+                            target._name,
+                            _custom_op_meta_for_cache_key(node),
+                        )
+                    )
                 for node in itertools.chain(
                     module.graph.find_nodes(
                         op="call_function", target=triton_kernel_wrapper_functional
