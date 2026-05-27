@@ -26,9 +26,71 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # When ROCM_VERSION=7.13, install ROCm from the multi-arch wheel index.
+    if [[ "${ROCM_VERSION}" == "7.13" || "${ROCM_VERSION}" == "7.13.0" ]]; then
+      apt-get install -y --no-install-recommends pkg-config
+
+      if [[ -d /opt/rocm ]]; then
+        rm -rf /opt/rocm
+      fi
+
+      ROCM_WHEEL_VERSION="7.13.0"
+      ROCM_MULTI_ARCH_INDEX_URL="${ROCM_MULTI_ARCH_INDEX_URL:-https://repo.amd.com/rocm/whl-multi-arch/}"
+
+      echo "Installing ROCm ${ROCM_WHEEL_VERSION} from ${ROCM_MULTI_ARCH_INDEX_URL}"
+      python3 -m pip install --no-cache-dir \
+        --index-url "${ROCM_MULTI_ARCH_INDEX_URL}" \
+        "rocm[libraries,devel]==${ROCM_WHEEL_VERSION}" \
+        "rocm-sdk-device-gfx90a==${ROCM_WHEEL_VERSION}" \
+        "rocm-sdk-device-gfx942==${ROCM_WHEEL_VERSION}" \
+        "rocm-sdk-device-gfx950==${ROCM_WHEEL_VERSION}"
+
+      ROCM_HOME_ACTUAL="$(rocm-sdk path --root)"
+      ln -sfn "${ROCM_HOME_ACTUAL}" /opt/rocm
+      ROCM_HOME=/opt/rocm
+      ROCM_BIN=/opt/rocm/bin
+      ROCM_CMAKE_PREFIX=/opt/rocm
+      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
+      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
+      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+
+      echo "ROCM_HOME_ACTUAL=${ROCM_HOME_ACTUAL}"
+      echo "ROCM_HOME=${ROCM_HOME}"
+      echo "ROCM_BIN=${ROCM_BIN}"
+      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+
+      cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
+export ROCM_PATH="${ROCM_HOME}"
+export ROCM_HOME="${ROCM_HOME}"
+export ROCM_SOURCE_DIR="${ROCM_HOME}"
+export ROCM_BIN="${ROCM_BIN}"
+export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
+export PATH="${ROCM_BIN}:\${PATH}"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_HOME}/lib:${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
+export LIBRARY_PATH="${ROCM_HOME}/lib:${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
+# Device library paths
+export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+# theRock system dependencies
+export ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS_INCLUDE}"
+export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
+export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
+export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
+export MAGMA_HOME="${ROCM_HOME}/magma"
+ROCM_ENV
+
+      echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
+
+      apt-get autoclean && apt-get clean
+      rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+      echo "ROCm ${ROCM_WHEEL_VERSION} multi-arch wheel installation complete"
+
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
-    if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+    elif [[ "${ROCM_VERSION}" == "nightly" ]]; then
       apt-get install -y --no-install-recommends pkg-config
 
       if [[ -d /opt/rocm ]]; then

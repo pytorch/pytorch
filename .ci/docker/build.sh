@@ -176,6 +176,14 @@ case "$tag" in
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx942"
     ;;
+  pytorch-linux-noble-rocm-7-13-py3)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=13
+    ROCM_VERSION=7.13.0
+    TRITON=yes
+    KATEX=yes
+    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
+    ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
