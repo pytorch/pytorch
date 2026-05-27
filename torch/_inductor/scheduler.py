@@ -103,6 +103,7 @@ from .utils import (
     is_output_of_multi_outputs_template,
     is_wait,
     sympy_product,
+    sympy_subs,
 )
 from .virtualized import V
 
@@ -851,6 +852,13 @@ class NestedReduction:
         if grouped_reduction_info is None:
             return False
 
+        # Total-element equality also implies divisibility of the grouped
+        # parent extent by group_size (grouped_total factors through
+        # FloorDiv(extent, group_size) * group_size). No separate Mod check
+        # is needed. The sizevars divisible set records Mod(s, s//G) from
+        # the view op, not Mod(s, G), so statically_known_equals on
+        # Mod(extent, group_size) would fail with dynamic shapes.
+        # TODO: teach sizevars to infer Mod(s, G)==0 from Mod(s, s//G)==0
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
         if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
@@ -863,18 +871,28 @@ class NestedReduction:
             outer_numel,
             outer_rnumel,
             group_size,
+            outer_node=outer_node,
         )
         if grouped_axis is None:
             return False
-        group_size_int = int(group_size)
-        if not (1 <= group_size_int and is_power_of_2(group_size_int)):
-            return False
-        grouped_parent_extent = (
+        parent_grouped_axis = (
             outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
         )
-        if not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(grouped_parent_extent, group_size), 0
+        iter_ranges, _ = grouped_reduction.get_ranges()
+        if len(iter_ranges) == 2:
+            grouped_axis_groups = (
+                iter_ranges[1] if grouped_axis is cls.GroupedAxis.R else iter_ranges[0]
+            )
+            if not V.graph.sizevars.statically_known_equals(
+                FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+            ):
+                return False
+        elif not V.graph.sizevars.statically_known_equals(
+            sympy.Mod(parent_grouped_axis, group_size), 0
         ):
+            return False
+        group_size_int = int(group_size)
+        if not (1 <= group_size_int and is_power_of_2(group_size_int)):
             return False
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
@@ -908,6 +926,8 @@ class NestedReduction:
         outer_numel: sympy.Expr,
         outer_rnumel: sympy.Expr,
         group_size: sympy.Expr,
+        *,
+        outer_node: BaseSchedulerNode | None = None,
     ) -> GroupedAxis | None:
         """Return which parent axis is split by the grouped local reduction."""
         sizevars = V.graph.sizevars
@@ -947,7 +967,76 @@ class NestedReduction:
             FloorDiv(outer_numel, group_size), iter_ranges[0]
         ):
             return cls.GroupedAxis.X
+        if outer_node is not None:
+            return cls._get_grouped_axis_from_loop_body(outer_node, grouped_reduction)
         return None
+
+    @classmethod
+    def _get_grouped_axis_from_loop_body(
+        cls, outer_node: BaseSchedulerNode, grouped_reduction: SchedulerNode
+    ) -> GroupedAxis | None:
+        """Use LoopBody iter/reduce vars to disambiguate equal-size axes."""
+        from torch._inductor.loop_body import MemoryUsageType
+
+        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
+        if len(outer_reductions) != 1:
+            return None
+        outer_reduction = typing.cast(SchedulerNode, outer_reductions[0])
+        outer_body = getattr(outer_reduction, "_body", None)
+        grouped_body = getattr(grouped_reduction, "_body", None)
+        if outer_body is None or grouped_body is None:
+            return None
+
+        outer_iter_ranges, outer_reduce_ranges = outer_reduction.get_ranges()
+        grouped_iter_ranges, grouped_reduce_ranges = grouped_reduction.get_ranges()
+        if len(outer_reduce_ranges) != 1 or len(grouped_reduce_ranges) != 1:
+            return None
+
+        def load_exprs_by_name(body: LoopBody) -> dict[str, list[sympy.Expr]]:
+            result: dict[str, list[sympy.Expr]] = defaultdict(list)
+            for entry in body.memory_usage.get(MemoryUsageType.LOAD, ()):
+                if entry.buffer_name is not None:
+                    result[entry.buffer_name].append(
+                        body.indexing_exprs[entry.index_name]
+                    )
+            return result
+
+        if len(outer_body.reduce_vars) != 1 or len(grouped_body.reduce_vars) != 1:
+            return None
+        if len(outer_body.iter_vars) != len(outer_iter_ranges) or len(
+            grouped_body.iter_vars
+        ) != len(grouped_iter_ranges):
+            return None
+
+        outer_reads_by_name = load_exprs_by_name(outer_body)
+        result: NestedReduction.GroupedAxis | None = None
+        grouped_reduce_var = grouped_body.reduce_vars[-1]
+        for name, grouped_read_exprs in load_exprs_by_name(grouped_body).items():
+            outer_read_exprs = outer_reads_by_name.get(name)
+            if not outer_read_exprs:
+                continue
+            for grouped_read_expr in grouped_read_exprs:
+                grouped_coeff = grouped_read_expr.coeff(grouped_reduce_var)
+                if grouped_coeff == 0:
+                    continue
+                for outer_read_expr in outer_read_exprs:
+                    outer_reduce_var = outer_body.reduce_vars[-1]
+                    outer_reduce_coeff = outer_read_expr.coeff(outer_reduce_var)
+                    matches_reduction = grouped_coeff == outer_reduce_coeff
+                    matches_iter = any(
+                        grouped_coeff == outer_read_expr.coeff(var)
+                        for var in outer_body.iter_vars
+                    )
+                    if matches_reduction == matches_iter:
+                        continue
+                    candidate = (
+                        cls.GroupedAxis.R if matches_reduction else cls.GroupedAxis.X
+                    )
+
+                    if result is not None and result != candidate:
+                        return None
+                    result = candidate
+        return result
 
 
 @dataclasses.dataclass
@@ -1881,27 +1970,33 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     return cache_key
 
 
-def _get_mm_like_fn(snode: BaseSchedulerNode) -> Callable[[Any], Any] | None:
+def _get_benchmarkable_extern_fn(
+    snode: BaseSchedulerNode,
+) -> Callable[[Any], Any] | None:
     if not isinstance(snode, ExternKernelSchedulerNode):
-        return None
-    mms_fns = {
-        "extern_kernels.mm": torch.ops.aten.mm,
-        "extern_kernels.bmm": torch.ops.aten.bmm,
-        "extern_kernels.addmm": torch.ops.aten.addmm,
-    }
-    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
-    if python_kernel_name not in mms_fns:
         return None
     if not isinstance(snode.node, ir.ExternKernel):
         return None
-    return mms_fns[python_kernel_name]
+
+    op_overload = snode.node.op_overload
+    if not isinstance(op_overload, torch._ops.OpOverload):
+        return None
+
+    op = op_overload.overloadpacket
+
+    from torch.utils.flop_counter import flop_registry
+
+    if op not in flop_registry:
+        return None
+
+    return op
 
 
 def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
     bench_fn = None
     args_kwargs_fn = None
     if config.runtime_estimations_mms_benchmark:
-        mm_fn = _get_mm_like_fn(snode)
+        mm_fn = _get_benchmarkable_extern_fn(snode)
         if mm_fn is None:
             return None
         bench_fn = mm_fn
@@ -1929,7 +2024,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
         memory_warmup_iters=5,
         benchmark_iters=10,
         max_benchmark_duration=10,
-    )
+    )  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
@@ -2884,6 +2979,7 @@ class FusedNestedReductions(FusedSchedulerNode):
             outer_numel,
             outer_rnumel,
             exact_group_size,
+            outer_node=node1,
         )
         assert grouped_axis is not None
         self.grouped_axis: NestedReduction.GroupedAxis = grouped_axis
@@ -2924,22 +3020,19 @@ class FusedNestedReductions(FusedSchedulerNode):
             self.domain_context, pointwise_domains
         ):
             return False
-        # New prologue producers would need to be inserted before the grouped
-        # reduction, but this path only appends downstream consumers.
+        # Producers for the grouped reduction body need to be inserted before
+        # the reduction; this append-only path only accepts consumers.
         if any(
             domain is NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
             for _, domain in pointwise_domains
         ):
             return False
-        # This commit only supports consumers of the grouped reduction's
-        # reduced output. Parent-full consumers need relaxed dependency
-        # matching, which is added separately.
-        if any(
-            domain is NestedReduction.PointwiseDomain.PARENT_FULL
-            for _, domain in pointwise_domains
-        ):
-            return False
-        return self.scheduler.can_fuse(self.node2, other, can_reorder=can_reorder)
+        return self.scheduler._can_fuse_nested_reduction_append(
+            self.node2,
+            other,
+            pointwise_domains,
+            can_reorder=can_reorder,
+        )
 
     def fuse_with(self, other: BaseSchedulerNode) -> FusedNestedReductions:
         device = self.node2.get_device()
@@ -3258,6 +3351,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
                 len(mix_order),
             )
+        nested_reductions = [x for x in nodes if isinstance(x, FusedNestedReductions)]
+        if nested_reductions:
+            log.debug(
+                "ComboKernels: %d FusedNestedReductions nodes are filtered",
+                len(nested_reductions),
+            )
 
         filtered_nodes = [
             x
@@ -3269,6 +3368,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
                     FusedMixOrderReductions,
+                    FusedNestedReductions,
                 ),
             )
         ]
@@ -4905,8 +5005,7 @@ class Scheduler:
         hint_override: int | None = None,
     ) -> str:
         """
-        Benchmark fused list of nodes and return the execution time
-        in milliseconds on randomly generated inputs.
+        Generate a kernel given a list of pre-fused nodes.
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
@@ -4921,7 +5020,7 @@ class Scheduler:
         self, module: ModuleType, device: torch.device
     ) -> tuple[float, str]:
         """
-        Benchmark fused list of nodes and return the execution time
+        Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
         """
         self.current_device = device
@@ -5034,7 +5133,7 @@ class Scheduler:
 
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -7034,6 +7133,72 @@ class Scheduler:
         else:
             return None
 
+    def _producer_output_names_read_by_consumer(
+        self, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
+    ) -> OrderedSet[str]:
+        producer_buf_names = OrderedSet(
+            self.mutation_renames.get(name, name)
+            for name in producer.get_buffer_names()
+        )
+        return OrderedSet(
+            name
+            for dep in consumer.read_writes.reads
+            if (name := self.mutation_renames.get(dep.name, dep.name))
+            in producer_buf_names
+        )
+
+    def _nested_index_equivalent_dep_names(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> OrderedSet[str] | None:
+        if not NestedReduction.is_candidate(node1, node2):
+            return None
+        # These names feed both the score bridge and relaxed vertical dep
+        # matching. The score bridge exists only so V.choices.can_fuse does not
+        # reject legal equivalent-index deps before vertical legality runs, so it
+        # must use the same fully legal nested relation as can_fuse_vertical.
+        # TODO: split cheap score prefiltering from legality if this shows up in
+        # compile-time profiles, without letting score-only names relax legality.
+        if not NestedReduction.can_fuse(node1, node2):
+            return None
+        return self._producer_output_names_read_by_consumer(node1, node2)
+
+    def _can_fuse_nested_reduction_append(
+        self,
+        grouped_node: BaseSchedulerNode,
+        other: BaseSchedulerNode,
+        pointwise_domains: Sequence[
+            tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]
+        ],
+        *,
+        can_reorder: bool,
+    ) -> bool:
+        index_equivalent_dep_names: OrderedSet[str] = OrderedSet()
+        grouped_buf_names = OrderedSet(
+            self.mutation_renames.get(name, name)
+            for name in grouped_node.get_buffer_names()
+        )
+        for sn, domain in pointwise_domains:
+            if domain is not NestedReduction.PointwiseDomain.PARENT_FULL:
+                continue
+            reads = (
+                self.mutation_renames.get(dep.name, dep.name)
+                for dep in sn.read_writes.reads
+            )
+            index_equivalent_dep_names.update(
+                dep_name for dep_name in reads if dep_name in grouped_buf_names
+            )
+        # Parent-full consumers may read grouped-stage outputs through
+        # broadcasted parent-tile views. Relax matching only for those named
+        # producer outputs; all other deps use normal vertical legality.
+        return self._can_fuse(
+            grouped_node,
+            other,
+            can_reorder=can_reorder,
+            index_equivalent_dep_names=index_equivalent_dep_names,
+        )
+
     def can_fuse(
         self,
         node1: BaseSchedulerNode,
@@ -7067,8 +7232,28 @@ class Scheduler:
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
         """
+        return self._can_fuse(
+            node1,
+            node2,
+            can_reorder=can_reorder,
+            allow_mix_order_reduction=allow_mix_order_reduction,
+        )
+
+    def _can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+        allow_mix_order_reduction: bool = True,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
+    ) -> bool:
         if node1 is node2:
             return False
+        if index_equivalent_dep_names is not None:
+            index_equivalent_dep_names = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in index_equivalent_dep_names
+            )
 
         # Prevent fusion across stream boundaries
         if self._has_multi_stream_nodes():
@@ -7197,7 +7382,7 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node1.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
@@ -7258,12 +7443,16 @@ class Scheduler:
             return False
         del device2
 
-        shared_data_score = self.score_fusion_memory(
+        if index_equivalent_dep_names is None:
+            index_equivalent_dep_names = self._nested_index_equivalent_dep_names(
+                node1, node2
+            )
+        shared_data_score = self._score_fusion_memory_for_can_fuse(
             node1,
             node2,
             allow_mix_order_reduction=allow_mix_order_reduction,
+            index_equivalent_dep_names=index_equivalent_dep_names,
         )
-        assert isinstance(shared_data_score, int)
 
         if (
             can_reorder
@@ -7281,11 +7470,11 @@ class Scheduler:
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
-            shared_data_score = self.score_fusion_memory(
+            shared_data_score = self._score_fusion_memory_for_can_fuse(
                 node1,
                 node2,
+                index_equivalent_dep_names=index_equivalent_dep_names,
             )
-            assert isinstance(shared_data_score, int)
 
         if (
             config.loop_index_inversion_in_fusion
@@ -7310,19 +7499,49 @@ class Scheduler:
 
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
-            can_fuse_vertical = self.can_fuse_vertical(node1, node2)
-            return (
-                can_fuse_vertical
+            if (
+                self.can_fuse_vertical(
+                    node1,
+                    node2,
+                    index_equivalent_dep_names=index_equivalent_dep_names,
+                )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
-            )
+            ):
+                return True
+
+            # Vertical fusion failed — the iteration domains may not
+            # match (e.g. pointwise reads buf[x//32] while reduction
+            # writes buf[x]).  Try reindexing the pointwise to the
+            # reduction's domain and retry.
+            if (
+                config.loop_reindexing_after_fusion
+                and self._try_reindex_pointwise_for_reduction(node1, node2)
+            ):
+                return (
+                    self.can_fuse_vertical(
+                        node1,
+                        node2,
+                        index_equivalent_dep_names=index_equivalent_dep_names,
+                    )
+                    and V.choices.can_fuse_vertical(
+                        self, node1, node2, shared_data_score
+                    )
+                    and self.get_backend(device).can_fuse_vertical(node1, node2)
+                )
+
+            return False
         else:  # nodes don't depend on each other, but may have common reads
             return V.choices.can_fuse_horizontal(
                 self, node1, node2, shared_data_score
             ) and self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
     ) -> bool:
         """
         Check if it is legal to fuse a consumer (node2) into a producer (node1).
@@ -7330,6 +7549,10 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        ``index_equivalent_dep_names`` relaxes write/read matching only for
+        named producer outputs; the remaining intermediate-dependency checks
+        still run normally.
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -7344,13 +7567,17 @@ class Scheduler:
         for cd in node1.read_writes.writes:
             if not isinstance(cd, MemoryDep) and not isinstance(cd, StarDep):
                 continue
-            remaining = remaining_deps_by_name.get(
-                self.mutation_renames.get(cd.name, cd.name)
-            )
+            write_name = self.mutation_renames.get(cd.name, cd.name)
+            remaining = remaining_deps_by_name.get(write_name)
             if remaining:
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
-                        rd, cd
+                        rd.rename(self.mutation_renames),
+                        cd,
+                        allow_index_equivalence=(
+                            index_equivalent_dep_names is not None
+                            and write_name in index_equivalent_dep_names
+                        ),
                     ):
                         remaining.remove(rd)  # noqa: B909
                     elif isinstance(cd, StarDep) and (
@@ -7435,20 +7662,49 @@ class Scheduler:
                 return False
         return num_concurrent_reads <= 1
 
-    # StarDep doesn't match MemoryDep, different indices don't match
-    # However, broadcasting sometimes strips dimensions, and if that's the case
-    # we still can match unmet dep
-    # if there's indirect indexing, don't match it
-    def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
-        if isinstance(read, MemoryDep):
-            read_name = self.mutation_renames.get(read.name, read.name)
+    @staticmethod
+    def _same_index_with_prefix_size(read: MemoryDep, write: MemoryDep) -> bool:
+        return (
+            read.index == write.index
+            and len(read.size) >= len(write.size)
+            and read.size[: len(write.size)] == write.size
+        )
 
+    # StarDep doesn't match MemoryDep, and indirect indexing is not fusible.
+    def fusable_read_and_write(
+        self, read: Dep, write: MemoryDep, *, allow_index_equivalence: bool = False
+    ) -> bool:
+        """Return whether a producer write can satisfy a consumer read.
+
+        The default path accepts exact matches, plus the existing
+        loop-ordering-normalized exact match when that config is enabled.
+        ``allow_index_equivalence`` only runs after those checks fail. It keeps
+        the producer write dense and injective, then accepts conservative
+        consumer-side equivalent reads such as broadcasts or normalized
+        loop-order changes.
+        """
+        if isinstance(read, MemoryDep):
             if (
-                read_name != write.name
+                read.name != write.name
                 or free_symbol_is_type(read.index, SymT.TMP)
                 or free_symbol_is_type(write.index, SymT.TMP)
             ):
                 return False
+
+            original_read = read
+            original_write = write
+
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel. Atomic modes
+            # and TMA stores require synchronization barriers.
+            if self.mode_requires_synchronization(original_write.mode):
+                return False
+
+            # Preserve the normal exact-dependency path before any optional
+            # normalization or relaxed equivalence checks.
+            if self._same_index_with_prefix_size(original_read, original_write):
+                return True
 
             if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
                 # Need merge loops if we do loop ordering after fusion since
@@ -7456,27 +7712,130 @@ class Scheduler:
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
-            # Operations like index_add_, scatter_add_, etc. require global
-            # synchronization - all threads must complete writes before any reads.
-            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
-            if self.mode_requires_synchronization(write.mode):
+
+            # Re-check after optional loop normalization. The first exact
+            # match preserves original deps, including gapped layouts; this
+            # path only covers deps that become exact after loop vars merge.
+            if self._same_index_with_prefix_size(read, write):
+                return True
+
+            if not allow_index_equivalence:
                 return False
 
-            return (
-                read.index == write.index
-                and len(read.size) >= len(write.size)
-                and read.size[: len(write.size)] == write.size
+            return self._fusable_read_after_index_equivalence(
+                original_read, original_write
             )
         elif isinstance(read, StarDep):
-            read_name = self.mutation_renames.get(read.name, read.name)
-            write_name = self.mutation_renames.get(write.name, write.name)
             if (
                 read.mode == write.mode
                 and write.mode is not None
-                and read_name == write_name
+                and read.name == write.name
             ):
                 return True
         return False
+
+    def _fusable_read_after_index_equivalence(
+        self, read: MemoryDep, write: MemoryDep
+    ) -> bool:
+        # Relaxed matching is only for consumer-side reshapes/broadcasts.
+        # If a write var is absent from the write index, the producer itself
+        # broadcasts multiple loop iterations to the same address.
+        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+            return False
+        # Once read/write indices differ, require the producer to write a
+        # dense logical region. Otherwise gaps or aliases in the producer
+        # could be hidden by a consumer-side broadcast.
+        if not (
+            write.normalize().is_contiguous()
+            or write.normalize_with_stride_order().is_contiguous()
+        ):
+            return False
+
+        return self.deps_match_normalized(
+            read, write
+        ) or self._fusable_read_after_broadcast(read, write)
+
+    @staticmethod
+    def _fusable_read_after_broadcast(read: MemoryDep, write: MemoryDep) -> bool:
+        """Match conservative broadcasted read forms.
+
+        This handles two nested-reduction dependency shapes:
+
+        - Pure broadcast dims absent from the read index:
+
+              read:  d1, {d0: 1024, d1: 16}
+              write: d0, {d0: 16}
+
+        - Same-rank expanded dims used through a quotient:
+
+              read:  32*d0 + FloorDiv(d1, 128), {d0: 128, d1: 4096}
+              write: 32*d0 + d1,                {d0: 128, d1: 32}
+
+        Producer-side broadcast and non-dense writes are rejected before this
+        helper, so these cases only relax consumer-side broadcasts.
+        """
+        # Strategy 1: remove read loop vars that do not affect the address,
+        # then compare the normalized access against the producer write.
+        read_vars = tuple(
+            var for var in read.var_names if var in read.index.free_symbols
+        )
+        if len(read_vars) != read.num_vars:
+            read_ranges = {var: read.ranges[var] for var in read_vars}
+            read = MemoryDep(
+                read.name,
+                read.index,
+                tuple(read_ranges),
+                tuple(read_ranges.values()),
+                read.mode,
+            )
+            if read.normalize() == write.normalize():
+                return True
+
+        if read.num_vars != write.num_vars:
+            return False
+
+        # Strategy 2: split a larger read axis into (write axis, tail), then
+        # simplify with the tail range. This only matches if the tail
+        # disappears from the final index.
+        sizevars = V.graph.sizevars
+        write_vars = tuple(
+            sympy.Symbol(f"_fusable_broadcast_{i}", integer=True, nonnegative=True)
+            for i in range(read.num_vars)
+        )
+        replacements: dict[sympy.Expr, sympy.Expr] = {}
+        tail_ranges: dict[sympy.Symbol, sympy.Expr] = {}
+        for read_var, read_size, write_var, write_size in zip(
+            read.var_names, read.size, write_vars, write.size
+        ):
+            if sizevars.statically_known_equals(read_size, write_size):
+                replacements[read_var] = write_var
+                continue
+
+            if not sizevars.statically_known_equals(
+                sympy.Mod(read_size, write_size), 0
+            ):
+                return False
+            factor = sizevars.simplify(FloorDiv(read_size, write_size))
+            if not sizevars.statically_known_gt(factor, 1):
+                return False
+
+            tail_var = sympy.Symbol(
+                f"_fusable_broadcast_tail_{len(tail_ranges)}",
+                integer=True,
+                nonnegative=True,
+            )
+            replacements[read_var] = write_var * factor + tail_var
+            tail_ranges[tail_var] = factor
+
+        if not tail_ranges:
+            return False
+
+        read_index = sizevars.simplify_with_ranges(
+            sympy_subs(read.index, replacements),
+            {**dict(zip(write_vars, write.size)), **tail_ranges},
+        )
+        write_index = sympy_subs(write.index, dict(zip(write.var_names, write_vars)))
+        return sizevars.statically_known_equals(read_index, write_index)
 
     # on tensors that are "empty" (i.e. with undefined values),
     # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
@@ -7514,6 +7873,69 @@ class Scheduler:
 
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
+
+    def _score_fusion_memory_by_fusable_read_write(
+        self,
+        producer: BaseSchedulerNode,
+        consumer: BaseSchedulerNode,
+        count_bytes: bool = True,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
+    ) -> int:
+        """Score vertical producer-output deps missed by exact dep scoring.
+
+        Exact scoring is set-intersection based, but vertical legality can also
+        accept normalized equivalent read/write deps. Give those pairs a memory
+        score so heuristics do not discard them before legality runs.
+        """
+        if not (producer.get_operation_names() & consumer.ancestors):
+            return 0
+
+        reads = list(consumer.read_writes.reads)
+        matched_reads: OrderedSet[int] = OrderedSet()
+        score = 0
+        for write in producer.read_writes.writes:
+            if not isinstance(write, MemoryDep):
+                continue
+            write_name = self.mutation_renames.get(write.name, write.name)
+            for i, read in enumerate(reads):
+                if i in matched_reads:
+                    continue
+                if self.fusable_read_and_write(
+                    read.rename(self.mutation_renames),
+                    write,
+                    allow_index_equivalence=(
+                        index_equivalent_dep_names is not None
+                        and write_name in index_equivalent_dep_names
+                    ),
+                ):
+                    matched_reads.add(i)
+                    score += max(
+                        self.dep_size_hint(read, count_bytes),
+                        self.dep_size_hint(write, count_bytes),
+                    )
+                    break
+        return score
+
+    def _score_fusion_memory_for_can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        allow_mix_order_reduction: bool = True,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
+    ) -> int:
+        score = self.score_fusion_memory(
+            node1,
+            node2,
+            allow_mix_order_reduction=allow_mix_order_reduction,
+        )
+        assert isinstance(score, int)
+        if score == 0 and index_equivalent_dep_names:
+            score = self._score_fusion_memory_by_fusable_read_write(
+                node1,
+                node2,
+                index_equivalent_dep_names=index_equivalent_dep_names,
+            )
+        return score
 
     @overload
     def score_fusion_memory(
@@ -7553,7 +7975,7 @@ class Scheduler:
         Scoring strategy:
         1. If nodes share exact memory deps (same buffer + same indexing), return
            the sum of shared dep sizes (original behavior).
-        2. If no exact matches (score == 0), check for same-buffer reads with
+        2. If no dependency score remains, check for same-buffer reads with
            different indexing (e.g., split operations reading different slices).
            - Give bonus if nodes read from exactly the same set of buffers
            - Score based on overlap ratio: common_buffer_size / total_read_size
@@ -7621,9 +8043,8 @@ class Scheduler:
         if score:
             return _construct_return_value(score, 0, False)
 
-        # If no exact dep matches, check for same-buffer reads with different indexing.
-        # This handles cases like split operations that read different slices of the
-        # same buffer - they should fuse for cache locality benefits.
+        # This is a horizontal/common-read locality heuristic, not a
+        # producer-consumer dependency match.
         buffer_overlap_score = 0
         if score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
             buffer_overlap_score = self._score_fusion_memory_by_buffer_overlap(
@@ -7874,7 +8295,7 @@ class Scheduler:
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed
+            - V.graph.wrapper_code.freed  # type: ignore[has-type]
         ):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
@@ -8360,31 +8781,31 @@ class Scheduler:
         return signatures[::-1]
 
     def clean_removed_buffer_from_partition_signatures(
-        self, signature: GraphPartitionSignature
+        self,
+        signature: GraphPartitionSignature,
+        removed_buffers: OrderedSet[str],
     ) -> GraphPartitionSignature:
         """
         Updates the partition signature by removing buffers specified in
-        V.graph.removed_buffers. See [Note: Removed Graph Partition Arguments]
+        removed_buffers. See [Note: Removed Graph Partition Arguments]
         """
         input_nodes = {
             name: buffer
             for name, buffer in signature.input_nodes.items()
-            if name not in V.graph.removed_buffers
+            if name not in removed_buffers
         }
         input_deallocation = {
             name: val
             for name, val in signature.input_deallocation.items()
-            if name not in V.graph.removed_buffers
+            if name not in removed_buffers
         }
         output_nodes = [
             node
             for node in signature.output_nodes
-            if node.maybe_get_name() not in V.graph.removed_buffers
+            if node.maybe_get_name() not in removed_buffers
         ]
         constant_names = [
-            name
-            for name in signature.constant_names
-            if name not in V.graph.removed_buffers
+            name for name in signature.constant_names if name not in removed_buffers
         ]
         return GraphPartitionSignature(
             signature.symbol_inputs,
@@ -8485,8 +8906,10 @@ class Scheduler:
             reordered_nodes, name_to_freeable_input_buf, graph_outputs
         )
 
-        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
-        if reorder_peak_memory < default_peak_memory * 1.1:
+        if (
+            reorder_peak_memory
+            < default_peak_memory * config.triton.cudagraph_partition_memory_budget
+        ):
             return reordered_nodes
 
         return nodes
@@ -8664,6 +9087,9 @@ class Scheduler:
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
+            # V.graph.removed_buffers is global to the wrapper. Only buffers added
+            # while codegening this partition should be removed from this signature.
+            removed_buffers_before_codegen = V.graph.removed_buffers.copy()
             self._codegen(partition)
 
             # Note: [Removed Graph Partition Arguments]
@@ -8675,7 +9101,12 @@ class Scheduler:
             # prefix (i.e., generating call function and return outputs) after we have
             # codegen the partition.
             assert isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
-            signature = self.clean_removed_buffer_from_partition_signatures(signature)
+            removed_buffers_during_codegen = (
+                V.graph.removed_buffers - removed_buffers_before_codegen
+            )
+            signature = self.clean_removed_buffer_from_partition_signatures(
+                signature, removed_buffers_during_codegen
+            )
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
@@ -8685,7 +9116,7 @@ class Scheduler:
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(
+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
         )
 
@@ -9337,7 +9768,7 @@ class BaseScheduling:  # noqa: docstring_linter
             from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
 
             debug_handle = set_kernel_post_grad_provenance_tracing(
-                node_schedule,
+                node_schedule,  # type: ignore[arg-type]
                 kernel_name,
             )
             V.graph.wrapper_code.write_provenance_debug_handle(

@@ -25,7 +25,7 @@ if typing.TYPE_CHECKING:
 try:
     import redis
 except ImportError:
-    redis = None
+    redis = None  # type: ignore[assignment]
 
 
 log = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ class RemoteCache(Generic[_T]):
                 self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
-    def _decode(self, data: _U, sample: Sample | None) -> _T:
+    def _decode(self, data: _U, sample: Sample | None) -> _T:  # type: ignore[override]
         return self.serde.decode(data)  # type: ignore[arg-type]
 
     # Used to convert structured data into data for the cache.
@@ -360,6 +360,19 @@ class LocalCache(RemoteCache[JsonDataTy]):
         backend = LocalCacheBackend()
         serde = RemoteCacheJsonSerde()
         super().__init__(backend, serde)
+
+    @override
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
+        try:
+            return super()._get(key, sample)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning(
+                "Ignoring corrupt local cache entry %s: %s: %s",
+                key,
+                type(exc).__name__,
+                exc,
+            )
+            return None
 
 
 class LocalAutotuneCache(LocalCache):
