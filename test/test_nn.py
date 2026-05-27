@@ -4321,11 +4321,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182790")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182666")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
@@ -14773,9 +14775,14 @@ if __name__ == '__main__':
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
                     if bias:
-                        expected_input_grad_max_ulp_diff = 6  # A100
-                        expected_weight_grad_max_ulp_diff = 4  # A100
-                        expected_linear_bias_grad_max_ulp_diff = 17  # A100
+                        if "mps" in device:
+                            expected_input_grad_max_ulp_diff = 54
+                            expected_weight_grad_max_ulp_diff = 36
+                            expected_linear_bias_grad_max_ulp_diff = 17
+                        else:  # CUDA
+                            expected_input_grad_max_ulp_diff = 6  # A100
+                            expected_weight_grad_max_ulp_diff = 4  # A100
+                            expected_linear_bias_grad_max_ulp_diff = 17  # A100
                     else:
                         expected_input_grad_max_ulp_diff = 0
                         expected_weight_grad_max_ulp_diff = 0
