@@ -2590,7 +2590,7 @@ class GraphLowering(torch.fx.Interpreter):
                         )
                     except Exception as exc:
                         raise RuntimeError(
-                            "When autotune_at_compile_time is False, AOTInductor generates"
+                            "When autotune_at_compile_time is False, AOTInductor generates "
                             "both JIT code and AOT code. The JIT code failed to run."
                         ) from exc
 
@@ -2600,7 +2600,7 @@ class GraphLowering(torch.fx.Interpreter):
                 aot_output: str | None = self.wrapper_code._aot_output
                 if aot_output is None:
                     raise RuntimeError(
-                        "When autotune_at_compile_time is False, AOTInductor generates"
+                        "When autotune_at_compile_time is False, AOTInductor generates "
                         "both JIT code and AOT code. The AOT code should not be None."
                     )
                 aoti_wrapper = ValueWithLineMap(
@@ -2631,7 +2631,6 @@ class GraphLowering(torch.fx.Interpreter):
             CppWrapperCodeCache,
             CudaKernelParamCache,
             get_cpp_wrapper_cubin_path_name,
-            output_code_log,
         )
 
         cpp_source = wrapper_code.value
@@ -2642,8 +2641,6 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
-
-        output_code_log.debug("AOTI lazy compile JIT wrapper code: \n%s", cpp_source)
 
         # Prefer the GPU device for the JIT compile: the wrapper includes
         # cpp_wrapper/<gpu>.h which transitively pulls in cuda_runtime.h.
@@ -2663,6 +2660,8 @@ class GraphLowering(torch.fx.Interpreter):
                 device_type=device_type,
                 num_outputs=len(self.graph_outputs),
                 kernel_code=kernel_source,
+                output_code_log_name="JIT wrapper code for AOT lazy autotuning",
+                kernel_code_log_name="JIT kernel code for AOT lazy autotuning",
             )
 
         real_inputs = extract_real_inputs()

@@ -60,6 +60,9 @@ class DualWrapperCodeLine(WrapperLine):
     aot_code: IndentedBuffer
 
     def codegen(self, code: IndentedBuffer) -> None:
+        # In dual-wrapper replay, these route each captured snippet to the
+        # matching side. If replayed on a plain IndentedBuffer, splice_jit writes
+        # normally and splice_aot is a no-op, preserving the same selection.
         code.splice_jit(self.jit_code)
         code.splice_aot(self.aot_code)
 
@@ -1546,7 +1549,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_before_suffix(self, result):
         # Close the entry function. In dual-wrapper-mode `result` is the JIT side;
         # the AOTI side close is emitted by _generate_end_aoti.
-        if V.graph.aot_mode:
+        if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
             entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
             result.writeline(f"}} // {self.aoti_model_class_name}::{entry}")
         else:
