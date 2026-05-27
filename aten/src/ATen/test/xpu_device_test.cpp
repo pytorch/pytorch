@@ -25,6 +25,7 @@ TEST(XpuDeviceTest, getDeviceFromPtr) {
 
   sycl::device& raw_device = at::xpu::get_raw_device(0);
   void* ptr = sycl::malloc_device(8, raw_device, at::xpu::get_device_context());
+
   at::Device device = at::xpu::getDeviceFromPtr(ptr);
   sycl::free(ptr, at::xpu::get_device_context());
   EXPECT_EQ(device.index(), 0);

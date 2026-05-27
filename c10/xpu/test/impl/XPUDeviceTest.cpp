@@ -42,12 +42,10 @@ TEST(XPUDeviceTest, PointerGetDevice) {
   }
 
   sycl::device& raw_device = c10::xpu::get_raw_device(0);
-
   void* ptr =
       sycl::malloc_device(8, raw_device, c10::xpu::get_device_context());
 
   EXPECT_EQ(c10::xpu::get_device_idx_from_pointer(ptr), 0);
-
   sycl::free(ptr, c10::xpu::get_device_context());
 
   int dummy = 0;
