@@ -1546,8 +1546,8 @@ def conv(
             aten._convolution.default,
             aten._convolution.deprecated,
         )
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(
