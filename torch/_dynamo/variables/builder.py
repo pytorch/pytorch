@@ -2402,6 +2402,15 @@ class VariableBuilder:
                 # type: ignore[attr-defined]
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
+                if value in self.tx.output.side_effects:
+                    side_effect_result = self.tx.output.side_effects[value]
+                    dup_guard = make_dupe_guard(self.source, side_effect_result.source)
+                    if dup_guard:
+                        self.install_guards(dup_guard)
+
+                    if isinstance(side_effect_result, UnspecializedNNModuleVariable):
+                        side_effect_result.set_nn_module_stack_source(self.source)
+                    return side_effect_result
 
             freezing = is_parameter_freezing()
 

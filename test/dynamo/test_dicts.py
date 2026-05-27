@@ -21,6 +21,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -907,6 +908,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_weakkeydict_attr_proxy_key(self):
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = torch.nn.Module()
+                self.alias = self.child
+
+        root = Root()
+        tracer = _ModuleStackTracer(root)
+        proxy = tracer.proxy_type(root.child, "child")
+        states = weakref.WeakKeyDictionary({proxy: 1})
+
+        def fn(d, key, x):
+            return x + d[key]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(states, proxy, x), opt_fn(states, proxy, x))
 
     def test_construct_user_dict_and_return(self):
         def fn(x):
