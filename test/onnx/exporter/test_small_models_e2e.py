@@ -681,6 +681,43 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_export_interpolate_symbolic_scale_factor(self):
+        class ResizeModel(torch.nn.Module):
+            def forward(self, image):
+                scale = 16 / image.shape[2]
+                return torch.nn.functional.interpolate(
+                    image,
+                    scale_factor=(scale, scale),
+                    mode="bilinear",
+                    antialias=True,
+                    align_corners=False,
+                )
+
+        model = ResizeModel().eval()
+        inputs = (torch.randn(2, 3, 16, 32),)
+        dynamic_shapes = (
+            {
+                0: torch.export.Dim.DYNAMIC,
+                2: torch.export.Dim.DYNAMIC,
+                3: torch.export.Dim.DYNAMIC,
+            },
+        )
+        onnx_program = self.export(
+            model, inputs, dynamic_shapes=dynamic_shapes, opset_version=18
+        )
+
+        # The current ATen upsample schemas accept scale factors as float[], so
+        # symbolic scale factors use output_size and recomputed-scale semantics.
+        # For rounded output sizes, cover the issue's dynamic shape behavior but
+        # do not assert scale_factor=False value semantics.
+        for image_shape, expected_spatial_shape in [
+            ((1, 3, 30, 17), (16, 9)),
+            ((1, 3, 32, 20), (16, 10)),
+            ((1, 3, 64, 20), (16, 5)),
+        ]:
+            (output,) = onnx_program(torch.randn(*image_shape))
+            self.assertEqual(output.shape[2:], expected_spatial_shape)
+
     def test_export_sym_sum(self):
         class SymSumModel(torch.nn.Module):
             def forward(self, x):

@@ -4716,6 +4716,13 @@ def _is_integer(x) -> bool:
     return isinstance(x, Tensor) and not x.is_floating_point()
 
 
+def _has_symbolic_scale_factor(scale_factors) -> bool:
+    for scale in scale_factors:
+        if isinstance(scale, (torch.SymFloat, torch.SymInt)):
+            return True
+    return False
+
+
 @_overload
 def interpolate(
     input: Tensor,
@@ -5026,6 +5033,21 @@ def interpolate(  # noqa: F811
         if align_corners is None:
             raise AssertionError("align_corners is unexpectedly None")
         if antialias:
+            if not torch.jit.is_scripting():
+                if (
+                    output_size is None
+                    and scale_factors is not None
+                    and _has_symbolic_scale_factor(scale_factors)
+                ):
+                    # The native upsample schemas take scale factors as float[].
+                    # Symbolic scale factors must use a dynamic output_size instead.
+                    # This follows recompute_scale_factor=True semantics; preserving
+                    # scale_factor=False semantics requires SymFloat-capable schemas.
+                    output_size = [
+                        _sym_int(input.size(i + 2) * scale_factors[i])
+                        for i in range(dim)
+                    ]
+                    scale_factors = None
             return torch._C._nn._upsample_bilinear2d_aa(
                 input,
                 # pyrefly: ignore [bad-argument-type]
