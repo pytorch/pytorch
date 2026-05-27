@@ -6691,6 +6691,94 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
 
+    def test_existing_list_tensor_setitem_graph_breaks(self):
+        def fn(x, cache):
+            cache[0] = x + 1
+            return cache[0] * 2
+
+        x = torch.randn(3)
+        eager_cache = [torch.zeros(3)]
+        expected = fn(x, eager_cache)
+
+        compiled_cache = [torch.zeros(3)]
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        actual = opt_fn(x, compiled_cache)
+
+        self.assertTrue(same(actual, expected))
+        self.assertTrue(same(compiled_cache[0], eager_cache[0]))
+        self.assertEqual(cnts.frame_count, 2)
+
+        with self.assertRaisesRegex(
+            Unsupported, "Tensor assignment to existing Python list"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, [torch.zeros(3)])
+
+    def test_existing_list_tensor_slice_setitem_graph_breaks(self):
+        def fn(x, cache):
+            cache[:] = [x + 1]
+            return cache[0] * 2
+
+        x = torch.randn(3)
+        eager_cache = [torch.zeros(3)]
+        expected = fn(x, eager_cache)
+
+        compiled_cache = [torch.zeros(3)]
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        actual = opt_fn(x, compiled_cache)
+
+        self.assertTrue(same(actual, expected))
+        self.assertTrue(same(compiled_cache[0], eager_cache[0]))
+        self.assertEqual(cnts.frame_count, 2)
+
+        with self.assertRaisesRegex(
+            Unsupported, "Tensor assignment to existing Python list"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, [torch.zeros(3)])
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_existing_list_tensor_setitem_peak_memory(self):
+        n = 8
+        elems = 8 * 1024 * 1024 // 4
+        tensor_bytes = elems * 4
+
+        def fn(cache):
+            for i in range(len(cache)):
+                cache[i] = cache[i] + 1
+            return cache[0]
+
+        def measure_peak(fn):
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            cache = [torch.zeros((elems,), device="cuda") for _ in range(n)]
+            torch.cuda.synchronize()
+            base = torch.cuda.memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
+
+            out = fn(cache)
+            torch.cuda.synchronize()
+            peak = torch.cuda.max_memory_allocated()
+            self.assertIs(out, cache[0])
+
+            del out, cache
+            gc.collect()
+            torch.cuda.empty_cache()
+            return peak - base
+
+        eager_extra = measure_peak(fn)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        warm_cache = [torch.zeros((elems,), device="cuda") for _ in range(n)]
+        opt_fn(warm_cache)
+        torch.cuda.synchronize()
+        del warm_cache
+
+        compiled_extra = measure_peak(opt_fn)
+
+        self.assertLessEqual(compiled_extra, eager_extra + 2 * tensor_bytes)
+
     def test_replay_side_effects_config(self):
         # Test that replay_side_effects config controls mutation replay
         def fn(x, lst):

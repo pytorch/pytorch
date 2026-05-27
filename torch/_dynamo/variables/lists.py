@@ -45,7 +45,13 @@ from ..utils import (
     unpack_and_apply_fn,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    MutationType,
+    ValueMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
@@ -79,6 +85,41 @@ def pylist_checkexact(obj: VariableTracker) -> bool:
 
 def pyslice_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), slice)
+
+
+def _contains_tensor_variable(value: Any) -> bool:
+    if value is None:
+        return False
+
+    result = False
+
+    def visit(var: VariableTracker) -> None:
+        nonlocal result
+        if var.is_tensor():
+            result = True
+
+    VariableTracker.visit(visit, value)
+    return result
+
+
+def _raise_if_tensor_assignment_to_existing_list(
+    mutation_type: MutationType | None,
+    value: Any,
+) -> None:
+    if isinstance(mutation_type, ValueMutationExisting) and _contains_tensor_variable(
+        value
+    ):
+        unimplemented(
+            gb_type="Tensor assignment to existing Python list",
+            context="mutating a pre-existing list with a tensor value",
+            explanation=(
+                "Dynamo replays existing Python list mutations after a compiled "
+                "graph returns. For tensor values, this can keep replaced list "
+                "entries alive longer than eager execution and increase peak "
+                "memory, so Dynamo graph breaks before the assignment."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 class BaseListVariable(VariableTracker):
@@ -1151,6 +1192,7 @@ class ListVariable(CommonListMethodsVariable):
             raise_observed_exception(
                 IndexError, tx, args=["list assignment index out of range"]
             )
+        _raise_if_tensor_assignment_to_existing_list(self.mutation_type, value)
         try:
             if value is None:
                 self.items.__delitem__(idx)
@@ -1204,6 +1246,9 @@ class ListVariable(CommonListMethodsVariable):
                     raise_type_error(tx, "must assign iterable to extended slice")
 
                 value_unpack = value.force_unpack_var_sequence(tx)
+                _raise_if_tensor_assignment_to_existing_list(
+                    self.mutation_type, value_unpack
+                )
                 try:
                     self.items[key_as_const] = value_unpack
                 except ValueError as exc:
