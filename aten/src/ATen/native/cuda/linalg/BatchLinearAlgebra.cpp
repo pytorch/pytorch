@@ -889,7 +889,7 @@ namespace {
   // and the threshold grows with batch.
 
   // float64 needs super-linear scaling (batch^1.5) because cuBLAS's cost
-  // grows more slowly with N for float64 than for other dtypes ~@~T its
+  // grows more slowly with N for float64 than for other dtypes - its
   // advantage over cuSOLVER persists to larger N at high batch. Empirically
   // N^2/batch at the crossover roughly doubles each time batch doubles.
 
