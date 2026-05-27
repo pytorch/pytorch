@@ -515,7 +515,7 @@ get_chunk_cat_metadata(
   // Inline computing `chunk_size` to avoid redundant computation
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
-    at::Tensor tensor = tensors[i];
+    const at::Tensor& tensor = tensors[i];
     srcs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
     auto sizes = tensor.sizes();
     auto [pad_size_along_dim, trailing_numel] =
