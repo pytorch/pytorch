@@ -25,6 +25,14 @@ static bool is_mkldnn_fp16_supported() {
   return mkldnn_fp16_device_check();
 }
 
+static constexpr bool is_mkldnn_kleidiai_ops_supported() {
+#if defined(__aarch64__)
+  return AT_MKLDNN_ENABLED();
+#else
+  return false;
+#endif
+}
+
 TORCH_LIBRARY(mkldnn, m) {
   m.class_<ConvOpContext>(TORCH_SELECTIVE_CLASS("ConvOpContext"))
       .def_pickle(
@@ -59,6 +67,9 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_mkldnn_rnn_layer_weight(Tensor weight0, Tensor weight1, int hidden_size, bool reverse, bool has_biases, bool batch_first, int[]? input_size=None) -> Tensor[] Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
   m.def("_is_mkldnn_fp16_supported", &is_mkldnn_fp16_supported);
+  m.def(
+      "_is_mkldnn_kleidiai_ops_supported",
+      &is_mkldnn_kleidiai_ops_supported);
   m.def("mkldnn::data_ptr(Tensor mkldnn_tensor) -> int");
   m.def("mkldnn::_get_mkldnn_serialized_md (Tensor mkldnn_tensor) -> Tensor");
   m.def("mkldnn::_nbytes(Tensor mkldnn_tensor) -> int");

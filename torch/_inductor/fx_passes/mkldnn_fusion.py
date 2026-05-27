@@ -119,6 +119,7 @@ if torch._C._has_mkldnn:
                 mkldnn._reorder_linear_weight
                 if (
                     is_lp_weight
+                    or mkldnn._is_mkldnn_kleidiai_ops_supported()
                     or V.aot_compilation
                     or has_free_symbols(batch_size)
                 )
@@ -135,6 +136,7 @@ if torch._C._has_mkldnn:
             transpose_weight_node = packed_weight_node.args[0]
             if (
                 is_lp_weight
+                or mkldnn._is_mkldnn_kleidiai_ops_supported()
                 or V.aot_compilation
                 or has_free_symbols(batch_size)
             ):
@@ -1286,6 +1288,7 @@ if torch._C._has_mkldnn:
         # on x86, for fp32, mkl should be enabled.
         if (
             not compute_with_lp
+            and not mkldnn._is_mkldnn_kleidiai_ops_supported()
             and not torch._C.has_mkl
         ):
             return False
@@ -1568,8 +1571,7 @@ if torch._C._has_mkldnn:
         ):
             return
 
-        # Re-enable this once oneDNN+KleidiAI supports fused operators.
-        if False:
+        if not mkldnn._is_mkldnn_kleidiai_ops_supported():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

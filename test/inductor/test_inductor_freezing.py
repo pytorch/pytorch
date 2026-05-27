@@ -325,7 +325,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
             )
             if self.device == "cpu" and mkldnn_weight_pack_init:
-                if torch._C.has_mkl:
+                if torch.ops.mkldnn._is_mkldnn_kleidiai_ops_supported():
+                    mm_invoke = "mkldnn._linear_pointwise.default("
+                elif torch._C.has_mkl:
                     mm_invoke = "mkl_linear.default("
 
             with torch.no_grad():
