@@ -76,9 +76,7 @@ import tempfile
 
 _PRECOMPILE_SENTINEL = os.path.join(tempfile.gettempdir(), "SENTINEL_PLACEHOLDER")
 
-def {{kernel_name}}_precompile(
-    precompile_shapes, precompile_strides, precompile_dtypes, device_index=0
-):
+def {{kernel_name}}_precompile(precompile_shapes, precompile_dtypes, device_index=0):
     with open(_PRECOMPILE_SENTINEL, "w") as f:
         import json
         f.write(json.dumps({"shapes": precompile_shapes, "dtypes": precompile_dtypes}))
