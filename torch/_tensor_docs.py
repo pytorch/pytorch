@@ -6319,6 +6319,13 @@ expanded to a larger size by setting the ``stride`` to 0. Any dimension
 of size 1 can be expanded to an arbitrary value without allocating new
 memory.
 
+.. note::
+
+    Operations on an expanded view may still allocate memory if they need to
+    materialize the expanded values. For example, changing dtype after
+    :meth:`expand` can allocate memory for the full expanded shape. To control
+    peak memory, perform such operations before expanding where possible.
+
 Args:
     *size (torch.Size or int...): the desired expanded size
 
