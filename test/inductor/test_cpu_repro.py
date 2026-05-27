@@ -406,6 +406,103 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_to_dense(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.to_dense() + 1
+
+        mod = Model().eval()
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = mod(x)
+
+        actual = torch.compile(mod, backend="inductor", fullgraph=True)(x)
+
+        self.assertFalse(actual.is_mkldnn)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_to_dense_with_requires_grad(self):
+        def fn(x):
+            return (x.to_dense() * 2).sum()
+
+        x = torch.randn(4, 4, requires_grad=True).to_mkldnn()
+        expected = fn(x)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_detach_to_dense(self):
+        def fn(x):
+            return x.detach().to_dense() + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertFalse(actual.is_mkldnn)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_aten_to_dense(self):
+        dtype = (
+            torch.bfloat16
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            else torch.float32
+        )
+
+        def fn(x):
+            return torch.ops.aten.to_dense.default(x, dtype=dtype) + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertFalse(actual.is_mkldnn)
+        self.assertEqual(actual.dtype, dtype)
+        if dtype is not torch.float32:
+            self.assertNotEqual(actual.dtype, x.dtype)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_repeated_to_dense(self):
+        def fn(x):
+            y = torch.ops.aten.to_dense.default(x, dtype=torch.float32)
+            z = torch.ops.aten.to_dense.default(y, dtype=torch.float32)
+            return z + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertFalse(actual.is_mkldnn)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkldnn_input_aten_to_dense_without_pre_grad_passes(self):
+        def fn(x):
+            return torch.ops.aten.to_dense.default(x, dtype=torch.float32) + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+
+        with config.patch(use_pre_grad_passes=False):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertFalse(actual.is_mkldnn)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

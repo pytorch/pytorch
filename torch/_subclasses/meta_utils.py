@@ -286,11 +286,12 @@ class MetaTensorDescriber:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
+        is_fake_mkldnn = bool(getattr(t, "_fake_is_mkldnn", False))
         layout = t.layout
         is_nested = t.is_nested
         is_traceable_wrapper_subclass_v = is_traceable_wrapper_subclass(t)
         is_functorch_wrapped = is_functorch_wrapped_tensor(t)
-        is_mkldnn = t.is_mkldnn
+        is_mkldnn = t.is_mkldnn or is_fake_mkldnn
         is_batchedtensor_v = is_batchedtensor(t)
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
@@ -1599,20 +1600,20 @@ class MetaConverter(Generic[_TensorT]):
                         explanation="This is not supported.",
                         hints=[],
                     )
-                elif t.is_mkldnn:
+                elif t.is_mkldnn or getattr(t, "_fake_is_mkldnn", False):
                     is_leaf = t.is_leaf
                     (
                         sizes,
                         strides,
                         _storage_offset,
                     ) = sym_sizes_strides_storage_offset(t, source)
-                    # TODO: This doesn't seem right, where's the MKLDNN'ness
-                    # lol
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
+                    if _is_fake_tensor(r):
+                        r._fake_is_mkldnn = True
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:
@@ -1642,6 +1643,8 @@ class MetaConverter(Generic[_TensorT]):
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
                         r = self._backward_error(r)
+                        if _is_fake_tensor(r):
+                            r._fake_is_mkldnn = True
                 elif t.is_functorch_wrapped:
                     if t.is_view:
                         from torch._dynamo.exc import unimplemented

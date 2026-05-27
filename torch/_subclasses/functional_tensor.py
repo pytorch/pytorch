@@ -382,7 +382,9 @@ class FunctionalTensor(torch.Tensor):
         *,
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
-        return self.elem.to_dense()
+        if getattr(torch._from_functional_tensor(self.elem), "_fake_is_mkldnn", False):
+            return torch.ops.aten._to_dense.default(self, dtype, masked_grad)
+        return self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
 
     @property
     # pyrefly: ignore[bad-override]

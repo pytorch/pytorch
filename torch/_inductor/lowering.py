@@ -3570,6 +3570,8 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
+make_fallback(aten.to_dense)
+make_fallback(aten._to_dense)
 
 # Needs dimname support
 make_fallback(aten.zeros.names)

@@ -117,7 +117,7 @@ from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
-from .fx_passes.pre_grad import pre_grad_passes
+from .fx_passes.pre_grad import canonicalize_mkldnn_to_dense, pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -511,6 +511,7 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
+        canonicalize_mkldnn_to_dense(gm, example_inputs)
         if not config.use_pre_grad_passes:
             return gm
 

@@ -714,6 +714,7 @@ class FakeTensor(Tensor):
     fake_mode: FakeTensorMode
     constant: Tensor | None
     real_tensor: Tensor | None
+    _fake_is_mkldnn: bool = False
 
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
@@ -889,6 +890,13 @@ class FakeTensor(Tensor):
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
         return fake_mode.from_tensor(t)
+
+    def to_dense(
+        self, dtype: torch.dtype | None = None, *, masked_grad: bool | None = None
+    ) -> Tensor:
+        if getattr(self, "_fake_is_mkldnn", False):
+            return torch.ops.aten._to_dense.default(self, dtype, masked_grad)
+        return torch.Tensor.to_dense(self, dtype=dtype, masked_grad=masked_grad)
 
     @classmethod
     @count
@@ -2812,6 +2820,21 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+        if (
+            func is aten.to_dense.default
+            and args
+            and isinstance(args[0], FakeTensor)
+            and getattr(args[0], "_fake_is_mkldnn", False)
+        ):
+            # MKL-DNN fakes are backed by strided meta tensors, so redirect
+            # before aten.to_dense decomposes to identity.
+            dtype = kwargs.get("dtype", args[1] if len(args) > 1 else None)
+            masked_grad = kwargs.get("masked_grad", args[2] if len(args) > 2 else None)
+            with self:
+                return maybe_propagate_real_tensors(
+                    aten._to_dense.default(args[0], dtype, masked_grad)
+                )
+
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
 
@@ -3056,6 +3079,13 @@ class FakeTensorMode(TorchDispatchMode):
         device: torch.device,
     ) -> PyTree:
         converter = self.fake_tensor_converter
+        propagate_fake_mkldnn = func in (
+            aten.alias.default,
+            aten.detach.default,
+        ) and any(
+            isinstance(arg, FakeTensor) and getattr(arg, "_fake_is_mkldnn", False)
+            for arg in flat_args
+        )
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
@@ -3080,17 +3110,22 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
+                if propagate_fake_mkldnn:
+                    e._fake_is_mkldnn = True
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
                     # We thus directly convert real tensor to fake tensor.
-                    return converter.from_real_tensor(self, e)
+                    out = converter.from_real_tensor(self, e)
                 else:
-                    return converter.from_meta_and_device(
+                    out = converter.from_meta_and_device(
                         self, e, device or common_device
                     )
+                if propagate_fake_mkldnn:
+                    out._fake_is_mkldnn = True
+                return out
             else:
                 # pyrefly: ignore [bad-return]
                 return e
