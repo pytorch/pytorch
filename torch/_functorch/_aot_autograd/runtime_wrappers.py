@@ -2594,49 +2594,35 @@ class _AutogradSavedState:
                 f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
             )
 
-        # Track which positions are None so we can reconstruct them in backward.
-        # The graph partitioner can produce None for optional tensors (e.g.,
-        # hr_weight in LSTM decompositions when proj_size=0).
-        ctx._none_positions_vc = [
-            i for i, x in enumerate(tensors_saved_with_vc_check) if x is None
-        ]
-        ctx._none_positions_no_vc = [
-            i for i, x in enumerate(tensors_saved_no_vc_check) if x is None
-        ]
-
         # See Note [Detaching saved tensors in AOTAutograd]
+        # save_for_backward natively accepts None
+        # (see torch/autograd/function.py:67).
+        # In C++, None becomes an empty SavedVariable with no version
+        # counter or storage tracking
+        # (torch/csrc/autograd/python_function.cpp:842-894).
+        # On unpack, empty SavedVariable returns None
+        # (python_function.cpp:118-121).
         num_vc_check = len(tensors_saved_with_vc_check)
         tensors_to_save = [
-            x.detach() if x._is_view() else x
+            x.detach() if x is not None and x._is_view() else x
             for x in tensors_saved_with_vc_check
-            if x is not None
         ]
         tensors_no_vc_check = [
-            x.detach() if x._is_view() else x
+            x.detach() if x is not None and x._is_view() else x
             for x in tensors_saved_no_vc_check
-            if x is not None
         ]
 
         # dynamic_saved_tensors_idxs has indices relative to all saved tensors
-        # (vc_check + no_vc_check combined). Adjust for filtered-out None positions.
-        none_set_vc = set(ctx._none_positions_vc)
-        none_set_no_vc = set(ctx._none_positions_no_vc)
+        # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
         for idx, dims in self.metadata.dynamic_saved_tensors_idxs.items():
             if idx < num_vc_check:
-                if idx in none_set_vc:
-                    continue
-                adjusted = idx - sum(1 for p in ctx._none_positions_vc if p < idx)
-                mark_dynamo_propagated_dynamic_indices(tensors_to_save[adjusted], dims)
+                t = tensors_to_save[idx]
+                if t is not None:
+                    mark_dynamo_propagated_dynamic_indices(t, dims)
             else:
-                no_vc_idx = idx - num_vc_check
-                if no_vc_idx in none_set_no_vc:
-                    continue
-                adjusted = no_vc_idx - sum(
-                    1 for p in ctx._none_positions_no_vc if p < no_vc_idx
-                )
-                mark_dynamo_propagated_dynamic_indices(
-                    tensors_no_vc_check[adjusted], dims
-                )
+                t = tensors_no_vc_check[idx - num_vc_check]
+                if t is not None:
+                    mark_dynamo_propagated_dynamic_indices(t, dims)
 
         ctx.save_for_backward(*tensors_to_save)
         ctx._tensors_no_vc_check = tensors_no_vc_check
@@ -3229,17 +3215,6 @@ def _codegen_compiled_forward(
     )
 
 
-def _reinsert_saved_nones(ctx: Any, saved: tuple[Any, ...]) -> tuple[Any, ...]:
-    vc_nones = getattr(ctx, "_none_positions_vc", [])
-    no_vc_nones = getattr(ctx, "_none_positions_no_vc", [])
-    if not vc_nones and not no_vc_nones:
-        return saved
-    result = list(saved)
-    for pos in sorted(vc_nones + no_vc_nones):
-        result.insert(pos, None)
-    return tuple(result)
-
-
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
@@ -3270,9 +3245,6 @@ def _codegen_compiled_backward(
         lines.append("    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)")
     else:
         lines.append("    _saved = _ctx_.saved_tensors")
-
-    lines.append("    _saved = _reinsert_nones_(_ctx_, _saved)")
-    code_globals["_reinsert_nones_"] = _reinsert_saved_nones
 
     lines.append(
         "    all_args = _prologue_(_saved, _ctx_.symints,"
