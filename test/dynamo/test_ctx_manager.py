@@ -2205,9 +2205,11 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             (duplicate_device, "multiple values for argument 'device'"),
         ]
         for fn, msg in cases:
-            with self.subTest(msg=msg):
-                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-                    torch.compile(fn, backend="eager", fullgraph=True)(pool)
+            with (
+                self.subTest(msg=msg),
+                self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):

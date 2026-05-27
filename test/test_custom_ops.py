@@ -48,6 +48,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -57,6 +59,9 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
 )
@@ -279,6 +284,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         self.assertEqual(len(ret), 1)
         self.assertEqual(x, ret[0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179898"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/118253",
+    )
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -450,6 +462,38 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         # Test atol/rtol overrides
         torch.library.opcheck(op, (x,), {}, atol=3, rtol=0.01)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180338",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180323",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180301",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180262",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180214",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180196",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179992",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179909",
+    )
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
@@ -459,6 +503,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             kwargs = sample_input.kwargs
             torch.library.opcheck(op.op, args, kwargs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179991"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/119159",
+    )
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor: ...
