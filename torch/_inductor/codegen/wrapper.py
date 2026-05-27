@@ -2314,14 +2314,21 @@ class PythonWrapperCodegen(CodeGen):
         # codegen allocations in two passes
         planning_states = [MemoryPlanningState()]
         past_planning_states = []
+        peak_estimate_stack: list[EfficientPeakEstimate] = []
         for i in range(len(self.lines)):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
                 self.lines[i] = line.plan(planning_states[-1])
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
+                if config.allow_buffer_reuse:
+                    peak_estimate_stack.append(self.estimate_peak)
+                    with V.set_graph_handler(line.graph):
+                        self.estimate_peak = EfficientPeakEstimate()
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
+                if config.allow_buffer_reuse:
+                    self.estimate_peak = peak_estimate_stack.pop()
         past_planning_states.append(planning_states.pop())
         assert len(planning_states) == 0
 
