@@ -207,10 +207,12 @@ constant_fold_functions = [
     torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
 if torch.distributed.is_available():
+    from torch.distributed.distributed_c10d import _get_rank
+
     constant_fold_functions.extend(
         [
             torch.distributed.is_initialized,
-            torch.distributed.get_rank,
+            _get_rank,
             torch.distributed.get_world_size,
         ]
     )
@@ -1692,20 +1694,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from torch.distributed.distributed_c10d import (
                 _get_group_size_by_name,
                 _get_group_tag,
+                _get_rank,
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
-                get_rank,
                 get_world_size,
             )
 
             @register(
                 _get_group_size_by_name,
                 _get_group_tag,
+                _get_rank,
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
-                get_rank,
                 get_world_size,
             )
             def handle_constant_processgroup_functions(
@@ -1717,7 +1719,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
                 if len(args) == 0 and len(kwargs) == 0:
-                    # get_rank() or get_world_size() with no args (uses default group)
+                    # _get_rank() or get_world_size() with no args (uses default group)
                     pass
                 elif len(args) == 1 and len(kwargs) == 0:
                     # group or group name
