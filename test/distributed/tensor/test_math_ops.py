@@ -279,6 +279,34 @@ class DistMathOpsTest(DTensorTestBase):
                     x.grad.zero_()
 
     @with_comms
+    @skip_unless_torch_gpu
+    def test_nll_loss_weighted_mean_batch_sharded(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185167
+        # F.nll_loss(weight=..., reduction='mean') returned wrong results when
+        # input was batch-sharded because per-rank denominator sum(w[t[n]])
+        # varies across ranks and cannot be averaged naively.
+        import torch.nn.functional as F
+
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+
+        log_probs = F.log_softmax(
+            torch.randn(8, 4, device=self.device_type), dim=1
+        )
+        target = torch.tensor([0, 3, 3, 3, 0, 1, 3, 2], device=self.device_type)
+        # Non-uniform weights so per-rank sum(weight[target]) differs across ranks
+        class_weight = torch.tensor([0.62, 2.0, 1.6, 1.39], device=self.device_type)
+
+        d_lp = distribute_tensor(log_probs, device_mesh, [Shard(0)])
+        d_tgt = distribute_tensor(target, device_mesh, [Replicate()])
+        d_w = distribute_tensor(class_weight, device_mesh, [Replicate()])
+
+        expected = F.nll_loss(log_probs, target, weight=class_weight, reduction="mean")
+        actual = F.nll_loss(d_lp, d_tgt, weight=d_w, reduction="mean")
+
+        self.assertEqual(actual.full_tensor(), expected, atol=1e-5, rtol=1e-5)
+
+    @with_comms
     def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
