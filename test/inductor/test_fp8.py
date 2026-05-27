@@ -87,6 +87,29 @@ def _fix_fp8_dtype_for_rocm(
     return dtype
 
 
+def _prepare_blockwise_scale(
+    inverse_scale: torch.Tensor,
+    block_outer: int,
+    block_inner: int,
+    transposed: bool,
+) -> torch.Tensor:
+    # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
+    # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
+    # padded to a multiple of 4 before the transpose). `transposed` indicates
+    # whether the corresponding data tensor was transposed (e.g. weight passed
+    # as w.t()): if so we apply one additional transpose to keep the scale
+    # aligned with the data layout.
+    if (block_outer, block_inner) == (1, 128):
+        out = inverse_scale.t().contiguous().t()
+        return out.t() if transposed else out
+    pad_amount = (-inverse_scale.shape[-1]) % 4
+    if pad_amount:
+        inverse_scale = torch.nn.functional.pad(
+            inverse_scale, (0, pad_amount), "constant", 0
+        )
+    return inverse_scale.t()
+
+
 class TestFP8Types(TestCase):
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
@@ -983,39 +1006,17 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
-        if (bn, bk) == (1, 128):
-            w_inverse_scale = (
-                w_inverse_scale.t().contiguous().t().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
-        else:
-            # 128x128 blocks: kernel requires scale shape
-            # (round_up(K/128, 4), N/128); pad inner dim to a multiple of 4
-            # before the transpose.
-            pad_amount = (-w_inverse_scale.shape[-1]) % 4
-            if pad_amount:
-                w_inverse_scale = torch.nn.functional.pad(
-                    w_inverse_scale, (0, pad_amount), "constant", 0
-                )
-            w_inverse_scale = w_inverse_scale.t()
+        w_inverse_scale = _prepare_blockwise_scale(
+            w_inverse_scale, bn, bk, transposed=True
+        )
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
             x, dtype_float8, block_outer=am, block_inner=ak
         )
-        if (am, ak) == (1, 128):
-            x_inverse_scale = (
-                x_inverse_scale.t().contiguous().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
-        else:
-            # 128x128 blocks: kernel requires scale shape
-            # (round_up(K/128, 4), M/128); pad inner dim to a multiple of 4
-            # before the transpose.
-            pad_amount = (-x_inverse_scale.shape[-1]) % 4
-            if pad_amount:
-                x_inverse_scale = torch.nn.functional.pad(
-                    x_inverse_scale, (0, pad_amount), "constant", 0
-                )
-            x_inverse_scale = x_inverse_scale.t()
+        x_inverse_scale = _prepare_blockwise_scale(
+            x_inverse_scale, am, ak, transposed=False
+        )
 
         recipe_x = (
             ScalingType.BlockWise1x128
