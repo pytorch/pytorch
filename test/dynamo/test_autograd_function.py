@@ -263,6 +263,49 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         optim_result = opt_model(input, weight)
         self.assertEqual(optim_result, eager_result)
 
+    def test_is_setup_context_defined_compiles(self):
+        from torch.autograd.function import _is_setup_context_defined
+
+        class InheritedSetupContext(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        class OverrideSetupContext(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.cos()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            y = InheritedSetupContext.apply(x)
+            if _is_setup_context_defined(InheritedSetupContext.setup_context):
+                y = y + 1
+            else:
+                y = y + 2
+            if _is_setup_context_defined(OverrideSetupContext.setup_context):
+                y = y + 4
+            else:
+                y = y + 8
+            return y
+
+        x = torch.randn(2, 2, requires_grad=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_materialize_grad(self):
         model = MaterializingGradModule()
         opt_model = torch.compile(model, backend="eager")

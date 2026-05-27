@@ -1093,6 +1093,32 @@ class AutogradFunctionVariable(VariableTracker):
     ) -> "AutogradFunctionVariable":
         return AutogradFunctionVariable(self.fn_cls)
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        source = AttrSource(self.source, name) if self.source is not None else None
+        if name == "apply":
+            return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
+
+        try:
+            obj = inspect.getattr_static(self.fn_cls, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+
+        if isinstance(obj, staticmethod):
+            func = obj.__get__(self.fn_cls)
+            traced = trace_rules.lookup(func)
+            if traced is None:
+                raise AssertionError(f"trace_rules.lookup returned None for {func}")
+            if source is not None:
+                # type: ignore[attr-defined]
+                return traced.create_with_source(func, source=source)
+            else:
+                # type: ignore[misc]
+                return traced(func)
+        elif isinstance(obj, classmethod):
+            return variables.UserMethodVariable(obj.__func__, self, source=source)
+
+        return VariableTracker.build(tx, getattr(self.fn_cls, name), source=source)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
