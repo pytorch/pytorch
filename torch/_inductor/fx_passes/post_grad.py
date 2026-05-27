@@ -797,7 +797,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
             # Step 2: create the cond_fn and body_fn for while_loop
             def tail_cond_fn(*flat_args):
-                loop_idx, _, _, _, _ = unpack_loop_args(flat_args)
+                loop_idx = unpack_loop_args(flat_args)[0]
                 return loop_idx < scan_length  # type: ignore[has-type]
 
             def tail_body_fn(*flat_args):
@@ -811,6 +811,9 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
             # Step 3: call the while_loop operator
             if unroll == _FULL_UNROLL:
+                # Full unroll intentionally materializes one graph copy per
+                # traced iteration.  Converting scan_length to int therefore
+                # specializes symbolic lengths to the trace-time value.
                 for idx in range(int(scan_length)):
                     init = scan_step(idx, ys_outs, init, xs, additional_inputs)
                 last_carry = init
@@ -818,7 +821,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 if unroll > 1 and guard_bool(scan_length >= unroll):
 
                     def main_cond_fn(*flat_args):
-                        loop_idx, _, _, _, _ = unpack_loop_args(flat_args)
+                        loop_idx = unpack_loop_args(flat_args)[0]
                         return loop_idx + unroll <= scan_length  # type: ignore[has-type]
 
                     def main_body_fn(*flat_args):
@@ -856,18 +859,14 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 _, ys_outs, last_carry, _ = unpack_loop_operands(
                     run_while_loop(tail_cond_fn, tail_body_fn, while_loop_operands)
                 )
-            carry_outs = (
-                (last_carry[0],)
-                if isinstance(last_carry, (list, tuple)) and num_init_leaves == 1
-                else (last_carry,)
-                if num_init_leaves == 1
-                else tuple(last_carry)
-            )
+            assert isinstance(last_carry, (list, tuple))
+            carry_outs = tuple(last_carry)
             flat_outputs = carry_outs + (tuple(ys_outs) if has_ys_outputs else ())
             if len(flat_outputs) == 1:
-                # Pattern replacement unwraps a single-output example and leaves
-                # the original scan[0] user as an indexing op on that tensor.
-                # Return a second, unused value to preserve tuple replacement.
+                # match.replace_by_example unwraps a single-output example and
+                # leaves the original scan[0] user as an indexing op on that
+                # tensor.  Return a second, unused value to preserve tuple
+                # replacement.
                 return (*flat_outputs, loop_idx)
             return flat_outputs
 
@@ -1762,7 +1761,18 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        return
+        # Allow unfuse when inp is a narrowing dtype cast (e.g. AMP casting
+        # fp32 bias to bf16/fp16). Unfusing lets the Triton pointwise kernel
+        # load the original higher-precision tensor directly, preserving
+        # precision instead of truncating bias before the fused addmm.
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
 
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2

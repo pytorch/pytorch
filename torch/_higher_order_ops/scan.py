@@ -131,12 +131,12 @@ def scan(
             of ``combine_fn``.
         xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
 
-    Kwargs:
+    Keyword Args:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
-        unroll (int or bool): A positive integer indicating how many scan
-            iterations to unroll in each loop iteration. ``False`` is
-            equivalent to ``1`` and ``True`` fully unrolls the scan length.
+        unroll (Union[int, bool]): How many scan iterations to unroll
+            in each loop iteration. ``False`` is equivalent to ``1`` and
+            ``True`` fully unrolls the scan length.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -334,7 +334,9 @@ scan_op = ScanOp()
 
 
 def generic_scan(operator, init, xs, dim=0, additional_inputs=(), unroll=1):
-    _validate_and_normalize_unroll(
+    # Eager scan semantics do not use unroll, but keep validation aligned
+    # with compiled paths so invalid inputs fail consistently.
+    _ = _validate_and_normalize_unroll(
         unroll,
         xs[0].shape[dim] if len(xs) > 0 else None,
         allow_full_unroll_marker=True,

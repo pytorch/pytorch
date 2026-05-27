@@ -817,6 +817,39 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_buffer_reuse_with_large_subgraph(self, device):
+        # Regression test: torch.cond subgraph with more buffers than main
+        # graph scheduler nodes caused segmented_tree OOB in memory planning.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(64, 64) for _ in range(10)]
+                )
+
+            def forward(self, p, x):
+                def true_fn(inp):
+                    h = inp
+                    for layer in self.layers:
+                        h = torch.relu(layer(h))
+                    return h.clone()
+
+                def false_fn(inp):
+                    return inp.new_zeros(inp.shape[0], 64)
+
+                return torch.cond(p, true_fn, false_fn, (x,))
+
+        model = Model().to(device)
+        inputs = (torch.randn(8, 64),)
+        self._run_test(
+            model=model,
+            inputs=inputs,
+            device=device,
+            dynamic=True,
+        )
+
 
 class WhileLoopModels:
     class Simple(torch.nn.Module):
@@ -2219,6 +2252,9 @@ class ScanTests(TestCase):
         def f_full(init, xs):
             return scan(step, init, xs, unroll=True)
 
+        def f_large_unroll(init, xs):
+            return scan(step, init, xs, unroll=10)
+
         def f_empty_ys(init, xs, unroll):
             def empty_ys_step(carry, x):
                 return carry + x, []
@@ -2235,6 +2271,13 @@ class ScanTests(TestCase):
         xs = torch.randn(5, 3, 4)
         compiled_f_full = torch.compile(f_full, fullgraph=True, dynamic=True)
         self.assertEqual(f_full(init, xs), compiled_f_full(init, xs))
+
+        init = torch.randn(3, 4)
+        xs = torch.randn(3, 3, 4)
+        compiled_f_large_unroll = torch.compile(
+            f_large_unroll, fullgraph=True, dynamic=True
+        )
+        self.assertEqual(f_large_unroll(init, xs), compiled_f_large_unroll(init, xs))
 
         for unroll in (1, 2, True):
             init = torch.randn(3, 4)
