@@ -3119,8 +3119,8 @@ def meta_avg_pool2d(
     padH, padW = unpack("padding", padding)
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero",
+        divisor_override is None or divisor_override > 0,
+        lambda: "divisor must be greater than zero",
     )
 
     nbatch = input.size(-4) if input.dim() == 4 else 1
@@ -3239,8 +3239,8 @@ def meta_avg_pool2d_backward(
     padW = padH if len(padding) == 1 else padding[1]
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero",
+        divisor_override is None or divisor_override > 0,
+        lambda: "divisor must be greater than zero",
     )
 
     input_size = input.shape
@@ -3325,8 +3325,8 @@ def meta_avg_pool3d(
     )
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero",
+        divisor_override is None or divisor_override > 0,
+        lambda: "divisor must be greater than zero",
     )
 
     nbatch = input.size(0)
@@ -3412,8 +3412,8 @@ def meta_avg_pool3d_backward(
     )
 
     torch._check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero",
+        divisor_override is None or divisor_override > 0,
+        lambda: "divisor must be greater than zero",
     )
 
     nslices = input.size(-4)

@@ -6205,6 +6205,9 @@ def _avg_poolnd(
     divisor_override,
     dim,
 ):
+    assert divisor_override is None or divisor_override > 0, (
+        "divisor must be greater than zero"
+    )
     if not stride:
         stride = kernel_size
     if not padding:
@@ -6343,7 +6346,9 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
+    assert divisor_override is None or divisor_override > 0, (
+        "divisor must be greater than zero"
+    )
     if not stride:
         stride = kernel_size
     if not padding:
@@ -6514,7 +6519,9 @@ def avg_pool3d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-    assert divisor_override is None or divisor_override != 0, "divisor must be not zero"
+    assert divisor_override is None or divisor_override > 0, (
+        "divisor must be greater than zero"
+    )
     if not stride:
         stride = kernel_size
     if not padding:

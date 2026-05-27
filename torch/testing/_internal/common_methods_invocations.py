@@ -5225,7 +5225,7 @@ def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
              ((1, 3, 9, 9), (4, 4), (2, 3), 1, True, False, 2),
              ((1, 3, 9, 9), (6, 6), (3, 3), (2, 3), True, True, 2),
              ((2, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
-             ((1, 1, 4, 4), (2, 2), (), (0, ), False, True, -2),
+             ((1, 1, 4, 4), (2, 2), (), (0, ), False, True, 2),
              ((1, 2, 6, 6), (4, 4), (2, 2), (2, ), True, True, None))
 
     for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override in cases:
@@ -5267,7 +5267,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 1, 7, 5, 7), (6, 3, 4), dict(stride=(2, 3, 2), padding=(3, 1, 0), ceil_mode=False,
                                           count_include_pad=False, divisor_override=2)),
         ((1, 1, 4, 5, 4), (2, 2, 3), dict(stride=(2, 2, 1), padding=0, ceil_mode=False,
-                                          count_include_pad=True, divisor_override=-2)),
+                                          count_include_pad=True, divisor_override=2)),
         ((1, 1, 6, 5, 6), (4, 5, 6), dict(stride=(2, 3, 2), padding=2, ceil_mode=True,
                                           count_include_pad=True, divisor_override=None)),
         ((0, 1, 4, 5, 4), (2, 3, 1), dict(stride=(2, 1, 2), padding=0, ceil_mode=False,
@@ -5306,7 +5306,7 @@ def error_inputs_avg_pool2d(op_info, device, **kwargs):
     # error inputs for zero divisor
     x = torch.zeros(3, 3, 3)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2), 'divisor_override': 0}),
-                     error_regex='divisor must be not zero')
+                     error_regex='divisor must be greater than zero')
 
 def error_inputs_avg_pool3d(op_info, device, **kwargs):
     # error inputs when pad is negative
@@ -5327,7 +5327,7 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
     # error inputs for zero divisor
     x = torch.zeros(3, 3, 3, 3)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2, 2), 'divisor_override': 0}),
-                     error_regex='divisor must be not zero')
+                     error_regex='divisor must be greater than zero')
 
     # error inputs for invalid input dimension
     x = torch.rand([0, 1, 49], dtype=torch.float32)

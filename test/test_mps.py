@@ -775,7 +775,7 @@ class TestAvgPool(TestCaseMPS):
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
-        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+        self.assertRaisesRegex(RuntimeError, "divisor must be greater than zero",
                                lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
     def test_doubletensor_avg_pool2d_with_divisor(self):

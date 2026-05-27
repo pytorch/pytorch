@@ -50,8 +50,8 @@ TORCH_META_FUNC(avg_pool3d) (
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() > 0,
+    "divisor must be greater than zero");
 
   /* sizes */
   const int64_t nbatch = input.size(0);
@@ -119,7 +119,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() > 0, "divisor must be greater than zero");
 
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
