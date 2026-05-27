@@ -15774,14 +15774,6 @@ op_db: list[OpInfo] = [
                 "TestCompositeCompliance", "test_cow_input",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-            # RuntimeError: LLD failed to link hsaco source... while
-            # compiling
-            # triton_per_fused__log_softmax_nll_loss_forward_prepare_softmax_online_sub_0
-            DecorateInfo(
-                unittest.skip("link failure"),
-                "TestInductorOpInfo", "test_comprehensive",
-                device_type="cuda",
-                active_if=TEST_WITH_ROCM),
         )
     ),
     OpInfo('nn.functional.normalize',
@@ -15925,11 +15917,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
-            # tensor-likes are not close
-            DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
-            # fails in TorchScript interpreter with failures associated with batch_norm
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness_with_reusing_ir"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
             # native_group_norm expects contiguous inputs on CUDA

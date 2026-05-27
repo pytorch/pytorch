@@ -36,6 +36,7 @@ from torch.distributed.elastic.multiprocessing.api import (
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -722,6 +723,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                                 [f"hello stderr from {i}"], results.stderrs[i]
                             )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/163230",
+        )
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",
