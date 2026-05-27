@@ -1523,7 +1523,13 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            skipCUDAIfRocm,  # regression in ROCm 6.4
+            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
+            DecorateInfo(
+                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=TEST_WITH_ROCM,
+            ),
         ],
     ),
     OpInfo(

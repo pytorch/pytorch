@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -67,12 +68,14 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     IS_SANDCASTLE,
     parametrize,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -548,6 +551,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176975")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177007")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166067")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177006")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164426")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
@@ -4620,6 +4629,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_into_tensor(output, t)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -5027,6 +5037,69 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             for i in range(self.world_size):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_python_export", [False, True])
+    def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(device)
+
+        t = torch.ones(1024, device=device)
+        # Warmup so NCCL init doesn't land inside the profiled region
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            trace_path = f.name
+        try:
+            if use_python_export:
+                from torch.profiler._chrome_trace_export import (
+                    export_chrome_trace as py_export,
+                )
+
+                py_export(prof.profiler.kineto_results, trace_path)
+            else:
+                prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                trace = json.load(f)
+        finally:
+            os.unlink(trace_path)
+
+        nccl_keys = {"Collective name", "dtype", "In msg nelems", "Out msg nelems"}
+        gpu_kernels_with_nccl = []
+        for ev in trace.get("traceEvents", []):
+            if ev.get("cat") == "kernel":
+                args = ev.get("args", {})
+                if "Collective name" in args:
+                    gpu_kernels_with_nccl.append(ev)
+
+        self.assertGreater(
+            len(gpu_kernels_with_nccl),
+            0,
+            "Expected at least one GPU kernel with NCCL annotations",
+        )
+        for ev in gpu_kernels_with_nccl:
+            args = ev["args"]
+            missing = nccl_keys - set(args.keys())
+            self.assertEqual(
+                missing,
+                set(),
+                f"GPU kernel {ev['name']} missing NCCL metadata: {missing}",
+            )
 
 
 instantiate_parametrized_tests(CommTest)
