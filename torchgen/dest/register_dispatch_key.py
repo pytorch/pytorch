@@ -103,7 +103,6 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.XPU,
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"

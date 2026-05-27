@@ -488,6 +488,13 @@ def meta_select(
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
+
     new_size = list(self.size())
     new_stride = list(self.stride())
 
@@ -1524,8 +1531,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(

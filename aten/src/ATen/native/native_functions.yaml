@@ -2894,14 +2894,14 @@
 
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm
+    CPU, CUDA, MPS: native_group_norm
     CompositeExplicitAutograd: math_group_norm
   autogen: native_group_norm.out
   tags: core
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm_backward
+    CPU, CUDA, MPS: native_group_norm_backward
   autogen: native_group_norm_backward.out
   tags: core
 
@@ -4921,7 +4921,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS, MTIA: _reshape_alias
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, MPS, MTIA: _reshape_alias
+    ZeroTensor: _reshape_alias_symint
     # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
@@ -8024,7 +8025,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
+    Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
+    ZeroTensor: view_symint
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: view_nested
   tags: core
@@ -8128,8 +8130,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_src_out
-    MPS: scatter_src_out_mps
+    CPU, CUDA, MPS: scatter_src_out
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   structured_delegate: scatter.value_out
@@ -8144,8 +8145,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_value_out
-    MPS: scatter_value_out_mps
+    CPU, CUDA, MPS: scatter_value_out
 
 - func: scatter.reduce(Tensor self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor
   structured_delegate: scatter.reduce_out
@@ -8159,8 +8159,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_reduce_out
-    MPS: scatter_reduce_out_mps
+    CPU, CUDA, MPS: scatter_reduce_out
 
 - func: scatter.value_reduce(Tensor self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor
   structured_delegate: scatter.value_reduce_out
@@ -8174,8 +8173,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_value_reduce_out
-    MPS: scatter_value_reduce_out_mps
+    CPU, CUDA, MPS: scatter_value_reduce_out
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   structured_delegate: scatter_add.out
@@ -8190,8 +8188,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_add
-    MPS: scatter_add_mps_out
+    CPU, CUDA, MPS: scatter_add
 
 - func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   structured_delegate: scatter_reduce.two_out
@@ -9191,8 +9188,7 @@
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: gather_out
-    MPS: gather_out_mps
+    CPU, CUDA, MPS: gather_out
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
