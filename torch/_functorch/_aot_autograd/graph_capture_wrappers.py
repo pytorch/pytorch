@@ -26,11 +26,14 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
+    get_proxy_slot,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
+    set_proxy_slot,
 )
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
@@ -331,7 +334,7 @@ def create_joint(
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
-            joint_fn_handle.post_forward(primals)
+            joint_fn_handle.post_forward(primals, outs)
 
         if len(tangent_mask) != len(outs):
             raise AssertionError(
@@ -652,6 +655,14 @@ class MutationCounters:
     mc_inductor_storage_resized: int
 
 
+@dataclass
+class FunctionalOutputSnapshot:
+    tensor: torch.Tensor
+    proxy: Any
+    mutation_counters: MutationCounters
+    storage_nbytes: int
+
+
 T = TypeVar("T")
 
 
@@ -768,8 +779,6 @@ def apply_in_graph_mutations(
             or mcs.mc_inductor_storage_resized > applied_mcs.mc_inductor_storage_resized  # type: ignore[union-attr]
         ):
             # resizing is not supported on subclasses (we error earlier if this happens)
-            from torch._subclasses.functional_tensor import FunctionalTensor
-
             if not isinstance(f_inpt, FunctionalTensor):
                 raise AssertionError(f"expected FunctionalTensor, got {type(f_inpt)}")
             old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
@@ -858,6 +867,8 @@ def create_functionalized_fn(
     primals_after_forward = None
     f_args_after_forward = None
     f_args_mutation_counters_after_forward: list[MutationCounters] | None = None
+    f_outs_after_forward_spec: TreeSpec | None = None
+    f_outs_after_forward_snapshots: list[FunctionalOutputSnapshot | None] | None = None
     inputs_mutated_in_graph = [
         info.mutation_type == MutationType.MUTATED_IN_GRAPH for info in meta.input_info
     ]
@@ -881,20 +892,46 @@ def create_functionalized_fn(
                 # Wrap inputs into functional wrappers
                 f_args = pytree.tree_map(to_fun, args)
 
-                if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
+                if trace_joint and joint_fn_handle:
                     # TODO(ivankobzarev): Support fw and bw mutations for subclasses
-                    def _post_forward(primals: Any) -> None:
-                        nonlocal primals_after_forward
-                        primals_after_forward = pytree.tree_map(from_fun, primals)
-                        nonlocal f_args_after_forward
-                        f_args_after_forward = f_args[0]
-                        nonlocal f_args_mutation_counters_after_forward
-                        f_args_mutation_counters_after_forward = [
-                            MutationCounters(-1, -1, -1)
-                            if not inputs_mutated_in_graph[i]
-                            else _get_mutation_counters(f_arg)
-                            for i, f_arg in enumerate(f_args_after_forward)
-                        ]
+                    def _post_forward(primals: Any, outs: Any) -> None:
+                        if has_input_mutated_in_graph:
+                            nonlocal primals_after_forward
+                            primals_after_forward = pytree.tree_map(from_fun, primals)
+                            nonlocal f_args_after_forward
+                            f_args_after_forward = f_args[0]
+                            nonlocal f_args_mutation_counters_after_forward
+                            f_args_mutation_counters_after_forward = [
+                                MutationCounters(-1, -1, -1)
+                                if not inputs_mutated_in_graph[i]
+                                else _get_mutation_counters(f_arg)
+                                for i, f_arg in enumerate(f_args_after_forward)
+                            ]
+
+                        flat_outs, outs_spec = pytree.tree_flatten(outs)
+                        nonlocal f_outs_after_forward_spec
+                        f_outs_after_forward_spec = outs_spec
+                        nonlocal f_outs_after_forward_snapshots
+                        f_outs_after_forward_snapshots = []
+
+                        mode = get_proxy_mode()
+                        if mode is None:
+                            raise AssertionError("Expected non-None proxy mode")
+
+                        for out in flat_outs:
+                            if not isinstance(out, FunctionalTensor):
+                                f_outs_after_forward_snapshots.append(None)
+                                continue
+
+                            unwrapped_out = torch._from_functional_tensor(out.elem)
+                            f_outs_after_forward_snapshots.append(
+                                FunctionalOutputSnapshot(
+                                    tensor=unwrapped_out,
+                                    proxy=get_proxy_slot(unwrapped_out, mode.tracer),
+                                    mutation_counters=_get_mutation_counters(out),
+                                    storage_nbytes=unwrapped_out.untyped_storage().nbytes(),
+                                )
+                            )
 
                     joint_fn_handle.post_forward = _post_forward
 
@@ -902,6 +939,113 @@ def create_functionalized_fn(
                 f_outs, f_outs_descs = call_and_expect_output_descs(fn, f_args)
 
             if trace_joint:
+                if f_outs_after_forward_snapshots is not None and any(
+                    snapshot is not None for snapshot in f_outs_after_forward_snapshots
+                ):
+                    if not (isinstance(f_outs, tuple) and len(f_outs) == 2):
+                        raise AssertionError(
+                            f"expected joint outputs to be tuple of (fwd, bwd), got {type(f_outs)}"
+                        )
+                    fw_outs, bw_outs = f_outs
+                    flat_fw_outs, fw_outs_spec = pytree.tree_flatten(fw_outs)
+                    if fw_outs_spec != f_outs_after_forward_spec:
+                        raise AssertionError(
+                            "forward output structure changed during joint tracing"
+                        )
+                    if len(flat_fw_outs) != len(f_outs_after_forward_snapshots):
+                        raise AssertionError(
+                            "forward output mutation counter count did not match outputs"
+                        )
+                    mode = get_proxy_mode()
+                    if mode is None:
+                        raise AssertionError("Expected non-None proxy mode")
+
+                    # Backward can mutate tensors that were also returned from
+                    # forward. Functionalization updates the output wrapper, so
+                    # restore the forward-time proxy after emitting a separate
+                    # backward-only copy_ for the side effect.
+                    replaced_fw_output = False
+                    for i, (
+                        fw_out,
+                        fw_out_after_forward_snapshot,
+                    ) in enumerate(
+                        zip(
+                            flat_fw_outs,
+                            f_outs_after_forward_snapshots,
+                        )
+                    ):
+                        if (
+                            fw_out_after_forward_snapshot is None
+                            or not isinstance(fw_out, torch.Tensor)
+                            or not is_fun(fw_out)
+                        ):
+                            continue
+
+                        mutation_counters = _get_mutation_counters(fw_out)
+                        if has_metadata_mutation(
+                            fw_out,
+                            fw_out_after_forward_snapshot.tensor,
+                            check_only_storage_mutation=False,
+                        ):
+                            raise AssertionError(
+                                "Found a forward output that had metadata mutated in the backward. This is not supported"
+                            )
+                        if (
+                            mutation_counters.mc_inductor_storage_resized
+                            != fw_out_after_forward_snapshot.mutation_counters.mc_inductor_storage_resized
+                        ):
+                            raise AssertionError(
+                                "Found a forward output that had storage resizing in the backward. This is not supported"
+                            )
+                        if isinstance(fw_out, FunctionalTensor):
+                            fw_out_storage_nbytes = (
+                                torch._from_functional_tensor(fw_out.elem)
+                                .untyped_storage()
+                                .nbytes()
+                            )
+                            if (
+                                fw_out_storage_nbytes
+                                != fw_out_after_forward_snapshot.storage_nbytes
+                            ):
+                                raise AssertionError(
+                                    "Found a forward output that had storage resizing in the backward. This is not supported"
+                                )
+                        if (
+                            mutation_counters.mc_data
+                            == fw_out_after_forward_snapshot.mutation_counters.mc_data
+                        ):
+                            continue
+
+                        fw_out_after_forward = fw_out_after_forward_snapshot.tensor
+                        mutation_target_proxy = fw_out_after_forward_snapshot.proxy
+                        fw_out_after_backward = from_fun(fw_out)
+                        if not (
+                            isinstance(fw_out_after_forward, torch.Tensor)
+                            and isinstance(fw_out_after_backward, torch.Tensor)
+                        ):
+                            raise AssertionError(
+                                "expected mutated forward output snapshots to be tensors"
+                            )
+                        with (
+                            torch.fx.traceback.preserve_node_meta(),
+                            set_partitioner_tag_must_be_in_backward(),
+                        ):
+                            with torch.no_grad():
+                                fw_out_after_forward.copy_(fw_out_after_backward)
+                        set_proxy_slot(
+                            fw_out_after_forward,
+                            mode.tracer,
+                            mutation_target_proxy,
+                        )
+                        flat_fw_outs[i] = fw_out_after_forward
+                        replaced_fw_output = True
+
+                    if replaced_fw_output:
+                        f_outs = (
+                            pytree.tree_unflatten(flat_fw_outs, fw_outs_spec),
+                            bw_outs,
+                        )
+
                 # We support a limited amount of mutation of graph inputs during the backward pass.
                 # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
                 # Here, we perform extra checks for primals that were mutated in the **backward**

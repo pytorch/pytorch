@@ -565,8 +565,9 @@ def aot_dispatch_autograd_graph(
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
-        # There should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fx_g.graph)
+        # There should be no mutating ops except backward-only copies that
+        # model mutations of forward intermediates saved for backward.
+        assert_functional_graph(fx_g.graph, allow_backward_copy_to_non_input=True)
 
     fx_g.recompile()
 
