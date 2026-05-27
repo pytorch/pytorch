@@ -897,6 +897,8 @@ namespace {
   // ratios are less regular. The lower multiplier (5200 vs 16600) reflects
   // that cuSOLVER overtakes cuBLAS at smaller N for complex128.
   //
+  // FIXME: test on Blackwell with float32 via half emulation enabled (CUDA 13.2+).
+  //
   // Authored with Claude.
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype) {
     // cuBLAS does not support rectangular inputs.
