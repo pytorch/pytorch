@@ -42,29 +42,34 @@ class OptionalArrayRef final {
   constexpr OptionalArrayRef(const T& value) noexcept
       : wrapped_opt_array_ref(value) {}
 
-  template <
-      typename U = ArrayRef<T>,
-      std::enable_if_t<
-          !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
-              !std::is_same_v<std::decay_t<U>, std::in_place_t> &&
-              std::is_constructible_v<ArrayRef<T>, U&&> &&
-              std::is_convertible_v<U&&, ArrayRef<T>> &&
-              !std::is_convertible_v<U&&, T>,
-          bool> = false>
-  constexpr OptionalArrayRef(U&& value) noexcept(
-      std::is_nothrow_constructible_v<ArrayRef<T>, U&&>)
+  template <typename U = ArrayRef<T>>
+  requires(
+      !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
+      !std::is_same_v<std::decay_t<U>, std::in_place_t> &&
+      std::is_constructible_v<ArrayRef<T>, U&&> &&
+      std::is_convertible_v<U&&, ArrayRef<T>> &&
+      !std::is_convertible_v<
+          U&&,
+          T>) constexpr OptionalArrayRef(U&& value) noexcept(std::
+                                                                 is_nothrow_constructible_v<
+                                                                     ArrayRef<
+                                                                         T>,
+                                                                     U&&>)
       : wrapped_opt_array_ref(std::forward<U>(value)) {}
 
-  template <
-      typename U = ArrayRef<T>,
-      std::enable_if_t<
-          !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
-              !std::is_same_v<std::decay_t<U>, std::in_place_t> &&
-              std::is_constructible_v<ArrayRef<T>, U&&> &&
-              !std::is_convertible_v<U&&, ArrayRef<T>>,
-          bool> = false>
-  constexpr explicit OptionalArrayRef(U&& value) noexcept(
-      std::is_nothrow_constructible_v<ArrayRef<T>, U&&>)
+  template <typename U = ArrayRef<T>>
+  requires(
+      !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
+      !std::is_same_v<std::decay_t<U>, std::in_place_t> &&
+      std::is_constructible_v<ArrayRef<T>, U&&> &&
+      !std::is_convertible_v<
+          U&&,
+          ArrayRef<
+              T>>) constexpr explicit OptionalArrayRef(U&& value) noexcept(std::
+                                                                               is_nothrow_constructible_v<
+                                                                                   ArrayRef<
+                                                                                       T>,
+                                                                                   U&&>)
       : wrapped_opt_array_ref(std::forward<U>(value)) {}
 
   template <typename... Args>
@@ -110,13 +115,12 @@ class OptionalArrayRef final {
     return *this;
   }
 
-  template <
-      typename U = ArrayRef<T>,
-      typename = std::enable_if_t<
-          !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
-          std::is_constructible_v<ArrayRef<T>, U&&> &&
-          std::is_assignable_v<ArrayRef<T>&, U&&>>>
-  constexpr OptionalArrayRef& operator=(U&& value) noexcept(
+  template <typename U = ArrayRef<T>>
+  requires(
+      !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
+      std::is_constructible_v<ArrayRef<T>, U&&> &&
+      std::is_assignable_v<ArrayRef<T>&, U&&>) constexpr OptionalArrayRef&
+  operator=(U&& value) noexcept(
       std::is_nothrow_constructible_v<ArrayRef<T>, U&&> &&
       std::is_nothrow_assignable_v<ArrayRef<T>&, U&&>) {
     wrapped_opt_array_ref = std::forward<U>(value);
@@ -175,16 +179,14 @@ class OptionalArrayRef final {
   }
 
   template <typename U>
-  constexpr std::
-      enable_if_t<std::is_convertible_v<U&&, ArrayRef<T>>, ArrayRef<T>>
-      value_or(U&& default_value) const& {
+  requires std::is_convertible_v<U&&, ArrayRef<T>> constexpr ArrayRef<T>
+  value_or(U&& default_value) const& {
     return wrapped_opt_array_ref.value_or(std::forward<U>(default_value));
   }
 
   template <typename U>
-  constexpr std::
-      enable_if_t<std::is_convertible_v<U&&, ArrayRef<T>>, ArrayRef<T>>
-      value_or(U&& default_value) && {
+  requires std::is_convertible_v<U&&, ArrayRef<T>> constexpr ArrayRef<T>
+  value_or(U&& default_value) && {
     return wrapped_opt_array_ref.value_or(std::forward<U>(default_value));
   }
 
@@ -199,10 +201,10 @@ class OptionalArrayRef final {
   }
 
   template <typename... Args>
-  constexpr std::
-      enable_if_t<std::is_constructible_v<ArrayRef<T>, Args&&...>, ArrayRef<T>&>
-      emplace(Args&&... args) noexcept(
-          std::is_nothrow_constructible_v<ArrayRef<T>, Args&&...>) {
+  requires std::is_constructible_v<ArrayRef<T>, Args&&...> constexpr ArrayRef<
+      T>&
+  emplace(Args&&... args) noexcept(
+      std::is_nothrow_constructible_v<ArrayRef<T>, Args&&...>) {
     return wrapped_opt_array_ref.emplace(std::forward<Args>(args)...);
   }
 
@@ -213,25 +215,17 @@ class OptionalArrayRef final {
     return wrapped_opt_array_ref.emplace(il, std::forward<Args>(args)...);
   }
 
+  friend bool operator==(OptionalArrayRef a1, ArrayRef<T> other) {
+    if (!a1.has_value()) {
+      return false;
+    }
+    return a1.value() == other;
+  }
+
  private:
   std::optional<ArrayRef<T>> wrapped_opt_array_ref;
 };
 
 using OptionalIntArrayRef = OptionalArrayRef<int64_t>;
-
-inline bool operator==(
-    const OptionalIntArrayRef& a1,
-    const IntArrayRef& other) {
-  if (!a1.has_value()) {
-    return false;
-  }
-  return a1.value() == other;
-}
-
-inline bool operator==(
-    const c10::IntArrayRef& a1,
-    const c10::OptionalIntArrayRef& a2) {
-  return a2 == a1;
-}
 
 } // namespace c10
