@@ -1126,6 +1126,8 @@ class TritonIndexExprPrinter(TritonPrinter):
     def _print_Symbol(self, expr: sympy.Expr) -> str:
         result = super()._print_Symbol(expr)  # pyrefly: ignore [missing-attribute]
         if expr.is_integer:
+            # Cast integer leaves before arithmetic so requested int64 math
+            # does not overflow in the kernel's default index dtype.
             return f"({result}).to({self.integer_dtype})"
         return result
 
@@ -3046,16 +3048,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
 
-    def index_to_str(self, index: sympy.Expr, dtype: torch.dtype | None = None) -> str:
+    def index_to_str(
+        self, index: sympy.Expr | list[sympy.Expr], dtype: torch.dtype | None = None
+    ) -> str:
         if isinstance(index, list):
             return f"[{', '.join(self.index_to_str(i, dtype=dtype) for i in index)}]"
 
         renamed = self.rename_indexing(index)
-        if dtype is not None and (
-            dtype in (torch.int32, torch.int64)
-            and dtype != self.get_index_dtype_as_torch_dtype()
-        ):
-            return TritonIndexExprPrinter(triton_type(dtype)).doprint(renamed)
+        if dtype in (torch.int32, torch.int64):
+            if dtype != self.get_index_dtype_as_torch_dtype():
+                return TritonIndexExprPrinter(triton_type(dtype)).doprint(renamed)
         return self.kexpr(renamed)  # type: ignore[arg-type]
 
     def __init__(

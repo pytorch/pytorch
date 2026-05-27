@@ -7927,8 +7927,8 @@ class CommonTemplate:
                 )
 
             # test broadcasted shape bail
-            fn = lambda x: x + torch.zeros(  # noqa: E731
-                [256, 256, 256], dtype=lowp_dtype, device=self.device
+            fn = lambda x: (  # noqa: E731
+                x + torch.zeros([256, 256, 256], dtype=lowp_dtype, device=self.device)
             )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(

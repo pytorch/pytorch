@@ -1071,7 +1071,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             )
         )
 
-    def index_to_str(self, index: sympy.Expr) -> str:
+    def index_to_str(
+        self, index: sympy.Expr | list[sympy.Expr], dtype: torch.dtype | None = None
+    ) -> str:
         """
         Convert an index expr to a string that can be used in output code.
         e.g. a sympy expression "s2" may actually appear as "ks1" in the generated kernel.
@@ -1081,7 +1083,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         new parameters to the function signature.
         """
         if isinstance(index, list):
-            return f"[{', '.join(map(self.index_to_str, index))}]"
+            return f"[{', '.join(self.index_to_str(i, dtype=dtype) for i in index)}]"
         return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
     def prepare_indexing(
