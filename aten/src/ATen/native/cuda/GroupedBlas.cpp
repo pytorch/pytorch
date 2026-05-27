@@ -973,8 +973,13 @@ void cublaslt_foreach_mm(
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opa, sizeof(opa)));
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opb, sizeof(opb)));
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &pointer_mode, sizeof(pointer_mode)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, &alphaBatchStride, sizeof(alphaBatchStride)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, &betaBatchStride, sizeof(betaBatchStride)));
+  // ALPHA/BETA_BATCH_STRIDE attributes (id 39/40) require cuBLAS 13.2+ headers.
+  // On SM 9.0, batch_stride=0 (scalar alpha/beta) is the default, so skip.
+  // On SM 10.0+, batch_stride=1 enables per-group alpha/beta pointer arrays.
+  if (!sm90) {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, &alphaBatchStride, sizeof(alphaBatchStride)));
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, &betaBatchStride, sizeof(betaBatchStride)));
+  }
 
   // Grouped matrix layouts
   cublasLtMatrixLayout_t Adesc, Bdesc, Cdesc, Ddesc;
@@ -1007,13 +1012,14 @@ void cublaslt_foreach_mm(
   auto workspace = allocator.allocate(workspace_size);
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+  // Average dimension hints (cuBLAS 13.2+). Best-effort: ignore if not supported.
   int64_t avgM = cublas_m, avgN = cublas_n, avgK = cublas_k;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, &avgM, sizeof(avgM)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, &avgN, sizeof(avgN)));
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-      preference, CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, &avgK, sizeof(avgK)));
+  cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, &avgM, sizeof(avgM));
+  cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, &avgN, sizeof(avgN));
+  cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, &avgK, sizeof(avgK));
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
