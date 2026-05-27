@@ -92,9 +92,7 @@ from torch._inductor.utils import (
     get_static_bw_input_idxs,
     InputType,
     is_gpu,
-    should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
-    tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
@@ -127,7 +125,6 @@ from .utils import (
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
-    maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
     shape_env_from_inputs,
@@ -1851,33 +1848,28 @@ def get_input_idxs_to_check(
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
-    This function runs at compile time, and generates a list of indices for which we
-    might need to do a copy to preserve alignment requirements.
+    Returns indices of GPU tensor inputs that the runtime wrapper should
+    realign via copy_if_misaligned.
+
+    The result must depend only on input *types* and the static-input set,
+    not on the example's actual data-pointer alignment. Codegen always
+    assumes aligned inputs; the wrapper realigns at runtime. Keeping this
+    list independent of actual alignment lets the FX graph cache hit on
+    both aligned and unaligned variants of the same input.
+
+    Static inputs are excluded: cudagraphs requires them to be aligned, and
+    any that weren't have already been demoted by remove_unaligned_input_idxs.
     """
+    static_set = OrderedSet(static_input_idxs)
     ids_to_check = []
-
-    for i, input in enumerate(inputs):
-        if not isinstance(input, torch.Tensor):
-            # non-tensors don't need alignment
+    for i, inp in enumerate(inputs):
+        if not isinstance(inp, torch.Tensor):
             continue
-        if not is_gpu(input.device.type):
-            # right now we only care for gpu tensors
+        if not is_gpu(inp.device.type):
             continue
-        with maybe_get_suppress_shape_guards_ctx():
-            # suppress guards so that tensor_is_aligned and should_assume_input_aligned
-            # do not add guards on input's storage offset
-            if i in static_input_idxs and tensor_is_aligned(input):
-                continue
-            if not should_assume_input_aligned(input):
-                continue
-
-        # if we get here, then
-        # (a) our triton code assumes that the input is aligned
-        # (b) we can't be sure ahead of time that the input will actually be aligned.
-        # therefore, at runtime, we'll need to check that the input is aligned
-        # (and if not, clone it to make it aligned.)
+        if i in static_set:
+            continue
         ids_to_check.append(i)
-
     return ids_to_check
 
 

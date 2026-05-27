@@ -113,10 +113,9 @@ from .utils import (
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
+    is_gpu,
     is_same_tensor,
-    maybe_get_suppress_shape_guards_ctx,
     normalize_name,
-    should_assume_input_aligned,
     should_fallback_by_default,
     SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
@@ -1327,20 +1326,16 @@ class GraphLowering(torch.fx.Interpreter):
             self.add_device_info(example.device)
 
         # Note: [Input Alignment handling in Inductor]
-        # Alignment matters for generating efficient code. Some operations,
-        # e.g. vectorized loads, can only be performed on aligned inputs.
-        #
-        # But if we codegen assuming aligned inputs and then get unaligned
-        # inputs at runtime, then we are forced to clone - which is bad for
-        # both perf and memory usage.
-        #
-        # One option would be to guard on storage_offset%ALIGNMENT, and then
-        # codegen based on this. But storage_offset guards turned out to be
-        # expensive and cause recompiles; Instead, we're generating code
-        # based on the alignment of the example input without guarding.
-        with maybe_get_suppress_shape_guards_ctx():
-            if not should_assume_input_aligned(example):
-                self.unaligned_buffers.add(target)
+        # GPU placeholders are always codegened assuming aligned inputs;
+        # the generated wrapper realigns at runtime via copy_if_misaligned
+        # (see PythonWrapperCodegen.register_alignment_check_inputs). That
+        # keeps the FX graph cache key independent of the example's actual
+        # alignment, so the same cached graph services both aligned and
+        # unaligned variants of an input. Non-GPU placeholders preserve the
+        # old conservative behavior since they go through different codegen
+        # and don't have a runtime realignment hook.
+        if not is_gpu(example.device.type):
+            self.unaligned_buffers.add(target)
         return tensor
 
     @typing_extensions.override
