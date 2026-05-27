@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -210,6 +211,52 @@ class TestSACILP(TestCase):
         self.assertEqual(ac_decisions, {})
         self.assertEqual(recomputation_time, 0)
         self.assertEqual(peak_mem, -1)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
+    @patch(
+        "torch.utils._runtime_estimation.get_gpu_dram_gbps",
+        return_value=2039,
+    )
+    @patch(
+        "torch.utils._runtime_estimation.get_device_tflops",
+        side_effect=lambda dtype: {
+            torch.bfloat16: 312.5,
+            torch.float16: 312.5,
+            torch.int8: 624.0,
+        }.get(dtype, 19.5),
+    )
+    def test_sac_ilp_case1_with_pinned_hw(self, _mock_tflops, _mock_gbps):
+        """
+        Same scenario as test_sac_ilp_case1 but with the roofline cost
+        model's hardware oracles pinned to the NVIDIA A100 SXM datasheet
+        (from torch/_inductor/analysis/device_info.py), so the MILP output
+        is exact on every host. Restores the numerical assertions that
+        case1 had to drop to be portable across A100/H100/MI300/MI350.
+        """
+        mod_info = self._collect_module_info_with_fake_tensor_mode()
+        g = parse_module_info(mod_info)
+
+        memory_budget = 1.6
+        budget_bytes = round(memory_budget * (2**30))
+
+        baseline_peak_mem, _ = get_peak_memory_runtime_baseline(g)
+        self.assertEqual(baseline_peak_mem, 2583888896)
+
+        ac_decisions, recomputation_time, peak_mem = sac_milp(
+            g, memory_budget=memory_budget, world_size=4
+        )
+
+        self.assertEqual(
+            set(ac_decisions.keys()),
+            {f"Transformer.layers.{i}" for i in range(4)},
+        )
+        self.assertEqual(
+            sorted(ac_decisions.values()),
+            [0.5225, 0.5225, 0.5225, 0.7983],
+        )
+        self.assertEqual(peak_mem, budget_bytes)
+        self.assertEqual(recomputation_time, 6.92)
 
 
 class TestOptimalCheckpointingPolicy(TestCase):
