@@ -1108,7 +1108,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
   } else {
-#if !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
+#if !AT_MAGMA_ENABLED() || defined(USE_ROCM)
     triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
@@ -1117,7 +1117,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // AT_MAGMA_ENABLED() || !defined(USE_ROCM)
+#endif // AT_MAGMA_ENABLED() || defined(USE_ROCM)
   }
 }
 
