@@ -797,7 +797,9 @@ def _ast_unparse(node: ast.AST) -> str:
 strip_function_call = torch._C._dynamo.strip_function_call
 
 
-def _safe_type_repr(t: type[Any]) -> str:
+def _safe_type_repr(t: object) -> str:
+    if not isinstance(t, type):
+        t = type(t)
     return type.__repr__(t)
 
 
