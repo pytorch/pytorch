@@ -50,6 +50,93 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             torch.randn(16, 32),
         )
 
+    @with_comms
+    def test_auto_registered_batch_norm_functional(self):
+        self.assertIn(
+            torch.ops.aten._native_batch_norm_legit_functional.default,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4 * 3 * 3, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4, 3, 3)
+        input = input / input.numel()
+        weight = torch.linspace(0.5, 1.1, 4, device=self.device_type)
+        bias = torch.linspace(-0.2, 0.2, 4, device=self.device_type)
+        running_mean = torch.zeros(4, device=self.device_type)
+        running_var = torch.ones(4, device=self.device_type)
+
+        expected = torch.ops.aten._native_batch_norm_legit_functional(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(1)])
+        dweight = distribute_tensor(weight, device_mesh, [Shard(0)])
+        dbias = distribute_tensor(bias, device_mesh, [Shard(0)])
+        drunning_mean = distribute_tensor(running_mean, device_mesh, [Shard(0)])
+        drunning_var = distribute_tensor(running_var, device_mesh, [Shard(0)])
+
+        result = torch.ops.aten._native_batch_norm_legit_functional(
+            dinput,
+            dweight,
+            dbias,
+            drunning_mean,
+            drunning_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        self.assertEqual(len(result), 5)
+        expected_placements = (Shard(1), Shard(0), Shard(0), Shard(0), Shard(0))
+        for output, placements in zip(result, expected_placements):
+            self.assertEqual(output.placements, (placements,))
+        for actual, expected_tensor in zip(result, expected):
+            self.assertEqual(actual.full_tensor(), expected_tensor)
+
+    @with_comms
+    def test_auto_registered_explicit_out_variant(self):
+        self.assertNotIn("out", torch.ops.aten.max.dim_max._schema.overload_name)
+        self.assertTrue(
+            any(
+                argument.is_out
+                for argument in torch.ops.aten.max.dim_max._schema.arguments
+            )
+        )
+        self.assertIn(
+            torch.ops.aten.max.dim_max,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4)
+        expected_values, expected_indices = torch.max(input, dim=1)
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(0)])
+        dvalues = distribute_tensor(
+            torch.empty_like(expected_values), device_mesh, [Shard(0)]
+        )
+        dindices = distribute_tensor(
+            torch.empty_like(expected_indices), device_mesh, [Shard(0)]
+        )
+
+        result = torch.max(dinput, dim=1, out=(dvalues, dindices))
+
+        self.assertIs(result[0], dvalues)
+        self.assertIs(result[1], dindices)
+        self.assertEqual(dvalues.placements, (Shard(0),))
+        self.assertEqual(dindices.placements, (Shard(0),))
+        self.assertEqual(dvalues.full_tensor(), expected_values)
+        self.assertEqual(dindices.full_tensor(), expected_indices)
+
     def test_detach(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
