@@ -15034,24 +15034,6 @@ if __name__ == '__main__':
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
-        if bias:
-            # TEMP: calibration data for bias=True ULP caps. Re-run on
-            # A100 / CI / etc., copy the four ``observed = ...`` lines
-            # into the per-(policy, dtype, device) cap entries above,
-            # then delete this block.
-            tag = (
-                f"[bias=True calibration] _resolved_policy={_resolved_policy!r}"
-                f" dtype={dtype} device={device}"
-            )
-            print(
-                f"{tag}\n"
-                f"  output:           observed={maximal_output_max_ulp_diff:>6d}  cap={expected_max_ulp_diff:>6d}\n"
-                f"  input_grad:       observed={maximal_input_grad_max_ulp_diff:>6d}  cap={expected_input_grad_max_ulp_diff:>6d}\n"
-                f"  linear_weight:    observed={maximal_linear_weight_grad_max_ulp_diff:>6d}  cap={expected_weight_grad_max_ulp_diff:>6d}\n"
-                f"  linear_bias:      observed={maximal_linear_bias_grad_max_ulp_diff:>6d}  cap={expected_linear_bias_grad_max_ulp_diff:>6d}",
-                flush=True,
-            )
-
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
