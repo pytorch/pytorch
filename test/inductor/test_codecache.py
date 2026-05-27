@@ -39,6 +39,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    compiled_fx_graph_hash,
     CUDACodeCache,
     FxGraphCache,
     FxGraphCachePickler,
@@ -109,6 +110,17 @@ if HAS_TRITON:
     import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel, sub_kernel
+
+
+@contextmanager
+def set_num_threads(num_threads):
+    orig_num_threads = torch.get_num_threads()
+    torch.set_num_threads(num_threads)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(orig_num_threads)
+
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
@@ -2908,6 +2920,35 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def test_ambient_cpp_thread_count_affects_cache_key(self):
+        def fn(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(fn)
+        inp = torch.randn(8)
+
+        with config.patch({"cpp.threads": -1, "cpp.dynamic_threads": False}):
+            with set_num_threads(1):
+                key_1, debug_lines_1 = compiled_fx_graph_hash(gm, [inp], {}, [])
+            with set_num_threads(2):
+                key_2, debug_lines_2 = compiled_fx_graph_hash(gm, [inp], {}, [])
+
+        self.assertNotEqual(key_1, key_2)
+        self.assertTrue(
+            any("cpp_thread_count" in line and ": 1" in line for line in debug_lines_1)
+        )
+        self.assertTrue(
+            any("cpp_thread_count" in line and ": 2" in line for line in debug_lines_2)
+        )
+
+        with config.patch({"cpp.threads": 2, "cpp.dynamic_threads": False}):
+            with set_num_threads(1):
+                explicit_key_1, _ = compiled_fx_graph_hash(gm, [inp], {}, [])
+            with set_num_threads(2):
+                explicit_key_2, _ = compiled_fx_graph_hash(gm, [inp], {}, [])
+
+        self.assertEqual(explicit_key_1, explicit_key_2)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()

@@ -102,6 +102,7 @@ from torch._inductor.utils import (
     determine_aoti_mmap_flags,
     is_linux,
     is_windows,
+    parallel_num_threads,
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1334,6 +1335,10 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
+        if config.cpp.threads < 1 and not config.cpp.dynamic_threads:
+            # CPU C++ codegen specializes implicit thread count into OpenMP
+            # pragmas, but save_config_portable() only records cpp.threads=-1.
+            self.cpp_thread_count = parallel_num_threads()
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
