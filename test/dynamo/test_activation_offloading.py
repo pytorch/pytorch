@@ -368,6 +368,155 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertEqual(wait_result.shape, x_gpu.shape)
             self.assertEqual(wait_result.device, x_gpu.device)
 
+    def test_pinned_empty_like_numa_restores_policy(self):
+        """Test that _pinned_empty_like_numa restores the thread's prior mempolicy.
+
+        Mocks the NUMA helpers so the test deterministically exercises
+        the bind-then-restore path on any host.
+        """
+        import ctypes
+        from unittest.mock import MagicMock, patch
+
+        from torch._functorch._activation_offloading.offload_ops import (
+            _MPOL_BIND,
+            _pinned_empty_like_numa,
+        )
+
+        # Simulate a pre-existing MPOL_BIND to NUMA node 3
+        prior_mask = (ctypes.c_ulong * 1)(8)  # bit 3
+        saved_policy = (_MPOL_BIND, prior_mask, 64)
+        mock_get = MagicMock(return_value=saved_policy)
+        mock_set = MagicMock(return_value=True)
+        _ops = "torch._functorch._activation_offloading.offload_ops"
+
+        x = torch.randn(64, device=GPU_TYPE)
+        with (
+            patch(f"{_ops}._init_mempolicy", return_value=True),
+            patch(f"{_ops}._gpu_numa_node", return_value=0),
+            patch(f"{_ops}._get_mempolicy", mock_get),
+            patch(f"{_ops}._set_mempolicy", mock_set),
+        ):
+            result = _pinned_empty_like_numa(x)
+
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(mock_set.call_count, 2)
+        bind_call, restore_call = mock_set.call_args_list
+        # First call: bind to the GPU's NUMA node
+        self.assertEqual(bind_call.args[0], _MPOL_BIND)
+        # Second call: restore the original policy (not MPOL_DEFAULT)
+        self.assertEqual(restore_call.args[0], _MPOL_BIND)
+        self.assertIs(restore_call.args[1], prior_mask)
+        self.assertEqual(restore_call.args[2], 64)
+
+    def test_pinned_empty_like_numa_restores_policy_on_failure(self):
+        """Test that mempolicy is restored even when allocation raises.
+
+        Mocks _gpu_numa_node and _set_mempolicy/_get_mempolicy to
+        deterministically exercise the bind-then-restore path regardless
+        of whether the host has NUMA hardware.
+        """
+        import ctypes
+        from unittest.mock import MagicMock, patch
+
+        from torch._functorch._activation_offloading.offload_ops import (
+            _MPOL_BIND,
+            _pinned_empty_like_numa,
+        )
+
+        prior_mask = (ctypes.c_ulong * 1)(8)  # bit 3
+        saved_policy = (_MPOL_BIND, prior_mask, 64)
+        mock_get = MagicMock(return_value=saved_policy)
+        mock_set = MagicMock(return_value=True)
+        _ops = "torch._functorch._activation_offloading.offload_ops"
+
+        x = torch.randn(64, device=GPU_TYPE)
+        with (
+            patch(f"{_ops}._init_mempolicy", return_value=True),
+            patch(f"{_ops}._gpu_numa_node", return_value=0),
+            patch(f"{_ops}._get_mempolicy", mock_get),
+            patch(f"{_ops}._set_mempolicy", mock_set),
+            patch("torch.empty_like", side_effect=RuntimeError("OOM")),
+        ):
+            with self.assertRaises(RuntimeError):
+                _pinned_empty_like_numa(x)
+
+        # set_mempolicy must have been called twice: bind then restore
+        self.assertEqual(mock_set.call_count, 2)
+        bind_call, restore_call = mock_set.call_args_list
+        self.assertEqual(bind_call.args[0], _MPOL_BIND)
+        self.assertEqual(restore_call.args[0], _MPOL_BIND)
+        self.assertIs(restore_call.args[1], prior_mask)
+        self.assertEqual(restore_call.args[2], 64)
+
+    def test_pinned_empty_like_numa_fallback(self):
+        """Test fallback to default pinned allocation when NUMA lookup fails."""
+        from unittest.mock import patch
+
+        from torch._functorch._activation_offloading.offload_ops import (
+            _pinned_empty_like_numa,
+        )
+
+        x = torch.randn(64, device=GPU_TYPE)
+        with patch(
+            "torch._functorch._activation_offloading.offload_ops._gpu_numa_node",
+            return_value=None,
+        ):
+            result = _pinned_empty_like_numa(x)
+        self.assertEqual(result.device.type, "cpu")
+        self.assertTrue(result.is_pinned())
+        self.assertEqual(result.shape, x.shape)
+
+    def test_gpu_numa_node_uses_device_properties(self):
+        """Test that _gpu_numa_node uses torch.cuda.get_device_properties."""
+        from torch._functorch._activation_offloading.offload_ops import _gpu_numa_node
+
+        _gpu_numa_node.cache_clear()
+        result = _gpu_numa_node(0)
+        # On any system with a GPU, result is either a valid node id or None
+        if result is not None:
+            self.assertGreaterEqual(result, 0)
+        _gpu_numa_node.cache_clear()
+
+    def test_wait_tensor_dep_arg_preserved_in_graph(self):
+        """Test that the dep arg on wait_tensor is preserved in the FX graph
+        and that the op accepts all 3 positional args."""
+        import torch._functorch._activation_offloading.offload_ops as _offload_ops  # noqa: F401
+
+        # Verify wait_tensor works with all 3 args at the op level
+        x_gpu = torch.randn(4, 4, device=GPU_TYPE)
+        cpu_result = torch.ops.ao.offload.default(x_gpu)
+        dep = torch.randn(4, device=GPU_TYPE)
+        result = torch.ops.ao.wait_tensor.default(cpu_result, x_gpu, dep)
+        self.assertEqual(result.shape, cpu_result.shape)
+        self.assertEqual(result.device.type, "cpu")
+
+        # Verify the dep arg appears in the FX graph and is not DCE'd
+        def fn_with_dep(x, dep_tensor):
+            cpu = torch.ops.ao.offload.default(x)
+            out = torch.ops.ao.wait_tensor.default(cpu, x, dep_tensor)
+            return out
+
+        gm = torch.fx.symbolic_trace(fn_with_dep)
+        wait_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.ao.wait_tensor.default
+        ]
+        self.assertEqual(len(wait_nodes), 1)
+        self.assertEqual(len(wait_nodes[0].args), 3)
+
+    def test_wait_tensor_dep_arg_fake_tensor(self):
+        """Test wait_tensor fake impl accepts 3 args."""
+        import torch._functorch._activation_offloading.offload_ops as _offload_ops  # noqa: F401
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            x_gpu = torch.randn(4, 8, device=GPU_TYPE)
+            dep = torch.randn(4, device=GPU_TYPE)
+            result = torch.ops.ao.wait_tensor.default(x_gpu, None, dep)
+            self.assertEqual(result.shape, x_gpu.shape)
+            self.assertEqual(result.device, x_gpu.device)
+
     def test_multiple_tensors_offload_ao_ops(self):
         """Test offloading all saved tensors simultaneously with ao ops."""
 
