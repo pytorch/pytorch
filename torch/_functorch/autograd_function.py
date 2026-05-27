@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
     from torch.autograd.function import FunctionCtx as _FunctionCtx
     from torch._functorch.pyfunctorch import FuncTorchInterpreter, VmapInterpreter
+else:
+    _FunctionCtx = Any
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
