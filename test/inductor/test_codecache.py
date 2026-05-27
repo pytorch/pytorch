@@ -726,6 +726,78 @@ class TestFxGraphCache(TestCase):
             torch.set_default_dtype(old_dtype)
             FxGraphCache.clear()
 
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_custom_op_fake_output_metadata_affects_cache_key(self):
+        FxGraphCache.clear()
+
+        @torch.library.custom_op("_test_fx_graph_cache::fake_meta", mutates_args=())
+        def fake_meta(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @fake_meta.register_fake
+        def _(x):
+            return x.new_empty((2,))
+
+        def fn(x):
+            return fake_meta(x) * 2
+
+        x = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(AssertionError, "expected size 4==2"):
+            torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        @fake_meta.register_fake
+        def _(x):
+            return x.new_empty(x.shape)
+
+        self.reset()
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result, (x + 1) * 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_custom_op_fake_tuple_output_dtype_affects_cache_key(self):
+        FxGraphCache.clear()
+
+        @torch.library.custom_op(
+            "_test_fx_graph_cache::fake_tuple_dtype", mutates_args=()
+        )
+        def fake_tuple_dtype(
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            return x.to(torch.bfloat16) + 1, torch.ones(x.shape[0], dtype=torch.float32)
+
+        @fake_tuple_dtype.register_fake
+        def _(x):
+            return x.to(torch.float32), torch.empty(x.shape[0], dtype=torch.float32)
+
+        def fn(x):
+            return fake_tuple_dtype(x)[0]
+
+        x = torch.arange(4, dtype=torch.bfloat16)
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        @fake_tuple_dtype.register_fake
+        def _(x):
+            return x.new_empty(x.shape, dtype=torch.bfloat16), torch.empty(
+                x.shape[0], dtype=torch.float32
+            )
+
+        self.reset()
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(result.dtype, torch.bfloat16)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
