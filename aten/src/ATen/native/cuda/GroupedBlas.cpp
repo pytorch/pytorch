@@ -42,6 +42,7 @@
 #include <ATen/ops/_foreach_add.h>
 #include <ATen/ops/_foreach_mm.h>
 #include <ATen/ops/_foreach_mm_native.h>
+#include <ATen/ops/_foreach_mm_from_ptrs_native.h>
 #include <ATen/ops/_foreach_mul.h>
 #include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
@@ -55,6 +56,9 @@
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/_grouped_mm.h>
+#include <ATen/ops/stack.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/mm_native.h>
@@ -1148,6 +1152,59 @@ std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
   }
 
   return outputs;
+}
+
+std::vector<at::Tensor> _foreach_mm_from_ptrs_cuda(
+    const at::Tensor& /*dispatch_dummy*/,
+    const at::Tensor& a_ptrs,
+    const at::Tensor& b_ptrs,
+    int64_t M, int64_t N, int64_t K, int64_t G,
+    int64_t lda, int64_t ldb) {
+  TORCH_CHECK(a_ptrs.is_cpu() && b_ptrs.is_cpu(),
+      "_foreach_mm_from_ptrs: pointer tensors must be CPU");
+  TORCH_CHECK(a_ptrs.dtype() == at::kLong && b_ptrs.dtype() == at::kLong);
+  TORCH_CHECK(a_ptrs.size(0) == G && b_ptrs.size(0) == G);
+
+  int64_t* a_p = a_ptrs.data_ptr<int64_t>();
+  int64_t* b_p = b_ptrs.data_ptr<int64_t>();
+
+  auto device = at::Device(at::kCUDA, at::cuda::current_device());
+  auto opts = at::TensorOptions().device(device).dtype(at::kBFloat16);
+
+  std::vector<at::Tensor> a_vec, b_vec;
+  a_vec.reserve(G);
+  b_vec.reserve(G);
+  for (int64_t i = 0; i < G; i++) {
+    a_vec.push_back(
+        at::from_blob(reinterpret_cast<void*>(a_p[i]), {M, K}, {lda, 1}, opts));
+    b_vec.push_back(
+        at::from_blob(reinterpret_cast<void*>(b_p[i]), {K, N}, {ldb, 1}, opts));
+  }
+
+  // TORCH_FROM_PTRS_CUBLASLT=1: direct cublasLt pointer path (no stack)
+  // default: stack → _grouped_mm (CUTLASS)
+  const char* cublaslt_env = std::getenv("TORCH_FROM_PTRS_CUBLASLT");
+#if !defined(USE_ROCM)
+  if (cublaslt_env && cublaslt_env[0] == '1' &&
+      cublasLtGroupedMatrixLayoutCreate != nullptr) {
+    const auto alignment = static_cast<int64_t>(
+        16 / c10::elementSize(at::kBFloat16));
+    const int64_t N_padded = (N + alignment - 1) / alignment * alignment;
+    auto out_buf = at::empty({G, M, N_padded}, opts);
+    std::vector<at::Tensor> outputs;
+    outputs.reserve(G);
+    for (int64_t i = 0; i < G; i++) {
+      outputs.push_back(out_buf[i].narrow(1, 0, N));
+    }
+    cublaslt_foreach_mm(a_vec, b_vec, outputs);
+    return outputs;
+  }
+#endif
+
+  auto A = at::stack(a_vec);
+  auto B = at::stack(b_vec);
+  auto out_3d = at::_grouped_mm(A, B);
+  return out_3d.unbind(0);
 }
 
 } // namespace at::native
