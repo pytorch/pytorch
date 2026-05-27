@@ -32,7 +32,7 @@ from torch import Tensor
 from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import CompileCounter, normalize_gm
 from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
@@ -9398,17 +9398,91 @@ def forward(self, x):
                 torch._check(steps <= 8)
                 return torch.logspace(0, 2, steps=x, device=x.device)
 
+        class LinspaceVmap(torch.nn.Module):
+            def forward(self, start, end, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.vmap(
+                    lambda s, e: torch.linspace(s, e, steps=x, device=x.device)
+                )(start, end)
+
+        class LogspaceVmap(torch.nn.Module):
+            def forward(self, start, end, x):
+                steps = x.item()
+                torch._check(steps >= 2)
+                torch._check(steps <= 8)
+                return torch.vmap(
+                    lambda s, e: torch.logspace(s, e, steps=x, device=x.device)
+                )(start, end)
+
         for module in (Linspace(), Logspace()):
             for strict in (False, True):
                 with self.subTest(module=type(module).__name__, strict=strict):
                     ep = export(module, (torch.tensor(4),), strict=strict)
+                    exported_module = ep.module()
                     self.assertEqual(
-                        ep.module()(torch.tensor(5)), module(torch.tensor(5))
+                        exported_module(torch.tensor(5)), module(torch.tensor(5))
                     )
+
+                    torchdynamo.reset()
+                    counter = CompileCounter()
+                    compiled_module = torch.compile(
+                        exported_module,
+                        backend=counter,
+                        dynamic=True,
+                        fullgraph=True,
+                    )
+                    self.assertEqual(
+                        compiled_module(torch.tensor(4)), module(torch.tensor(4))
+                    )
+                    self.assertEqual(
+                        compiled_module(torch.tensor(6)), module(torch.tensor(6))
+                    )
+                    self.assertEqual(counter.frame_count, 1)
+
                     with self.assertRaisesRegex(
                         RuntimeError, "Runtime assertion failed"
                     ):
-                        ep.module()(torch.tensor(1))
+                        exported_module(torch.tensor(1))
+
+        start = torch.tensor([0.0, 1.0])
+        end = torch.tensor([2.0, 3.0])
+        for op in (torch.linspace, torch.logspace):
+            for step_count in (0, 1, 4):
+                steps = torch.tensor(step_count)
+                with self.subTest(op=op.__name__, steps=step_count):
+                    self.assertEqual(
+                        torch.vmap(lambda s, e: op(s, e, steps=steps, device=s.device))(
+                            start, end
+                        ),
+                        torch.stack(
+                            [
+                                op(s, e, steps=steps, device=s.device)
+                                for s, e in zip(start, end)
+                            ]
+                        ),
+                    )
+
+        for module in (LinspaceVmap(), LogspaceVmap()):
+            with self.subTest(module=type(module).__name__):
+                torchdynamo.reset()
+                counter = CompileCounter()
+                compiled_module = torch.compile(
+                    module,
+                    backend=counter,
+                    dynamic=True,
+                    fullgraph=True,
+                )
+                self.assertEqual(
+                    compiled_module(start, end, torch.tensor(4)),
+                    module(start, end, torch.tensor(4)),
+                )
+                self.assertEqual(
+                    compiled_module(start, end, torch.tensor(6)),
+                    module(start, end, torch.tensor(6)),
+                )
+                self.assertEqual(counter.frame_count, 1)
 
     def test_while_loop_simple(self):
         class Simple(torch.nn.Module):
