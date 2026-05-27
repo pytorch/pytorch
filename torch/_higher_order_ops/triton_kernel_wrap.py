@@ -23,7 +23,7 @@ from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
-from torch._prims_common import compute_required_storage_length
+from torch._prims_common import clone_preserve_strides, compute_required_storage_length
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -203,13 +203,18 @@ kernel_side_table = KernelSideTable()
 
 
 def clone_preserve_strides_for_triton_kernel_wrapper(x: Tensor) -> Tensor:
+    # This helper is specific to Triton HOP functionalization. Unlike public
+    # tensor inputs, Inductor may realize a non-overlapping strided intermediate
+    # in compact storage, so copying the whole stride span from the source can
+    # read past the realized buffer.
+    if torch._debug_has_internal_overlap(x) == 1:
+        # Preserve the legacy behavior for expanded/overlapping mutated args.
+        # The logical-copy path below would reject writing into an overlapping
+        # output view, but user Triton kernels may intentionally do that.
+        return clone_preserve_strides(x)
+
     storage_offset = cast(int, x.storage_offset())
     needed_size = compute_required_storage_length(x.size(), x.stride(), storage_offset)
-    if torch._debug_has_internal_overlap(x) == 1:
-        raise RuntimeError(
-            "Cannot safely clone an internally overlapping mutated Triton kernel "
-            "argument."
-        )
     buffer = torch.empty_strided((needed_size,), (1,), dtype=x.dtype, device=x.device)
     out = torch.as_strided(buffer, x.size(), x.stride(), storage_offset)
     # Copy logical elements only. Inductor may use a compact internal
