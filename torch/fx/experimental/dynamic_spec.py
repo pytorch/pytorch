@@ -6,6 +6,7 @@ Currently only supports unbacked dynamic shapes.
 from __future__ import annotations
 
 import itertools
+import threading
 from typing import Any, TYPE_CHECKING, TypeAlias
 
 import sympy
@@ -46,16 +47,22 @@ _INDENT = "  "
 # ---------------------------------------------------------------------------
 
 
-_SPEC_SHAPE_ENV = None  # populated lazily by _get_spec_shape_env()
-
-# Maps each spec sympy.Symbol back to the IntVar that created it.
-_intvar_symbol_registry: dict[sympy.Symbol, IntVar] = {}
+_SPEC_SHAPE_ENV: ShapeEnv | None = None
+# Lock guarding the lazy init of _SPEC_SHAPE_ENV so concurrent IntVar()
+# calls observe the same singleton. We cannot construct eagerly at module
+# import time because ShapeEnv.__init__ pulls in modules that
+# transitively import this one.
+_SPEC_SHAPE_ENV_LOCK = threading.Lock()
 
 
 def _get_spec_shape_env() -> ShapeEnv:
-    """Lazily build the singleton spec ShapeEnv."""
+    """Lazily build the singleton spec ShapeEnv (thread-safe)."""
     global _SPEC_SHAPE_ENV
-    if _SPEC_SHAPE_ENV is None:
+    if _SPEC_SHAPE_ENV is not None:
+        return _SPEC_SHAPE_ENV
+    with _SPEC_SHAPE_ENV_LOCK:
+        if _SPEC_SHAPE_ENV is not None:
+            return _SPEC_SHAPE_ENV
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         class _SpecShapeEnv(ShapeEnv):
@@ -81,6 +88,12 @@ def _get_spec_shape_env() -> ShapeEnv:
                     "should_record_events",
                     "is_recording",
                     "fx_node_cache",
+                    # bound_sympy is read-only (no guards/asserts/mutation).
+                    # Needed for `%` (mod) which inspects symbol ranges to
+                    # pick between Mod and PythonMod. var_to_range is the
+                    # field bound_sympy reads to compute ranges.
+                    "bound_sympy",
+                    "var_to_range",
                 }
             )
 
@@ -104,7 +117,7 @@ def _get_spec_shape_env() -> ShapeEnv:
                 )
 
         _SPEC_SHAPE_ENV = _SpecShapeEnv()
-    return _SPEC_SHAPE_ENV
+        return _SPEC_SHAPE_ENV
 
 
 class IntVar(SymInt):
@@ -149,6 +162,8 @@ class IntVar(SymInt):
         optimization_hint: int | None = None,
     ) -> None:
         from torch.fx.experimental.sym_node import _NO_HINT, SymNode
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import ValueRanges
 
         self.name = name if name is not None else "anon"
         self._uid = next(IntVar._uid_counter)
@@ -156,14 +171,20 @@ class IntVar(SymInt):
         self.max = max
         self.optimization_hint = optimization_hint
         self.sympy_sym = sympy.Symbol(f"{self.name}#{self._uid}")
+        env = _get_spec_shape_env()
         node = SymNode(
             self.sympy_sym,
-            shape_env=_get_spec_shape_env(),
+            shape_env=env,
             pytype=int,
             hint=_NO_HINT,
         )
         super().__init__(node)
-        _intvar_symbol_registry[self.sympy_sym] = self
+        # Register the user-supplied (or unbounded) range so
+        # range-dependent ops like `%` get correct ValueRanges info.
+        env.var_to_range[self.sympy_sym] = ValueRanges(
+            min if min is not None else -int_oo,
+            max if max is not None else int_oo,
+        )
 
     def __repr__(self) -> str:
         # Always include uid so two same-named (or anonymous) instances

@@ -4316,9 +4316,12 @@ def _wire_spec_slot(
             shape_env.var_to_hint_override[compile_expr] = spec.optimization_hint
         if spec_sym not in shape_env._spec_symbol_to_compile_symbol:
             shape_env._spec_symbol_to_compile_symbol[spec_sym] = compile_expr
-            # Bounds apply on the canonical (first) symbol. Subsequent
-            # occurrences are tied to this one via the eq-check below, so
-            # the shape env propagates bounds via equivalence.
+            # Bounds apply ONLY on the canonical (first) symbol. Subsequent
+            # occurrences are tied to this one via the Eq runtime assert
+            # below; ShapeEnv._set_replacement / _refine_ranges intersect
+            # var_to_range across both sides of an integer Eq, so the
+            # bounds propagate to every other occurrence's symbol
+            # automatically.
             if spec.min is not None:
                 torch._check(size_sym >= spec.min)
             if spec.max is not None:
@@ -4381,15 +4384,14 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     pending = shape_env._shape_spec_pending_assumptions
     if not pending:
         return
-    from torch.fx.experimental.dynamic_spec import _intvar_symbol_registry
 
     subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
-    unbound: set[Any] = set()
+    unbound: set[sympy.Symbol] = set()
     for free, _ in pending:
         unbound |= free - subst_keys
-    names = sorted(
-        _intvar_symbol_registry[s].name for s in unbound if s in _intvar_symbol_registry
-    )
+    # Spec symbol names are formatted as "name#uid" by IntVar; strip the
+    # "#uid" suffix to recover the user-facing IntVar name.
+    names = sorted(str(s).rsplit("#", 1)[0] for s in unbound)
     raise ValueError(
         f"shapes_spec: {len(pending)} pending check(s) reference unbound "
         f"IntVar(s) {names}. Every IntVar used in a derived expression or "
