@@ -297,15 +297,22 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
 
     allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
     skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+    repro_env_vars = ["TORCHDYNAMO_REPRO_AFTER", "TORCHDYNAMO_REPRO_LEVEL"]
 
     def filter(key: str) -> bool:
-        return any(string in key for string in allow_list) and key not in skip_list
+        return (
+            any(string in key for string in allow_list)
+            and key not in skip_list
+            and key not in repro_env_vars
+        )
 
     config_lines = [
         f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
+    # Repro scripts should not recursively generate more repro scripts when run.
+    config_lines.extend(f"os.environ.pop('{key}', None)" for key in repro_env_vars)
     config_string = "\n".join(config_lines)
     return normalize_path_separator(f"""\
 import os
@@ -684,8 +691,12 @@ class InputReader:
         self.args.append(t)
         return t  # for BC
 
-    def symint(self, val: Any) -> Any:
+    def symint(self, val: Any, *, expr: str | None = None) -> Any:
         self.args.append(val)
+        if expr is not None:
+            if not hasattr(self, "symint_exprs"):
+                self.symint_exprs: dict[int, str] = {}
+            self.symint_exprs[len(self.args) - 1] = expr
         return val  # for BC
 
     def const(self, name: str) -> None:
@@ -841,8 +852,11 @@ class InputWriter:
     # TODO: this doesn't actually symint atm
     def symint(self, name: str, val: Any) -> None:
         if isinstance(val, torch.SymInt):
-            val = val.node.hint
-        self._lines.append(f"reader.symint({val!r})  # {name}")
+            expr_str = str(val.node.expr)
+            hint = val.node.hint
+            self._lines.append(f"reader.symint({hint!r}, expr={expr_str!r})  # {name}")
+        else:
+            self._lines.append(f"reader.symint({val!r})  # {name}")
 
     def generator(self, name: str, arg: torch._C.Generator) -> None:
         device = arg.device
