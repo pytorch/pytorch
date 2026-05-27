@@ -253,7 +253,9 @@ def constructors(
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
-        return FakeTensor(fake_mode, r, out_device)
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, r, out_device
+        )
     return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
 
 
@@ -1552,8 +1554,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(
