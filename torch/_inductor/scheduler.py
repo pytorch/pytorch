@@ -2135,6 +2135,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             device = node.get_device_or_error()
             # pyrefly: ignore [bad-assignment]
             self.group = (device, (numel, rnumel))
+            log.warning("ExternKernelSchedulerNode.__init__: set group=(device=%s, numel=%s, rnumel=%s) for fusable kernel", device, numel, rnumel)
+        elif isinstance(node, ir.UserDefinedTritonKernel):
+            log.warning("ExternKernelSchedulerNode.__init__: kernel can_fuse_epilogue=False, not setting group")
 
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
@@ -3068,11 +3071,23 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         assert len(node1.node.mutation_outputs) == 1
         # pyrefly: ignore[bad-assignment]
         mutated_name: str = node1.node.mutation_outputs[0].name
-        # Node1's mutated tensor becomes an intermediary tensor.
-        # Thus, remove node1 from the respective allocated buffer's users
-        # for `Scheduler.dead_node_elimination` to remove.
-        real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
-        scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
+
+        if len(node1.unmet_dependencies) == 1:
+            # Standard path: the only unmet dep is the empty output buffer.
+            original_mutated_buffer = scheduler.name_to_buf[
+                next(iter(node1.unmet_dependencies)).name
+            ]
+            original_mutated_buffer.users.remove(NodeUser(node1))
+        else:
+            # TMA kernel path: output buffer may be a graph input (0 unmet deps)
+            # or there may be multiple unmet deps from read inputs.
+            real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
+            if real_name in scheduler.name_to_buf:
+                original_mutated_buffer = scheduler.name_to_buf[real_name]
+                node_user = NodeUser(node1)
+                if node_user in original_mutated_buffer.users:
+                    original_mutated_buffer.users.remove(node_user)
+
         return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -7299,14 +7314,18 @@ class Scheduler:
                 why("node1's triton kernel doesn't support epilogue fusion")
                 return False
 
+            log.warning("can_fuse: PASSED ExternKernel checks for node1=%s, checking node2=%s (type=%s)", node1.get_name(), node2.get_name(), type(node2).__name__)
+
             if not isinstance(node2, SchedulerNode):
                 why("node1 is extern but node2 is not SchedulerNode")
                 return False
             if not isinstance(node2.node, ComputedBuffer):
                 why("node1 is extern but node2.node is not SchedulerNode")
+                log.warning("can_fuse: BLOCKED node2.node type=%s (expected ComputedBuffer)", type(node2.node).__name__)
                 return False
             if not isinstance(node2.node.data, Pointwise):
                 why("node1 is extern but node2.node.data is not Pointwise")
+                log.warning("can_fuse: BLOCKED node2.node.data type=%s (expected Pointwise)", type(node2.node.data).__name__)
                 return False
 
             assert len(node1.node.mutation_outputs) == 1
@@ -7850,7 +7869,9 @@ class Scheduler:
         read_name = self.mutation_renames.get(read.name, read.name)
         write_name = self.mutation_renames.get(write.name, write.name)
         if isinstance(write, StarDep) and read_name == write_name:
+            log.warning("fusable_stardep_write_and_read_on_empty_tensor: MATCHED read=%s write=%s (renamed: read=%s write=%s)", read.name, write.name, read_name, write_name)
             return True
+        log.warning("fusable_stardep_write_and_read_on_empty_tensor: NOT MATCHED read=%s write=%s (renamed: read=%s write=%s)", read.name, write.name, read_name, write_name)
         return False
 
     @staticmethod

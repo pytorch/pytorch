@@ -7,6 +7,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import textwrap
 import traceback
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
@@ -7813,10 +7814,15 @@ class UserDefinedTritonKernel(ExternKernel):
         We do this by pruning the `out` tensor allocation and directly writing the relu-output.
         """
 
-        if not config.epilogue_fusion_user_defined_triton_kernel:
+        _debug_tlx = os.environ.get("TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION")
+
+        if not config.epilogue_fusion_user_defined_triton_kernel and not _debug_tlx:
+            if _debug_tlx is not None:
+                log.warning("can_fuse_epilogue: BLOCKED by config gate (config=%s, env=%s)", config.epilogue_fusion_user_defined_triton_kernel, _debug_tlx)
             return False
 
         if not self.arg_accesses.can_fuse_epilogue:
+            log.warning("can_fuse_epilogue: BLOCKED by arg_accesses.can_fuse_epilogue=False (read_writes=%s)", self.arg_accesses.read_writes)
             return False
 
         # We achieve fusion by parsing the original src into a python AST,
@@ -7824,6 +7830,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # We generate an expr for the value after the epilogue and replace that into the tl.store.
         # So far we only support the simple case where there is a single tl.store in the kernel.
         if len(self.kernel_stores.stores) != 1:
+            log.warning("can_fuse_epilogue: BLOCKED by kernel_stores count=%d (expected 1). Stores: %s", len(self.kernel_stores.stores), [(type(s).__name__, s.is_tma_descriptor_store, getattr(s, 'local_store_node', None) is not None) for s in self.kernel_stores.stores])
             return False
 
         # Only fuse if the mutated arg is originally an "empty" tensor.
@@ -7831,18 +7838,29 @@ class UserDefinedTritonKernel(ExternKernel):
         # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to that subset.
         # In these edge cases, our fusion is only correct if the original tensor is empty,
         # where the semantics is that content values are UB, and we can rely on the fact that `epilogue(UB) == UB`.
+        #
+        # When TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION is set, skip this check:
+        # the output buffer may come from a different AOT module (graph split) and
+        # appear as an InputBuffer rather than a ComputedBuffer(Pointwise).
         assert len(self.mutable_args) == 1
-        if not isinstance(self.mutable_args[0], TensorBox):
-            return False
-        if not isinstance(self.mutable_args[0].data, StorageBox):
-            return False
-        if not isinstance(self.mutable_args[0].data.data, ComputedBuffer):
-            return False
-        if not isinstance(self.mutable_args[0].data.data.data, Pointwise):
-            return False
-        if not all(r == 0 for r in self.mutable_args[0].data.data.data.ranges):
-            return False
+        if not _debug_tlx:
+            if not isinstance(self.mutable_args[0], TensorBox):
+                log.warning("can_fuse_epilogue: BLOCKED mutable_args[0] is %s, not TensorBox", type(self.mutable_args[0]).__name__)
+                return False
+            if not isinstance(self.mutable_args[0].data, StorageBox):
+                log.warning("can_fuse_epilogue: BLOCKED mutable_args[0].data is %s, not StorageBox", type(self.mutable_args[0].data).__name__)
+                return False
+            if not isinstance(self.mutable_args[0].data.data, ComputedBuffer):
+                log.warning("can_fuse_epilogue: BLOCKED mutable_args[0].data.data is %s, not ComputedBuffer", type(self.mutable_args[0].data.data).__name__)
+                return False
+            if not isinstance(self.mutable_args[0].data.data.data, Pointwise):
+                log.warning("can_fuse_epilogue: BLOCKED mutable_args[0].data.data.data is %s, not Pointwise", type(self.mutable_args[0].data.data.data).__name__)
+                return False
+            if not all(r == 0 for r in self.mutable_args[0].data.data.data.ranges):
+                log.warning("can_fuse_epilogue: BLOCKED mutable_args[0] ranges=%s (not all zero)", self.mutable_args[0].data.data.data.ranges)
+                return False
 
+        log.warning("can_fuse_epilogue: PASSED all checks, returning True")
         return True
 
     @override
@@ -8053,6 +8071,59 @@ class UserDefinedTritonKernel(ExternKernel):
         ]
         V.graph.register_operation(self)
 
+    @override
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        # Limit the new `get_read_writes` to `epilogue_fusion_user_defined_triton_kernel`
+        # to avoid potential regression to existing models.
+        if not config.epilogue_fusion_user_defined_triton_kernel and not os.environ.get(
+            "TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION"
+        ):
+            result = super().get_read_writes()
+            if os.environ.get("TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION") is not None:
+                log.warning(
+                    "get_read_writes: using GENERIC (super) path. reads=%s, writes=%s",
+                    result.reads,
+                    result.writes,
+                )
+            return result
+
+        # maps formal arg name to actual arg name
+        read_renames = {
+            formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
+            for formal_arg_dep in self.arg_accesses.read_writes.reads
+        }
+
+        formal_arg_writes = list(self.arg_accesses.read_writes.writes)
+        write_renames = {
+            formal_arg_dep.name: mut_output.get_name()
+            for formal_arg_dep, mut_output in zip(
+                formal_arg_writes, self.mutation_outputs
+            )
+        }
+
+        read_writes = dependencies.ReadWrites(
+            reads=OrderedSet(
+                [
+                    dep.rename(read_renames)
+                    for dep in self.arg_accesses.read_writes.reads
+                ]
+            ),
+            writes=OrderedSet(
+                [
+                    dep.rename(write_renames)
+                    for dep in self.arg_accesses.read_writes.writes
+                ]
+            ),
+            index_exprs=OrderedSet(),
+        )
+        log.warning(
+            "get_read_writes: using DETAILED path. reads=%s, writes=%s, read_renames=%s, write_renames=%s",
+            read_writes.reads,
+            read_writes.writes,
+            read_renames,
+            write_renames,
+        )
+        return read_writes
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)
 

@@ -282,6 +282,9 @@ epilogue_fusion_first = False
 # do epilogue fusions for user defined triton kernels
 epilogue_fusion_user_defined_triton_kernel = False
 
+# do epilogue fusions for fx.wrap-wrapped triton kernels (FallbackKernel)
+epilogue_fusion_fallback_triton_kernel = False
+
 # enable pattern match+replace optimizations
 pattern_matcher = True
 

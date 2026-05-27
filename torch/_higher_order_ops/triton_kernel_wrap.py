@@ -245,9 +245,12 @@ def generate_ttir(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
-) -> tuple["TritonIRModule", list[str]]:
+) -> tuple["TritonIRModule", list[str], Any, Any, Any]:
     """
-    Uses Triton's internal code generation to create TTIR
+    Uses Triton's internal code generation to create TTIR.
+
+    Returns (ttir_module, ordered_arg_names, backend, target, options).
+    The extra return values are needed to optionally generate TTGIR later.
     """
     import sympy
     import triton
@@ -339,6 +342,26 @@ def generate_ttir(
         param_idx = kernel.arg_names.index(name)
         return kernel.params[param_idx].is_constexpr or arg is None
 
+    # Identify non-constexpr params with value 1 that should be treated as
+    # compile-time constants, matching Triton JIT specialization behavior.
+    # This is needed for kernels using tl.make_tensor_descriptor, where the
+    # semantic function compares stride values against 1 using Python operators.
+    # Without this, stride params like stride_ak=1 become IR tensor values, and
+    # the comparison `stride != 1` triggers a Triton builtin call that fails
+    # outside the JIT context.
+    # Only enabled when TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION is set to avoid
+    # changing behavior for existing kernels.
+    _specialized_constants: set[str] = set()
+    import os
+    if os.environ.get("TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION"):
+        for name, arg in ordered_args.items():
+            if (
+                not _is_constexpr_or_none(name, arg)
+                and isinstance(arg, int)
+                and arg == 1
+            ):
+                _specialized_constants.add(name)
+
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -353,7 +376,7 @@ def generate_ttir(
     # scalars and tensors as this matters for "odd" ordering,
     # eg. [tensor, scalar, tensor].
     def get_arg_names(name: str, arg: Any) -> list[str]:
-        if _is_constexpr_or_none(name, arg):
+        if _is_constexpr_or_none(name, arg) or name in _specialized_constants:
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
@@ -468,7 +491,7 @@ def generate_ttir(
     constants = {
         name: arg
         for name, arg in ordered_args.items()
-        if _is_constexpr_or_none(name, arg)
+        if _is_constexpr_or_none(name, arg) or name in _specialized_constants
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -494,16 +517,16 @@ def generate_ttir(
     if triton_version_uses_attrs_dict():
         # In newer versions of Triton, the signature includes constexpr args
         signature = {
-            name: get_signature_value(i, arg)
+            name: ("constexpr" if name in constants else get_signature_value(i, arg))
             for i, (name, arg) in enumerate(ordered_args.items())
         }
     else:
         # In older versions of Triton, the signature does not include constexpr args
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
         signature = {
-            name: get_signature_value(i, arg)
+            name: ("constexpr" if name in constants else get_signature_value(i, arg))
             for i, (name, arg) in enumerate(ordered_args.items())
-            if i not in constexprs
+            if i not in constexprs and name not in constants
         }
 
     triton._C.libtriton.ir.load_dialects(context)
@@ -540,7 +563,168 @@ def generate_ttir(
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
-    return ttir_module, ordered_arg_names
+    return ttir_module, ordered_arg_names, backend, target, options
+
+
+def generate_ttgir(
+    ttir_module: "TritonIRModule",
+    backend: Any,
+    target: Any,
+    options: Any,
+) -> "TritonIRModule":
+    """
+    Converts a TTIR module to TTGIR by applying GPU-specific lowering passes.
+    NOTE: This mutates the module in-place. The TTIR module should not be used
+    for TTIR-level analysis after this call.
+    """
+    capability = backend._parse_arch(options.arch)
+    metadata: dict[str, Any] = {"target": target, **options.__dict__}
+    return backend.make_ttgir(ttir_module, metadata, options, capability)
+
+
+def _analyze_ttgir_for_epilogue(
+    ttgir_module: "TritonIRModule | str",
+) -> bool:
+    """
+    Check if the kernel is eligible for epilogue fusion
+    based on async TMA store patterns in TTGIR.
+
+    Accepts either an MLIR module (with .walk()) or a TTGIR string.
+    Returns True if there is exactly one ttng.async_tma_copy_local_to_global op.
+    """
+    if isinstance(ttgir_module, str):
+        # String-based analysis: count occurrences in the TTGIR text
+        store_count = ttgir_module.count("ttng.async_tma_copy_local_to_global")
+        return store_count == 1
+
+    # MLIR module-based analysis: walk the module
+    store_count = 0
+
+    def _walk_op(op: Any) -> None:
+        nonlocal store_count
+        if op.get_name() == "ttng.async_tma_copy_local_to_global":
+            store_count += 1
+
+    ttgir_module.walk(_walk_op)
+    return store_count == 1
+
+
+def _compile_kernel_to_ttgir(
+    kernel: "TritonKernelType",
+    kwargs: dict[str, Any],
+) -> str | None:
+    """
+    Try to compile a Triton kernel through Triton's full compilation pipeline
+    to get the TTGIR string. This handles kernels that generate_ttir cannot
+    process (e.g. TLX kernels with tl.make_tensor_descriptor).
+
+    Returns the TTGIR string if successful, None otherwise.
+    """
+    try:
+        import triton
+        from triton.runtime.autotuner import Autotuner
+
+        if isinstance(kernel, Autotuner):
+            if len(kernel.configs) > 0:
+                kwargs = {**kwargs, **kernel.configs[0].kwargs}
+            kernel = kernel.fn
+
+        # Build the grid and launch args needed for compilation.
+        # We compile by calling kernel.run() which triggers JIT compilation.
+        # Instead, use triton.compile() with an ASTSource.
+        from triton.compiler.compiler import ASTSource, compile as triton_compile
+
+        target = triton.runtime.driver.active.get_current_target()
+        backend = triton.compiler.compiler.make_backend(target)
+        options = backend.parse_options({})
+
+        import sympy
+        from torch._subclasses.fake_tensor import FakeTensor
+        import torch._inductor.ir
+
+        ordered_args: dict[str, Any] = {}
+        for name in kernel.arg_names:
+            a = kwargs[name]
+            if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
+                ordered_args[name] = 2
+            elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
+                with torch._C._DisableTorchDispatch():
+                    ordered_args[name] = torch.empty(2, dtype=a.dtype)
+            else:
+                ordered_args[name] = a
+
+        # Build signature and constants
+        def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+            param_idx = kernel.arg_names.index(name)
+            return kernel.params[param_idx].is_constexpr or arg is None
+
+        constants = {
+            name: arg
+            for name, arg in ordered_args.items()
+            if _is_constexpr_or_none(name, arg)
+        }
+
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            triton_version_uses_attrs_dict,
+            TritonAttrsDescriptorVersion,
+        )
+
+        triton_version = get_triton_attrs_descriptor_version()
+
+        if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
+            def get_signature_value(idx: int, arg: Any) -> str:
+                if kernel.params[idx].is_constexpr:
+                    return "constexpr"
+                result = mangle_type(arg)
+                if result in ("*i1", "*u1"):
+                    result = "*u8"
+                return result
+        else:
+            def get_signature_value(idx: int, arg: Any) -> str:
+                return kernel._type_of(kernel.key_of(arg))
+
+        if triton_version_uses_attrs_dict():
+            signature = {
+                name: get_signature_value(i, arg)
+                for i, (name, arg) in enumerate(ordered_args.items())
+            }
+        else:
+            constexprs = [p.num for p in kernel.params if p.is_constexpr]
+            signature = {
+                name: get_signature_value(i, arg)
+                for i, (name, arg) in enumerate(ordered_args.items())
+                if i not in constexprs
+            }
+
+        # Get specialization attrs
+        if triton_version in {
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+        }:
+            specialization = kernel._get_config(*ordered_args.values())
+        elif triton_version in {
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            specialization = backend.get_attrs_descriptor(
+                ordered_args.values(), kernel.params
+            )
+        else:
+            # For V4_DICT and above, use empty dict as fallback
+            specialization = {}
+
+        src = ASTSource(kernel, signature, constants, specialization)
+        compiled = triton_compile(src, target=target, options=options)
+        ttgir_str = compiled.asm.get("ttgir")
+        if ttgir_str:
+            log.warning("_compile_kernel_to_ttgir: successfully compiled kernel, got TTGIR (%d chars)", len(ttgir_str))
+        return ttgir_str
+    except Exception:
+        log.warning(
+            "_compile_kernel_to_ttgir: failed to compile kernel to TTGIR",
+            exc_info=True,
+        )
+        return None
 
 
 def ttir_to_functions(
@@ -1072,18 +1256,22 @@ def analyze_kernel_access(
     def _decide_can_fuse_epilogue():
         # only do epilogue fusion if the kernel has a single output tensor
         if len(write_count) != 1:
+            log.warning("_decide_can_fuse_epilogue: BLOCKED write_count=%s (expected 1 entry)", dict(write_count))
             return False
 
         written_arg_index = next(iter(write_count))
         # only do epilogue fusion if the written tensor is written exactly once
         if write_count[written_arg_index] != 1:
+            log.warning("_decide_can_fuse_epilogue: BLOCKED write_count[%d]=%d (expected 1)", written_arg_index, write_count[written_arg_index])
             return False
 
         written_arg_name = next(iter(writes)).name
         #  cannot fuse if the kernel also reads from the output buffer
         if any(read_dep.name == written_arg_name for read_dep in reads):
+            log.warning("_decide_can_fuse_epilogue: BLOCKED kernel reads from output buffer '%s'", written_arg_name)
             return False
 
+        log.warning("_decide_can_fuse_epilogue: PASSED (writes=%s, reads=%s)", writes, reads)
         return True
 
     can_fuse_epilogue = _decide_can_fuse_epilogue()
@@ -1108,8 +1296,11 @@ def identify_accessed_tensors(
 
     ttir_module = None
     functions = None
+    backend = None
+    target = None
+    options = None
     try:
-        ttir_module, ordered_arg_names = generate_ttir(
+        ttir_module, ordered_arg_names, backend, target, options = generate_ttir(
             kernel, kwargs, tma_descriptor_metadata
         )
 
@@ -1141,13 +1332,82 @@ def identify_accessed_tensors(
             if isinstance(kwargs.get(name), (Tensor, TensorBox))
         )
 
-        return analyze_kernel_access(
+        result = analyze_kernel_access(
             functions,
             kernel_name,
             len(ordered_arg_names),
             tuple(ordered_arg_names),
             tensor_arg_indices,
         )
+
+        # TTGIR fallback: if TTIR analysis says can_fuse_epilogue=False,
+        # try TTGIR analysis for TLX kernels with async TMA stores.
+        # make_ttgir mutates ttir_module in-place, but TTIR analysis is done.
+        if not result.can_fuse_epilogue:
+            log.warning("identify_accessed_tensors: TTIR says can_fuse_epilogue=False, trying TTGIR fallback...")
+            ttgir_succeeded = False
+            try:
+                ttgir_module = generate_ttgir(ttir_module, backend, target, options)
+                ttgir_result = _analyze_ttgir_for_epilogue(ttgir_module)
+                log.warning("identify_accessed_tensors: TTGIR _analyze_ttgir_for_epilogue=%s", ttgir_result)
+                if ttgir_result:
+                    result = TensorAccesses(
+                        read_writes=result.read_writes,
+                        can_fuse_epilogue=True,
+                    )
+                    ttgir_succeeded = True
+            except Exception:
+                log.warning(
+                    "TTGIR epilogue analysis failed",
+                    exc_info=True,
+                )
+
+            # AST fallback: if both TTIR and TTGIR analysis failed to enable fusion,
+            # use Python AST store analysis for TMA descriptor kernels.
+            import os
+            if not ttgir_succeeded and not result.can_fuse_epilogue and os.environ.get("TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION"):
+                try:
+                    import ast as _ast
+                    # pyrefly: ignore [missing-attribute]
+                    kernel_src = None
+                    if hasattr(kernel, "src"):
+                        kernel_src = kernel.src
+                    elif hasattr(kernel, "fn") and hasattr(kernel.fn, "src"):
+                        kernel_src = kernel.fn.src
+                    if kernel_src is not None:
+                        kernel_ast = _ast.parse(kernel_src)
+                        stores = identify_triton_stores(kernel_ast)
+                        log.warning("AST fallback (inside try): found %d stores", len(stores.stores))
+                        if len(stores.stores) == 1 and stores.stores[0].is_tma_descriptor_store:
+                            store = stores.stores[0]
+                            output_arg_name = _ast.unparse(store.store_pointer_node).strip()
+                            log.warning("AST fallback: single TMA store to '%s', enabling fusion", output_arg_name)
+
+                            # Build accurate read/write sets from ordered_arg_names
+                            read_deps: OrderedSet[Dep] = OrderedSet(
+                                StarDep(name)
+                                for name in ordered_arg_names
+                                if isinstance(kwargs.get(name), (Tensor, TensorBox)) and name != output_arg_name
+                            )
+                            read_deps = typing.cast(OrderedSet[Dep], read_deps)
+                            write_deps: OrderedSet[Dep] = OrderedSet([StarDep(output_arg_name)])
+                            write_deps = typing.cast(OrderedSet[Dep], write_deps)
+
+                            result = TensorAccesses(
+                                ReadWrites(
+                                    reads=read_deps,
+                                    writes=write_deps,
+                                    index_exprs=OrderedSet(),
+                                ),
+                                can_fuse_epilogue=True,
+                            )
+                except Exception:
+                    log.warning("AST fallback failed", exc_info=True)
+        else:
+            log.warning("identify_accessed_tensors: TTIR says can_fuse_epilogue=True, skipping TTGIR fallback")
+
+        log.warning("identify_accessed_tensors: FINAL result.can_fuse_epilogue=%s, read_writes=%s", result.can_fuse_epilogue, result.read_writes)
+        return result
     except Exception:
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
@@ -1169,13 +1429,99 @@ def identify_accessed_tensors(
         ]
         all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
+
+        # AST-based fallback for TMA descriptor kernels:
+        # When generate_ttir fails (e.g. for TLX kernels with tl.make_tensor_descriptor),
+        # use the Python AST store analysis to determine which arg is the output,
+        # then validate with _analyze_ttgir_for_epilogue if possible.
+        can_fuse = False
+        import os
+        if os.environ.get("TORCHINDUCTOR_FORCE_TLX_EPILOGUE_FUSION"):
+            try:
+                import ast as _ast
+
+                # Get kernel source: JITFunction has .src directly,
+                # Autotuner wraps a JITFunction in .fn
+                # pyrefly: ignore [missing-attribute]
+                kernel_src = None
+                if hasattr(kernel, "src"):
+                    kernel_src = kernel.src
+                elif hasattr(kernel, "fn") and hasattr(kernel.fn, "src"):
+                    kernel_src = kernel.fn.src
+                if kernel_src is not None:
+                    kernel_ast = _ast.parse(kernel_src)
+                    stores = identify_triton_stores(kernel_ast)
+                    log.warning(
+                        "AST fallback: found %d stores in kernel source",
+                        len(stores.stores),
+                    )
+
+                    # Use _analyze_ttgir_for_epilogue as the authoritative store count check.
+                    # Try to compile the kernel to get TTGIR for analysis.
+                    ttgir_eligible = False
+                    ttgir_str = _compile_kernel_to_ttgir(kernel, kwargs)
+                    if ttgir_str is not None:
+                        ttgir_eligible = _analyze_ttgir_for_epilogue(ttgir_str)
+                        log.warning(
+                            "TTGIR analysis: _analyze_ttgir_for_epilogue=%s",
+                            ttgir_eligible,
+                        )
+                    else:
+                        # If we can't get TTGIR either, fall back to AST store count
+                        # as a proxy for TTGIR analysis.
+                        log.warning(
+                            "TTGIR compilation failed, using AST store count as proxy"
+                        )
+                        ttgir_eligible = (
+                            len(stores.stores) == 1
+                            and stores.stores[0].is_tma_descriptor_store
+                        )
+
+                    if ttgir_eligible and len(stores.stores) >= 1:
+                        # Use AST to find the output arg name
+                        store = stores.stores[0]
+                        if store.is_tma_descriptor_store:
+                            output_arg_name = _ast.unparse(store.store_pointer_node).strip()
+                            log.warning(
+                                "Epilogue fusion enabled: TMA descriptor store to '%s'",
+                                output_arg_name,
+                            )
+
+                            # Build accurate read/write sets:
+                            # - writes: only the output arg
+                            # - reads: all tensor args except the output
+                            write_deps: OrderedSet[Dep] = OrderedSet(
+                                [StarDep(output_arg_name)]
+                            )
+                            write_deps = typing.cast(OrderedSet[Dep], write_deps)
+                            read_deps: OrderedSet[Dep] = OrderedSet(
+                                StarDep(name)
+                                for name in all_tensor_names
+                                if name != output_arg_name
+                            )
+                            read_deps = typing.cast(OrderedSet[Dep], read_deps)
+
+                            return TensorAccesses(
+                                ReadWrites(
+                                    reads=read_deps,
+                                    writes=write_deps,
+                                    index_exprs=OrderedSet(),
+                                ),
+                                can_fuse_epilogue=True,
+                            )
+            except Exception:
+                log.warning(
+                    "Epilogue fusion fallback failed",
+                    exc_info=True,
+                )
+
         return TensorAccesses(
             ReadWrites(
                 reads=all_deps,
                 writes=all_deps,
                 index_exprs=OrderedSet(),
             ),
-            can_fuse_epilogue=False,
+            can_fuse_epilogue=can_fuse,
         )
 
 
@@ -1184,6 +1530,13 @@ class TritonStore:
     store_node: ast.Call
     store_pointer_node: ast.Expr
     store_value_node: ast.Expr
+    # For TMA descriptor stores, the value goes through SMEM:
+    #   local_store(smem, value)  →  async_descriptor_store(desc, smem, offsets)
+    # In this case, store_value_node points to the value arg of local_store,
+    # and local_store_node points to the local_store call whose value arg
+    # should be replaced for epilogue fusion.
+    local_store_node: ast.Call | None = None
+    is_tma_descriptor_store: bool = False
 
 
 @dataclasses.dataclass
@@ -1191,53 +1544,176 @@ class TritonStores:
     stores: list[TritonStore]
 
 
-@functools.cache
-def identify_triton_stores(source_code: str) -> TritonStores:
+def _extract_arg(
+    node: ast.Call, arg_name: str, positional_index: int
+) -> ast.expr | None:
     """
-    Parse Python source code of triton kernel and find all tl.store calls.
-    Returns a TritonStores object containing information about pointer, value, and mask.
-
-    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
+    Extract an argument from a Call node, checking both positional and keyword args.
+    Returns the AST node for the argument, or None if not found.
     """
-    return identify_triton_stores_from_ast(ast.parse(source_code))
+    if len(node.args) > positional_index:
+        return node.args[positional_index]
+    for keyword in node.keywords:
+        if keyword.arg == arg_name:
+            return keyword.value
+    return None
 
 
-def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
-    stores = []
+def _is_call_to(node: ast.Call, module: str, func_name: str) -> bool:
+    """Check if an AST Call node is a call to module.func_name (e.g. tl.store)."""
+    return (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == module
+        and node.func.attr == func_name
+    )
 
-    def _extract_arg(node, arg_name, positional_index):
-        """
-        Extract an argument from a Call node, checking both positional and keyword args.
-        Returns the AST node for the argument, or None if not found.
-        """
-        # Check positional args first
-        if len(node.args) > positional_index:
-            return node.args[positional_index]
 
-        # Check keyword args
-        for keyword in node.keywords:
-            if keyword.arg == arg_name:
-                return keyword.value
+def _find_tma_descriptor_stores(tree: ast.AST) -> list[TritonStore]:
+    """
+    Find TMA descriptor store patterns in a triton kernel AST.
 
-        return None
+    TMA descriptor stores use a two-step pattern:
+        tlx.local_store(smem_buf, value)
+        tlx.async_descriptor_store(desc, smem_buf, offsets)
+    or:
+        tl.descriptor_store(desc, value, offsets)
+
+    For the tlx.async_descriptor_store pattern, we trace back from the
+    async_descriptor_store to find the preceding local_store that writes
+    the actual value to the SMEM buffer, and return the value arg of
+    local_store as the store_value_node for epilogue fusion.
+    """
+    stores: list[TritonStore] = []
+
+    # Collect all tlx.local_store and tlx.async_descriptor_store calls
+    local_stores: list[ast.Call] = []
+    async_desc_stores: list[ast.Call] = []
+    direct_desc_stores: list[ast.Call] = []
+    # Map descriptor variable name -> base pointer arg from tl.make_tensor_descriptor
+    desc_to_base_ptr: dict[str, ast.expr] = {}
 
     for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _is_call_to(node, "tlx", "local_store"):
+            local_stores.append(node)
+        elif _is_call_to(node, "tlx", "async_descriptor_store"):
+            async_desc_stores.append(node)
+        elif _is_call_to(node, "tl", "descriptor_store"):
+            direct_desc_stores.append(node)
+
+    # Build desc_to_base_ptr mapping from assignments like:
+    #   desc_c = tl.make_tensor_descriptor(c_ptr, ...)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+            and _is_call_to(node.value, "tl", "make_tensor_descriptor")
+        ):
+            base_ptr = _extract_arg(node.value, "base", 0)
+            if base_ptr is not None:
+                desc_to_base_ptr[node.targets[0].id] = base_ptr
+
+    # Handle direct tl.descriptor_store(desc, value, offsets) pattern
+    for desc_store in direct_desc_stores:
+        pointer_node = _extract_arg(desc_store, "desc", 0)
+        value_node = _extract_arg(desc_store, "value", 1)
+        if pointer_node is not None and value_node is not None:
+            stores.append(
+                TritonStore(
+                    store_node=desc_store,
+                    store_pointer_node=pointer_node,
+                    store_value_node=value_node,
+                    is_tma_descriptor_store=True,
+                )
+            )
+
+    # Handle tlx.async_descriptor_store(desc, smem_buf, offsets) pattern
+    # by tracing back to the preceding tlx.local_store(smem_buf, value)
+    for desc_store in async_desc_stores:
+        desc_node = _extract_arg(desc_store, "desc", 0)
+        smem_node = _extract_arg(desc_store, "src", 1)
+        if desc_node is None or smem_node is None:
+            continue
+
+        # Resolve desc variable to the base pointer arg from make_tensor_descriptor
+        # e.g. desc_c -> c_ptr
+        resolved_ptr_node = desc_node
+        if isinstance(desc_node, ast.Name) and desc_node.id in desc_to_base_ptr:
+            resolved_ptr_node = desc_to_base_ptr[desc_node.id]
+
+        # Find the smem buffer name used in async_descriptor_store
+        smem_name = ast.unparse(smem_node).strip() if smem_node else None
+        if smem_name is None:
+            continue
+
+        # Find the matching local_store that writes to the same smem buffer
+        matched_local_store = None
+        for ls in local_stores:
+            ls_dest = _extract_arg(ls, "dest", 0)
+            if ls_dest is not None and ast.unparse(ls_dest).strip() == smem_name:
+                matched_local_store = ls
+
+        if matched_local_store is not None:
+            value_node = _extract_arg(matched_local_store, "value", 1)
+            if value_node is not None:
+                stores.append(
+                    TritonStore(
+                        store_node=desc_store,
+                        store_pointer_node=resolved_ptr_node,
+                        store_value_node=value_node,
+                        local_store_node=matched_local_store,
+                        is_tma_descriptor_store=True,
+                    )
+                )
+
+    return stores
+
+
+def identify_triton_stores(source_code: str | ast.AST) -> TritonStores:
+    """
+    Parse Python source code of triton kernel and find all store calls,
+    including both tl.store() and TMA descriptor store patterns.
+
+    Supported store patterns:
+    1. tl.store(pointer, value, mask=None, ...)
+    2. tl.descriptor_store(desc, value, offsets, ...)
+    3. tlx.local_store(smem, value) + tlx.async_descriptor_store(desc, smem, offsets)
+       (traces back through SMEM to find the actual value)
+
+    Accepts either a source code string or a pre-parsed AST.
+    Note: caching only works for string inputs (AST objects are not hashable).
+    """
+
+    if isinstance(source_code, str):
+        tree = ast.parse(source_code)
+    else:
+        tree = source_code
+    stores = []
+
+    # 1. Find standard tl.store() calls
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            # Check if this is a tl.store call
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "tl"
-                and node.func.attr == "store"
-            ):
-                # Extract required arguments
+            if _is_call_to(node, "tl", "store"):
                 pointer_node = _extract_arg(node, "pointer", 0)
                 value_node = _extract_arg(node, "value", 1)
+                if pointer_node is not None and value_node is not None:
+                    stores.append(TritonStore(node, pointer_node, value_node))
 
-                if pointer_node is None or value_node is None:
-                    continue
+    # 2. Find TMA descriptor store patterns
+    tma_stores = _find_tma_descriptor_stores(tree)
+    stores.extend(tma_stores)
 
-                stores.append(TritonStore(node, pointer_node, value_node))
+    log.warning(
+        "identify_triton_stores: found %d tl.store, %d TMA stores, %d total stores. Details: %s",
+        len(stores) - len(tma_stores),
+        len(tma_stores),
+        len(stores),
+        [(s.is_tma_descriptor_store, s.local_store_node is not None, ast.unparse(s.store_value_node) if s.store_value_node else "None") for s in stores],
+    )
 
     return TritonStores(stores=stores)
 

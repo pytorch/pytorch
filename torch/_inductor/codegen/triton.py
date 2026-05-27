@@ -6879,9 +6879,16 @@ class FusedUserDefinedTritonKernel(TritonKernel):
                 if keyword.arg == arg_name:
                     keyword.value = new_arg
 
-        _replace_arg(
-            kernel_stores.stores[0].store_node, "value", 1, new_store_value_node
-        )
+        store = kernel_stores.stores[0]
+        if store.is_tma_descriptor_store and store.local_store_node is not None:
+            # For TMA descriptor stores with the pattern:
+            #   tlx.local_store(smem, value)
+            #   tlx.async_descriptor_store(desc, smem, offsets)
+            # Replace the value arg of the local_store call
+            _replace_arg(store.local_store_node, "value", 1, new_store_value_node)
+        else:
+            # For standard tl.store(ptr, value, ...) or tl.descriptor_store(desc, value, ...)
+            _replace_arg(store.store_node, "value", 1, new_store_value_node)
 
         src_with_store_replaced = ast.unparse(new_ast)
 
@@ -6891,19 +6898,26 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 
         # identify the store again, because the previous parse-modify-unparse could've change its location
         kernel_stores = identify_triton_stores(src_with_store_replaced)
-        # python ast lineno is 1-indexed
-        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+        store = kernel_stores.stores[0]
 
-        indentations = " " * kernel_stores.stores[0].store_node.col_offset
+        # For TMA stores, inject epilogue code before the local_store (not the async_descriptor_store)
+        if store.is_tma_descriptor_store and store.local_store_node is not None:
+            # python ast lineno is 1-indexed
+            inject_line_index = store.local_store_node.lineno - 1
+            indentations = " " * store.local_store_node.col_offset
+        else:
+            # python ast lineno is 1-indexed
+            inject_line_index = store.store_node.lineno - 1
+            indentations = " " * store.store_node.col_offset
 
         load_lines = [indentations + l for l in self.loads.get_lines_ref()]
         compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
 
         new_src_lines = (
-            src_lines[:store_line_index]
+            src_lines[:inject_line_index]
             + load_lines
             + compute_lines
-            + src_lines[store_line_index:]
+            + src_lines[inject_line_index:]
         )
         return "\n".join(new_src_lines)
 
