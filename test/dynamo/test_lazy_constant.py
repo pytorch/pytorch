@@ -15,6 +15,7 @@ _lazy_constant_update_summary = {}
 _lazy_constant_value_summary = {}
 _lazy_constant_iter_summary = {}
 _lazy_constant_popitem_summary = {}
+_lazy_constant_delitem_summary = {}
 _lazy_constant_view_summary = {}
 _lazy_constant_ordered_dict_summary = collections.OrderedDict()
 
@@ -752,6 +753,28 @@ class LazyConstantVariableTests(TestCase):
         x = torch.randn(4)
         self.assertEqual(mod(x), x + 1)
         self.assertEqual(_lazy_constant_popitem_summary, {})
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_delitem(self):
+        global _lazy_constant_delitem_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_delitem_summary[self.name] = 1
+                del _lazy_constant_delitem_summary[self.name]
+                return x + len(_lazy_constant_delitem_summary)
+
+        mod = SubMod("mod_a")
+        _lazy_constant_delitem_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x)
+        self.assertEqual(_lazy_constant_delitem_summary, {})
 
     def test_source_backed_lazy_constant_ordered_dict_key_overwrite_then_popitem(self):
         global _lazy_constant_ordered_dict_summary

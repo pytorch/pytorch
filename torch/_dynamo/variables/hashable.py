@@ -74,6 +74,9 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 def _contains_unrealized_source_backed_lazy_constant(value: Any) -> bool:
+    # Unlike PyCodegen's container-only scan, hash deferral starts from a single
+    # candidate key. Walk the full VT object here so supported composite keys can
+    # defer their hash guard when any item reloads from source.
     cache: set[int] = set()
 
     def visit(obj: Any) -> bool:
