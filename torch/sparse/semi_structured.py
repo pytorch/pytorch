@@ -699,7 +699,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 self.shape[0],
                 constraints.dense_min_rows,
                 constraints.dense_min_cols,
-                self.fuse_transpose_cusparselt,
+                should_transpose_dense,
                 self.alg_id_cusparselt,
                 should_transpose_dense,
             )
@@ -746,12 +746,9 @@ def _ensure_cutlass_mm_registered():
             res = torch._sparse_semi_structured_addmm(bias, packed, meta, mm_input)
         if need_pad:
             out_cols = m if should_transpose_dense else n
-            return (
-                res[:out_features]
-                .narrow(1, 0, out_cols)
-                .clone(memory_format=torch.contiguous_format)
-            )
-        return res.contiguous()
+            res = res[:out_features].narrow(1, 0, out_cols)
+            return res.t().contiguous() if should_transpose_dense else res.contiguous()
+        return res.t().contiguous() if should_transpose_dense else res
 
     @cutlass_mm.register_fake
     def _cutlass_mm_fake(
@@ -765,9 +762,11 @@ def _ensure_cutlass_mm_registered():
         transpose_dense: bool,
     ) -> torch.Tensor:
         out_cols = dense.shape[0] if transpose_dense else dense.shape[1]
+        output_shape = (
+            (out_cols, out_features) if transpose_dense else (out_features, out_cols)
+        )
         return torch.empty(
-            out_features,
-            out_cols,
+            output_shape,
             dtype=dense.dtype,
             device=dense.device,
         )
@@ -812,14 +811,13 @@ def _ensure_cusparselt_mm_registered():
             transpose_result=fuse_transpose,
             alg_id=alg_id,
         )
-        if fuse_transpose:
-            res = res.t()
         if need_pad:
             out_cols = m if should_transpose_dense else n
-            return res.narrow(1, 0, out_cols).clone(
-                memory_format=torch.contiguous_format
-            )
-        return res.contiguous()
+            if fuse_transpose:
+                return res.narrow(0, 0, out_cols).contiguous()
+            else:
+                return res.narrow(1, 0, out_cols).contiguous()
+        return res
 
     @cusparselt_mm.register_fake
     def _cusparselt_mm_fake(
@@ -834,9 +832,11 @@ def _ensure_cusparselt_mm_registered():
         should_transpose_dense: bool,
     ) -> torch.Tensor:
         out_cols = dense.shape[0] if should_transpose_dense else dense.shape[1]
+        output_shape = (
+            (out_cols, out_features) if fuse_transpose else (out_features, out_cols)
+        )
         return torch.empty(
-            out_features,
-            out_cols,
+            output_shape,
             dtype=dense.dtype,
             device=dense.device,
         )
