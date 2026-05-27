@@ -223,6 +223,14 @@ class IterationRangesRoot(IterationRanges):
     def owns_mask(self, mask_var: str) -> bool:
         return mask_var == self.mask_name()
 
+    def mask_shape(self, tensor_ndim: int) -> tuple[str, ...]:
+        if self.tensor_dim is None:
+            return ()
+
+        shape = ["1"] * tensor_ndim
+        shape[self.tensor_dim] = self.block_size_str()
+        return tuple(shape)
+
     def supports_constant_mask(self) -> bool:
         return True
 
@@ -737,12 +745,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def combine_contiguous_dims(
         self, index: sympy.Expr, tree: IterationRangesRoot
     ) -> sympy.Expr:
-        if isinstance(index, sympy.Add) and index.has(FloorDiv):
-            tree.vars_and_sizes(index)
-            candidate_vars = OrderedSet(self.range_tree_nodes)
-        else:
-            candidate_vars = None
-        if expand_res := V.graph.sizevars.expand_floor_div(index, candidate_vars):
+        if expand_res := V.graph.sizevars.expand_floor_div(index):
             new_index, denominator = expand_res  # type: ignore[misc]
             return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
         else:
@@ -2928,7 +2931,7 @@ class SIMDScheduling(BaseScheduling):
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
-        Given a set of pre-fused nodes, generate a Triton kernel.
+        Given a set of pre-fused nodes, generate a SIMD kernel.
         """
         assert self.scheduler
         nodes = [
