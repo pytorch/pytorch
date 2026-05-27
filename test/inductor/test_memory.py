@@ -348,9 +348,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         N = 128
         x = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
         y = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
-        # Keep the add as pointwise so this test continues to exercise scheduler
-        # fusion choices instead of addmm fusion.
-        z = torch.rand(1, N, dtype=torch.float32, device=GPU_TYPE).expand(N, N)
+        z = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
 
         from torch._inductor.choices import InductorChoices
         from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
