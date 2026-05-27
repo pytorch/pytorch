@@ -386,7 +386,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(ElementType);
   }
-  Vectorized() {}
+  Vectorized() = default;
 
   C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(const vinner_data& v)
@@ -1781,7 +1781,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   vinner_type _vec;
 
  public:
-  Vectorized() {}
+  Vectorized() = default;
 
   explicit C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
   Vectorized(const T& val) : _vec(val.val_) {}
@@ -2250,7 +2250,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   vinner_type _vec;
 
  public:
-  Vectorized() {}
+  Vectorized() = default;
 
   C10_ALWAYS_INLINE Vectorized(const vinner_data& v)
       : _vec{v.first, v.second} {}

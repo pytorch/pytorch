@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from inspect import getattr_static
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -44,15 +43,22 @@ class SDPAParamsVariable(VariableTracker):
         return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
 
     def __init__(
-        self, proxy: Proxy, param_vars: Sequence[VariableTracker], **kwargs: Any
+        self, proxy: Proxy, param_vars: list[VariableTracker], **kwargs: Any
     ) -> None:
         self.proxy = proxy
         self.param_vars = param_vars
         super().__init__(**kwargs)
 
+    def python_type(self) -> type:
+        return SDPAParams
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert self.source is None
-        assert self.param_vars is not None
+        if self.source is not None:
+            raise AssertionError(
+                "SDPAParamsVariable should not have a source during reconstruct"
+            )
+        if self.param_vars is None:
+            raise AssertionError("SDPAParamsVariable.param_vars must not be None")
         codegen.add_push_null(
             lambda: codegen.load_import_from("torch._C", "_SDPAParams")
         )

@@ -1,7 +1,11 @@
-# mypy: allow-untyped-defs
 import operator
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import torch
+
+
+__all__ = ["CudaGraphsSupport", "partition_cudagraphs"]
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
@@ -11,7 +15,9 @@ from torch.utils import _pytree as pytree
 
 class CudaGraphsSupport(OperatorSupport):
     # TODO: why is submodules passed here
-    def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+    def is_node_supported(
+        self, submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node
+    ) -> bool:
         if node.op not in CALLABLE_NODE_OPS:
             return False
 
@@ -23,10 +29,10 @@ class CudaGraphsSupport(OperatorSupport):
 
         found_not_cuda = False
 
-        def meta_fk(meta):
+        def meta_fk(meta: dict[str, Any]) -> torch.Tensor:
             return meta["val"] if "val" in meta else meta["fake_result"]
 
-        def find_not_cuda(t):
+        def find_not_cuda(t: object) -> None:
             nonlocal found_not_cuda
             if isinstance(t, torch.Tensor) and t.device.type != "cuda":
                 found_not_cuda = True
@@ -42,7 +48,9 @@ class CudaGraphsSupport(OperatorSupport):
         return not found_not_cuda
 
 
-def partition_cudagraphs(gm, inputs):
+def partition_cudagraphs(
+    gm: torch.fx.GraphModule, inputs: Sequence[object]
+) -> torch.fx.GraphModule:
     """
     Partition an FX graph into sub-GraphModules that can be validly run under
     CUDA graphs.  For a subgraph to be runnable under CUDA, all of the operations

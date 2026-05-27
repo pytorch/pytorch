@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_CPU_CAPABILITY_SVE256,
     IS_LINUX,
+    MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1521,7 +1522,13 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            skipCUDAIfRocm,  # regression in ROCm 6.4
+            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
+            DecorateInfo(
+                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=TEST_WITH_ROCM,
+            ),
         ],
     ),
     OpInfo(
@@ -1685,6 +1692,7 @@ op_db: list[OpInfo] = [
                 "test_out",
                 device_type="mps",
                 dtypes=(torch.float32,),
+                active_if=MACOS_VERSION < 26.0,
             ),
         ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
@@ -1733,6 +1741,7 @@ op_db: list[OpInfo] = [
                 "test_out",
                 device_type="mps",
                 dtypes=(torch.float32,),
+                active_if=MACOS_VERSION < 26.0,
             ),
         ),
     ),
@@ -1968,16 +1977,6 @@ op_db: list[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
-            ),
-            # Exception: cumulative ops are not yet supported for complex
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
     ),

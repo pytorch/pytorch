@@ -13,6 +13,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     ALLOW_XPU_PROFILING_TEST,
     DEVICE_LIST_SUPPORT_PROFILING_TEST,
+    IS_MACOS,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -280,6 +282,9 @@ class TestIdentifyGradients(TestCase):
     def test_extract_gradients_from_optimizer(self) -> None:
         self._test_extract_gradients_from_optimizer(set_to_none=False)
 
+    @unittest.skipIf(
+        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/88721"
+    )
     def test_extract_gradients_from_optimizer_set_to_none(self) -> None:
         self._test_extract_gradients_from_optimizer(set_to_none=True)
 
@@ -494,7 +499,7 @@ class TestDataFlow(TestCase):
             z = x.mul(y)
             return {"z": z.view_as(z)}
 
-        def f1(x, y):  # noqa: F841
+        def f1(x, y):
             with torch.no_grad():
                 return f0(x, y)
 
@@ -1123,7 +1128,7 @@ class TestMemoryProfilerE2E(TestCase):
         w1 = torch.ones((1,), requires_grad=True)
 
         def step_fn(_):
-            x = torch.ones((2, 2))  # noqa: F841
+            x = torch.ones((2, 2))
             y = torch.cat([x * w0, x * w1], dim=1)  # noqa: F841
 
         # NOTE: We expect that all unknown categories. This is simply a sanity

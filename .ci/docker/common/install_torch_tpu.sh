@@ -60,7 +60,7 @@ fetch_secret() {
         set +x
     fi
 
-    if ! gcloud secrets versions access latest --secret="torchtpu-readonly-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
+    if ! gcloud secrets versions access latest --secret="torchtpu-read-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
         echo "Error: Failed to fetch secret. Ensure you are authenticated with gcloud."
 
         # Restore xtrace if it was enabled, before exiting
@@ -82,7 +82,7 @@ clone_repo() {
 
     # Use GIT_SSH_COMMAND to specify the key and disable strict host key checking for automation
     export GIT_SSH_COMMAND="ssh -i temp_ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
-    if git clone --recursive "git@github.com:google-ml-infra/torch_tpu.git"; then
+    if git clone --recursive "git@github.com:google-pytorch/torch_tpu.git"; then
         echo "Repository cloned successfully."
     else
         echo "Error: Failed to clone repository."
@@ -110,7 +110,7 @@ pull_torch_tpu() {
 # sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit
 
 # 3. Configuration
-TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
+TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-pytorch/torch_tpu.git}"
 TORCH_TPU_BRANCH="${TORCH_TPU_BRANCH:-main}"
 
 # Pin File Configuration

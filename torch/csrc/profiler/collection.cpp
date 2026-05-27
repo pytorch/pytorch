@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -456,7 +457,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     auto& second = (++it)->basic_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+        first.name_.starts_with("autograd::engine::evaluate_function: ")) {
       first.sequence_number_ = second.sequence_number_;
       first.forward_tid_ = second.forward_tid_;
     }
@@ -911,13 +912,11 @@ void passEventsToKineto(
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
 
-      // There is a longstanding regression for initializing
-      // on-demand Kineto activity handling. Enabling this path
-      // for Profiler API could cause side effects as much has changed since.
-      // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path fragmentation, which has been snowballing in complexity
-      // and thus flakiness.
-      if (config.global()) {
+      // In the normal (synchronous) path, kineto_activity_ is set later
+      // by TransferEvents::reassociate(). For global (async) profiling
+      // and trace_only mode the reassociation path diverges, so we also
+      // set it here while the raw pointer from addCPUActivity is valid.
+      if (config.global() || config.experimental_config.trace_only) {
         e->kineto_activity_ = activity;
       }
     }
@@ -1096,6 +1095,18 @@ class TransferEvents {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
       if (e) {
+        // Flow data for Kineto events is already set during
+        // resultFromActivity(). TorchOp events need it copied here because
+        // their Result is created during RecordFunction callbacks, before
+        // flow data exists on the GenericTraceActivity.
+        e->visit(c10::overloaded(
+            [&](ExtraFields<EventType::TorchOp>& i) {
+              i.flow = {
+                  /*id=*/static_cast<uint32_t>(activity->flowId()),
+                  /*type=*/static_cast<uint32_t>(activity->flowType()),
+                  /*start=*/activity->flowStart()};
+            },
+            [](auto&) {}));
         if (config_.experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
@@ -1105,6 +1116,27 @@ class TransferEvents {
                 i.metadata_json_ = activity->metadataJson();
               },
               [](auto&) { return; }));
+          // Parse metadataJson() into extra_meta_ so events() exposes
+          // Kineto metadata as typed fields without export_chrome_trace().
+          // Python schemas (profiler_util.py) are the single SOT for
+          // which keys to expose and how to type-convert them.
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                auto json_str = activity->metadataJson();
+                if (!json_str.empty()) {
+                  auto j = nlohmann::json::parse(
+                      "{" + json_str + "}", nullptr, false);
+                  if (!j.is_discarded()) {
+                    for (auto& [key, val] : j.items()) {
+                      i.extra_meta_.emplace(
+                          key,
+                          val.is_string() ? val.get<std::string>()
+                                          : val.dump());
+                    }
+                  }
+                }
+              },
+              [](auto&) {}));
         }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
@@ -1217,7 +1249,9 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace, config};
+  if (!config.experimental_config.trace_only) {
+    TransferEvents transfer{results, trace, config};
+  }
   return trace;
 }
 

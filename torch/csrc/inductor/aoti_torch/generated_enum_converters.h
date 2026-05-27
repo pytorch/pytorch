@@ -50,6 +50,8 @@ inline c10::ScalarType convertSerializedScalarType(int serialized_value) {
       static_cast<int>(c10::ScalarType::Float8_e4m3fnuz), // 31
       static_cast<int>(c10::ScalarType::Float8_e5m2fnuz), // 32
       static_cast<int>(c10::ScalarType::Float8_e8m0fnu), // 33
+      static_cast<int>(c10::ScalarType::UInt32), // 34
+      static_cast<int>(c10::ScalarType::UInt64), // 35
   };
   constexpr int kMapSize = sizeof(kScalarTypeMap) / sizeof(kScalarTypeMap[0]);
 

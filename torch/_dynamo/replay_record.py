@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 """
 Python execution state recording and replay functionality.
 
@@ -15,12 +18,17 @@ and recreate specific program states.
 
 import dataclasses
 from dataclasses import field
-from io import BufferedReader, BufferedWriter
 from types import CellType, CodeType, ModuleType
-from typing import Any, IO
+from typing import Any, cast, IO, TYPE_CHECKING
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
+
+
+if TYPE_CHECKING:
+    from io import BufferedReader, BufferedWriter
+
+    from .output_graph import CodeOptions
 
 
 dill = import_dill()
@@ -50,15 +58,18 @@ class ExecutionRecord:
     globals: dict[str, Any] = field(default_factory=dict)
     locals: dict[str, Any] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
-    code_options: dict[str, Any] = field(default_factory=dict)
+    # The replay record starts empty and gets populated by the translator before use.
+    code_options: CodeOptions = field(default_factory=lambda: cast("CodeOptions", {}))
 
     def dump(self, f: IO[str] | BufferedWriter) -> None:
-        assert dill is not None, "replay_record requires `pip install dill`"
+        if dill is None:
+            raise AssertionError("replay_record requires `pip install dill`")
         dill.dump(self, f)
 
     @classmethod
     def load(cls, f: IO[bytes] | BufferedReader) -> Self:
-        assert dill is not None, "replay_record requires `pip install dill`"
+        if dill is None:
+            raise AssertionError("replay_record requires `pip install dill`")
         return dill.load(f)
 
 
@@ -71,7 +82,8 @@ class ExecutionRecorder:
     globals: dict[str, Any] = field(default_factory=dict)
     locals: dict[str, Any] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
-    code_options: dict[str, Any] = field(default_factory=dict)
+    # The recorder starts empty and gets populated by the translator before use.
+    code_options: CodeOptions = field(default_factory=lambda: cast("CodeOptions", {}))
     name_to_modrec: dict[str, ModuleRecord] = field(default_factory=dict)
 
     def add_local_var(self, name: str, var: Any) -> None:
@@ -87,7 +99,8 @@ class ExecutionRecorder:
             self.globals[name] = var
 
     def add_local_mod(self, name: str, mod: ModuleType) -> None:
-        assert isinstance(mod, ModuleType)
+        if not isinstance(mod, ModuleType):
+            raise AssertionError(f"Expected ModuleType, got {type(mod)}")
         self.add_global_var(name, mod)
 
     def record_module_access(self, mod: ModuleType, name: str, val: Any) -> None:

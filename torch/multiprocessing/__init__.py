@@ -29,7 +29,7 @@ __all__ = ["set_sharing_strategy", "get_sharing_strategy", "get_all_sharing_stra
 from multiprocessing import *  # noqa: F403
 
 
-__all__ += multiprocessing.__all__  # noqa: PLE0605 type: ignore[attr-defined]
+__all__ += multiprocessing.__all__
 
 
 # This call adds a Linux specific prctl(2) wrapper function to this module.

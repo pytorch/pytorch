@@ -1,13 +1,17 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import importlib
 import os
 import sys
 
 import torch
+from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -113,6 +117,12 @@ test_failures = {
     "test_as_strided_on_views_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_resize_overlapping_strides_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -128,6 +138,7 @@ test_failures = {
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
+    "test_arange7_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
@@ -153,6 +164,8 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice_scatter_dtype_consistency_dynamic_shapes": TestFailure(
         (
@@ -164,6 +177,17 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    # Fallback ops (data-dependent output size) route to ATen eager — no
+    # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
+    "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # test_amp_update_scale does not use self.common(), so check_codegen() is
+    # never triggered — the test calls torch.compile() directly and passes.
+    # No TestFailure entry needed.
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
@@ -180,7 +204,6 @@ test_failures = {
     "test_compar_dynamic_shapes": TestFailure(("cpu",)),
     "test_complex_from_real_imag_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_const_int32_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_conv2d_backward_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
@@ -209,6 +232,12 @@ test_failures = {
     "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
+    "test_searchsorted_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
+    "test_bucketize_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -440,6 +469,26 @@ DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
 )
 
 
+class DynamicShapesCodegenTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
+
+
 if HAS_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
@@ -466,7 +515,7 @@ if HAS_CPU:
 
 if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenGPUTests(TestCase):
+    class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
         maxDiff = None
         device = GPU_TYPE
 
@@ -486,6 +535,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
         GPU_TYPE,
         test_failures,
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesCodegenGPUTests,
+        "test_randint_distribution_dynamic_shapes_cuda",
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda = skipIfRocmArch(
+            MI350_ARCH
+        )(DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda)
 
 
 if __name__ == "__main__":

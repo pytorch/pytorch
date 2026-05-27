@@ -108,7 +108,7 @@ CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
     std::unique_ptr<ViewFunc> view_fn_,
-    std::shared_ptr<Node> fn_)
+    c10::intrusive_ptr<Node> fn_)
     : base(base_var),
       view(std::move(view_)),
       view_fn(std::move(view_fn_)),

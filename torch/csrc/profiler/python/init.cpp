@@ -384,7 +384,9 @@ void initPythonBindings(PyObject* module) {
               bool /* capture_overload_names */,
               bool /* record_python_gc_info */,
               bool /* expose_kineto_event_metadata */,
-              std::string /* custom_profiler_config*/
+              std::string /* custom_profiler_config*/,
+              bool /* adjust_timestamps */,
+              bool /* trace_only */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -405,7 +407,10 @@ void initPythonBindings(PyObject* module) {
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
           "    record_python_gc_info (bool) : adds python gc events to profile\n"
           "    expose_kineto_event_metadata (bool) : whether to expose KinetoEvent metadata in the PyTorch Profiler\n"
-          "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
+          "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n"
+          "    adjust_timestamps (bool) : whether to adjust timestamps for Vulkan events\n"
+          "    trace_only (bool) : when True, skip building Python event objects during __exit__.\n"
+          "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
@@ -417,7 +422,9 @@ void initPythonBindings(PyObject* module) {
           py::arg("capture_overload_names") = false,
           py::arg("record_python_gc_info") = false,
           py::arg("expose_kineto_event_metadata") = false,
-          py::arg("custom_profiler_config") = "")
+          py::arg("custom_profiler_config") = "",
+          py::arg("adjust_timestamps") = false,
+          py::arg("trace_only") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -443,7 +450,9 @@ void initPythonBindings(PyObject* module) {
                 p.capture_overload_names,
                 p.record_python_gc_info,
                 p.expose_kineto_event_metadata,
-                p.custom_profiler_config);
+                p.custom_profiler_config,
+                p.adjust_timestamps,
+                p.trace_only);
           },
           [](const py::tuple& t) { // __setstate__
             TORCH_CHECK(t.size() >= 12, "Expected at least 12 values in state");
@@ -474,8 +483,11 @@ void initPythonBindings(PyObject* module) {
                 t[8].cast<bool>(),
                 t[9].cast<bool>(),
                 t[10].cast<bool>(),
-                t[11].cast<std::string>());
-          }));
+                t[11].cast<std::string>(),
+                t.size() > 12 ? t[12].cast<bool>() : false,
+                t.size() > 13 ? t[13].cast<bool>() : false);
+          }))
+      .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(
@@ -675,9 +687,9 @@ void initPythonBindings(PyObject* module) {
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
 
-  TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
-  PyModule_AddObject(
-      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
+  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
+    throw python_error();
+  }
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,

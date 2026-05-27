@@ -1,5 +1,6 @@
 import abc
 import contextlib
+import contextvars
 import functools
 import logging
 import threading
@@ -45,6 +46,7 @@ __all__ = [
     "get_gradient_edge",
     "increment_version",
     "set_warn_on_accumulate_grad_stream_mismatch",
+    "set_override_stale_capture_stream",
 ]
 
 
@@ -426,7 +428,7 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
     Args:
         error_message (str): When saved tensors default hooks are used when they
-                             have been are disabled, a RuntimeError with this
+                             have been disabled, a RuntimeError with this
                              error message gets raised.
 
     Example::
@@ -458,6 +460,36 @@ def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
     of the node that produced the incoming gradient.
     """
     return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
+
+
+def set_override_stale_capture_stream(enabled: bool) -> None:
+    """Control behavior when autograd detects a stale non-capturing stream during
+    CUDA graph capture.
+
+    During CUDA graph capture, autograd nodes may reference a stale stream
+    that is not part of the capture. With the flag disabled (the
+    process-initial state), autograd raises a ``RuntimeError`` when the stale
+    stream is the default stream (stream 0), because this case always
+    invalidates the capture: ``cudaStreamWaitEvent`` on the default stream
+    pulls a non-capturing stream into the graph. For non-default stale streams
+    the stream reference is left unchanged; the capture will succeed if the
+    user has joined the stream into the capture (e.g. via
+    ``capture_stream.wait_stream(stale_stream)``) and will otherwise fail with
+    a CUDA runtime error.
+
+    When ``enabled=True``, any stale non-capturing stream (default or
+    non-default) is automatically overridden with the producer's capturing
+    stream, allowing the capture to proceed. This is a process-global setting
+    and is not thread-local.
+
+    Args:
+        enabled (bool): If ``True``, override stale non-capturing streams with
+            the producer's capturing stream during CUDA graph capture. If
+            ``False`` (the process-initial state), raise an error only when the
+            stale stream is the default stream (stream 0); other stale streams
+            are left unchanged.
+    """
+    return torch._C._set_override_stale_capture_stream(enabled)
 
 
 class _MultiHandle(RemovableHandle):
@@ -873,6 +905,10 @@ def _engine_run_backward(
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+
+    # Need to save the context so compiler config will be visible in device threads
+    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
+
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
@@ -880,3 +916,4 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
+        torch._C._stash_obj_in_tls("context", None)
