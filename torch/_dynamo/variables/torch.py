@@ -2990,6 +2990,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
 
+        if torch.distributed.is_available():
+            import torch.distributed.config as dist_config
+            from torch.distributed.distributed_c10d import get_rank
+
+            if (
+                dist_config.compile_on_one_rank
+                and self.value is get_rank
+                and len(args) == 0
+                and len(kwargs) == 0
+            ):
+                from torch.distributed._ops import device_mesh  # noqa: F401
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch.ops.device_mesh._runtime_get_rank.default,
+                        (),
+                        {},
+                    ),
+                )
+
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
