@@ -1790,7 +1790,10 @@ class SizeVariable(TupleVariable):
         return self.nb_add_impl(tx, other)
 
     def nb_add_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, reverse: bool = False
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
     ) -> VariableTracker:
         # NOTE: The python interpreter tries, in order:
         #    1. right.nb_add(left, right)  (only if right is a subclass of left)
