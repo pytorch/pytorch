@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
@@ -1532,6 +1533,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
     def test_unshard_async(self):
         class ReduceModule(nn.Module):
