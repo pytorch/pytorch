@@ -1249,12 +1249,12 @@ class ComboKernel(Kernel):
                     seed_specs_str = f"({seed_specs[0]},)"
                 else:
                     seed_specs_str = f"({', '.join(seed_specs)})"
-                # Emit into runtime call path (Python wrapper only).
-                # C++ wrappers can't call Python seed-bench functions.
-                # Guard so iterations 2+ skip tuple construction entirely.
-                # Use all() check to handle partial prepick (some slots
-                # pre-filled, others None needing runtime tuning).
-                if not V.graph.cpp_wrapper:
+                # Runtime seed-bench path: only when compile-time bench is
+                # off. cpp_wrapper can't call Python helpers at runtime.
+                if (
+                    not config.combo_seed_autotune_at_compile_time
+                    and not V.graph.cpp_wrapper
+                ):
                     wrapper.writeline(f"if combo_seeds_need_tuning({name}):")
                     wrapper.writeline(
                         f"    start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
