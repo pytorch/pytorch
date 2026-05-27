@@ -36,6 +36,10 @@ from torch.testing._internal.opinfo.refs import (
     ElementwiseBinaryPythonRefInfo,
     ReductionPythonRefInfo
 )
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+)
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -652,6 +656,7 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183891")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1062,6 +1067,7 @@ class TestSparse(TestSparseBase):
         test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
         test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184598")
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1487,10 +1493,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
 
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -1550,10 +1552,6 @@ class TestSparse(TestSparseBase):
     @onlyCUDA
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_deterministic(self, device, dtype, coalesced):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -1588,10 +1586,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
     @onlyCUDA
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     def test_bmm_oob(self, device):
         # Targets an out of bounds error when the sparse tensor has no non-zero
         # values in the first batch dimension (#131977).
@@ -1609,24 +1603,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
 
     @onlyCUDA
-    @unittest.skipIf(
-        not IS_WINDOWS or not TEST_WITH_ROCM,
-        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
-    )
-    @dtypes(torch.double)
-    def test_bmm_windows_error(self, device, dtype):
-        a = torch.rand(2, 2, 2, dtype=dtype).to_sparse().cuda()
-        b = torch.rand(2, 2, 2, dtype=dtype).cuda()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
-            ab = a.bmm(b)
-
-    @onlyCUDA
-    @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
-    )
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_bmm_coo_row_index_alignment(self, device, dtype):
@@ -1827,6 +1803,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
+    @unittest.skipIf(IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/174389")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3449,6 +3426,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182816")
     @coalescedonoff
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -3851,6 +3829,7 @@ class TestSparse(TestSparseBase):
         gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True)
 
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183435")
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -3876,6 +3855,8 @@ class TestSparse(TestSparseBase):
         self.assertEqual(out, out_double.to(dtype=dtype))
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182600")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184329")
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())

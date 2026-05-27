@@ -7,6 +7,8 @@ set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source ${SOURCE_DIR}/set_desired_python.sh
+# shellcheck source=../pytorch/rocm_utils.sh
+source "$(dirname "${SOURCE_DIR}")/pytorch/rocm_utils.sh"
 
 
 if [[ -n "$BUILD_PYTHONLESS" && -z "$LIBTORCH_VARIANT" ]]; then
@@ -163,6 +165,11 @@ time CMAKE_ARGS=${CMAKE_ARGS[@]} \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
 echo "Finished setup.py bdist at $(date)"
+
+# Build rocm-composable-kernel (ck4inductor) wheel for ROCm builds
+if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+    build_rocm_ck_wheel "/tmp/$WHEELHOUSE_DIR"
+fi
 
 # Build libtorch packages
 if [[ -n "$BUILD_PYTHONLESS" ]]; then
@@ -446,6 +453,10 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
         cp /$LIBTORCH_HOUSE_DIR/libtorch*.zip "$PYTORCH_FINAL_PACKAGE_DIR"
     else
         cp /$WHEELHOUSE_DIR/torch*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
+        # Also copy rocm-composable-kernel wheel for ROCm builds
+        if compgen -G "/$WHEELHOUSE_DIR/rocm_composable_kernel*.whl" >/dev/null; then
+            cp /$WHEELHOUSE_DIR/rocm_composable_kernel*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
+        fi
     fi
 fi
 

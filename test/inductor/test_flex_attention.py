@@ -70,9 +70,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
+    IS_LINUX,
     MI200_ARCH,
     skipIfRocm,
     skipIfRocmArch,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
@@ -2559,6 +2562,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out_only, out_legacy, atol=1e-6, rtol=1e-6)
         torch.testing.assert_close(aux_lse.lse, lse_legacy, atol=1e-6, rtol=1e-6)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/162464",
+    )
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -5386,6 +5393,44 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    def test_cpu_qk_chunk_same_addmm_buffer(self, device):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.H = 2
+                self.D = 16
+                self.S = 128
+                self.project_qk = nn.Linear(self.H * self.D, self.H * self.D * 2)
+                self.project_v = nn.Linear(self.H * self.D, self.H * self.D)
+
+            def forward(self, hidden_states):
+                B = hidden_states.size(0)
+                qk = self.project_qk(hidden_states)
+                query, key = qk.chunk(2, dim=-1)
+
+                query = query.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                key = key.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                value = (
+                    self.project_v(hidden_states)
+                    .view(B, self.S, self.H, self.D)
+                    .permute(0, 2, 1, 3)
+                )
+
+                return flex_attention(query, key, value, score_mod=_identity)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 128, 32, device=device)
+        model = Model().to(device).eval()
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model)(x)
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -5401,6 +5446,31 @@ class GraphModule(torch.nn.Module):
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_nested_tensor_inputs_error(self, device):
+        def make_nt(lengths, heads=2, dim=8):
+            elems = [
+                torch.randn(s, heads, dim, device=device, dtype=torch.float32)
+                for s in lengths
+            ]
+            return torch.nested.nested_tensor(elems, layout=torch.jagged).transpose(
+                1, 2
+            )
+
+        q = make_nt([3, 2])
+        k = make_nt([3, 2])
+        v = make_nt([3, 2])
+        msg = "flex_attention does not support NestedTensor inputs"
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            flex_attention(q, k, v)
+
+        compiled_flex = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            compiled_flex(q, k, v)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
@@ -8354,7 +8424,7 @@ class TestLearnableBiases(InductorTestCase):
                 )
 
                 compiled_flex = torch.compile(
-                    flex_attention, mode="max-autotune-no-cudagraphs"
+                    flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
                 )
 
                 out = compiled_flex(
