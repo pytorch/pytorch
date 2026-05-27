@@ -1245,6 +1245,7 @@ def _script_impl(
 
         # some functions are explicitly marked as not supported in script mode
         if hasattr(obj, "__script_unsupported"):
+            # pyrefly: ignore [no-access]
             raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)

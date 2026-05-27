@@ -236,6 +236,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
     transfer_ns = get_transfer_time(flat_args_kwargs, flat_outs)
 
     # Roofline: max of compute and transfer, convert ns to ms
+    # pyrefly: ignore [unnecessary-type-conversion]
     return max(float(compute_ns), float(transfer_ns)) / 1e6
 
 

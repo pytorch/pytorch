@@ -393,6 +393,7 @@ def get_in(
         operator.getitem
     """
     try:
+        # pyrefly: ignore [incompatible-overload-residual]
         return reduce(
             operator.getitem,
             keys,  # pyrefly: ignore[bad-argument-type]

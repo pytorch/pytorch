@@ -101,6 +101,7 @@ if is_available():
             skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
         """
         if skip > 0:
+            # pyrefly: ignore [unnecessary-type-conversion]
             key = hash(str(traceback.format_exc()))
             counter = _breakpoint_cache.get(key, 0) + 1
             _breakpoint_cache[key] = counter

@@ -594,6 +594,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             from .autograd_cache import AOTAutogradCache
 
             symints = AOTAutogradCache._filter_backed_symints(args)
+            # pyrefly: ignore [unnecessary-type-conversion]
             check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symints))
             if check is not True:
                 raise AssertionError(f"guards check failed: {check}")

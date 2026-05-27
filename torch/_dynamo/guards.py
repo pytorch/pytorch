@@ -1134,12 +1134,15 @@ def _constant_subclass_base_value(value: Any) -> Any:
 
 
 def register_guard_check_spec(
+    # pyrefly: ignore [implicit-any-parameter]
     get_metadata_fn,
+    # pyrefly: ignore [implicit-any-parameter]
     eval_fn,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
     handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
 
+    # pyrefly: ignore [implicit-any-parameter]
     def decorator(fn):
         fn.guard_check_spec = handler
         return fn
@@ -1147,6 +1150,7 @@ def register_guard_check_spec(
     return decorator
 
 
+# pyrefly: ignore [implicit-any-parameter]
 def skip_guard_check_spec(fn):
     """Mark a guard method as skipped during auto-cache dispatch."""
     fn.guard_check_spec = SKIP_GUARD
@@ -1171,6 +1175,7 @@ class UnsupportedGuardCheckSpec:
         raise NotImplementedError(f"Guard check spec not implemented for {self._name}")
 
 
+# pyrefly: ignore [implicit-any-parameter]
 def unsupported_guard_check_spec(fn):
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)

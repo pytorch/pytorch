@@ -62,6 +62,7 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import python_constant_richcompare_impl
 
@@ -255,6 +256,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 

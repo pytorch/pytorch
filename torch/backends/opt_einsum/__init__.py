@@ -113,5 +113,6 @@ class OptEinsumModule(PropModule):
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = OptEinsumModule(sys.modules[__name__], __name__)
 
+# pyrefly: ignore [unnecessary-type-conversion]
 enabled = bool(is_available())
 strategy = "auto" if is_available() else None

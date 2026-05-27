@@ -218,12 +218,14 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
         if self.repr_hook is not None:
             return self.repr_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        # pyrefly: ignore [unnecessary-type-conversion]
         return str(self.__class__.__qualname__)
 
     def __str__(self) -> str:
         if self.str_hook is not None:
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        # pyrefly: ignore [unnecessary-type-conversion]
         return str(self.__class__.__qualname__)
 
     def __dir__(self):
@@ -357,12 +359,14 @@ class MapDataPipe(Dataset[_T_co], metaclass=_DataPipeMeta):
         if self.repr_hook is not None:
             return self.repr_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        # pyrefly: ignore [unnecessary-type-conversion]
         return str(self.__class__.__qualname__)
 
     def __str__(self) -> str:
         if self.str_hook is not None:
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        # pyrefly: ignore [unnecessary-type-conversion]
         return str(self.__class__.__qualname__)
 
     def __dir__(self):

@@ -1520,6 +1520,7 @@ class TupleVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen):
         if len(self.items) == 0:
             return "()"

@@ -318,6 +318,7 @@ def reshape_inference_rule(n: Node) -> TensorType:
         a = [e if e != Dyn else 1 for e in t1.dims]
         p1 = reduce(operator.mul, a)
         p2 = reduce(operator.mul, t2)
+        # pyrefly: ignore [unsupported-operation]
         if p1 % p2 == 0 or p2 % p1 == 0:
             n.type = t2_type
             return t2_type

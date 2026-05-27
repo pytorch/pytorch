@@ -600,6 +600,7 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -921,6 +922,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(*tracing_state_functions())
         def handle_tracing_state_functions(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -954,6 +956,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(*dispatch_key_set_functions)
         def handle_dispatch_key_set_functions(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -998,6 +1001,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.overrides.get_default_nowrap_functions.__wrapped__)
         def handle_get_default_nowrap_functions(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1013,6 +1017,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1026,6 +1031,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(math.radians)
         def handle_radians(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1043,6 +1049,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             @register(math.fma)
             def handle_fma(
+                # pyrefly: ignore [implicit-any-parameter]
                 self,
                 tx: "InstructionTranslator",
                 *args: VariableTracker,
@@ -1061,7 +1068,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> NoReturn:
             unimplemented(
                 gb_type="Encountered torch.is_inference_mode_enabled during tracing",
@@ -1075,7 +1084,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(
-            self, tx: "InstructionTranslator", arg: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            arg: VariableTracker,
         ) -> VariableTracker:
             if arg.is_tensor() or (
                 self.value is torch.overrides.is_tensor_like
@@ -1091,7 +1103,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.is_complex,
         )
         def handle_is_floating_point(
-            self, tx: "InstructionTranslator", input: Any
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            input: Any,
         ) -> VariableTracker | None:
             input_arg = input
             if input_arg.is_tensor() and input_arg.dtype is not None:
@@ -1105,7 +1120,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(
-            self, tx: "InstructionTranslator", input: Any
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            input: Any,
         ) -> VariableTracker | None:
             if input.is_tensor() and input.valid_size():
                 return VariableTracker.build(tx, product(input.size))
@@ -1116,6 +1134,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.compile)
         def handle_torch_compile(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1137,6 +1156,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.library.wrap_triton, torch._library.capture_triton)
         def handle_wrap_triton(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1159,7 +1179,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(
-            self, tx: "InstructionTranslator", input: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            input: VariableTracker,
         ) -> VariableTracker:
             if not input.is_tensor():
                 raise AssertionError(
@@ -1175,6 +1198,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.nn.modules.utils._ntuple,
         )
         def handle_ntuple(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1184,13 +1208,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.is_grad_enabled)
         def handle_is_grad_enabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> ConstantVariable:
             install_guard(GradModeVariable._guards_singleton)
             return VariableTracker.build(tx, torch.is_grad_enabled())
 
         @register(torch.use_deterministic_algorithms)
         def handle_use_deterministic_algorithms(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             mode: Any,
@@ -1213,7 +1240,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.autocast_increment_nesting)
         def handle_autocast_increment_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch.autocast_increment_nesting, (), {}
@@ -1224,7 +1253,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.autocast_decrement_nesting)
         def handle_autocast_decrement_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch.autocast_decrement_nesting, (), {}
@@ -1235,6 +1266,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.set_autocast_enabled)
         def handle_set_autocast_enabled(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             device_type: VariableTracker,
@@ -1255,7 +1287,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.set_autocast_cache_enabled)
         def handle_set_autocast_cache_enabled(
-            self, tx: "InstructionTranslator", enabled: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            enabled: VariableTracker,
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch.set_autocast_cache_enabled, (enabled.as_proxy(),)
@@ -1267,7 +1302,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.predispatch._jvp_increment_nesting)
         def handle_jvp_increment_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch._functorch.predispatch._jvp_increment_nesting
@@ -1280,7 +1317,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.predispatch._jvp_decrement_nesting)
         def handle_jvp_decrement_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch._functorch.predispatch._jvp_decrement_nesting
@@ -1293,7 +1332,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.predispatch._enter_dual_level)
         def handle_enter_dual_level(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch._functorch.predispatch._enter_dual_level
@@ -1306,7 +1347,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.predispatch._exit_dual_level)
         def handle_exit_dual_level(
-            self, tx: "InstructionTranslator", level: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            level: VariableTracker,
         ) -> VariableTracker:
             level_const = level.as_python_constant()
             tx.output.create_node(
@@ -1329,7 +1373,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._functorch._grad_increment_nesting)
         def handle_grad_increment_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch._C._functorch._grad_increment_nesting
@@ -1340,7 +1386,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._functorch._grad_decrement_nesting)
         def handle_grad_decrement_nesting(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function", torch._C._functorch._grad_decrement_nesting
@@ -1351,7 +1399,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._functorch.set_inplace_requires_grad_allowed)
         def handle_set_inplace_requires_grad_allowed(
-            self, tx: "InstructionTranslator", allowed: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            allowed: VariableTracker,
         ) -> VariableTracker:
             tx.output.create_node(
                 "call_function",
@@ -1369,7 +1420,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> ConstantVariable:
             guard = Guard(
                 GlobalStateSource(),
@@ -1382,7 +1435,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._is_torch_function_enabled)
         def handle_is_torch_function_enabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> ConstantVariable:
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             # see comment on SymbolicTorchFunctionState class as to why
@@ -1393,7 +1448,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> ConstantVariable:
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             return VariableTracker.build(
@@ -1402,7 +1459,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._is_torch_function_mode_enabled)
         def handle_is_torch_function_mode_enabled(
-            self, tx: "InstructionTranslator"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
         ) -> ConstantVariable:
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             # _is_torch_function_mode_enabled returns True only if:
@@ -1420,7 +1479,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.overrides.has_torch_function_unary,
         )
         def handle_has_torch_function(
-            self, tx: "InstructionTranslator", *args: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
         ) -> ConstantVariable:
             tf_state = tx.symbolic_torch_function_state
             if tf_state.skip_next:
@@ -1433,8 +1495,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
 
+        # pyrefly: ignore [missing-attribute]
         @register(torch._C._skip_one_hop_torch_function)
         def handle_skip_one_hop_torch_function(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             func: VariableTracker,
@@ -1474,13 +1538,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         )
         def handle_device_interface_stream(
-            self, tx: "InstructionTranslator", stream: "StreamVariable"
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            stream: "StreamVariable",
         ) -> StreamContextVariable:
             return StreamContextVariable.create(tx, stream)
 
         @register(torch.from_numpy)
         def handle_from_numpy(
-            self, tx: "InstructionTranslator", *args: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
         ) -> TensorVariable:
             if not config.trace_numpy:
                 unimplemented(
@@ -1517,13 +1587,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.jit.annotate)
         def handle_jit_annotate(
-            self, tx: "InstructionTranslator", the_type: Any, the_value: V
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            the_type: Any,
+            the_value: V,
         ) -> V:
             return the_value
 
         @register(torch.backends.cudnn.is_acceptable)
         def handle_cudnn_is_acceptable(
-            self, tx: "InstructionTranslator", tensor: Any, *extra: Any
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            tensor: Any,
+            *extra: Any,
         ) -> ConstantVariable:
             # is_acceptable(tensor) returns true if
             #   (a) tensor dtype/device are supported by cudnn
@@ -1543,6 +1621,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.utils.hooks.BackwardHook)
         def handle_backward_hook(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1552,6 +1631,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.nn.Parameter)
         def handle_parameter(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1561,7 +1641,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
         def handle_sym_size(
-            self_: Any, tx: "InstructionTranslator", self, dim: Any | None = None
+            self_: Any,
+            tx: "InstructionTranslator",
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            dim: Any | None = None,
         ) -> VariableTracker | None:
             # we see this when retracing already traced code
             if dim is not None:
@@ -1570,7 +1654,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
         def handle_sym_stride(
-            self_: Any, tx: "InstructionTranslator", self, dim: Any | None = None
+            self_: Any,
+            tx: "InstructionTranslator",
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            dim: Any | None = None,
         ) -> VariableTracker | None:
             if dim is not None:
                 return self.call_method(tx, "stride", [dim], {})
@@ -1578,6 +1666,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.addcdiv)
         def handle_addcdiv(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1599,6 +1688,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.full)
         def handle_full(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             size: VariableTracker,
@@ -1670,6 +1760,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._assert)
         def handle_assert(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             condition: VariableTracker,
@@ -1684,6 +1775,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(SDPAParams)
         def handle_sdpa_params(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1720,6 +1812,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 get_world_size,
             )
             def handle_constant_processgroup_functions(
+                # pyrefly: ignore [implicit-any-parameter]
                 self,
                 tx: "InstructionTranslator",
                 *args: VariableTracker,
@@ -1782,6 +1875,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             tensor_list: VariableTracker | None = None,
@@ -1815,6 +1909,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -1836,6 +1931,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
         def handle_guarding_hint_or_throw(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1854,6 +1950,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
         def handle_optimization_hint(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1874,7 +1971,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
         def handle_guard_size_oblivious(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
@@ -1892,7 +1992,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
         def handle_guard_or_true(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
@@ -1908,7 +2011,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
         def handle_guard_or_false(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
@@ -1924,7 +2030,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
         def handle_statically_known_false(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
@@ -1940,7 +2049,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols)
         def handle_has_free_unbacked_symbols(
-            self, tx: "InstructionTranslator", x: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            x: VariableTracker,
         ) -> VariableTracker | None:
             from .tensor import TensorVariable
 
@@ -1956,7 +2068,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker:
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
@@ -1977,7 +2092,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
         def handle_statically_known_true(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
@@ -1993,7 +2111,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.sym_and)
         def handle_sym_and(
-            self, tx: "InstructionTranslator", *terms: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            *terms: VariableTracker,
         ) -> VariableTracker | None:
             if all(isinstance(x, SymNodeVariable) for x in terms):
                 return SymNodeVariable.create(
@@ -2007,7 +2128,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.sym_or)
         def handle_sym_or(
-            self, tx: "InstructionTranslator", *terms: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            *terms: VariableTracker,
         ) -> VariableTracker | None:
             if all(isinstance(x, SymNodeVariable) for x in terms):
                 return SymNodeVariable.create(
@@ -2021,7 +2145,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.fx.experimental.symbolic_shapes.has_static_value)
         def handle_has_static_value(
-            self, tx: "InstructionTranslator", expr: VariableTracker
+            # pyrefly: ignore [implicit-any-parameter]
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
@@ -2036,6 +2163,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2049,6 +2177,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._functorch.peek_interpreter_stack)
         def handle_functorch_peek_interpreter_stack(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2062,6 +2191,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
         def handle_functorch_pyfunctorch_coerce_cinterpreter(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2075,6 +2205,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.tensor)
         def handle_torch_tensor(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2113,6 +2244,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._pop_torch_function_stack)
         def handle_pop_torch_function(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2141,6 +2273,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._push_on_torch_function_stack)
         def handle_push_torch_function(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2158,6 +2291,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._len_torch_function_stack)
         def handle_len_torch_function(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2171,6 +2305,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._C._get_function_stack_at)
         def handle_get_stack_at(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2195,6 +2330,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.get_device_module.__wrapped__)
         def handle_get_device_module(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2243,6 +2379,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.xpu.current_stream,
         )
         def handle_current_stream(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2303,6 +2440,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.cpu.synchronize,
         )
         def handle_synchronize(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2340,6 +2478,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.set_default_device)
         def handle_set_default_device(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2364,6 +2503,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(elementwise_dtypes)
         def handle_elementwise_dtypes(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2394,6 +2534,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return SourcelessBuilder.create(tx, result)
 
         def check_impl(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             predicate_vt: VariableTracker | None,
@@ -2472,6 +2613,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._check)
         def handle_check(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2490,6 +2632,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch._check_not_implemented,
         )
         def handle_check_with(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2525,6 +2668,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch._check_tensor_all,
         )
         def handle_check_tensor_all(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2583,6 +2727,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.cuda._exchange_device)
         def handle_exchange_device(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2594,6 +2739,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.cuda._maybe_exchange_device)
         def handle_maybe_exchange_device(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2605,6 +2751,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._dynamo.decorators.override_optimization_hint)
         def handle_override_optimization_hint(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
@@ -2634,6 +2781,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
+        # pyrefly: ignore [implicit-any-parameter]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.
@@ -2923,6 +3071,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._functorch.eager_transforms._autograd_grad)
         def handle_functorch_autograd_grad(
+            # pyrefly: ignore [implicit-any-parameter]
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,

@@ -104,6 +104,7 @@ class PyCodegen:
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
         self.pycodes = []
 
+    # pyrefly: ignore [implicit-any-parameter]
     def add_pycode(self, pycode: str, *args):
         if not config.generate_pycode:
             return

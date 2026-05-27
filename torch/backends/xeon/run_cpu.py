@@ -193,8 +193,10 @@ class _CPUinfo:
                     if node_id == int(nid):
                         if int(cpuinfo[1]) not in cur_node_physical_core:
                             cur_node_physical_core.append(int(cpuinfo[1]))
+                            # pyrefly: ignore [unnecessary-type-conversion]
                             self.physical_core_node_map[int(cpuinfo[1])] = int(node_id)
                         cur_node_logical_core.append(int(cpuinfo[0]))
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         self.logical_core_node_map[int(cpuinfo[0])] = int(node_id)
                 self.node_physical_cores.append(cur_node_physical_core)
                 self.node_logical_cores.append(cur_node_logical_core)

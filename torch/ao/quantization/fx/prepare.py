@@ -213,6 +213,7 @@ def _is_input_arg_dtype_supported_by_backend(
         # out why backend_config has is_dynamic set to None in some cases.
         return (dtype_config.input_dtype is None) or (
             dtype_config.input_dtype == qconfig_dtype
+            # pyrefly: ignore [unnecessary-type-conversion]
             and bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic)
             and _qconfig_satisfies_dtype_config_constraints(
                 qconfig, dtype_config.input_dtype_with_constraints

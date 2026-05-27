@@ -149,6 +149,7 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
 
     return {
         "model": mlmodel,
+        # pyrefly: ignore [unnecessary-type-conversion]
         "hash": str(hashlib.sha256(mlmodel).hexdigest()),
         "extra": json.dumps(coreml_compile_spec),
     }

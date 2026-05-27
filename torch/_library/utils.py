@@ -79,12 +79,14 @@ def is_builtin(op: OpOverload) -> bool:
 def is_out(op: OpOverload) -> bool:
     """Returns True if the operator has "out" semantics: its mutable arguments
     are write-only output buffers that are not read from."""
+    # pyrefly: ignore [missing-attribute]
     return torch.Tag.out in op.tags
 
 
 def is_inplace(op: OpOverload) -> bool:
     """Returns True if the operator has inplace semantics: it mutates its first
     positional argument and returns it."""
+    # pyrefly: ignore [missing-attribute]
     return torch.Tag.inplace in op.tags
 
 

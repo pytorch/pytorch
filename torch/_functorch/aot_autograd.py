@@ -896,9 +896,12 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
 
 
 def autograd_cache_key(
+    # pyrefly: ignore [implicit-any-parameter]
     graph,
+    # pyrefly: ignore [implicit-any-parameter]
     example_inputs,
     ignore_shape_env: bool,
+    # pyrefly: ignore [implicit-any-parameter]
     decompositions,
     compiler_config_extra: CompilerConfigExtra,
     keep_inference_input_mutations: bool = False,

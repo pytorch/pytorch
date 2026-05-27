@@ -683,6 +683,7 @@ def _get_collective_info(
     if isinstance(val, torch.Tensor):
         nelems = 1
         for s in val.shape:
+            # pyrefly: ignore [unnecessary-type-conversion]
             nelems *= int(s)
         dtype = _dtype_to_nccl_str(val.dtype)
     else:
@@ -692,6 +693,7 @@ def _get_collective_info(
             if isinstance(inp_val, torch.Tensor):
                 nelems = 1
                 for s in inp_val.shape:
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     nelems *= int(s)
                 dtype = _dtype_to_nccl_str(inp_val.dtype)
             else:

@@ -648,6 +648,7 @@ class GraphArg:
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.source)
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen) -> str:
         if self.source is None:
             raise AssertionError(

@@ -848,10 +848,12 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # inductor codegen, where we need to do a non-uniform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.
         carries_tensor_masks = [
+            # pyrefly: ignore [unnecessary-type-conversion]
             bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.carries
         ]
         additional_inputs_tensor_masks = [
+            # pyrefly: ignore [unnecessary-type-conversion]
             bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.additional_inputs
         ]

@@ -907,6 +907,7 @@ class _TorchDynamoContext:
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
+        # pyrefly: ignore [bad-argument-type]
         _maybe_set_eval_frame(_callback_from_stance(self.prior))
         self.prior = unset
         return None

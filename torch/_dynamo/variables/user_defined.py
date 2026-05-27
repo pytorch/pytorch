@@ -1559,6 +1559,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.value is other.value
         )
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen) -> str:
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -1716,6 +1717,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return side_effects.is_modified(self._base_vt)
         return False
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)

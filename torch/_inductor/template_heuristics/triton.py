@@ -1677,6 +1677,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
+            # pyrefly: ignore [unnecessary-type-conversion]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
         ]
@@ -1701,6 +1702,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
+            # pyrefly: ignore [unnecessary-type-conversion]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
             if BLOCK_N1 % BLOCK_M1 == 0
@@ -1715,6 +1717,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
+            # pyrefly: ignore [unnecessary-type-conversion]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
         ]
@@ -1796,6 +1799,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 key += (group_m,)
 
             if waves_per_eu != 0:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 waves_per_eu = int(8 // conf.num_warps)
 
             if key not in used and (

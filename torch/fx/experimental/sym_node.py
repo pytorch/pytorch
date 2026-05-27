@@ -676,6 +676,7 @@ class DynamicInt(_DynamicScalar, int):
     def __new__(cls, val: int) -> Self:
         if not isinstance(val, int):
             raise AssertionError(f"Expected int, got {type(val)}")
+        # pyrefly: ignore [unnecessary-type-conversion]
         obj = super().__new__(cls, int(val))
         return obj
 

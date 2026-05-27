@@ -1631,6 +1631,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         super().__init_subclass__(**kwargs)
 
+        # pyrefly: ignore [implicit-any-parameter]
         def as_python_constant_failure(self) -> NoReturn:
             raise AsPythonConstantNotImplementedError(
                 self, msg=f"{self} is self-referential"
@@ -1640,6 +1641,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             cls, "as_python_constant", as_python_constant_failure
         )
 
+        # pyrefly: ignore [implicit-any-parameter]
         def reconstruct_failure(self) -> NoReturn:
             unimplemented(
                 gb_type="Reconstruction failure (self-referential)",
@@ -1671,6 +1673,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return
 
         @functools.wraps(original_method)
+        # pyrefly: ignore [implicit-any-parameter]
         def guarded_method(self, *args: Any, **kwargs: Any) -> VariableTracker:
             active = _vt_active_calls.get()
             if active is None:

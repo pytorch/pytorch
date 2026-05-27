@@ -13686,6 +13686,7 @@ Example::
 )
 
 add_docstr(
+    # pyrefly: ignore [missing-attribute]
     torch.Stream.is_capturing,
     r"""
 Stream.is_capturing() -> bool

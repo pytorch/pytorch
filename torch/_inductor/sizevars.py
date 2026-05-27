@@ -209,6 +209,7 @@ def statically_known_true(
     var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[Any]]] | None = None,
 ) -> bool:
     if expr in (True, False):
+        # pyrefly: ignore [unnecessary-type-conversion]
         return bool(expr)
 
     # Hint fast-path: if the current concrete hints make `expr` evaluate to
@@ -964,6 +965,7 @@ class SizeVarAllocator:
             return expr
         val = self.guarding_hint_or_throw(expr)
         self.check_equals(expr, sympy.Integer(val))
+        # pyrefly: ignore [unnecessary-type-conversion]
         return int(val)
 
     def guard_int_seq(self, left: Sequence[Expr | int]) -> list[int]:

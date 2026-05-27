@@ -417,6 +417,7 @@ class ConstantVariable(VariableTracker):
             tree_map_kwargs,
         )
 
+    # pyrefly: ignore [implicit-any-parameter]
     def reconstruct_pycode(self, codegen) -> str:
         return repr(self.value)
 

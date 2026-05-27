@@ -79,6 +79,7 @@ class AddOperator(PointwiseOperator):
 
     def __init__(self, weight: float = 1.0):
         super().__init__("add", "+")
+        # pyrefly: ignore [unnecessary-type-conversion]
         self.weight = float(weight)
 
     @property

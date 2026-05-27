@@ -319,7 +319,9 @@ def get_linux_pkg_version(run_lambda, pkg_name):
         },
     }
 
+    # pyrefly: ignore [redundant-cast, unnecessary-type-conversion]
     field_index: int = int(_cast(int, grep_version[pkg_mgr]["field_index"]))
+    # pyrefly: ignore [unnecessary-type-conversion]
     cmd: str = str(grep_version[pkg_mgr]["command"])
     cmd = cmd.format(pkg_name)
     ret = run_and_read_all(run_lambda, cmd)

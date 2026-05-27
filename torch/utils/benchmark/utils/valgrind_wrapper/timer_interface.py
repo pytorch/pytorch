@@ -85,6 +85,7 @@ class FunctionCounts:
         fn_str_len = max(linewidth - count_len - 4, 40)
         for c, fn in self:
             if len(fn) > fn_str_len:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 left_len = int((fn_str_len - 5) // 2)
                 fn = fn[:left_len] + " ... " + fn[-(fn_str_len - left_len - 5):]
             lines.append(f"  {c:>{count_len}}  {fn}")

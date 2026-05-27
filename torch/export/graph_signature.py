@@ -115,6 +115,7 @@ class InputSpec:
     def __str__(self):
         target = "" if self.target is None else f" target='{self.target}'"
         persistent = "" if self.persistent is None else f" persistent={self.persistent}"
+        # pyrefly: ignore [unnecessary-type-conversion]
         return f"{str(self.arg.name)}: {str(self.kind.name)}{target}{persistent}"
 
 
@@ -152,6 +153,7 @@ class OutputSpec:
 
     def __str__(self):
         target = "" if self.target is None else f" target='{self.target}'"
+        # pyrefly: ignore [unnecessary-type-conversion]
         return f"{str(self.arg.name)}: {str(self.kind.name)}{target}"
 
 

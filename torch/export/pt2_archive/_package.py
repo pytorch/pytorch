@@ -295,6 +295,7 @@ def _package_aoti_files(
                 "Saving AOTI generated file %s to archive in %s", file, new_filepath
             )
             archive_writer.write_file(
+                # pyrefly: ignore [unnecessary-type-conversion]
                 str(new_filepath),
                 file,
             )

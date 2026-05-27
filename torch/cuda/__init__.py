@@ -1299,6 +1299,7 @@ def current_blas_handle():
 def current_solver_handle():
     r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
     _lazy_init()
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getCurrentSolverHandle()
 
 

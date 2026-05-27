@@ -17,6 +17,7 @@ class Operator(ABC):
                     (default 1.0). Higher values increase selection likelihood.
         """
         self.name = name
+        # pyrefly: ignore [unnecessary-type-conversion]
         self.weight: float = float(weight)
 
     @property

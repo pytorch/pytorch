@@ -75,6 +75,7 @@ class ContextWrappingVariable(VariableTracker):
         self.target_values = target_values
         self.initial_values = initial_values
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -1520,6 +1521,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
+            # pyrefly: ignore [unnecessary-type-conversion]
             (arg, bool(self.set_priority)),
             {},
         )
@@ -1533,6 +1535,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
+            # pyrefly: ignore [unnecessary-type-conversion]
             (arg, bool(self.set_priority)),
             {},
         )
@@ -1734,6 +1737,7 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -1786,6 +1790,7 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    # pyrefly: ignore [implicit-any-parameter]
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 

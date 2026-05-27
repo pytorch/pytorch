@@ -6199,6 +6199,7 @@ class Scheduler:
         delta = new_peak - original_peak
         abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
         pct_thr = config.combo_kernel_peak_memory_pct_threshold
+        # pyrefly: ignore [unnecessary-type-conversion]
         limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
         if pct_thr is not None:
             limits.append(pct_thr * original_peak)
@@ -8253,6 +8254,7 @@ class Scheduler:
         for node1, node2 in possible_fusions:
             assert node1.get_device() == node2.get_device()
             device = node1.get_device()
+            # pyrefly: ignore [unnecessary-type-conversion]
             fusion_pair_priority = int(
                 self.get_backend(device).get_fusion_pair_priority(node1, node2)
             )

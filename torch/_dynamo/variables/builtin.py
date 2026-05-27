@@ -1847,7 +1847,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return user_func_variable.call_function(tx, [arg], {})
         return None
 
+    # pyrefly: ignore [implicit-any-parameter]
     def call___build_class__(self, tx, *args, **kwargs):
+        # pyrefly: ignore [implicit-any-parameter]
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
                 gb_type="Invalid call to __build_class__",

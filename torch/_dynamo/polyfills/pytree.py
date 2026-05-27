@@ -109,6 +109,7 @@ def tree_is_leaf(
 ) -> bool:
     if (tree is None and none_is_leaf) or (is_leaf is not None and is_leaf(tree)):
         return True
+    # pyrefly: ignore [missing-attribute]
     if optree.register_pytree_node.get(type(tree), namespace=namespace) is None:
         return True
     return False
@@ -164,6 +165,7 @@ def tree_leaves(
 
 
 class _Asterisk(str):
+    # pyrefly: ignore [implicit-any-attribute]
     __slots__ = ()
 
     def __new__(cls) -> Self:
@@ -254,6 +256,7 @@ class PyTreeSpec:
             )
 
         inner = [
+            # pyrefly: ignore [unnecessary-type-conversion]
             str(helper(self)),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
@@ -299,6 +302,7 @@ class PyTreeSpec:
             node_type = treespec.type
             if node_type is None:
                 raise AssertionError("Non-leaf treespec must have a type")
+            # pyrefly: ignore [missing-attribute]
             handler = optree.register_pytree_node.get(
                 node_type, namespace=treespec.namespace
             )
@@ -499,6 +503,7 @@ def treespec_tuple(
             "All children PyTreeSpecs must have the same `namespace` value "
             f"as the parent; expected {namespace!r}, got: {children!r}.",
         )
+    # pyrefly: ignore [missing-attribute]
     handler = optree.register_pytree_node.get(tuple, namespace=namespace)
     if handler is None:
         raise AssertionError("No pytree handler registered for tuple")
@@ -725,6 +730,7 @@ def tree_unflatten(treespec: PyTreeSpec, leaves: Iterable[Any]) -> PyTree:
     return treespec.unflatten(leaves)
 
 
+# pyrefly: ignore [missing-attribute]
 _none_registration = optree.register_pytree_node.get(type(None))
 if _none_registration is None:
     raise AssertionError("No pytree handler registered for NoneType")
@@ -742,6 +748,7 @@ def none_unflatten(_: None, children: Iterable[_T], /) -> None:
 
 
 with optree.dict_insertion_ordered(False, namespace="torch"):
+    # pyrefly: ignore [missing-attribute]
     _dict_registration = optree.register_pytree_node.get(dict)
     if _dict_registration is None:
         raise AssertionError("No pytree handler registered for dict")

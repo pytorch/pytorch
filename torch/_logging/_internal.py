@@ -1390,6 +1390,7 @@ def add_structured_logging_overhead(time_spent: float) -> None:
     # It's hard to figure out where we would log that if we want it in compilation metrics
     # itself.
     if key is not None:
+        # pyrefly: ignore [unnecessary-type-conversion]
         key = str(key)
         structured_logging_overhead[key] += time_spent
 

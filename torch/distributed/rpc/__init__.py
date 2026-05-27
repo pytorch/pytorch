@@ -194,6 +194,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
+            # pyrefly: ignore [unnecessary-type-conversion]
             store = dist.PrefixStore(str(f"rpc_prefix_{_init_counter}"), store)
             _init_counter += 1
 

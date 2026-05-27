@@ -420,6 +420,7 @@ def _unique(
 
             numel = arg.numel() if dim is None else arg.size(dim)
             if not has_free_symbols(numel):
+                # pyrefly: ignore [unnecessary-type-conversion]
                 maxval = int(numel)
 
             _constrain_range_for_size(nnz, max=maxval)
@@ -726,6 +727,7 @@ def _view_has_unbacked_input(
     )
 
 
+# pyrefly: ignore [implicit-any-parameter]
 def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     """
     Collect candidate (x, y) pairs whose runtime hints match (so they
@@ -748,6 +750,7 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
 
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
+    # pyrefly: ignore [implicit-any-parameter]
     def _atomic_syms(dims) -> list[torch.SymInt]:
         """Keep only SymInts whose expr is a single bare *backed* symbol."""
         out: list[torch.SymInt] = []
@@ -797,12 +800,14 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     }
 
     # 2) Symbolic test: does the substitution make the view's numel match?
+    # pyrefly: ignore [implicit-any-parameter]
     def _expr_of(s):
         return s.node.expr if isinstance(s, torch.SymInt) else s
 
     try:
         a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
         shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
+        # pyrefly: ignore [missing-attribute]
         diff = sympy.simplify((a_numel - shape_numel).subs(subs))
         if diff != 0:
             return False
@@ -1080,6 +1085,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
             maxval = sys.maxsize - 1
 
             if not has_free_symbols(arg.numel()):
+                # pyrefly: ignore [unnecessary-type-conversion]
                 maxval = int(arg.numel())
             else:
                 prod_node = math.prod(arg.shape).node  # type: ignore[union-attr]
@@ -1130,6 +1136,7 @@ def _padded_dense_to_jagged_forward(
         )
 
         if not has_free_symbols(padded.numel()):
+            # pyrefly: ignore [unnecessary-type-conversion]
             maxval = int(padded.numel())
 
         _constrain_range_for_size(total_L, min=0, max=maxval)
@@ -1263,6 +1270,7 @@ def masked_select(
     # the concrete value based on upper bounds. Otherwise,
     # we can set max val directly.
     if not has_free_symbols(self.numel()):
+        # pyrefly: ignore [unnecessary-type-conversion]
         num_elements = int(self.numel())
     else:
         prod_node = math.prod(self.shape).node  # type: ignore[union-attr]

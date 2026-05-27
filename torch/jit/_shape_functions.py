@@ -1069,6 +1069,7 @@ def multiply_integers(li: list[int]):
 def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
     if end < 0:
         raise AssertionError(f"Expected end ({end}) >= 0")
+    # pyrefly: ignore [unnecessary-type-conversion]
     return [int(math.ceil(end))]
 
 
@@ -1079,6 +1080,7 @@ def arange_start(
         raise AssertionError(f"Expected end ({end}) >= 0")
     if end < start:
         raise AssertionError(f"Expected end ({end}) >= start ({start})")
+    # pyrefly: ignore [unnecessary-type-conversion]
     return [int(math.ceil(end - start))]
 
 
@@ -1097,6 +1099,7 @@ def arange_start_step(
             raise AssertionError(
                 f"Expected end ({end}) >= start ({start}) when step > 0"
             )
+    # pyrefly: ignore [unnecessary-type-conversion]
     return [int(math.ceil((end - start) / step))]
 
 

@@ -372,6 +372,7 @@ def get_op_overload(node: torch._C.Node):
     if schema_str == "(no schema)":
         raise AssertionError(f"got empty schema for {node}")
     schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
+    # pyrefly: ignore [unnecessary-type-conversion]
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
 

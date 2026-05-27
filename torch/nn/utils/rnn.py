@@ -101,6 +101,7 @@ class PackedSequence(PackedSequence_):
         )
 
     @copy_method_params(torch.Tensor.to)
+    # pyrefly: ignore [invalid-overload]
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 

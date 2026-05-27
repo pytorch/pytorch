@@ -198,6 +198,7 @@ class Interpreter:
             except Exception as e:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     if (

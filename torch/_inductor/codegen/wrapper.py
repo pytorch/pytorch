@@ -947,6 +947,7 @@ class AllocateLine(MemoryPlanningLine):
         if self.node.get_device_or_error().type == "cpu":
             static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
             if static_shape is not None:
+                # pyrefly: ignore [unnecessary-type-conversion]
                 state.total_allocated_buffer_size += int(
                     functools.reduce(operator.mul, static_shape, 1)
                 )
@@ -3568,6 +3569,7 @@ class PythonWrapperCodegen(CodeGen):
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
+                # pyrefly: ignore [unnecessary-type-conversion]
                 if isinstance(arg, str) and "=" in str(arg):
                     # arg may be passed in a kwarg style, and then we need to extract its value
                     key, arg = arg.split("=")

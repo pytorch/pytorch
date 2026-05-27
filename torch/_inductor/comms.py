@@ -2134,6 +2134,7 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     else:
         assert callable(config.estimate_op_runtime)
         runtime = config.estimate_op_runtime(snode)
+    # pyrefly: ignore [bad-return]
     return runtime
 
 

@@ -167,6 +167,7 @@ def set_flags(
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
         torch._C._get_fp32_precision_getter("cuda", "all"),
+        # pyrefly: ignore [missing-attribute]
         torch._C._get_cudnn_depthwise_kernel(),
     )
     if _enabled is not None:
@@ -182,6 +183,7 @@ def set_flags(
     if _fp32_precision is not None:
         torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
     if _depthwise_kernel is not None:
+        # pyrefly: ignore [missing-attribute]
         torch._C._set_cudnn_depthwise_kernel(_depthwise_kernel)
     return orig_flags
 
@@ -242,7 +244,9 @@ class CudnnModule(PropModule):
         _set_fp32_precision_setter("cuda", "all"),
     )
     depthwise_kernel = ContextProp(
+        # pyrefly: ignore [missing-attribute]
         torch._C._get_cudnn_depthwise_kernel,
+        # pyrefly: ignore [missing-attribute]
         torch._C._set_cudnn_depthwise_kernel,
     )
 

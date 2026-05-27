@@ -447,6 +447,7 @@ def attention_23(
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,
+            # pyrefly: ignore [unnecessary-type-conversion]
             enable_gqa=bool(
                 current_q_num_heads != current_kv_num_heads
             ),  # Ensure enable_gqa is not SymBool

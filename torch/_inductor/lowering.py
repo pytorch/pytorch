@@ -1173,6 +1173,7 @@ def broadcast_tensors(*inputs):
         if isinstance(inputs[0], (list, tuple)):
             return broadcast_tensors(*inputs[0])
         return inputs
+    # pyrefly: ignore [bad-assignment]
     target: list[sympy.Expr] = functools.reduce(
         broadcast_symbolic_shapes, (x.get_size() for x in inputs), ()
     )
@@ -1847,7 +1848,10 @@ def quantized_decomposed_quantize_per_tensor_default(
         device=input.get_device(),
         dtype=dtype,
         inner_fn=functools.partial(
-            inner_fn, scale=float(scale), zero_point=int(zero_point)
+            # pyrefly: ignore [unnecessary-type-conversion]
+            inner_fn,
+            scale=float(scale),
+            zero_point=int(zero_point),
         ),
         ranges=input.get_size(),
     )
@@ -1886,7 +1890,10 @@ def quantized_decomposed_dequantize_per_tensor_default(
         device=input.get_device(),
         dtype=out_dtype,
         inner_fn=functools.partial(
-            inner_fn, scale=float(scale), zero_point=int(zero_point)
+            # pyrefly: ignore [unnecessary-type-conversion]
+            inner_fn,
+            scale=float(scale),
+            zero_point=int(zero_point),
         ),
         ranges=input.get_size(),
     )
@@ -2894,6 +2901,7 @@ def inductor_random(
                 base_offset,
                 threads_per_round,
                 ops.index_expr(random_pos(index), torch.int32),
+                # pyrefly: ignore [unnecessary-type-conversion]
                 vec=int(vec),
             )
     else:

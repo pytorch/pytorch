@@ -1387,8 +1387,10 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             print_output=False, include_stride=True, include_device=True
         )
 
+        # pyrefly: ignore [unnecessary-type-conversion]
         name = f"optimus_{str(rule.__class__.__name__)}"
         if "MTIA" in name:
+            # pyrefly: ignore [unnecessary-type-conversion]
             name = f"cff_{str(rule.__class__.__name__)}"
         trace_structured(
             "artifact",

@@ -143,6 +143,7 @@ class Measurement:
         """
         self._lazy_init()
         n_total = len(self._sorted_times)
+        # pyrefly: ignore [unnecessary-type-conversion]
         lower_bound = int(n_total // 4)
         upper_bound = int(torch.tensor(3 * n_total / 4).ceil())
         interquartile_points: tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
@@ -276,6 +277,7 @@ def unit_to_english(u: str) -> str:
 
 def trim_sigfig(x: float, n: int) -> float:
     """Trim `x` to `n` significant figures. (e.g. 3.14159, 2 -> 3.10000)"""
+    # pyrefly: ignore [unnecessary-type-conversion]
     if n != int(n):
         raise AssertionError("Number of significant figures must be an integer")
     magnitude = int(torch.tensor(x).abs().log10().ceil().item())

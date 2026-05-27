@@ -2205,7 +2205,9 @@ def _compile(
                 # pyrefly: ignore [implicit-any]
                 graph_node_shapes = {}
                 graph_input_count = None
+                # pyrefly: ignore [implicit-any-empty-container]
                 non_compliant_ops = set({})
+                # pyrefly: ignore [implicit-any-empty-container]
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted

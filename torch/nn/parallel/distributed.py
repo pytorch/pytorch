@@ -96,11 +96,14 @@ class _BucketCapacityConfig:
                     "when using bucket_cap_mb_list, python reducer is not supported"
                 )
             per_bucket_bytes_caps = tuple(
-                int(cap_mb * _MB_TO_BYTES) for cap_mb in bucket_cap_mb_list
+                # pyrefly: ignore [unnecessary-type-conversion]
+                int(cap_mb * _MB_TO_BYTES)
+                for cap_mb in bucket_cap_mb_list
             )
             effective_bucket_cap_mb = max(bucket_cap_mb_list)
             is_using_default = False
 
+        # pyrefly: ignore [unnecessary-type-conversion]
         bucket_bytes_cap = int(effective_bucket_cap_mb * _MB_TO_BYTES)
 
         # First bucket optimization: use smaller size when using defaults

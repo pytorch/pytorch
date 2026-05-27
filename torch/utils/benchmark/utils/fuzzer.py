@@ -380,6 +380,7 @@ class Fuzzer:
         """
         import numpy as np
         if seed is None:
+            # pyrefly: ignore [unnecessary-type-conversion]
             seed = int(np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64))
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)

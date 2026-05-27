@@ -1281,6 +1281,7 @@ def native_dropout(input: Tensor, p: float, train: bool | None):
                 "result type Float can't be cast to the desired output type Long"
             )
         bool_mask = torch.rand_like(input) > p
+        # pyrefly: ignore [unnecessary-type-conversion]
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:
@@ -1612,7 +1613,9 @@ def tensor_split_tensor_indices_or_sections_py_impl(
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
+        # pyrefly: ignore [unnecessary-type-conversion]
         beta = int(beta)
+        # pyrefly: ignore [unnecessary-type-conversion]
         alpha = int(alpha)
     out = alpha * torch.mm(mat1, mat2)
     if beta == 0:
@@ -1668,7 +1671,9 @@ def _addmm_activation(
 @pw_cast_for_opmath
 def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
+        # pyrefly: ignore [unnecessary-type-conversion]
         beta = int(beta)
+        # pyrefly: ignore [unnecessary-type-conversion]
         alpha = int(alpha)
     out = alpha * torch.mv(mat1, vec)
     if beta == 0:

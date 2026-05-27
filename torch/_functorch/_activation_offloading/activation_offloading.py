@@ -126,6 +126,7 @@ def offload_activation_fw(graph: fx.Graph) -> None:
                 torch.ops.prims.device_put.default,
                 args=(node, torch.device("cpu")),
                 kwargs={"non_blocking": True},
+                # pyrefly: ignore [unnecessary-type-conversion]
                 name=CPU_OFFLOAD_PREFIX + str(node.name),
             )
             cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
@@ -233,6 +234,7 @@ def offload_activation_fw_async(graph: fx.Graph) -> None:
             wait_node: fx.Node = graph.call_function(
                 torch.ops.ao.wait_tensor.default,
                 args=(offload_node, node),
+                # pyrefly: ignore [unnecessary-type-conversion]
                 name=CPU_OFFLOAD_PREFIX + str(node.name),
             )
             wait_node.meta["val"] = offload_node.meta["val"]

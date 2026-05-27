@@ -103,6 +103,7 @@ class RNNBase(Module):
         self.num_layers = num_layers
         self.bias = bias
         self.batch_first = batch_first
+        # pyrefly: ignore [unnecessary-type-conversion]
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.proj_size = proj_size
@@ -291,6 +292,7 @@ class RNNBase(Module):
                         self.proj_size,
                         self.num_layers,
                         self.batch_first,
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         bool(self.bidirectional),
                     )
 

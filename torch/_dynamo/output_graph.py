@@ -747,6 +747,7 @@ class OutputGraph(OutputGraphCommon):
             fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                # pyrefly: ignore [unnecessary-type-conversion]
                 allow_non_fake_inputs=bool(self.export),
                 export=self.export,
             )
@@ -2898,6 +2899,7 @@ class OutputGraph(OutputGraphCommon):
             if self.torch_function_subclass_inlined:
                 real_compiled_fn = compiled_fn
 
+                # pyrefly: ignore [implicit-any-parameter]
                 def _tf_disabled_wrapper(*args, **kwargs):
                     with torch._C.DisableTorchFunctionSubclass():
                         return real_compiled_fn(*args, **kwargs)
@@ -3722,6 +3724,7 @@ class SubgraphTracer(fx.Tracer):
         # Maps _DynamicScalar object ids to allocated SymInt nodes, for symbol reuse
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
+        # pyrefly: ignore [implicit-any-attribute]
         self.prev_inst = None
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
@@ -3747,6 +3750,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
+        # pyrefly: ignore [implicit-any-attribute]
         self._cur_code = None
         self._orig_gm_meta: list[Any] | None = None
         self._orig_gm_lineno_map: dict[int, int | None] | None = None

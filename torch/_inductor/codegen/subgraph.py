@@ -148,8 +148,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     inp_node.get_size(), benchmark_inp.shape
                 ):
                     if isinstance(sym_dim, sympy.Symbol):
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         sym_name_to_value[sym_dim.name] = int(actual_dim)
                     elif str(sym_dim) in sym_input_names:
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         sym_name_to_value[str(sym_dim)] = int(actual_dim)
 
         result = []

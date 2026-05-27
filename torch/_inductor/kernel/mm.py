@@ -186,6 +186,7 @@ def check_supported_striding(mat_a, mat_b) -> None:
         return V.graph.sizevars.statically_known_equals(stride[0], 1)
 
     def has_zero_dim(size) -> bool:
+        # pyrefly: ignore [unnecessary-type-conversion]
         return bool(
             V.graph.sizevars.statically_known_equals(size[0], 0)
             or V.graph.sizevars.statically_known_equals(size[1], 0)

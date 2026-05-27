@@ -886,6 +886,7 @@ class {module_name}(torch.nn.Module):
                 # as used
                 if node.op == "call_module":
                     try:
+                        # pyrefly: ignore [redundant-cast]
                         str_target = cast(str, node.target)
                         submod = self.get_submodule(str_target)
 

@@ -862,6 +862,7 @@ def _range_based_lowering_fn(
         )
         range_input_gen_fns = {**(input_gen_fns or {}), tensor_name: range_gen_fn}
 
+        # pyrefly: ignore [unnecessary-type-conversion]
         range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
 
         # pyrefly: ignore [not-iterable]

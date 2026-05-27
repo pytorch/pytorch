@@ -935,6 +935,7 @@ def method_impl(
     dispatch: list[str] = []
     for overload_index, overload in enumerate(grouped_overloads):
         signature = overload.signature.signature_str(symint=symint)
+        # pyrefly: ignore [unnecessary-type-conversion]
         signatures.append(f"{cpp_string(str(signature))},")
         dispatch_body = emit_dispatch_case(overload, structseq_typenames, symint=symint)
         dispatch.append(

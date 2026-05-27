@@ -311,6 +311,7 @@ class FrameStateSizeEntry:
             return True
         if self.size is auto_unset:
             return False
+        # pyrefly: ignore [bad-index]
         return self.size[dim] is auto_dynamic
 
     def is_stride_dynamic(self, dim: int) -> bool:
@@ -337,6 +338,7 @@ class FrameStateSizeEntry:
             return True
         if self.stride is auto_unset:
             return False
+        # pyrefly: ignore [bad-index]
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
@@ -387,8 +389,10 @@ class FrameStateSizeEntry:
             return xs
         if xs is auto_dynamic or ys is auto_dynamic:
             return auto_dynamic
+        # pyrefly: ignore [bad-argument-type]
         if len(xs) != len(ys):
             return auto_dynamic
+        # pyrefly: ignore [bad-argument-type]
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:

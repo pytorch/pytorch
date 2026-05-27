@@ -390,7 +390,9 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
     """
 
     def __init__(self, enable: bool = True) -> None:
+        # pyrefly: ignore [missing-attribute]
         self.prev = torch._C._is_grad_layout_enforcement_enabled()
+        # pyrefly: ignore [missing-attribute]
         torch._C._set_grad_layout_enforcement_enabled(enable)
         self.mode = enable
 
@@ -398,6 +400,7 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
         pass
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        # pyrefly: ignore [missing-attribute]
         torch._C._set_grad_layout_enforcement_enabled(self.prev)
 
     def clone(self) -> "enforce_grad_layout_policy":

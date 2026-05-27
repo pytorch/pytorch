@@ -292,6 +292,7 @@ class SymbolicTorchFunctionState:
             not torch._C._is_torch_function_all_disabled()
         )
 
+        # pyrefly: ignore [implicit-any-attribute]
         self.cur_mode = None
 
         TorchFunctionModeStackVariable.reset()

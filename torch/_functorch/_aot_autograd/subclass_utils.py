@@ -64,6 +64,7 @@ def requires_subclass_dispatch(
         type(x) is SubclassCreationMeta for x in fw_metadata.subclass_fw_graph_out_meta
     )
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
+    # pyrefly: ignore [unnecessary-type-conversion]
     return bool(any_subclass_args or any_subclass_outputs)
 
 

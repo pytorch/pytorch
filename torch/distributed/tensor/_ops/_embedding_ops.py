@@ -38,6 +38,7 @@ def embedding_strategy(
     # _MaskPartial hashes offset_shape, but torch.Size with SymInt (from
     # dynamo tracing) is unhashable.  Concretize to int, which adds a
     # standard dynamo guard (recompiles if the shape changes at runtime).
+    # pyrefly: ignore [unnecessary-type-conversion]
     weight_shape = torch.Size(int(s) for s in weight_meta.shape)
     indices_shape = indices_meta.shape
     output_emb_dim = len(indices_shape)

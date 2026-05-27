@@ -357,7 +357,7 @@ def backward(
             "Other Mapping types are not supported."
         )
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         inputs_tuple = tuple(inputs)
     if inputs is not None and len(inputs_tuple) == 0:
         raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
@@ -365,7 +365,7 @@ def backward(
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(tuple[torch.Tensor] | tuple[graph.GradientEdge], (tensors,))
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         tensors = tuple(tensors)
 
     # Check for __torch_function__ on tensors (similar to torch.autograd.grad)
@@ -385,6 +385,7 @@ def backward(
         )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
+    # pyrefly: ignore [bad-argument-type]
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
     if retain_graph is None:
         retain_graph = create_graph
@@ -393,6 +394,7 @@ def backward(
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
     _engine_run_backward(
+        # pyrefly: ignore [bad-argument-type]
         tensors,
         grad_tensors_,
         retain_graph,
@@ -511,7 +513,7 @@ def grad(
             Sequence[torch.Tensor] | Sequence[graph.GradientEdge], (outputs,)
         )
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         outputs = tuple(outputs)
 
     inputs_tuple: tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...]
@@ -528,7 +530,7 @@ def grad(
             "Other Mapping types are not supported."
         )
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         inputs_tuple = tuple(inputs)
     if len(inputs_tuple) == 0:
         raise RuntimeError("`inputs` argument to `grad()` cannot be empty.")
@@ -551,6 +553,7 @@ def grad(
             materialize_grads=materialize_grads,
         )
         if type(inputs) is dict:
+            # pyrefly: ignore [bad-return]
             return dict(zip(inputs.keys(), result_tuple, strict=True))
         return result_tuple
 
@@ -565,7 +568,10 @@ def grad(
 
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
     grad_outputs_ = _make_grads(
-        outputs, grad_outputs_, is_grads_batched=is_grads_batched
+        # pyrefly: ignore [bad-argument-type]
+        outputs,
+        grad_outputs_,
+        is_grads_batched=is_grads_batched,
     )
 
     if retain_graph is None:
@@ -578,6 +584,7 @@ def grad(
 
         def vjp(gO):
             return _engine_run_backward(
+                # pyrefly: ignore [bad-argument-type]
                 outputs,
                 gO,
                 retain_graph,
@@ -592,6 +599,7 @@ def grad(
         )
     else:
         result = _engine_run_backward(
+            # pyrefly: ignore [bad-argument-type]
             outputs,
             grad_outputs_,
             retain_graph,

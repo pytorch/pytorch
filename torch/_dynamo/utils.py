@@ -1309,6 +1309,7 @@ def unpack_iterable(
 def unpack_and_apply_fn(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
+    # pyrefly: ignore [implicit-any-parameter]
     apply_fn,
 ) -> None:
     from . import variables
@@ -3361,6 +3362,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
         log.warning(msg)
         unimplemented(
             gb_type="Fake tensor propagation exception",
+            # pyrefly: ignore [unnecessary-type-conversion]
             context=str(e.reason),
             explanation=msg,
             hints=[],

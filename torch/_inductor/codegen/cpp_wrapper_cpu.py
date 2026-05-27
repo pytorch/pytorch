@@ -754,6 +754,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         self.prefix.writeline_aot(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
                         )
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         device_type_str = str(tensor_device.type)
                         self.prefix.splice_aot(
                             f"""

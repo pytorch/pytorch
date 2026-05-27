@@ -2130,6 +2130,7 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
     # graph partition to split off this data copy, and cudagraphifying
     # the remaining gpu ops.
+    # pyrefly: ignore [unnecessary-type-conversion]
     allow_inputs_outputs = bool(
         torch._inductor.config.triton.cudagraphs
         and torch._inductor.config.graph_partition

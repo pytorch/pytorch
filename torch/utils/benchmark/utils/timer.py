@@ -264,6 +264,7 @@ class Timer:
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
+            # pyrefly: ignore [unnecessary-type-conversion]
             self._timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(

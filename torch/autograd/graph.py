@@ -489,6 +489,7 @@ def set_override_stale_capture_stream(enabled: bool) -> None:
             stale stream is the default stream (stream 0); other stale streams
             are left unchanged.
     """
+    # pyrefly: ignore [missing-attribute]
     return torch._C._set_override_stale_capture_stream(enabled)
 
 

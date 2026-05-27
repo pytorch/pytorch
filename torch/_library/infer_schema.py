@@ -77,7 +77,9 @@ def infer_schema(
         tags = ()
     elif isinstance(tags, torch.Tag):
         tags = (tags,)
+    # pyrefly: ignore [missing-attribute]
     is_inplace = torch.Tag.inplace in tags
+    # pyrefly: ignore [missing-attribute]
     is_out = torch.Tag.out in tags
     if is_inplace and is_out:
         raise AssertionError(

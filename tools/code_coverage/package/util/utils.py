@@ -17,6 +17,7 @@ from .setting import (
 
 
 def convert_time(seconds: float) -> str:
+    # pyrefly: ignore [unnecessary-type-conversion]
     seconds = int(round(seconds))
     seconds = seconds % (24 * 3600)
     hour = seconds // 3600

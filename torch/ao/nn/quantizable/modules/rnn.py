@@ -459,6 +459,7 @@ class LSTM(torch.nn.Module):
         self.num_layers = num_layers
         self.bias = bias
         self.batch_first = batch_first
+        # pyrefly: ignore [unnecessary-type-conversion]
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # Default to eval mode. If we want to train, we will explicitly set to training.

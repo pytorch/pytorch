@@ -1357,10 +1357,14 @@ def _check_single_backend_availability(backend_name: str) -> bool:
     Helper function to check if a single backend is available.
     """
     available_func = getattr(
-        torch.distributed, f"is_{str(backend_name).lower()}_available", None
+        # pyrefly: ignore [unnecessary-type-conversion]
+        torch.distributed,
+        f"is_{str(backend_name).lower()}_available",
+        None,
     )
     if available_func:
         return available_func()
+    # pyrefly: ignore [unnecessary-type-conversion]
     return str(backend_name).lower() in Backend.backend_list
 
 
@@ -1463,6 +1467,7 @@ def get_backend_config(group: ProcessGroup | None = None) -> str:
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
+    # pyrefly: ignore [unnecessary-type-conversion]
     return str(not_none(backend_config))
 
 
@@ -1577,6 +1582,7 @@ def get_node_local_rank(fallback_rank: int | None = None) -> int:
     if "LOCAL_RANK" in os.environ:
         return int(os.environ["LOCAL_RANK"])
     elif fallback_rank is not None:
+        # pyrefly: ignore [unnecessary-type-conversion]
         return int(fallback_rank)
     raise RuntimeError(
         "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
@@ -5292,16 +5298,19 @@ def barrier(
     if isinstance(device_ids, list):
         opts.device_ids = device_ids
         # use only the first device id
+        # pyrefly: ignore [read-only]
         opts.device = torch.device(device.type, device_ids[0])
     elif getattr(group, "bound_device_id", None) is not None:
         # Use device id from `init_process_group(device_id=...)`
         opts.device = group.bound_device_id  # type: ignore[assignment]
     elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        # pyrefly: ignore [read-only]
         opts.device = torch.device("cpu")
     else:
         # Use the current device set by the user. If user did not set any, this
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
+        # pyrefly: ignore [read-only]
         opts.device = device
         if group.rank() == 0:
             warnings.warn(  # warn only once
@@ -6318,6 +6327,7 @@ def _prepare_shrink_target_group(group: ProcessGroup | None) -> dict:
     target_pg = group if group is not None else _get_default_group()
 
     # Cache frequently accessed properties to avoid repeated calls
+    # pyrefly: ignore [unnecessary-type-conversion]
     group_size = int(target_pg.size())
     group_info = {
         "process_group": target_pg,

@@ -1537,6 +1537,7 @@ def load(
                 device = "cpu"
                 if map_location is not None:
                     if isinstance(map_location, (str, bytes)):
+                        # pyrefly: ignore [unnecessary-type-conversion]
                         device = str(map_location)
                     elif isinstance(map_location, torch.device):
                         device = str(map_location)

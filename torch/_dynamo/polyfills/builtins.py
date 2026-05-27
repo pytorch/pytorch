@@ -92,6 +92,7 @@ class _CallableIterator:
 
 
 class _SequenceIterator:
+    # pyrefly: ignore [implicit-any-parameter]
     def __init__(self, iterable) -> None:
         self.iterable = iterable
         self.index = 0
@@ -113,12 +114,14 @@ class _SequenceIterator:
             raise StopIteration from None
 
 
+# pyrefly: ignore [implicit-any-parameter]
 def sequence_iterator(iterable) -> Iterable[object]:
     if hasattr(iterable, "__getitem__"):
         return _SequenceIterator(iterable)
     raise TypeError(f"'{type(iterable)}' object is not iterable")
 
 
+# pyrefly: ignore [implicit-any-parameter]
 def callable_iterator(fn, sentinel, /):
     # If the second argument, sentinel, is given, then object must be a
     # callable object.

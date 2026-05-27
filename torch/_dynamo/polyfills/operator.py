@@ -43,6 +43,7 @@ def attrgetter(
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.attrgetter
 @substitute_in_graph(operator.attrgetter, is_embedded_type=True)  # type: ignore[arg-type,misc]
+# pyrefly: ignore [invalid-overload]
 def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
     if len(attrs) == 0:
         raise TypeError("attrgetter expected 1 argument, got 0")
@@ -102,6 +103,7 @@ def itemgetter(
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.itemgetter
 @substitute_in_graph(operator.itemgetter, is_embedded_type=True)  # type: ignore[arg-type,misc]
+# pyrefly: ignore [invalid-overload]
 def itemgetter(*items: Any) -> Callable[[Any], Any | tuple[Any, ...]]:
     if len(items) == 0:
         raise TypeError("itemgetter expected 1 argument, got 0")

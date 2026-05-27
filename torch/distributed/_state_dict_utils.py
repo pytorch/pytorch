@@ -759,6 +759,7 @@ def _traverse_state_dict(
             visitor(path, value)
 
     for key, value in state_dict.items():
+        # pyrefly: ignore [unnecessary-type-conversion]
         _traverse_obj((str(key),), value)
 
 

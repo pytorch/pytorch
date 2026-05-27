@@ -248,6 +248,7 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
                 any_unbacked_lhs = has_free_unbacked_symbols(lhs)
                 any_unbacked_rhs = has_free_unbacked_symbols(rhs)
                 if any_unbacked_lhs != any_unbacked_rhs:
+                    # pyrefly: ignore [unnecessary-type-conversion]
                     return bool(any_unbacked_rhs)
 
                 if lhs.has(rhs):

@@ -21,6 +21,7 @@ _initial_missing = object()
 
 # Reference: https://docs.python.org/3/library/functools.html#functools.reduce
 @substitute_in_graph(functools.reduce)
+# pyrefly: ignore [invalid-overload]
 def reduce(
     function: Callable[[_U, _T], _U],
     iterable: Iterable[_T],
