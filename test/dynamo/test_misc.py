@@ -20,6 +20,7 @@ import os
 import pickle
 import random
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -13941,6 +13942,66 @@ fn
         x = torch.randn(2, 3)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(fn(x, gn), opt_fn(x, gn))
+
+    def test_tensor_compare_inspect_parameter_empty_no_numpy(self):
+        script = r"""
+import importlib.abc
+import importlib.util
+import inspect
+import sys
+
+orig_find_spec = importlib.util.find_spec
+
+
+def patched_find_spec(name, package=None):
+    if name == "numpy" or name.startswith("numpy."):
+        return None
+    return orig_find_spec(name, package)
+
+
+importlib.util.find_spec = patched_find_spec
+
+
+class BlockNumpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == "numpy" or fullname.startswith("numpy."):
+            raise ModuleNotFoundError("No module named 'numpy'")
+        return None
+
+
+sys.meta_path.insert(0, BlockNumpy())
+
+import torch
+
+
+def f_eq(x):
+    return x == inspect.Parameter.empty
+
+
+def f_ne(x):
+    return x != inspect.Parameter.empty
+
+
+def f_ne_no_arg(x):
+    return x.__ne__()
+
+
+x = torch.tensor([1])
+assert f_eq(x) is False
+assert f_ne(x) is True
+assert f_ne_no_arg(x) is NotImplemented
+assert torch.compile(f_eq, backend="eager", fullgraph=True)(x) is False
+assert torch.compile(f_ne, backend="eager", fullgraph=True)(x) is True
+assert torch.compile(f_ne_no_arg, backend="eager")(x) is NotImplemented
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
 
     def test_inspect_signature_caching(self):
         """Test that inspect.signature results are cached for repeated calls."""
