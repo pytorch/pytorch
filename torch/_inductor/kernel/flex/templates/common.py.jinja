@@ -58,12 +58,7 @@ def forward_block_mn(
         h="off_h",
         m="m",
         n="n",
-        out="qk",
-        input_shapes={
-            "score": ("BLOCK_M", "BLOCK_N"),
-            "m": ("BLOCK_M", "1"),
-            "n": ("1", "BLOCK_N"),
-        }
+        out="qk"
     ) | indent_except_first(1) }}
 
     if CHECK_BLOCK_BOUNDARY:
@@ -79,11 +74,6 @@ def forward_block_mn(
             h="off_h",
             m="m",
             n="n",
-            input_shapes={
-                "score": ("BLOCK_M", "BLOCK_N"),
-                "m": ("BLOCK_M", "1"),
-                "n": ("1", "BLOCK_N"),
-            }
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
