@@ -51,8 +51,8 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, NoReturn, Protocol, TypeVar
-from typing_extensions import Self, TypeAlias, TypeIs
+from typing import Any, NoReturn, Protocol, TypeAlias, TypeVar
+from typing_extensions import Self, TypeIs
 
 import torch
 import torch._guards
@@ -455,6 +455,8 @@ class MatchContext:
 
     def match(self, pattern: PatternExpr, node: NodeOrConstant) -> MatchResult:
         """wrapper to check reused nodes in patterns"""
+        if not isinstance(node, torch.fx.Node):
+            return FailedMatch("pattern expects node")
         if pattern in self.pattern_to_node:
             if self.pattern_to_node[pattern] == node:
                 return Match(self, pattern)  # already checked this node
