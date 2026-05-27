@@ -814,7 +814,16 @@ print(t.is_pinned())
                 gcn_arch = str(
                     torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
                 )
-                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"]:
+                if gcn_arch in [
+                    "gfx90a",
+                    "gfx942",
+                    "gfx950",
+                    "gfx1110",
+                    "gfx1101",
+                    "gfx1151",
+                    "gfx1200",
+                    "gfx1201",
+                ]:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
