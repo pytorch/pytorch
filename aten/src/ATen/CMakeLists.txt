@@ -1003,6 +1003,12 @@ foreach(HEADER ${generated_headers} ${cuda_generated_headers})
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 endforeach()
 
+if(USE_XPU)
+  foreach(HEADER ${xpu_generated_headers})
+    install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+  endforeach()
+endif()
+
 message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
 foreach(HEADER ${core_generated_headers})
   message("core header install: ${HEADER}")
