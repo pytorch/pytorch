@@ -58,6 +58,8 @@ self-hosted-runner:
     - linux.rocm.gpu.mi250.4
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
+    - linux.rocm.gpu.mi210.1
+    - linux.rocm.gpu.mi210.2
     - linux.rocm.mi210.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1
@@ -82,3 +84,6 @@ self-hosted-runner:
     - linux.google.tpuv6e.1
     - linux.google.tpuv7x.1
     - linux.google.tpuv7x.4
+    # OSDC ARC (multi-tenant) runners
+    - mt-l-x86iavx512-2-4
+    - mt-rel-l-x86iavx512-8-64

@@ -26,10 +26,9 @@ for more information on the design.
 
 import collections
 import contextlib
-import functools
 import inspect
 import operator
-from collections.abc import Generator, Iterable, Sequence
+from collections.abc import Generator, Iterable
 from types import TracebackType
 from typing import Any, TYPE_CHECKING
 
@@ -129,13 +128,6 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
-
-
-@functools.cache
-def get_prev_stack_var_name() -> str:
-    from ..bytecode_transformation import unique_id
-
-    return unique_id("___prev_torch_function_mode_stack")
 
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
@@ -758,7 +750,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
