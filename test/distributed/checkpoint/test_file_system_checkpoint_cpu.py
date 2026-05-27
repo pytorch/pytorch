@@ -430,14 +430,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ],
         )
 
-        model_to_save = MyShardedModel3(src_spec).to(dist.get_rank())
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
+        device = f"{device_type}:{dist.get_rank()}"
+        model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).to(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec).to(device)
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
