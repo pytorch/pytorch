@@ -237,12 +237,7 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
 }
 
-# Per-backend allowlists for c_shim generation. When a backend has an entry
-# here, only the listed ops will have shims generated for that backend.
-# Ops not in the list will use aoti_call_dispatcher fallback at runtime.
-# This avoids inflating the ABI surface when new dispatch keys are added
-# to native_functions.yaml.
-xpu_fallback_ops_allowlists: set[str] = {
+xpu_fallback_ops_allowlist: set[str] = {
     "aten._addmm_activation.default",
     "aten._fused_moving_avg_obs_fq_helper_functional.default",
     "aten._fused_rms_norm.default",
@@ -310,8 +305,10 @@ xpu_fallback_ops_allowlists: set[str] = {
     "aten.view.dtype",
 }
 
-# Map from DispatchKey name (lowercase) to the per-backend allowlist.
-# Backends not listed here generate shims for all ops in inductor_fallback_ops.
+# Maps DispatchKey name (lowercase) to a per-backend allowlist. When a backend
+# has an entry here, only the listed ops get c_shim entries; the rest fall back
+# to aoti_torch_call_dispatcher at runtime. Backends not listed here generate
+# shims for all ops in inductor_fallback_ops.
 backend_fallback_op_allowlists: dict[str, set[str]] = {
-    "xpu": xpu_fallback_ops_allowlists,
+    "xpu": xpu_fallback_ops_allowlist,
 }

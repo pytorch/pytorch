@@ -446,10 +446,7 @@ def gen_declaration_and_definition(
     return declaration_definition_cache[(base_name, device, backend_call)]
 
 
-def gen_static_dispatch_backend_call_signature(
-    sig: CppSignature | DispatcherSignature,
-    f: NativeFunction,
-) -> CppSignature:
+def gen_static_dispatch_backend_call_signature(f: NativeFunction) -> CppSignature:
     sig = DispatcherSignature.from_schema(f.func)
     cpp_sigs = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -468,7 +465,7 @@ def gen_static_dispatch_backend_call(
     backend_index: BackendIndex | None = None,
 ) -> str:
     sig = DispatcherSignature.from_schema(f.func)
-    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
+    cpp_sig = gen_static_dispatch_backend_call_signature(f)
 
     if backend_index is None:
         # Check if this is a symint function and if the function only has method variants
@@ -748,9 +745,7 @@ def gen_aoti_c_shim_files(
         # Only ops in the allowlist will have shims generated; the rest use
         # aoti_call_dispatcher at runtime.
         if dispatch_key is not None:
-            allowlist = backend_fallback_op_allowlists.get(
-                dispatch_key.name.lower()
-            )
+            allowlist = backend_fallback_op_allowlists.get(dispatch_key.name.lower())
             if allowlist is not None:
                 fallbacks = {k: v for k, v in fallbacks.items() if k in allowlist}
 

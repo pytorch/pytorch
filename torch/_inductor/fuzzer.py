@@ -235,10 +235,9 @@ class SamplingMethod(Enum):
                 random.choice(characters) for _ in range(random.randint(1, 20))
             )
         elif is_type(type_hint, list):
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(default[0])] if default and len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(default[0])] if default and len(default) else [type(None)])
             )[0]
             new_default = default[0] if default and len(default) > 0 else None
             return [
@@ -249,10 +248,9 @@ class SamplingMethod(Enum):
             ]
         elif is_type(type_hint, set):  # noqa: set_linter
             indexable = list(default)
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(indexable[0])] if default and len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(indexable[0])] if default and len(default) else [type(None)])
             )[0]
             new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
@@ -263,10 +261,9 @@ class SamplingMethod(Enum):
             }
         elif is_type(type_hint, OrderedSet):
             indexable = list(default)
-            elem_type = getattr(
-                type_hint,
-                "__args__",
-                [type(indexable[0])] if default and len(default) else [type(None)],
+            elem_type = (
+                get_args(type_hint)
+                or ([type(indexable[0])] if default and len(default) else [type(None)])
             )[0]
             new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
@@ -278,12 +275,10 @@ class SamplingMethod(Enum):
                 ]
             )
         elif is_type(type_hint, dict):
-            key_type, value_type = getattr(
-                type_hint,
-                "__args__",
-                map(type, next(iter(default.items())))
+            key_type, value_type = get_args(type_hint) or (
+                tuple(map(type, next(iter(default.items()))))
                 if (default is not None and len(default))
-                else (type(None), type(None)),
+                else (type(None), type(None))
             )
             if default is not None and len(default.items()) > 0:
                 default_key, default_val = next(iter(default.items()))
@@ -299,15 +294,14 @@ class SamplingMethod(Enum):
             }
         elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
-            try:
-                assert len(type_hint.__args__) > 1
-            except AttributeError as err:
-                raise ValueError("Union type with no args") from err
+            union_args = get_args(type_hint)
+            if len(union_args) <= 1:
+                raise ValueError("Union type with no args")
             if random_sample:
-                new_type = random.choice(type_hint.__args__)
+                new_type = random.choice(union_args)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t is not type(default)]
+                    [t for t in union_args if t is not type(default)]
                 )
             try:
                 new_default = new_type()
@@ -319,11 +313,7 @@ class SamplingMethod(Enum):
                 random_sample, field_name, new_type, new_default
             )
         elif is_type(type_hint, tuple):
-            args = getattr(
-                type_hint,
-                "__args__",
-                tuple(map(type, default)),
-            )
+            args = get_args(type_hint) or tuple(map(type, default))
             zipped = zip(args, default)
             return tuple(
                 map(  # noqa: C417
@@ -334,22 +324,22 @@ class SamplingMethod(Enum):
                 )
             )
         elif is_type(type_hint, Literal):
-            try:
-                if random_sample:
-                    return random.choice(type_hint.__args__)
+            literal_args = get_args(type_hint)
+            if not literal_args:
+                raise ValueError("Literal type with no args")
+            if random_sample:
+                return random.choice(literal_args)
+            else:
+                choices = [t for t in literal_args if t != default]
+                if choices:
+                    return random.choice(choices)
                 else:
-                    choices = [t for t in type_hint.__args__ if t != default]
-                    if choices:
-                        return random.choice(choices)
-                    else:
-                        return default
-            except AttributeError as err:
-                raise ValueError("Literal type with no args") from err
+                    return default
         elif is_optional_type(type_hint):
-            try:
-                elem_type = type_hint.__args__[0]
-            except AttributeError as err:
-                raise ValueError("Optional type with no args") from err
+            optional_args = get_args(type_hint)
+            if not optional_args:
+                raise ValueError("Optional type with no args")
+            elem_type = optional_args[0]
             if random_sample:
                 return random.choice(
                     [
@@ -369,10 +359,10 @@ class SamplingMethod(Enum):
         elif type_hint is type(None):
             return None
         elif is_callable_type(type_hint):
-            try:
-                return_type = list(type_hint.__args__)[-1]
-            except AttributeError as err:
-                raise ValueError("Callable type with no args") from err
+            callable_args = get_args(type_hint)
+            if not callable_args:
+                raise ValueError("Callable type with no args")
+            return_type = callable_args[-1]
 
             @wraps(lambda *args, **kwargs: None)
             def dummy_function(*args, **kwargs):  # type: ignore[no-untyped-def]

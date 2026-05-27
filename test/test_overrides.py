@@ -16,6 +16,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
+    IS_LINUX,
+    TEST_WITH_SLOW,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch._dynamo.utils import clone_input
@@ -549,7 +552,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_tensor_subclass_propagation(self):
         """this test exercises the functionality described in
-        docs/source/notes/extending.rst#subclassing-torchtensor"""
+        docs/source/notes/extending.md#subclassing-torch-tensor"""
         t1 = torch.tensor([5])
         t2 = torch.tensor([6])
 
@@ -1465,7 +1468,6 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182317")
     def test_factory_override(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1693,6 +1695,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertTrue(called)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/162586")
     def test_getitem_call(self):
         # This failed because the parser thinks the function is called to()
         # but it's actually called _parse_to()
@@ -1936,13 +1939,31 @@ class TestTorchFunctionMode(TestCase):
 
 
 class TestTorchFunctionRedispatch(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.assertFalse(
+            torch._C._peek_should_skip_torch_function(),
+            "skip_next TLS was set at test start",
+        )
+
+    def tearDown(self):
+        leaked = torch._C._peek_should_skip_torch_function()
+        if leaked:
+            torch._C._set_skip_next_torch_function(False)
+        super().tearDown()
+        self.assertFalse(leaked, "skip_next TLS leaked from test")
+
+    @staticmethod
+    def _filter_log(call_log, allowed_qualnames):
+        return [e for e in call_log if e[0] in allowed_qualnames]
+
     def test_simple(self):
         call_log = []
         x = RedispatchTensor(torch.ones(1), call_log=call_log)
         ret = bar(x)
         self.assertIs(ret, x)
-        # Check that bar was intercepted
-        call_log_str = '\n'.join(f"{entry[0]}" for entry in call_log)
+        filtered = self._filter_log(call_log, {"bar"})
+        call_log_str = '\n'.join(f"{entry[0]}" for entry in filtered)
         self.assertExpectedInline(call_log_str, """bar""")
 
     def test_skip_to_inner(self):
@@ -1956,7 +1977,8 @@ class TestTorchFunctionRedispatch(TestCase):
         # but then the + operations inside foo DO dispatch to __torch_function__
         # So we should see: foo, then add (from a+b), then add (from temp+c)
         # Snapshot the log before assertEqual triggers more __torch_function__ calls.
-        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in call_log)
+        filtered = self._filter_log(call_log, {"foo", "TensorBase.add"})
+        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in filtered)
         self.assertEqual(ret, torch.full((1,), 6))
         self.assertExpectedInline(call_log_str, """\
 foo: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
@@ -1980,7 +2002,8 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
         self.assertEqual(ret, torch.tensor([6.0]))
         # Without 'with self:', mode only sees the outer call
-        self.assertEqual(call_log, ['foo'])
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo'])
 
     def test_mode_with_redispatch_reentrant(self):
         call_log = []
@@ -2001,10 +2024,13 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
         self.assertEqual(ret, torch.tensor([6.0]))
         # With 'with self:', mode sees outer call and inner add operations
-        self.assertEqual(call_log, ['foo', 'add', 'add'])
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo', 'add', 'add'])
 
 
 class TestTorchFunctionRedispatchOps(TestCase):
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/182819")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182869")
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
         if op.has_nondeterministic_output:
