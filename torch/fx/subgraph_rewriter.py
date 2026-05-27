@@ -9,7 +9,7 @@ from ._compatibility import compatibility
 from ._symbolic_trace import symbolic_trace
 from .graph import Graph
 from .graph_module import GraphModule
-from .node import Node
+from .node import map_arg, Node
 
 
 if TYPE_CHECKING:
@@ -347,20 +347,14 @@ def _replace_pattern(
                 f"Placeholder count mismatch: {len(match.placeholder_nodes)} vs "
                 f"{len(replacement_placeholders)}"
             )
-        val_map: dict[Node, Node] = {}
-        for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
-            if isinstance(gn, Node):
-                val_map[rn] = match_changed_node.get(gn, gn)
-                if gn != val_map[rn]:
-                    # Update match.placeholder_nodes and match.nodes_map with the node that replaced gn
-                    gn_ind = match.placeholder_nodes.index(gn)
-                    match.placeholder_nodes[gn_ind] = match_changed_node[gn]
-                    map_key = list(match.nodes_map.keys())[
-                        list(match.nodes_map.values()).index(gn)
-                    ]
-                    match.nodes_map[map_key] = match_changed_node[gn]
-            else:
-                val_map[rn] = gn
+        val_map: dict[Node, Any] = {}
+        pattern_placeholders = [n for n in pattern_graph.nodes if n.op == "placeholder"]
+        for i, (rn, gn) in enumerate(
+            zip(replacement_placeholders, match.placeholder_nodes)
+        ):
+            val_map[rn] = map_arg(gn, lambda node: match_changed_node.get(node, node))
+            match.placeholder_nodes[i] = val_map[rn]
+            match.nodes_map[pattern_placeholders[i]] = val_map[rn]
 
         # Copy the replacement graph over
         user_nodes: set[Node] = set()
@@ -406,7 +400,9 @@ def _replace_pattern(
 
         # Get a list of nodes that have been replaced into the graph
         replacement_nodes: list[Node] = [
-            v for v in val_map.values() if v not in match.placeholder_nodes
+            v
+            for v in val_map.values()
+            if isinstance(v, Node) and v not in match.placeholder_nodes
         ]
 
         # Hook the output Node of the replacement subgraph in to the
