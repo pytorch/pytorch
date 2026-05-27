@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -111,6 +112,8 @@ class FakeTensorUpdater:
             if new is None:
                 return old is None
             if not isinstance(new, torch.Tensor):
+                if isinstance(new, OpaqueBase):
+                    return True
                 assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
                     f"Unknown type {type(new)} in {self.graph}"
                 )
