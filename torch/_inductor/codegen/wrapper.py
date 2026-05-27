@@ -587,10 +587,14 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 )
             else:
                 if V.graph.aot_mode:
+                    # AOTI emits a single stream_guard on first use; later
+                    # contexts can only re-enter the same device. In dual-wrapper
+                    # mode the JIT side still needs device_guard updates.
                     assert self.last_seen_device_guard_index == self.device_idx, (
                         "AOTInductor only supports running on one CUDA device"
                     )
-                code.writeline_jit(f"device_guard.set_index({self.device_idx});")
+                if not V.graph.aot_mode or V.graph.is_dual_wrapper_mode:
+                    code.writeline_jit(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -2316,14 +2320,21 @@ class PythonWrapperCodegen(CodeGen):
         # codegen allocations in two passes
         planning_states = [MemoryPlanningState()]
         past_planning_states = []
+        peak_estimate_stack: list[EfficientPeakEstimate] = []
         for i in range(len(self.lines)):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
                 self.lines[i] = line.plan(planning_states[-1])
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
+                if config.allow_buffer_reuse:
+                    peak_estimate_stack.append(self.estimate_peak)
+                    with V.set_graph_handler(line.graph):
+                        self.estimate_peak = EfficientPeakEstimate()
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
+                if config.allow_buffer_reuse:
+                    self.estimate_peak = peak_estimate_stack.pop()
         past_planning_states.append(planning_states.pop())
         assert len(planning_states) == 0
 
