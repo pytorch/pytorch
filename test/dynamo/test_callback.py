@@ -85,13 +85,19 @@ class CallbackTests(TestCase):
                 self.relu = torch.nn.ReLU()
                 self.fc1b = torch.nn.Linear(10, 10)
                 self.fc2 = torch.nn.Linear(10, 10)
+                self.fc2b = torch.nn.Linear(10, 10)
+                self.fc3 = torch.nn.Linear(10, 10)
 
             def forward(self, x):
                 temp = self.fc1(x)
                 temp = self.relu(temp)
                 temp = self.fc1b(temp)
                 torch._dynamo.graph_break()
-                return self.fc2(temp)
+                temp = self.fc2(temp)
+                temp = self.relu(temp)
+                temp = self.fc2b(temp)
+                torch._dynamo.graph_break()
+                return self.fc3(temp)
 
         model = TinyModel().to(device_type)
         compiled_model = torch.compile(model, mode="max-autotune")
@@ -106,6 +112,10 @@ start=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='0/0
 end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='0/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0')
+start=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='2/0')
+end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='2/0')
+start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='2/0')
+end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='2/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
@@ -125,6 +135,10 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id
             """\
 start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
+start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
+end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, compile_id='0/0')""",
         )
