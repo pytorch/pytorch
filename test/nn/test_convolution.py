@@ -12,16 +12,6 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
-
-
-def _get_cudnn_version():
-    """Safely get cuDNN version, returning None if unavailable."""
-    try:
-        return torch.backends.cudnn.version()
-    except RuntimeError:
-        return None
-
-
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
@@ -51,31 +41,40 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     floating_types_and,
 )
-from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
+from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
 from torch.testing._internal.common_utils import (
-    download_file,
-    dtype2prec_DONTUSE,
-    gradcheck,
     GRADCHECK_NONDET_TOL,
-    gradgradcheck,
-    instantiate_parametrized_tests,
     IS_ARM64,
     IS_LINUX,
     MACOS_VERSION,
     MI300_ARCH,
-    parametrize as parametrize_test,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    download_file,
+    dtype2prec_DONTUSE,
+    gradcheck,
+    gradgradcheck,
+    instantiate_parametrized_tests,
     run_tests,
     serialTest,
     set_default_dtype,
     skipIfRocmArch,
     subtest,
-    TEST_SCIPY,
-    TEST_WITH_ROCM,
     xfailIf,
 )
-
+from torch.testing._internal.common_utils import (
+    parametrize as parametrize_test,
+)
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+
+def _get_cudnn_version():
+    """Safely get cuDNN version, returning None if unavailable."""
+    try:
+        return torch.backends.cudnn.version()
+    except RuntimeError:
+        return None
 
 
 if TEST_WITH_ROCM:
@@ -3903,6 +3902,49 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
+    @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
+    @onlyAccelerator
+    @largeTensorTest("40GB")
+    @largeTensorTest("24GB", "cpu")
+    @serialTest()
+    @tf32_on_and_off(0.005)
+    def test_conv3d_64bit_indexing(self, device):
+        x = torch.rand(1, 32, 512, 512, 256)
+        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
+        yref = m(x)
+        y = m.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y)
+
+    @onlyAccelerator
+    @largeTensorTest("20GB")
+    @largeTensorTest("64GB", "cpu")
+    @serialTest()
+    # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
+    # Reference: https://github.com/ROCm/MIOpen/pull/2838
+    @xfailIf(
+        torch.version.hip is None
+        and _get_cudnn_version() is not None
+        and (91000 < _get_cudnn_version() < 91500)
+    )
+    def test_depthwise_conv_64bit_indexing(self, device):
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
+        c = nn.Conv2d(
+            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
+        ).to(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
+        del y, yref
+
+        # try a batch-splittable case
+        x = x.reshape(100, 2, 3280, 3280)
+        x = x.contiguous(memory_format=torch.channels_last)
+        yref = c.cpu()(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
+
 
 class TestConvolutionNNCUDA(NNTestCase):
     """CUDA/cuDNN-specific convolution tests."""
@@ -4290,18 +4332,6 @@ class TestConvolutionNNCUDA(NNTestCase):
             else:
                 self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
-    @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
-    @largeTensorTest("40GB")
-    @largeTensorTest("24GB", "cpu")
-    @serialTest()
-    @tf32_on_and_off(0.005)
-    def test_conv3d_64bit_indexing(self, device):
-        x = torch.rand(1, 32, 512, 512, 256)
-        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
-        yref = m(x)
-        y = m.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y)
-
     @skipCUDAIfRocm
     @largeTensorTest("48GB", "cuda")
     @serialTest()
@@ -4340,35 +4370,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         self.assertEqual(yref, y)
         atol = 5e-3 if dtype == torch.half else 5e-2
         self.assertEqual(gradref, x.grad, atol=atol, rtol=1e-3)
-
-    @largeTensorTest("20GB")
-    @largeTensorTest("64GB", "cpu")
-    @serialTest()
-    # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
-    # Reference: https://github.com/ROCm/MIOpen/pull/2838
-    @xfailIf(
-        torch.version.hip is None
-        and _get_cudnn_version() is not None
-        and (91000 < _get_cudnn_version() < 91500)
-    )
-    def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
-            memory_format=torch.channels_last
-        )
-        c = nn.Conv2d(
-            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
-        ).to(memory_format=torch.channels_last)
-        yref = c(x)
-        y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
-        del y, yref
-
-        # try a batch-splittable case
-        x = x.reshape(100, 2, 3280, 3280)
-        x = x.contiguous(memory_format=torch.channels_last)
-        yref = c.cpu()(x)
-        y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(
