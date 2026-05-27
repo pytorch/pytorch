@@ -1530,6 +1530,18 @@ op_db: list[OpInfo] = [
                 dtypes=(torch.complex64, torch.complex128),
                 active_if=TEST_WITH_ROCM,
             ),
+            # ROCm: second-order autograd through vmap (vmap(vjp(vjp(...)))) on
+            # linalg.householder_product accumulates an f32 precision difference
+            # that exceeds the default tolerance. Other functorch transforms for
+            # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
+            DecorateInfo(
+                unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
+                "TestOperators",
+                "test_vmapvjpvjp",
+                device_type="cuda",
+                dtypes=(torch.float32,),
+                active_if=TEST_WITH_ROCM,
+            ),
         ],
     ),
     OpInfo(
