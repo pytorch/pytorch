@@ -55,6 +55,7 @@ from torch._prims_common import (
     StrideType,
 )
 from torch.fx.experimental.symbolic_shapes import (
+    _free_unbacked_symbols_with_path,
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
     free_symbols,
@@ -6959,6 +6960,19 @@ class ExternKernel(InputsKernel):
             unbacked_bindings = compute_unbacked_bindings(
                 shape_env, example_output, node_meta_val
             )
+            if unbacked_bindings is None:
+                pending = cast(
+                    Any,
+                    OrderedSet([*free_unbacked_symbols(example_output)]),
+                )
+                if pending:
+                    unbacked_bindings = _free_unbacked_symbols_with_path(
+                        example_output,
+                        (),
+                        shape_env=shape_env,
+                        pending=pending,
+                        simplify=False,
+                    )
 
         example_out_li = (
             [example_output]

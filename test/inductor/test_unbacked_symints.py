@@ -861,6 +861,41 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
+    @skipCPUIf(True, "requires gpu and triton")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    def test_standalone_compile_binds_ignored_fallback_unbacked_output(self, device):
+        from torch._inductor import standalone_compile
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(counts, x):
+            idx = torch.repeat_interleave(counts)
+            return x[idx].sin()
+
+        counts = torch.tensor([1, 2, 1, 0], device=device, dtype=torch.int64)
+        x = torch.randn(4, 8, device=device)
+        torch._dynamo.mark_dynamic(counts, 0, min=1, max=8)
+        gm = make_fx(fn, tracing_mode="symbolic")(counts, x)
+        fake_mode = next(
+            node.meta["val"].fake_mode
+            for node in gm.graph.nodes
+            if isinstance(node.meta.get("val"), FakeTensor)
+        )
+
+        with (
+            torch._guards.tracing(torch._guards.TracingContext(fake_mode)),
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols(),
+        ):
+            compiled = standalone_compile(
+                gm,
+                [counts, x],
+                dynamic_shapes="from_tracing_context",
+                options={},
+            )
+
+        torch.testing.assert_close(compiled(counts, x), fn(counts, x))
+
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_eager(self, device):
         """Test that override_optimization_hint updates var_to_hint_override eagerly."""
