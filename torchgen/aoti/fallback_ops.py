@@ -25,6 +25,12 @@
 # guard. When absent, the declaration is emitted ungated, which would signify that the op was
 # available since torch 2.9. ALL NEWLY ADDED OPS MUST INCLUDE A "since" KEY WITH THE VALUE SET
 # TO THE CURRENT TORCH VERSION (the version when the op was added).
+#
+# backend_fallback_op_allowlists maps DispatchKey name (lowercase) to a set of ops allowed to
+# have c_shim entries generated for that backend. Backends listed here only get shims for the
+# allowlisted ops; the rest fall back to aoti_torch_call_dispatcher at runtime.
+# This prevents new backends from inflating the checked-in ABI surface and ensures the
+# allowlist is only extended when real models actually require a given op.
 
 inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
@@ -229,4 +235,83 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.new_zeros.default": {},
     "aten.full.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
+}
+
+# Per-backend allowlists for c_shim generation. When a backend has an entry
+# here, only the listed ops will have shims generated for that backend.
+# Ops not in the list will use aoti_call_dispatcher fallback at runtime.
+# This avoids inflating the ABI surface when new dispatch keys are added
+# to native_functions.yaml.
+xpu_fallback_ops_allowlists: set[str] = {
+    "aten._addmm_activation.default",
+    "aten._fused_moving_avg_obs_fq_helper_functional.default",
+    "aten._fused_rms_norm.default",
+    "aten._grouped_mm.default",
+    "aten._int_mm.out",
+    "aten._scaled_dot_product_flash_attention.default",
+    "aten._scaled_dot_product_flash_attention_backward.default",
+    "aten._scaled_dot_product_fused_attention_overrideable.default",
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default",
+    "aten._scaled_mm.default",
+    "aten._scaled_mm.out",
+    "aten._trilinear.default",
+    "aten._weight_int4pack_mm_with_scales_and_zeros.default",
+    "aten._weight_int8pack_mm.default",
+    "aten.abs.default",
+    "aten.add.Scalar",
+    "aten.addbmm.default",
+    "aten.addmm.out",
+    "aten.addmv.default",
+    "aten.baddbmm.out",
+    "aten.bmm.out",
+    "aten.cholesky_solve.default",
+    "aten.convolution.default",
+    "aten.convolution_backward.default",
+    "aten.cummax.default",
+    "aten.cummin.default",
+    "aten.exponential.default",
+    "aten.hann_window.default",
+    "aten.index_put.default",
+    "aten.kthvalue.default",
+    "aten.logcumsumexp.default",
+    "aten.masked_scatter.default",
+    "aten.masked_scatter_backward.default",
+    "aten.mm.dtype_out",
+    "aten.mm.out",
+    "aten.mul.Scalar",
+    "aten.narrow.default",
+    "aten.normal_functional.default",
+    "aten.pad.default",
+    "aten.permute.default",
+    "aten.polar.default",
+    "aten.rand.default",
+    "aten.rand.generator",
+    "aten.rand_like.default",
+    "aten.rand_like.generator",
+    "aten.randint.default",
+    "aten.randint.generator",
+    "aten.randint.low",
+    "aten.randint.low_out",
+    "aten.randint_like.default",
+    "aten.randint_like.low_dtype",
+    "aten.randn.default",
+    "aten.randn.generator",
+    "aten.randn_like.default",
+    "aten.randn_like.generator",
+    "aten.randperm.default",
+    "aten.reshape.default",
+    "aten.resize_as_.default",
+    "aten.slice.Tensor",
+    "aten.soft_margin_loss_backward.default",
+    "aten.sort.default",
+    "aten.squeeze.dim",
+    "aten.to_sparse.default",
+    "aten.uniform.default",
+    "aten.view.dtype",
+}
+
+# Map from DispatchKey name (lowercase) to the per-backend allowlist.
+# Backends not listed here generate shims for all ops in inductor_fallback_ops.
+backend_fallback_op_allowlists: dict[str, set[str]] = {
+    "xpu": xpu_fallback_ops_allowlists,
 }

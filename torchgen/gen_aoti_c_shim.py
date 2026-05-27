@@ -7,7 +7,11 @@ import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torchgen.aoti.fallback_ops import aten_shimified_ops, inductor_fallback_ops
+from torchgen.aoti.fallback_ops import (
+    aten_shimified_ops,
+    backend_fallback_op_allowlists,
+    inductor_fallback_ops,
+)
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 from torchgen.context import method_with_native_function
@@ -739,6 +743,17 @@ def gen_aoti_c_shim_files(
             op_name = get_fallback_op_name(func)
             if op_name in fallback_ops_dict:
                 fallbacks[op_name] = func
+
+        # Apply per-backend allowlist if one exists for this dispatch key.
+        # Only ops in the allowlist will have shims generated; the rest use
+        # aoti_call_dispatcher at runtime.
+        if dispatch_key is not None:
+            allowlist = backend_fallback_op_allowlists.get(
+                dispatch_key.name.lower()
+            )
+            if allowlist is not None:
+                fallbacks = {k: v for k, v in fallbacks.items() if k in allowlist}
+
         fallback_native_functions = tuple(
             value for _, value in sorted(fallbacks.items())
         )
