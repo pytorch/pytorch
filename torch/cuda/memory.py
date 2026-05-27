@@ -1388,9 +1388,63 @@ def _use_uvm(device: "Device" = None):
         Only the current thread's allocations are routed to managed memory.
         Allocations in threads spawned inside this context (e.g. by backward)
         will use the default allocator.
+
+    .. note::
+        Requires ``cuda.bindings`` package (``pip install cuda-python``).
     """
-    # pyrefly: ignore [missing-attribute]
-    allocator = _CUDAAllocator(torch._C._cuda_uvmAllocator())
-    pool = MemPool(allocator=allocator.allocator())
+    try:
+        from cuda.bindings import (  # pyrefly: ignore[missing-import]
+            runtime as cuda_runtime,
+        )
+    except ImportError:
+        raise ImportError(
+            "torch.cuda._use_uvm() requires the 'cuda-python' package for "
+            "cuda.bindings.runtime (cudaMallocManaged, cudaMemAdvise, cudaFree).\n"
+            "Install it with: pip install cuda-python"
+        ) from None
+
+    ALLOC_FN = ctypes.CFUNCTYPE(
+        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+    )
+    FREE_FN = ctypes.CFUNCTYPE(
+        None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+    )
+
+    def _uvm_alloc(size, device, stream):
+        err, ptr = cuda_runtime.cudaMallocManaged(
+            size, cuda_runtime.cudaMemAttachGlobal
+        )
+        if err != cuda_runtime.cudaError_t.cudaSuccess:
+            return 0
+        if device >= 0:
+            location = cuda_runtime.cudaMemLocation()
+            location.type = cuda_runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+            location.id = device
+            cuda_runtime.cudaMemAdvise(
+                ptr,
+                size,
+                cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                location,
+            )
+            cuda_runtime.cudaMemAdvise(
+                ptr,
+                size,
+                cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                location,
+            )
+        return ptr
+
+    def _uvm_free(ptr, size, device, stream):
+        if ptr:
+            cuda_runtime.cudaFree(ptr)
+
+    c_alloc = ALLOC_FN(_uvm_alloc)
+    c_free = FREE_FN(_uvm_free)
+    alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
+    free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
+
+    # pyrefly: ignore[bad-argument-type]
+    allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
+    pool = MemPool(allocator=allocator)
     with use_mem_pool(pool, device=device):
         yield pool

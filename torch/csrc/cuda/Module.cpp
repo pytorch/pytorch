@@ -24,7 +24,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
@@ -1374,44 +1373,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         reinterpret_cast<FreeFuncType*>(free_ptr);
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
-  });
-  m.def("_cuda_uvmAllocator", []() {
-    auto alloc_fn = [](size_t size, int device, cudaStream_t) -> void* {
-      std::optional<c10::cuda::CUDAGuard> device_guard;
-      if (device >= 0) {
-        device_guard.emplace(device);
-      }
-      void* ptr = nullptr;
-      auto err = cudaMallocManaged(&ptr, size, cudaMemAttachGlobal);
-      if (err != cudaSuccess) {
-        (void)cudaGetLastError();
-        return nullptr;
-      }
-      if (device >= 0) {
-#if CUDART_VERSION >= 13000
-        cudaMemLocation location;
-        location.type = cudaMemLocationTypeDevice;
-        location.id = device;
-        C10_CUDA_CHECK(cudaMemAdvise(
-            ptr, size, cudaMemAdviseSetPreferredLocation, location));
-        C10_CUDA_CHECK(cudaMemAdvise(
-            ptr, size, cudaMemAdviseSetAccessedBy, location));
-#else
-        C10_CUDA_CHECK(cudaMemAdvise(
-            ptr, size, cudaMemAdviseSetPreferredLocation, device));
-        C10_CUDA_CHECK(cudaMemAdvise(
-            ptr, size, cudaMemAdviseSetAccessedBy, device));
-#endif
-      }
-      return ptr;
-    };
-    auto free_fn = [](void* ptr, size_t, int, cudaStream_t) {
-      if (ptr) {
-        C10_CUDA_CHECK(cudaFree(ptr));
-      }
-    };
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        alloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
