@@ -64,6 +64,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -72,6 +73,8 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -204,6 +207,22 @@ class FakeTensorTest(TestCase):
         self.assertEqual(output.device, weight.device)
         self.assertTrue(output._has_symbolic_sizes_strides)
         self.assertTrue(free_unbacked_symbols(output.shape[0]))
+
+    def test_wrapped_fake_inplace_view_errors(self):
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(torch.empty(2, 3))
+            wrapped = TwoTensor(x, x)
+            flat_args, args_spec = pytree.tree_flatten(((wrapped, 0, 1), {}))
+
+            with self.assertRaisesRegex(
+                AssertionError, "metadata mutating ops on non-Fake Tensor inputs"
+            ):
+                fake_mode.validate_and_convert_non_fake_tensors(
+                    torch.ops.aten.transpose_.default,
+                    fake_mode.fake_tensor_converter,
+                    flat_args,
+                    args_spec,
+                )
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -2270,6 +2289,10 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):

@@ -205,11 +205,13 @@ def _append_fake_tensor_leaves(x: object, fake_tensors: list[FakeTensor]) -> boo
     if isinstance(x, FakeTensor):
         fake_tensors.append(x)
         return True
+    if not isinstance(x, Tensor):
+        return False
 
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if is_traceable_wrapper_subclass(x):
-        attrs, _ = type(x).__tensor_flatten__(x)
+        attrs, _ = x.__tensor_flatten__()
         got_fake: bool | None = None
         for attr in attrs:
             match getattr(x, attr):
@@ -2496,9 +2498,9 @@ class FakeTensorMode(TorchDispatchMode):
             return NotImplemented
 
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
-        flat_arg_fake_tensor_leaves = [
-            fake_tensor for arg in flat_args for fake_tensor in _fake_tensor_leaves(arg)
-        ]
+        flat_arg_fake_tensor_leaves: list[FakeTensor] = []
+        for arg in flat_args:
+            _append_fake_tensor_leaves(arg, flat_arg_fake_tensor_leaves)
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensor_leaves
         ) or any(isinstance(a, SymInt) for a in flat_args)
@@ -2587,11 +2589,10 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensor_leaves = []
         has_wrapped_fake_tensor_leaf = False
         for arg in flat_args:
-            fake_tensor_leaves = _fake_tensor_leaves(arg)
-            flat_arg_fake_tensor_leaves.extend(fake_tensor_leaves)
-            has_wrapped_fake_tensor_leaf = has_wrapped_fake_tensor_leaf or (
-                bool(fake_tensor_leaves) and not self.is_our_fake(arg)
-            )
+            if _append_fake_tensor_leaves(arg, flat_arg_fake_tensor_leaves):
+                has_wrapped_fake_tensor_leaf = (
+                    has_wrapped_fake_tensor_leaf or not self.is_our_fake(arg)
+                )
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensor_leaves
         ) or any(isinstance(a, SymInt) for a in flat_args)
@@ -3057,17 +3058,17 @@ class FakeTensorMode(TorchDispatchMode):
                 flat_arg_fake_tensors.append(x)
                 return x
 
-            fake_tensor_leaves = _fake_tensor_leaves(x)
-            if fake_tensor_leaves and all(
-                self.is_our_fake(fake_tensor) for fake_tensor in fake_tensor_leaves
-            ):
-                return x
-
             if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                 args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                 raise AssertionError(
                     f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                 )
+
+            fake_tensor_leaves = _fake_tensor_leaves(x)
+            if fake_tensor_leaves and all(
+                self.is_our_fake(fake_tensor) for fake_tensor in fake_tensor_leaves
+            ):
+                return x
             allow_non_fake_inputs = (
                 self.allow_non_fake_inputs
                 if fake_tensor_tls.allow_non_fake_inputs_override is None
