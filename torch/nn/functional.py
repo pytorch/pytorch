@@ -6833,7 +6833,10 @@ def multi_head_attention_forward(
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
         if not torch.jit.is_scripting():
             del q_scaled, k
-        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if attn_mask is not None:
+            attn_output_weights = torch._safe_softmax(attn_output_weights, dim=-1)
+        else:
+            attn_output_weights = softmax(attn_output_weights, dim=-1)
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
