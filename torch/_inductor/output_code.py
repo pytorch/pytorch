@@ -78,6 +78,15 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _copy_stripped_gm(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    import copy
+
+    gm_copy = copy.deepcopy(gm)
+    for node in gm_copy.graph.nodes:
+        node.meta.clear()
+    return gm_copy
+
+
 @dataclasses.dataclass
 class OutputCode:
     # TODO: Remove underscores here
@@ -686,18 +695,17 @@ class CompiledFxGraph(OutputCode):
 
         # Store whether to wrap compiled regions in inductor_compiled_code HOP
         # This is set at compile time to avoid runtime overhead
-        self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
+        self._wrap_compiled_regions = (
+            config.wrap_inductor_compiled_regions
+            or fx_kwargs.get("runtime_inputs_are_fake", False)
+            or torch._guards.compile_runtime_fake_mode_active()
+        )
 
         if self._wrap_compiled_regions:
             # Store a metadata-stripped copy of the FX graph. Running this
             # under FakeTensorMode re-derives output shapes and aliasing
             # from the input fake tensors.
-            import copy
-
-            gm_copy = copy.deepcopy(gm)
-            for node in gm_copy.graph.nodes:
-                node.meta.clear()
-            self._original_gm = gm_copy
+            self._original_gm = _copy_stripped_gm(gm)
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
@@ -894,6 +902,16 @@ class CompiledFxGraph(OutputCode):
             original_gm.recompile()
             self._original_gm = original_gm
             self._serialized_original_gm = None
+
+        if (
+            graph_kwargs.get("runtime_inputs_are_fake", False)
+            or torch._guards.compile_runtime_fake_mode_active()
+        ):
+            self._wrap_compiled_regions = True
+            if self._original_gm is None and isinstance(
+                constants, CompiledFxGraphConstantsWithGm
+            ):
+                self._original_gm = _copy_stripped_gm(constants.gm)
 
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts

@@ -10960,13 +10960,55 @@ def ___make_guard_fn():
     def test_compile_with_userland_fake_tensor_mode(self):
         # Test that torch.compile works when called inside a user's FakeTensorMode.
         # The user's fake tensors should be "refakified" to Dynamo's fake mode.
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
-        with FakeTensorMode():
+        @torch.compile
+        def fn(x):
+            return x + 1
+
+        backend_fake_modes = []
+
+        def backend(gm, example_inputs):
+            context = torch._guards.TracingContext.try_get()
+            self.assertIsNotNone(context)
+            self.assertIsNotNone(context.fake_mode)
+            for example in example_inputs:
+                if isinstance(example, FakeTensor):
+                    backend_fake_modes.append(example.fake_mode)
+                    self.assertIs(example.fake_mode, context.fake_mode)
+            return gm.forward
+
+        with FakeTensorMode() as fake_mode:
+            out = fn(torch.rand(4, 4))
+            self.assertIsInstance(out, FakeTensor)
+            self.assertIs(out.fake_mode, fake_mode)
+
+            custom_out = torch.compile(lambda x: x.cos(), backend=backend)(
+                torch.rand(4, 4)
+            )
+            self.assertIsInstance(custom_out, FakeTensor)
+            self.assertIs(custom_out.fake_mode, fake_mode)
+            self.assertTrue(backend_fake_modes)
+            self.assertTrue(all(mode is not fake_mode for mode in backend_fake_modes))
+
             model = torch.nn.Linear(4, 4)
             inp = torch.rand(4, 4)
             loss = torch.compile(model, backend="aot_eager")(inp).sum()
             loss.backward()
+
+        real_inp = torch.rand(4, 4)
+        with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+            out = torch.compile(lambda x: x + 1)(real_inp)
+            self.assertIsInstance(out, FakeTensor)
+            self.assertIs(out.fake_mode, fake_mode)
+
+        opt = torch.compile(lambda x: x + 1)
+        first = opt(real_inp)
+        self.assertNotIsInstance(first, FakeTensor)
+        with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+            second = opt(real_inp)
+            self.assertIsInstance(second, FakeTensor)
+            self.assertIs(second.fake_mode, fake_mode)
 
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):

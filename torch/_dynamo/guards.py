@@ -3166,6 +3166,25 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
+    def RUNTIME_FAKE_MODE(self, guard: Guard) -> None:
+        has_runtime_fake_mode = torch._guards.compile_runtime_fake_mode_active()
+        code = [
+            f"torch._guards.compile_runtime_fake_mode_active() == {has_runtime_fake_mode}"
+        ]
+        self._set_guard_export_info(guard, code)
+
+        def fn(x: Any) -> bool:
+            return (
+                torch._guards.compile_runtime_fake_mode_active()
+                == has_runtime_fake_mode
+            )
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         if guard.source is not GuardSource.GLOBAL:
