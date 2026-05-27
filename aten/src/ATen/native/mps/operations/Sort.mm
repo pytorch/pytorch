@@ -146,7 +146,7 @@ static void sort_radix(const Tensor& input,
   const auto type_str = scalarToMetalTypeString(values);
   const char* tptg_suffix = small_tg ? "_tptg512" : "";
   const char* u16_suffix = use_u16 ? "_u16" : "";
-  const char* sel_suffix = sel_mode ? "_topk" : "";
+  const std::string_view sel_suffix = sel_mode ? "_topk" : "";
   const auto count_kernel = fmt::format("radix_count_{}_{}bit{}", type_str, radix_bits, tptg_suffix);
 
   constexpr int kMaxFusedBlocks = 4;
@@ -325,7 +325,7 @@ static void sort_multi_block(const Tensor& input,
   // mb_sort_block has stable variants; mb_merge doesn't (stable on stable input).
   const auto block_fn = fmt::format("mb_sort_block_{}_tptg{}{}{}", type_str, tptg, u16_sfx, stable_sfx);
   const auto merge_fn = fmt::format("mb_merge_{}_tptg{}{}", type_str, tptg, u16_sfx);
-  const char* final_sel_sfx = sel_mode ? "_topk" : "";
+  const std::string_view final_sel_sfx = sel_mode ? "_topk" : "";
   const auto final_fn = fmt::format("mb_merge_final{}_{}_tptg{}{}", final_sel_sfx, type_str, tptg, u16_sfx);
 
   int total_rounds = 0;
@@ -415,13 +415,9 @@ static void sort_out_mps_impl(const Tensor& self,
   }
 
   const bool sel_mode = sel.count > 0;
-  Tensor out_vals = values;
-  Tensor out_inds = indices;
   const bool need_copy_back = !values.is_contiguous() || !indices.is_contiguous();
-  if (need_copy_back) {
-    out_vals = at::empty(values.sizes(), values.options());
-    out_inds = at::empty(indices.sizes(), indices.options());
-  }
+  auto out_vals = need_copy_back ? at::empty(values.sizes(), values.options()) : values;
+  auto out_inds = need_copy_back ? at::empty(indices.sizes(), indices.options()) : indices;
 
   const int n_rows = static_cast<int>(self.numel() / sort_size);
   const int tptg = select_tptg(sort_size, self.element_size(), n_rows);
