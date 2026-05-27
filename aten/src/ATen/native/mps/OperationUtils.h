@@ -698,7 +698,13 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
             computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
       }
       detail::mtl_setArg(computeEncoder, params, iter.is_contiguous() ? 2 : 6);
-      mtl_dispatch1DJob(computeEncoder, cplState, length);
+      if (!iter.is_contiguous()) {
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto outer = static_cast<NSUInteger>(length) / inner;
+        mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      } else {
+        mtl_dispatch1DJob(computeEncoder, cplState, length);
+      }
 
       getMPSProfiler().endProfileKernel(cplState);
     });
