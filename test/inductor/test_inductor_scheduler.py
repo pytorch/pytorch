@@ -11,6 +11,7 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
@@ -326,6 +327,90 @@ class TestScheduler(TestCase):
             None,
         )
 
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
@@ -543,6 +628,77 @@ class TestScheduler(TestCase):
             torch.allclose(expected, result),
             msg=f"Fusion bug detected! Expected {expected}, got {result}",
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_does_not_realize_before_reduction(self):
+        def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
+            input1_selected = torch.index_select(input1, 2, icrd1)
+            input2_selected = torch.index_select(input2, 2, icrd2)
+            weight_selected = torch.index_select(weight, 3, wcrd)
+
+            input1_expanded = input1_selected.view(B, U, 1, 1, -1)
+            input2_expanded = input2_selected.view(B, 1, V, 1, -1)
+            weight_expanded = weight_selected.view(1, U, V, W, -1)
+            meta_expanded = meta.view(1, 1, 1, 1, -1)
+
+            product = (
+                meta_expanded * input1_expanded * input2_expanded * weight_expanded
+            )
+            product = torch.sum(product, dim=(1, 2))
+            output.index_add_(2, ocrd, product)
+            return output
+
+        P = 20
+        M = 10
+        B = 10
+        L = 23
+        U = 4
+        V = 4
+        W = 4
+        device = "cuda"
+
+        torch.manual_seed(0)
+        input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
+        input2 = torch.rand((B, V, L), dtype=torch.float32, device=device)
+        weight = torch.rand((U, V, W, M), dtype=torch.float32, device=device)
+        output = torch.zeros((B, W, L), dtype=torch.float32, device=device)
+        meta = torch.rand((P,), dtype=torch.float32, device=device)
+        icrd1 = torch.randint(L, (P,), device=device)
+        icrd2 = torch.randint(L, (P,), device=device)
+        wcrd = torch.randint(M, (P,), device=device)
+        ocrd = torch.arange(P, device=device)
+
+        expected = fn(
+            icrd1,
+            icrd2,
+            wcrd,
+            ocrd,
+            meta,
+            input1,
+            input2,
+            weight,
+            output.clone(),
+        )
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                icrd1,
+                icrd2,
+                wcrd,
+                ocrd,
+                meta,
+                input1,
+                input2,
+                weight,
+                output.clone(),
+            )
+
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 class TestScoreFusionMemory(TestCase):
