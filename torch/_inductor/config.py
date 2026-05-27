@@ -1054,12 +1054,14 @@ combo_kernel_max_num_nodes = 8
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 # Implies enable_autotune=True (per-subkernel blocks without tuning is pointless).
 combo_kernel_per_subkernel_blocks = False
+# When True (default), combo-kernel seeds are compiled and benched inline at
+# codegen; the stitched config is baked into the combo's inductor_meta so
+# runtime is a pure launch. When False, seed bench runs on the first .run()
+# (the original behavior). Only affects combos generated with
+# combo_kernel_per_subkernel_blocks=True.
+combo_seed_autotune_at_compile_time = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
-# When True, scheduler nodes whose reads or writes use indirect indexing
-# (an address computed from a previously loaded value, e.g. gather/scatter)
-# are kept out of combo kernels.
-combo_kernels_exclude_indirect_indexing = True
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase

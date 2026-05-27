@@ -784,6 +784,7 @@ class CachingAutotuner(KernelInterface):
         # point we swap in the stitched config and compile only that one
         # binary (instead of a throwaway placeholder followed by a
         # recompile in the apply phase).
+        just_stitched_combo_seed_config = False
         if self.defer_combo_precompile and self.configs is not None:
             if not combo_seeds_need_tuning(self):
                 combo_grid_meta = self.inductor_meta.get("combo_grid_meta", {})
@@ -810,6 +811,7 @@ class CachingAutotuner(KernelInterface):
                 stitched.found_by_combo_autotune = True
                 self.configs = [stitched]
                 self.defer_combo_precompile = False
+                just_stitched_combo_seed_config = True
                 # Worker-side prepare_for_pickle wiped self.fn.fn; reload
                 # before _precompile_worker tries to JIT.
                 self._ensure_kernel_loaded()
@@ -843,6 +845,24 @@ class CachingAutotuner(KernelInterface):
             if static_triton_bundle_key is not None and self.is_statically_launchable():
                 TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
+            if (
+                just_stitched_combo_seed_config
+                and self.save_cache_hook
+                and self.launchers
+            ):
+                # Persist the stitched combo config so subsequent compiles
+                # hit the cache and skip the seed bench.  autotune_to_one_
+                # config doesn't run on this single-config path, and the
+                # _apply_combo_standalone_autotune_seed save path is gated
+                # on found_by_combo_autotune=False, so the cache write
+                # would otherwise never happen on the defer-stitch path.
+                launcher = self.launchers[0]
+                self.save_cache_hook(
+                    launcher.config,
+                    self.autotune_time_taken_ns,
+                    found_by_combo_autotune=True,
+                    triton_cache_hash=launcher.cache_hash,
+                )
             self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
@@ -853,7 +873,12 @@ class CachingAutotuner(KernelInterface):
                     self.triton_meta.get("device", 0),
                 )
             return
-        assert not self.launchers
+        if self.launchers and not self.compile_results:
+            # Stub launcher (_ComboSeedConfigOnlyLauncher) already installed
+            # for a single-config combo seed.  Re-entry happens when two
+            # combos share a seed source and PyCodeCache returns the same
+            # autotuner -- the second precompile() is a no-op.
+            return
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
@@ -1032,6 +1057,10 @@ class CachingAutotuner(KernelInterface):
 
     def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
+            return
+        if self.launchers and not self.compile_results:
+            # Stub launcher already installed (combo-seed single-config
+            # fast path); nothing to compile from compile_results.
             return
 
         from torch._dynamo.device_interface import DeviceGuard
@@ -1640,7 +1669,7 @@ class CachingAutotuner(KernelInterface):
             return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+        """Bench all configs, pick the fastest, and save it to the autotune cache."""
         start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
         benchmark_time_taken_ns = time.time_ns() - start_time
@@ -1704,9 +1733,17 @@ class CachingAutotuner(KernelInterface):
 
         TritonBundler.put_winner(launcher.cache_hash)
 
+        # Skip baseline cache save only when seed configs are populated but
+        # the launcher is still the unstitched placeholder. Once the launcher
+        # holds the stitched combo winner (found_by_combo_autotune=True),
+        # save it so subsequent compiles can hit cache and skip the bench.
+        found_by_combo_autotune = getattr(
+            launcher.config, "found_by_combo_autotune", False
+        )
         skip_combo_seed_baseline_cache = (
             self.inductor_meta.get("combo_grid_meta")
             and self.combo_standalone_autotune_seed_configs is not None
+            and not found_by_combo_autotune
         )
         if self.save_cache_hook and not skip_combo_seed_baseline_cache:
             self.save_cache_hook(
@@ -1715,6 +1752,7 @@ class CachingAutotuner(KernelInterface):
                 found_by_coordesc=self.inductor_meta.get(
                     "coordinate_descent_tuning", False
                 ),
+                found_by_combo_autotune=found_by_combo_autotune,
                 triton_cache_hash=launcher.cache_hash,
             )
 
@@ -1872,7 +1910,12 @@ class CachingAutotuner(KernelInterface):
 
         self._ensure_kernel_loaded()
         with self.lock:
-            seeded_launcher = self._precompile_config(seed_config).make_launcher()
+            # Replace compile_results too so is_statically_launchable,
+            # recheck_autotune_cache, and TritonBundler all see the
+            # stitched config rather than the stale placeholder.
+            new_result = self._precompile_config(seed_config)
+            self.compile_results = [new_result]
+            seeded_launcher = new_result.make_launcher()
         counters["inductor"]["combo_autotune_seed_applied"] += 1
         log.debug(
             "Combo standalone autotune seed: selected stitched combo config %s",
