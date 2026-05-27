@@ -558,9 +558,9 @@ class CachingAutotuner(KernelInterface):
             return
         module = getattr(kernel, "module", None)
         if module is not None:
-            # Triton CompiledKernel unloads in __del__.  Calling it explicitly
-            # lets benchmark-only kernels release modules before the whole
-            # autotune site completes.
+            # Transitional fallback for Triton versions before CompiledKernel.close().
+            # Their __del__ unloads the module and clears kernel.module, so repeated
+            # calls from our idempotent benchmark cleanup paths are harmless.
             delete = getattr(kernel, "__del__", None)
             if delete is not None:
                 delete()
@@ -1459,6 +1459,8 @@ class CachingAutotuner(KernelInterface):
             for launcher in self.launchers:
                 timing = self.bench(launcher, *args, **kwargs)
                 timings[launcher] = timing
+                # Close losing static launchers eagerly so exhaustive autotuning
+                # keeps only the current winner and candidate modules loaded.
                 if best_launcher is None or timing < best_timing:
                     if best_launcher is not None:
                         self._close_static_launcher(best_launcher)

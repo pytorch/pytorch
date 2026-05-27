@@ -4099,6 +4099,8 @@ class AlgorithmSelectorCache(PersistentCache):
         try:
             return benchmark_fn(choices)
         finally:
+            # Safety net for failures before individual BenchmarkRequest cleanup
+            # can run; request-level cleanup remains the authoritative owner cleanup.
             evict_paths = OrderedSet(
                 [
                     path
@@ -4770,6 +4772,8 @@ class AlgorithmSelectorCache(PersistentCache):
             bmreq = getattr(choice, "bmreq", None)
             cleanup_run_fn = getattr(bmreq, "cleanup_run_fn", None)
             if cleanup_run_fn is not None:
+                # In-process autotuning owns the loaded benchmark module, so clean it
+                # immediately after each choice. The outer benchmark cleanup is a fallback.
                 cleanup_run_fn()
 
     @classmethod

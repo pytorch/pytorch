@@ -731,6 +731,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             )
 
     def cleanup_run_fn(self) -> None:
+        # Authoritative cleanup for one benchmark module load. Higher-level
+        # finally blocks may call this again as safety nets, so keep it idempotent.
         mod = self._benchmark_module
         self._benchmark_module = None
 
