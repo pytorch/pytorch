@@ -2575,13 +2575,18 @@ def get_rank(group: ProcessGroup | None = None) -> int | torch.SymInt:
         -1, if not part of the group
 
     """
-    if group is None or group is GroupMember.WORLD:
-        if dist_config.compile_on_one_rank:
-            from torch.distributed._ops import _runtime_rank  # noqa: F401
+    if _rank_not_in_group(group):
+        return -1
 
-            return torch.ops.device_mesh._runtime_get_rank.default()
+    pg = (
+        _get_default_group() if group is None or group is GroupMember.WORLD else group
+    )
+    if dist_config.compile_on_one_rank:
+        from torch.distributed._ops import _runtime_rank  # noqa: F401
 
-    return _get_rank(group)
+        return torch.ops.device_mesh._runtime_get_rank.default(pg)
+
+    return _get_rank(pg)
 
 
 def get_world_size(group: ProcessGroup | None = None) -> int:

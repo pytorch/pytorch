@@ -118,6 +118,35 @@ class TestCompileOnOneRank(DTensorTestBase):
 
     @with_comms
     @dist_config.patch(compile_on_one_rank=True)
+    def test_get_rank_with_explicit_process_group_input(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        def f(x):
+            return x + dist.get_rank(pg)
+
+        x = torch.ones((), device=self.device_type)
+        opt = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), x + pg.rank())
+
+    @with_comms
+    def test_rank_branch_with_explicit_process_group_graph_breaks_under_coor(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        def rank_branch(x):
+            if dist.get_rank(pg) == 0:
+                return x + 123
+            return x - 456
+
+        with dist_config.patch(compile_on_one_rank=True):
+            opt_f = torch.compile(rank_branch, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                UserError,
+                "Could not guard on data-dependent expression",
+            ):
+                opt_f(torch.ones(()))
+
+    @with_comms
+    @dist_config.patch(compile_on_one_rank=True)
     def test_compiled_rowwise_embedding_graph_consistency(self):
         """Test that compiled graphs are identical across all ranks.
 
