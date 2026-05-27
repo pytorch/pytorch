@@ -36,6 +36,7 @@ import torch._functorch.config
 
 with torch._functorch.config.patch(activation_memory_budget=0.5):
     compiled_step = torch.compile(train_step)
+    # The first call triggers compilation with the patched budget.
     loss = compiled_step(*args)
     loss.backward()
 ```
@@ -64,9 +65,10 @@ Related advanced knobs live in the same namespace:
 - ``torch._functorch.config.activation_memory_budget_runtime_estimator``
   controls how recomputation cost is estimated. The default is ``"flops"``;
   ``"profile"`` benchmarks operators, and ``"testing"`` is intended for tests.
-- ``torch._functorch.config.visualize_memory_budget_pareto`` writes an SVG
-  Pareto frontier for memory budget versus recomputation runtime when enabled.
-  Use ``torch._functorch.config.memory_budget_pareto_dir`` to choose the output
+- Setting ``torch._functorch.config.visualize_memory_budget_pareto`` to
+  ``True`` causes the partitioner to write an SVG Pareto frontier for memory
+  budget versus recomputation runtime. Use
+  ``torch._functorch.config.memory_budget_pareto_dir`` to choose the output
   directory.
 
 ``Autocast`` behavior
