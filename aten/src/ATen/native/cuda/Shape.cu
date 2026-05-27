@@ -299,7 +299,7 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
       }
 
       using LT = at::native::memory::aligned_vector<T, kILP>;
-      ((LT*)reg_data)[0] = const_cast<LT*>((LT*)(data + inputOffset))[0];
+      ((LT*)reg_data)[0] = ((LT*)(data + inputOffset))[0];
 
       #pragma unroll
       for (int i = 0; i < kILP; ++i) {

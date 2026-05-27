@@ -149,8 +149,6 @@ struct UniqueCub {
       const bool consecutive,
       const bool return_inverse,
       const bool return_counts) {
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
     int64_t num_inp = self.numel();
     Tensor sorted;
     if (consecutive) {
