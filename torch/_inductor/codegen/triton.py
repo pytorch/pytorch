@@ -2222,12 +2222,16 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # index_expr is the materialization point for SymPy expressions on the
-        # indexing path.  int32/int64 requests are normalized to the kernel's
-        # selected index dtype; smaller integer and non-integer requests still
-        # use the requested dtype as the logical cast dtype.
+        # Sympy expression printing uses the kernel's selected index dtype.
+        # int32 requests are normalized to follow index_dtype (which may be
+        # int32 or int64 depending on tensor sizes).  Explicit int64 requests
+        # are preserved -- callers like randint rely on the full int64 range
+        # for data values, not just indexing.
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        cast_dtype = index_dtype if dtype in (torch.int32, torch.int64) else dtype
+        if dtype in (torch.int32, torch.int64):
+            cast_dtype = torch.promote_types(dtype, index_dtype)
+        else:
+            cast_dtype = dtype
         # to_dtype(..., use_compute_types=True) emits the Triton compute type
         # for cast_dtype, so the CSE metadata must be derived from that same
         # dtype.  For example, float16 requests emit tl.float32 when compute
