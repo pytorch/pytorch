@@ -2727,6 +2727,122 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_per_node_memory_budget_meta_does_not_cause_cache_miss(self):
+        """Demonstrate that per-node memory_budget set via node.meta is invisible
+        to the AOTAutograd cache key, so changing it gets a stale cache hit."""
+
+        def make_backend(budget):
+            def backend(gm, example_inputs):
+                for node in gm.graph.nodes:
+                    if node.op == "call_function":
+                        node.meta["memory_budget"] = budget
+                return torch._inductor.compile_fx.compile_fx(gm, example_inputs)
+
+            return backend
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        def run_with_budget(budget):
+            compiled_fn = torch.compile(fn, backend=make_backend(budget))
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            result = compiled_fn(x, y)
+            result.sum().backward()
+
+        run_with_budget(0.3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        # Different per-node budget, but we get a stale cache hit (bug)
+        run_with_budget(0.8)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_custom_node_metadata_causes_cache_miss(self):
+        """Custom annotations set via fx_traceback.annotate inside a compiled
+        function are included in the AOTAutograd cache key."""
+        import torch.fx.traceback as fx_traceback
+
+        def fn1(x):
+            with fx_traceback.annotate({"blah": 1}):
+                return x.sin().cos()
+
+        compiled = torch.compile(fn1, backend="inductor")
+        x = torch.randn(10, requires_grad=True)
+        compiled(x).sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+
+        # Same annotation value should hit cache
+        def fn2(x):
+            with fx_traceback.annotate({"blah": 1}):
+                return x.sin().cos()
+
+        compiled2 = torch.compile(fn2, backend="inductor")
+        x2 = torch.randn(10, requires_grad=True)
+        compiled2(x2).sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        # Different annotation value should miss cache
+        def fn3(x):
+            with fx_traceback.annotate({"blah": 2}):
+                return x.sin().cos()
+
+        compiled3 = torch.compile(fn3, backend="inductor")
+        x3 = torch.randn(10, requires_grad=True)
+        compiled3(x3).sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_different_activation_memory_budget_causes_cache_miss(self):
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        with functorch_config.patch({"activation_memory_budget": 0.5}):
+            compiled_fn = torch.compile(fn, backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            result = compiled_fn(x, y)
+            result.sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        with functorch_config.patch({"activation_memory_budget": 0.7}):
+            compiled_fn2 = torch.compile(fn, backend="inductor")
+            x2 = torch.randn(10, 10, requires_grad=True)
+            y2 = torch.randn(10, 10, requires_grad=True)
+            result2 = compiled_fn2(x2, y2)
+            result2.sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})

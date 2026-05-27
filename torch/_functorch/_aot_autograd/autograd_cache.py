@@ -365,6 +365,29 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     return hashes
 
 
+def _collect_custom_node_metadata(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[int, dict[str, Any]]]:
+    """
+    Collect custom annotations (node.meta["custom"]) set via fx_traceback.annotate.
+
+    These annotations can affect compilation behavior (e.g., memory_budget
+    controls the min-cut partitioner, sparsity_hint affects runtime cost
+    estimation). We include them in the cache key so that changing an
+    annotation invalidates the cache.
+
+    Returns a list of (node_index, custom_dict) for nodes that have custom
+    metadata, using node position index as a stable identifier.
+    """
+    result: list[tuple[int, dict[str, Any]]] = []
+    for module in _iter_graph_modules(gm):
+        for i, node in enumerate(module.graph.nodes):
+            custom = node.meta.get("custom")
+            if custom:
+                result.append((i, custom))
+    return result
+
+
 def _collect_wrapped_user_cache_hashes(gm: torch.fx.GraphModule) -> list[str]:
     wrapped_user_cache_hashes = []
     for node in gm.graph.nodes:
@@ -509,6 +532,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.custom_node_metadata = _collect_custom_node_metadata(gm)
 
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
