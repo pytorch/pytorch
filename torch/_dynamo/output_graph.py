@@ -1939,6 +1939,14 @@ class OutputGraph(OutputGraphCommon):
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
 
+        # Finalize shapes_spec wiring: error if any spec assumption/derived
+        # check still has unbound IntVar dependencies (i.e. an IntVar appears
+        # in an expression but never as a bare-IntVar input slot).
+        if config._shapes_spec is not None:
+            from torch._dynamo.variables.builder import _finalize_spec_wiring
+
+            _finalize_spec_wiring(self.shape_env)
+
         if not config.nested_graph_breaks:
             # expect to only compile 1 frame
             if self.root_tx is not tx:
