@@ -2980,6 +2980,30 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         *graph_break_hints.DIFFICULT,
                     ],
                 )
+            if isinstance(combine_fn_var, variables.FunctoolsPartialVariable):
+                missing_keywords = [
+                    key
+                    for key in (
+                        "combine_fn",
+                        "spec_init",
+                        "spec_xs",
+                        "num_init_leaves",
+                        "num_inp_leaves",
+                    )
+                    if key not in combine_fn_var.keywords
+                ]
+                if missing_keywords:
+                    unimplemented(
+                        gb_type="torch.scan: direct operator call",
+                        context=f"missing scan partial keywords: {missing_keywords}",
+                        explanation=(
+                            "Direct calls to torch.ops.higher_order.scan are not supported. "
+                            "Call the scan frontend instead of the internal lowered operator."
+                        ),
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
             return isinstance(
                 combine_fn_var,
                 (

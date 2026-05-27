@@ -213,6 +213,27 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         ):
             f(x)
 
+    def test_direct_scan_op_compile_error(self):
+        def fn(x):
+            def combine_fn(carry, element):
+                (total,) = carry
+                return (total + element,), None
+
+            final_carry, _ = torch.ops.higher_order.scan(
+                functools.partial(combine_fn),
+                (torch.zeros((), dtype=x.dtype, device=x.device),),
+                x,
+                (),
+            )
+            (final_sum,) = final_carry
+            return final_sum
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Direct calls to torch\.ops\.higher_order\.scan are not supported",
+        ):
+            torch.compile(fn, backend="eager")(torch.arange(1, 11, dtype=torch.float32))
+
     def test_no_freevars(self):
         def f(x):
             return wrap(lambda x: torch.sin(x), x)
