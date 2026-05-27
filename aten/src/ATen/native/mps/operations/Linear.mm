@@ -122,19 +122,18 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  // Apple7/8 (M1/M2) MPSGraph and MPSNDArrayMatrixMultiplication silently produce
-  // wrong results when the contraction (K) dim exceeds 2^15. M3+ are
-  // fine. See pytorch/pytorch#177116.
+  // Apple7/8 (M1/M2) MPSGraph silently produces wrong results when K exceeds 2^15;
+  // M3+ are fine. Route through at::mm instead. See pytorch/pytorch#177116.
   constexpr int64_t mpsgraph_k_overflow = 32768;
   static const bool needs_k_overflow_fallback = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   if (needs_k_overflow_fallback && input.size(-1) > mpsgraph_k_overflow && !input.is_complex() &&
       !weight.is_complex() && (!is_bias_defined || !bias.is_complex())) {
-    const Tensor input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
-    Tensor output_2d = at::mm(input_2d, weight.t());
+    const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
+    auto output_2d = at::mm(input_2d, weight.t());
     if (is_bias_defined) {
       output_2d.add_(bias);
     }
-    Tensor reshaped = output_2d.view(output_size);
+    auto reshaped = output_2d.view(output_size);
     return weight_arg.dim() != 1 ? reshaped : reshaped.squeeze(-1);
   }
 
@@ -250,26 +249,21 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
               "MPS device does not support linear backward for non-float inputs");
 
-  const Tensor grad_output_2d = grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
-  const Tensor input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
+  const auto grad_output_2d = grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
+  const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
 
   if (grad_output.numel() == 0) {
-    Tensor grad_weight = at::zeros({grad_output_2d.size(1), input_2d.size(1)}, grad_output.options());
-    Tensor grad_bias = bias_defined ? at::zeros({grad_output_2d.size(1)}, grad_output.options()) : Tensor();
+    auto grad_weight = at::zeros({grad_output_2d.size(1), input_2d.size(1)}, grad_output.options());
+    auto grad_bias = bias_defined ? at::zeros({grad_output_2d.size(1)}, grad_output.options()) : Tensor();
     return {grad_weight, grad_bias};
   }
 
-  // Route through at::mm so the dispatcher can choose the Metal kernel fallback
-  // (see use_metal_mm in LinearAlgebra.mm) for shapes that hit MPSGraph's K-dim
-  // overflow on macOS 14.4+. The previous implementation called
-  // matrixMultiplicationWithPrimaryTensor: directly with K = batch*... and
-  // silently produced wrong gradients for K > 32768. See pytorch/pytorch#177116.
-  Tensor grad_weight = at::mm(grad_output_2d.t(), input_2d.contiguous());
-  // sum() is promoted to float32 by autocast, but linear_backward's meta types
-  // grad_bias as grad_output's dtype, under torch.compile inductor bakes that dtype
-  // into downstream kernels and would reinterpret a float32 buffer byte-wise. Cast
-  // back so the runtime dtype matches the meta
-  Tensor grad_bias = bias_defined ? grad_output_2d.sum(0).to(grad_output.scalar_type()) : Tensor();
+  // Route through at::mm so the dispatcher can pick the Metal fallback for K-dim
+  // overflow on Apple7/8 (M1/M2). See pytorch/pytorch#177116.
+  auto grad_weight = at::mm(grad_output_2d.t(), input_2d.contiguous());
+  // autocast promotes sum() to float32, but linear_backward's meta keeps grad_output's
+  // dtype; cast back so inductor's baked-in dtype matches the runtime buffer.
+  auto grad_bias = bias_defined ? grad_output_2d.sum(0).to(grad_output.scalar_type()) : Tensor();
   return {grad_weight, grad_bias};
 }
 
