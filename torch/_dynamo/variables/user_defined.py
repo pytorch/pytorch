@@ -839,10 +839,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Class-level __setitem__ / __delitem__: looked up on the metaclass.
+        # `cls[k] = v` invokes type(cls).__setitem__(cls, k, v); `del cls[k]`
+        # invokes __delitem__. value=None signals delete (CPython NULL).
+        is_delete = value is None
+        attr = "__delitem__" if is_delete else "__setitem__"
+        m = self._maybe_get_baseclass_method(attr)
+        if isinstance(m, types.FunctionType):
+            source = self.source and AttrSource(self.source, attr)
+            args = [key] if is_delete else [key, value]
+            variables.UserMethodVariable(m, self, source_fn=source).call_function(
+                tx, args, {}
+            )
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -1024,7 +1047,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
@@ -1523,7 +1546,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
@@ -1551,7 +1574,7 @@ class RemovableHandleClass:
 def call_random_fn(
     tx: "InstructionTranslator",
     fn: Callable[..., Any],
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     from .builder import VariableBuilder
@@ -1588,6 +1611,12 @@ def _get_datetime_now_attrs() -> tuple[int, ...]:
 
 
 class DatetimeNowVariable(VariableTracker):
+    _nonvar_fields = {
+        "attrs_source",
+        "attrs",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         attrs_source: RandomValueSource | None = None,
@@ -1627,6 +1656,8 @@ class DatetimeNowVariable(VariableTracker):
         return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Reconstruct a fresh datetime after graph breaks, matching other runtime
+        # values such as random calls rather than reusing the pre-break sample.
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1666,7 +1697,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value_type: type | None = None,
         cls_source: TypeSource | None = None,
         base_cls_vt: VariableTracker | None = None,
-        init_args: Sequence[VariableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2108,6 +2139,33 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_vt is not None:
             return self._base_vt.sq_inplace_repeat_impl(tx, count)
         return super().sq_inplace_repeat_impl(tx, count)
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c
+        # value=None signals delete (CPython NULL sentinel).
+        is_delete = value is None
+        attr = "__delitem__" if is_delete else "__setitem__"
+        method, source_fn = self._lookup_slot_type_attr(tx, attr)
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        if isinstance(method, types.FunctionType):
+            args = [key] if is_delete else [key, value]
+            variables.UserMethodVariable(
+                method, self, source_fn=source_fn, source=self.source
+            ).call_function(tx, args, {})
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
 
     def _vectorcall_maybe(
         self,
@@ -2700,6 +2758,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             setter = inspect.getattr_static(type(descriptor), "__set__", None)
             deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
+            # collections._tuplegetter (namedtuple field accessor) is a C-level
+            # data descriptor whose __set__/__delete__ unconditionally raise
+            # AttributeError. Short-circuit so we don't need to model it.
+            _tuplegetter = getattr(collections, "_tuplegetter", None)
+            if _tuplegetter is not None and type(descriptor) is _tuplegetter:
+                raise_readonly_attr()
             desc_var = VariableTracker.build(tx, descriptor, desc_source)
             if isinstance(value, variables.DeletedVariable):
                 if isinstance(deleter, types.FunctionType):
@@ -2818,7 +2882,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
@@ -3570,7 +3634,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """Emulate tree_map behavior for user-defined objects.
@@ -3667,7 +3731,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
@@ -4245,6 +4309,23 @@ class OrderedDictVariable(UserDefinedDictVariable):
         self.call_method(tx, "update", [other], {})
         return self
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # value=None signals __delitem__ (CPython NULL sentinel).
+        attr = "__delitem__" if value is None else "__setitem__"
+        method = self._maybe_get_baseclass_method(attr)
+        if method in self._base_methods:
+            if self._base_vt is None:
+                raise AssertionError(
+                    "_base_vt must not be None in mp_ass_subscript_impl"
+                )
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -4776,7 +4857,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         raise NotImplementedError
 
     def _validate_rest_for_tree_map(
-        self, rest: "collections.abc.Sequence[VariableTracker]"
+        self, rest: "list[VariableTracker]"
     ) -> list["UserDefinedTupleVariable"] | None:
         """Validate that rest args are compatible for tree_map fast-path."""
         others: list[UserDefinedTupleVariable] = []
@@ -4813,7 +4894,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not self._is_pytree_node():
@@ -4842,7 +4923,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
