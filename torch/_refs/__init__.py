@@ -5304,6 +5304,17 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
+    if utils.is_non_overlapping_and_dense_or_false(a):
+        return torch.empty_strided(
+            a.shape,
+            a.stride(),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            requires_grad=requires_grad,
+            pin_memory=pin_memory,
+        )
+
     logical_to_physical_perm, _ = (
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )

@@ -569,6 +569,7 @@ def while_loop_fake_tensor_mode(
                 "carried_inputs",
                 "body_output",
                 include_contiguity=False,
+                ignore_stride_on_size_one_dims=True,
             )
 
         if stack_output:

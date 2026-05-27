@@ -5546,6 +5546,34 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 torch.randn(2, 3),
             )
 
+    def test_while_loop_preserve_format_like_op_with_size_one_stride(self):
+        x = torch.randn(1, 5).t()
+
+        def cond_fn(x):
+            return torch.tensor(False)
+
+        def body_fn(x):
+            return (torch.ones_like(x),)
+
+        (out,) = torch.while_loop(cond_fn, body_fn, (x,))
+        self.assertEqual(out.stride(), x.stride())
+
+    def test_while_loop_compile_preserve_format_like_op_with_size_one_stride(self):
+        x = torch.randn(1, 5).t()
+
+        def f(x):
+            def cond_fn(x):
+                return torch.tensor(False)
+
+            def body_fn(x):
+                return (torch.ones_like(x),)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))[0]
+
+        out = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(out, x)
+        self.assertEqual(out.stride(), x.stride())
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
