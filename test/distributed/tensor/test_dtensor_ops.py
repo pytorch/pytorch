@@ -1013,8 +1013,6 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             skip("log_normal"),
             skip("normal", "in_place"),
             skip("uniform"),
-            # https://github.com/pytorch/pytorch/issues/184463
-            skip("nn.functional.max_unpool3d", "grad"),
         },
     )
     def test_single_dim_strategy(self, dtype, op):

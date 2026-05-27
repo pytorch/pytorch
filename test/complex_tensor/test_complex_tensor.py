@@ -32,11 +32,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_ASAN,
-    unMarkDynamoStrictTest,
-)
+from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
 
 
 if TYPE_CHECKING:
@@ -98,15 +94,6 @@ SKIPS = {
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
 }
-if TEST_WITH_ASAN:
-    SKIPS[
-        Descriptor(
-            op=aten.diagonal_scatter,
-            variant=Variant.GradCheck,
-            device_type="cpu",
-            dtype=torch.complex128,
-        )
-    ] = "https://github.com/pytorch/pytorch/issues/168169"
 
 EXTRA_KWARGS = {
     Descriptor(op=aten.asinh, dtype=torch.complex64, variant=Variant.Op): {
