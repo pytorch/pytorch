@@ -3,7 +3,7 @@ name: rocm-7-13
 on:
   push:
     tags:
-      - ciflow/rocm-7-13/*
+      - ciflow/rocm-nightly/*
   workflow_dispatch:
 
 concurrency:
