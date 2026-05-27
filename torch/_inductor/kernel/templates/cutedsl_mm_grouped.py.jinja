@@ -56,7 +56,10 @@ _TORCH_TO_CUTLASS_DTYPE = {
 
 def _to_fake_cute_tensor(shape, dtype, assumed_align=16):
     ndim = len(shape)
-    dyn_shape = tuple(cute.sym_int64() for _ in range(ndim))
+    dyn_shape = tuple(
+        s if isinstance(s, int) and s == 1 else cute.sym_int64()
+        for s in shape
+    )
     stride_order = tuple(range(ndim - 1, -1, -1))
     return cute.runtime.make_fake_compact_tensor(
         _TORCH_TO_CUTLASS_DTYPE[dtype], dyn_shape,
