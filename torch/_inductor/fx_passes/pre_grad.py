@@ -20,6 +20,7 @@ from torch.fx.passes.graph_transform_observer import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..custom_graph_pass import get_custom_graph_passes
@@ -124,6 +125,54 @@ def fuse_chunk_reshape_concat_pass(graph):
 
 def remove_noop_pass(graph):
     return None
+
+
+def _is_mkldnn_value(value: object) -> bool:
+    return bool(
+        getattr(value, "_fake_is_mkldnn", False)
+        or (isinstance(value, torch.Tensor) and value.is_mkldnn)
+    )
+
+
+def canonicalize_mkldnn_to_dense(gm, example_inputs):
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    mkldnn_nodes = OrderedSet(
+        [
+            node
+            for node, value in zip(placeholders, example_inputs)
+            if _is_mkldnn_value(value)
+        ]
+    )
+
+    def is_mkldnn_node(node):
+        if not isinstance(node, torch.fx.Node):
+            return False
+        if node in mkldnn_nodes:
+            return True
+        return _is_mkldnn_value(node.meta.get("val")) or _is_mkldnn_value(
+            node.meta.get("example_value")
+        )
+
+    changed = False
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.aten.to_dense.default
+            and node.args
+            and is_mkldnn_node(node.args[0])
+        ):
+            node.target = torch.ops.aten._to_dense.default
+            node.meta.pop("val", None)
+            node.meta.pop("example_value", None)
+            changed = True
+        elif _is_mkldnn_value(node.meta.get("val")) or _is_mkldnn_value(
+            node.meta.get("example_value")
+        ):
+            mkldnn_nodes.add(node)
+
+    if changed:
+        gm.graph.lint()
+        gm.recompile()
 
 
 def stack_to_unsqueeze_pass(graph):

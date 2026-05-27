@@ -205,6 +205,38 @@ def dispatch_to_op_implementations_dict(
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
 
 
+def _is_sparse_any(x: FakeTensor) -> bool:
+    return x.is_sparse or x.layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }
+
+
+@register_op_impl([aten.to_dense.default, aten._to_dense.default])
+def dense_from_mkldnn(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if not getattr(self, "_fake_is_mkldnn", False):
+        if func is not aten._to_dense.default or _is_sparse_any(self):
+            return NotImplemented
+        # AOT can canonicalize MKL-DNN densify to aten._to_dense, then later
+        # propagate that graph with a plain strided fake input.
+        # The runtime fallback still enforces the real input layout.
+
+    out_dtype = self.dtype if dtype is None else dtype
+    shape = tuple(self.shape)
+    strides = make_contiguous_strides_for(shape)
+    with in_kernel_invocation_manager(fake_mode):
+        out = torch.empty_strided(shape, strides, dtype=out_dtype, device="meta")
+    return FakeTensor(fake_mode, out, self.fake_device)
+
+
 @register_op_impl(_is_tensor_constructor)
 @register_op_impl([*_like_tensor_constructors])
 def constructors(
@@ -1878,9 +1910,11 @@ def fast_detach(
 ) -> FakeTensor:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    if include_real:
-        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
-    return FakeTensor(fake_mode, out, x.device)
+    real_tensor = x.real_tensor if include_real else None
+    fake_out = FakeTensor(fake_mode, out, x.device, real_tensor=real_tensor)
+    if getattr(x, "_fake_is_mkldnn", False):
+        fake_out._fake_is_mkldnn = True
+    return fake_out
 
 
 @functools.cache
