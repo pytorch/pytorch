@@ -255,7 +255,13 @@ class TimmRunner(BenchmarkRunner):
                 int(recorded_batch_size / batch_size_divisors[model_name]), 1
             )
         batch_size = batch_size or recorded_batch_size
-        if self.args.ci and self.args.accuracy:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and self.args.backend == "inductor"
+            and self.args.ci
+            and self.args.accuracy
+        ):
             ci_accuracy_batch_sizes = self._batch_size.get("ci_accuracy", {})
             batch_size = ci_accuracy_batch_sizes.get(model_name, batch_size)
 
