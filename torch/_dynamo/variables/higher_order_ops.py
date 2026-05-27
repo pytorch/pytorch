@@ -3403,13 +3403,55 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 
 class FunctorchHigherOrderVariable(UserFunctionVariable):
+    def _vjp_call_site(
+        self, tx: "InstructionTranslator"
+    ) -> tuple[str, int, int | None]:
+        inst = tx.current_instruction
+        if inst.positions is not None and inst.positions.lineno is not None:
+            lineno = inst.positions.lineno
+        elif inst.starts_line is not None:
+            lineno = inst.starts_line
+        else:
+            lineno = tx.lineno
+        return tx.f_code.co_filename, lineno, inst.offset
+
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return super().call_function(tx, args, kwargs)
+        is_vjp = self.fn is torch._functorch.eager_transforms.vjp
+        if not is_vjp:
+            return super().call_function(tx, args, kwargs)
+
+        call_site = self._vjp_call_site(tx)
+        if call_site in tx.speculation_log.vjp_offending_call_sites:
+            unimplemented(
+                gb_type="vjp wrapped tensor leaked as output",
+                context=(
+                    f"{self.fn.__name__} at "
+                    f"{call_site[0]}:{call_site[1]}:{call_site[2]}"
+                ),
+                explanation=(
+                    "vjp returns a closure (vjpfunc) that captures tensors "
+                    "still wrapped at a functorch level (TensorWrapper). "
+                    "Returning vjpfunc from a compiled region is not "
+                    "supported. Graph breaking here to preserve partial "
+                    "acceleration."
+                ),
+                hints=[
+                    "Consume the vjp result inside the compiled function "
+                    "instead of returning it.",
+                ],
+            )
+
+        prior_nodes = set(tx.output.graph.nodes)
+        result = super().call_function(tx, args, kwargs)
+        for node in tx.output.graph.nodes:
+            if node not in prior_nodes:
+                node.meta["dynamo_vjp_call_site"] = call_site
+        return result
 
     def should_allow_nested_graph_breaks(self) -> bool:
         return False

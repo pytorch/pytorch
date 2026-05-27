@@ -1892,6 +1892,28 @@
       "Hints": []
     }
   ],
+  "GB4083": [
+    {
+      "Gb_type": "returning vjp wrapped tensor",
+      "Context": "node_names",
+      "Explanation": "vjp returns a closure (vjpfunc) that captures tensors still wrapped at a functorch level (TensorWrapper). Returning vjpfunc from a compiled region is not supported.",
+      "Hints": [
+        "Consume the vjp result inside the compiled function ",
+        "instead of returning it."
+      ]
+    }
+  ],
+  "GB5756": [
+    {
+      "Gb_type": "vjp wrapped tensor leaked as output",
+      "Context": "{self.fn.__name__} at {call_site[0]}:{call_site[1]}:{call_site[2]}",
+      "Explanation": "vjp returns a closure (vjpfunc) that captures tensors still wrapped at a functorch level (TensorWrapper). Returning vjpfunc from a compiled region is not supported. Graph breaking here to preserve partial acceleration.",
+      "Hints": [
+        "Consume the vjp result inside the compiled function ",
+        "instead of returning it."
+      ]
+    }
+  ],
   "GB0141": [
     {
       "Gb_type": "Unsupported call_id() without source",
