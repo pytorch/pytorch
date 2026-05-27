@@ -1530,6 +1530,7 @@ def conv(
     )
     input_ = new_kwargs["input"]
     weight = new_kwargs["weight"]
+    device = input_.fake_device
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
@@ -1542,7 +1543,17 @@ def conv(
             f"Input type ({input_.dtype}) and weight type "
             f"({weight.dtype}) should be the same"
         )
-    device = input_.fake_device
+    for name, value in new_kwargs.items():
+        if isinstance(value, torch.Tensor):
+            value_device = (
+                value.fake_device if isinstance(value, FakeTensor) else value.device
+            )
+            if value_device != device:
+                raise RuntimeError(
+                    "Expected all tensors to be on the same device, but got "
+                    f"{name} is on {value_device}, different from other tensors "
+                    f"on {device}"
+                )
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
         # if the input is unsqueezed in Convolution.cpp we get segfault
