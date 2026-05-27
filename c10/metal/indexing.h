@@ -251,11 +251,11 @@ kernel void unary_alpha_strided(
     constant long* output_strides [[buffer(4)]],
     constant uint& ndim [[buffer(5)]],
     constant T2& alpha [[buffer(6)]],
-    uint index [[thread_position_in_grid]]) {
+    uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T2>;
   int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
   ref_at_offs<res_t>(output, output_offs) =
@@ -286,7 +286,7 @@ kernel void unary_alpha_strided(
           constant long* output_strides,                                   \
           constant uint& ndim,                                             \
           constant DTYPEA& alpha,                                          \
-          uint index)
+          uint2 thread_pos)
 
 // Value at offset with dynamic cast from provided type
 template <typename T, typename P>
