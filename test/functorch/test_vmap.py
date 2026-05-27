@@ -28,7 +28,6 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
-    skipOps,
     tol1,
     xfail,
     xfailIf,
@@ -59,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     OpDTypes,
     ops,
+    skipOps,
     tol,
     toleranceOverride,
 )
@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
@@ -4383,6 +4384,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("torch.ops.aten._flash_attention_forward"),
     }
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164556")
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(
         op_db + additional_op_db + autograd_function_db + custom_op_db,
@@ -4413,8 +4415,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_exhaustive",
         vmap_fail.union(
             {
                 # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -4440,6 +4440,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -4477,8 +4478,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_op_has_batch_rule",
         vmap_fail.union(
             {
                 xfail("as_strided", "partial_views"),
@@ -4618,6 +4617,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -5283,8 +5283,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_linalg_failure_1D_input",
         {
             xfail("linalg.vector_norm"),  # can accept vector inputs
             xfail("linalg.norm"),  # can accept vector inputs
