@@ -137,6 +137,28 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager_noexcept(self, device):
         self._check_backend_works("eager_noexcept", device, boxed=False)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_eager_noexcept_wraps_unexpected_graph_exception(self):
+        def fn(x):
+            return int(x)
+
+        opt_fn = torch.compile(fn, backend="eager_noexcept")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchDynamoException,
+            torch._dynamo.exc.EAGER_NOEXCEPT_EXCEPTION_MSG,
+        ):
+            opt_fn(torch.tensor(float("nan")))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_assert_raises_matches_eager_noexcept_graph_exception_cause(self):
+        def fn(x):
+            return int(x)
+
+        opt_fn = torch.compile(fn, backend="eager_noexcept")
+        self.assertRaises(ValueError, opt_fn, torch.tensor(float("nan")))
+        with self.assertRaisesRegex(ValueError, "cannot convert float NaN to integer"):
+            opt_fn(torch.tensor(float("nan")))
+
     @skipIfHpu
     @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):

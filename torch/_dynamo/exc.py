@@ -67,6 +67,8 @@ def exportdb_error_message(case_name: str) -> str:
 log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
+EAGER_NOEXCEPT_EXCEPTION_MSG = "Unexpected exception when running generated GraphModule"
+
 
 class TorchDynamoException(RuntimeError):
     """Base exception class for all TorchDynamo-specific exceptions.

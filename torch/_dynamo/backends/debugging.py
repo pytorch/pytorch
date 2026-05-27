@@ -99,13 +99,13 @@ def eager_noexcept(
         log.warning("eager_noexcept backend ignoring extra kwargs %s", kwargs)
 
     # This backend is intended to check that dynamo-generated GraphModules
-    # do not cause errors.
+    # do not cause unexpected errors.
     def inner(*args: Any) -> Any:
         try:
             return gm(*args)
         except Exception as e:
             raise torch._dynamo.exc.TorchDynamoException(
-                "Unexpected exception when running generated GraphModule"
+                torch._dynamo.exc.EAGER_NOEXCEPT_EXCEPTION_MSG
             ) from e
 
     return inner

@@ -525,6 +525,36 @@ instantiate_device_type_tests(TestTesting, globals())
 
 class TestFrameworkUtils(TestCase):
 
+    def test_plain_assert_raises_does_not_import_dynamo(self):
+        code = """\
+import sys
+from torch.testing._internal.common_utils import TestCase
+
+if "torch._dynamo" in sys.modules or "torch._dynamo.exc" in sys.modules:
+    raise AssertionError("Dynamo imported before assertRaises")
+
+case = TestCase()
+with case.assertRaises(ValueError):
+    raise ValueError("expected")
+
+if "torch._dynamo" in sys.modules or "torch._dynamo.exc" in sys.modules:
+    raise AssertionError("plain assertRaises imported Dynamo")
+"""
+        env = os.environ.copy()
+        for name in (
+            "PYTORCH_TEST_WITH_AOT_EAGER",
+            "PYTORCH_TEST_WITH_DYNAMO",
+            "PYTORCH_TEST_WITH_INDUCTOR",
+        ):
+            env.pop(name, None)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
