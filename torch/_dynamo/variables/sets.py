@@ -626,7 +626,10 @@ class SetVariable(VariableTracker):
         return self
 
     def nb_subtract_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, reverse: bool = False
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1801-L1812
         self_, other_ = (other, self) if reverse else (self, other)
@@ -766,7 +769,10 @@ class OrderedSetVariable(SetVariable):
         return super().call_method(tx, "union", [other], {})
 
     def nb_subtract_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, reverse: bool = False
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
     ) -> VariableTracker:
         self_, other_ = (other, self) if reverse else (self, other)
         return self_.call_method(tx, "difference", [other_], {})

@@ -557,7 +557,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_multiply_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -586,7 +586,7 @@ class ConstantVariable(VariableTracker):
 
     def sq_repeat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         count: VariableTracker,
     ) -> VariableTracker:
         # Only str / bytes are reachable via ConstantVariable since list, tuple,
