@@ -70,7 +70,14 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    CleanDiv,
+    FloorDiv,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -815,8 +822,15 @@ class IRNode:
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        pass
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        """
+        Hint that this node's value will be reused.
+
+        `users` estimates the reuse count. When `graph_reuse` is true, this
+        represents graph fanout and can trigger fanout-based realization
+        heuristics. When false, the reuse comes from loop-level indexing, such
+        as a broadcast expand, and should not be treated as graph fanout.
+        """
 
     def realize_hint(self) -> None:
         pass
@@ -1220,6 +1234,8 @@ def get_reduction_combine_fn(
     elif reduction_type in (
         "argmax",
         "argmin",
+        "argmax_value",
+        "argmin_value",
         "argmax_with_value",
         "argmin_with_value",
     ):
@@ -1230,7 +1246,7 @@ def get_reduction_combine_fn(
             a_value, a_index = a
             b_value, b_index = b
 
-            if reduction_type in ("argmin", "argmin_with_value"):
+            if reduction_type in ("argmin", "argmin_value", "argmin_with_value"):
                 mask = ops.lt(a_value, b_value)
             else:
                 mask = ops.gt(a_value, b_value)
@@ -1394,6 +1410,8 @@ class Reduction(Loops):
         arg_reduction_types = (
             "argmax",
             "argmin",
+            "argmax_value",
+            "argmin_value",
             "argmax_with_value",
             "argmin_with_value",
         )
@@ -1594,6 +1612,8 @@ class Reduction(Loops):
         if reduction_type in (
             "argmin",
             "argmax",
+            "argmin_value",
+            "argmax_value",
             "argmin_with_value",
             "argmax_with_value",
         ):
@@ -1616,6 +1636,8 @@ class Reduction(Loops):
 
             if reduction_type in ("argmin_with_value", "argmax_with_value"):
                 return fn
+            if reduction_type in ("argmin_value", "argmax_value"):
+                return lambda index: fn(index)[0]
             return lambda index: fn(index)[1]
         else:
             value_fn = inner_fn
@@ -1835,14 +1857,14 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "argmax", "argmax_with_value"):
+        if reduction_type in ("max", "argmax", "argmax_value", "argmax_with_value"):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return False
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin", "argmin_with_value"):
+        if reduction_type in ("min", "argmin", "argmin_value", "argmin_with_value"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
@@ -3284,8 +3306,8 @@ class BaseView(IRNode):
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        return self.data.mark_reuse(users, graph_reuse=graph_reuse)
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
@@ -4021,16 +4043,16 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = sympy.Min
-            max_func = sympy.Max
+            min_func = Min
+            max_func = Max
         elif any(
             # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max)
+            x.has(sympy.Min, sympy.Max, Min, Max)
             for x in (start, end, dim_size)
             if isinstance(x, Expr)
         ):
-            min_func = sympy.Min
-            max_func = sympy.Max
+            min_func = Min
+            max_func = Max
         else:
             min_func = sizevars.evaluate_min
             max_func = sizevars.evaluate_max
@@ -4181,7 +4203,7 @@ def is_contiguous_strides_for_shape(
         ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
             return False
 
-        expected_stride_max *= sympy.Max(1, x)
+        expected_stride_max *= Max(1, x)
         expected_stride *= x
 
     return True
@@ -9740,8 +9762,8 @@ class MutableBox(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         return self.data.has_large_inner_fn(threshold)
 
-    def mark_reuse(self, users: int) -> None:
-        return self.data.mark_reuse(users)
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        return self.data.mark_reuse(users, graph_reuse=graph_reuse)
 
     def realize_hint(self) -> None:
         return self.data.realize_hint()
@@ -9965,7 +9987,7 @@ class StorageBox(MutableBox):
             )
         )
 
-    def should_realize_on_reuse(self, users: int) -> bool:
+    def should_realize_on_reuse(self, users: int, *, graph_reuse: bool = True) -> bool:
         """
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
@@ -9977,14 +9999,13 @@ class StorageBox(MutableBox):
                 heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-            return (
-                self.num_reads() > config.realize_reads_threshold
-                or self.has_large_inner_fn()
-            )
+            if self.has_large_inner_fn():
+                return True
+            return graph_reuse and self.num_reads() > config.realize_reads_threshold
         return False
 
-    def mark_reuse(self, users: int) -> None:
-        if self.should_realize_on_reuse(users):
+    def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
+        if self.should_realize_on_reuse(users, graph_reuse=graph_reuse):
             self.realize()
 
     def num_reads(self) -> int:
