@@ -15,6 +15,8 @@ We minimize it by:
   3. Output splitting via unbind() is always zero-copy (views).
 """
 
+import os
+
 import torch
 
 from ... import registry
@@ -24,6 +26,8 @@ def _foreach_mm_cond(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> bool:
+    if os.environ.get("TORCH_FOREACH_MM_NATIVE_CPP") == "1":
+        return False
     if len(self) < 2:
         return False
 
@@ -85,11 +89,10 @@ def _try_as_3d_view(tensors: list[torch.Tensor]) -> torch.Tensor | None:
     )
 
 
-def _foreach_mm_impl(
+def _foreach_mm_impl_stack(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    # Try zero-copy 3D view first, fall back to stack (one fused copy).
     A = _try_as_3d_view(self)
     if A is None:
         A = torch.stack(self)
@@ -100,6 +103,46 @@ def _foreach_mm_impl(
 
     out_3d = torch._grouped_mm(A, B)
     return list(out_3d.unbind(0))
+
+
+def _foreach_mm_impl_ptrs(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> list[torch.Tensor]:
+    G = len(self)
+    M, K = self[0].shape
+    N = mat2[0].size(1)
+    lda = self[0].stride(0)
+    ldb = mat2[0].stride(0)
+
+    a_ptrs = torch.tensor([t.data_ptr() for t in self], dtype=torch.int64)
+    b_ptrs = torch.tensor([t.data_ptr() for t in mat2], dtype=torch.int64)
+
+    # Pointer tensors are CPU; pass a dummy CUDA scalar to route dispatch to CUDA
+    dummy = self[0].new_empty(0)
+    return list(
+        torch._foreach_mm_from_ptrs(
+            dummy,
+            a_ptrs,
+            b_ptrs,
+            M,
+            N,
+            K,
+            G,
+            lda,
+            ldb,
+        )
+    )
+
+
+def _foreach_mm_impl(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> list[torch.Tensor]:
+    try:
+        return _foreach_mm_impl_ptrs(self, mat2)
+    except Exception:
+        return _foreach_mm_impl_stack(self, mat2)
 
 
 def register_to_dispatch() -> None:
