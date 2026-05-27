@@ -17885,7 +17885,11 @@ if RUN_GPU:
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
 
-            # We want code that assumes alignment if the initial input is 16-byte aligned
+            # Codegen always assumes aligned inputs regardless of the example's
+            # actual alignment or the assume_aligned_inputs config; the wrapper
+            # realigns at runtime via copy_if_misaligned. So every offset
+            # produces the same kernel where in_ptr0, out_ptr0, xnumel are all
+            # flagged divisible by 16.
             for offset in (0, 1, 2, 3, 4):
                 base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
@@ -17894,17 +17898,8 @@ if RUN_GPU:
                 arguments_that_are_divisible_by_16 = get_divisible_by_16(
                     kernels[0].triton_meta["configs"][0]
                 )
+                self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 
-                #             NO_ALIGN ALIGN     ALIGN
-                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
-
-                if offset % 4 == 0:
-                    expected_aligned = (0, 1, 2)
-                else:
-                    expected_aligned = (1, 2)
-                self.assertEqual(arguments_that_are_divisible_by_16, expected_aligned)
-
-            # If input isn't a view, storage offset != , inductor will assume alignment.
             torch._dynamo.reset()
             inp = torch.randn((64, 64), device=GPU_TYPE)
             kernels = self.get_kernels(fn, [inp])

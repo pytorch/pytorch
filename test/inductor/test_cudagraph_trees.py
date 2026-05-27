@@ -1154,15 +1154,18 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(m.count, expected_clones)
 
         def test_unaligned_static_input_trees(self):
-            self._test_unaligned_static_input_impl(expected_clones=0)
+            # Codegen always assumes aligned inputs and the wrapper realigns
+            # the non-static input at runtime via copy_if_misaligned, hence
+            # one clone per call with misaligned inputs.
+            self._test_unaligned_static_input_impl(expected_clones=1)
 
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_unaligned_static_input_non_trees(self):
-            self._test_unaligned_static_input_impl(expected_clones=0)
+            self._test_unaligned_static_input_impl(expected_clones=1)
 
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
-            self._test_unaligned_static_input_impl(expected_clones=0)
+            self._test_unaligned_static_input_impl(expected_clones=1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)

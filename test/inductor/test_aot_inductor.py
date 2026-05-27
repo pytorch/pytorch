@@ -7483,10 +7483,13 @@ class AOTInductorTestsTemplate:
 
         model = Model()
         self.check_model(model, example_inputs)
-        # If the model is already compiled with a misaligned input, the
-        # generated code should NOT contain an alignment check for that input.
+        # The generated code always emits an alignment check regardless of the
+        # example input's actual alignment: codegen assumes aligned inputs and
+        # the wrapper realigns at runtime. This keeps the cache key independent
+        # of the example's alignment so the same compiled artifact services
+        # both aligned and unaligned tensors.
         self.code_check_count(
-            model, example_inputs, "aoti_torch_clone_preserve_strides", 0
+            model, example_inputs, "aoti_torch_clone_preserve_strides", 1
         )
 
     def test_autotuning_args_reuse(self):
