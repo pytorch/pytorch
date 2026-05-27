@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
@@ -111,11 +112,14 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHINDUCTOR,
     xfailIf,
     xfailIfS390X,
 )
@@ -344,6 +348,8 @@ class TestCase(InductorTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
                 }
             )
         )
@@ -6715,6 +6721,10 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/165879",
+    )
     @parametrize("tile_reduction", (False, True))
     def test_var_mean(self, tile_reduction: bool):
         def fn(x):
@@ -7962,6 +7972,10 @@ class CommonTemplate:
         n2.meta["val"] = t
         self.assertTrue(same_meta(n1, n2))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151384",
+    )
     def test_remove_noop_slice(self):
         def f(x):
             x = x + 1
@@ -7989,6 +8003,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151381",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151379",
+    )
     def test_remove_noop_slice1(self):
         def f(x):
             x = x + 1
@@ -8013,6 +8035,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151378",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151382",
+    )
     def test_remove_noop_slice_scatter(self):
         def f(x):
             x = x + 1
@@ -10116,6 +10146,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_index_put_deterministic_fallback(self):
+        if is_mps_backend(self.device):
+            # MPS has no deterministic implementation for
+            # index_put_(accumulate=True) on floating dtypes
+            raise unittest.SkipTest("no deterministic index_put accumulate on MPS")
         with DeterministicGuard(True):
 
             def fn(a, b, c):
@@ -10717,8 +10751,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp = False
 
         for deterministic in [False, True]:
-            if deterministic and self.device == "xpu":
-                # There is no deterministic implementation for scatter_add on Intel GPU.
+            if deterministic and self.device in ("xpu", "mps"):
+                # There is no deterministic implementation for scatter_add on Intel GPU/Apple MPS.
                 continue
             with DeterministicGuard(deterministic):
                 self.common(
@@ -16611,6 +16645,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f"{expected=} {actual=}",
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151511",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151512",
+    )
     def test_remove_noop_view_default(self):
         def f(x):
             batch_size = x.shape[0]
@@ -16649,6 +16691,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151541",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151540",
+    )
     def test_remove_noop_view_dtype(self):
         def f(x):
             x = x.transpose(1, 2)  # (batch_size, 2, 3)
@@ -16898,6 +16948,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         return code_allowed != code_disallowed
 
     # If matmul is implemented by triton there is more reuse
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/179776")
     @config.patch(
         {
             "max_autotune_gemm_backends": "ATEN",
@@ -16947,6 +16998,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179970")
     @requires_gpu_and_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):
