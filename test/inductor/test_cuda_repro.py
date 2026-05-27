@@ -71,12 +71,6 @@ from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
-def _strip_triton_static_asserts(code):
-    return "\n".join(
-        line for line in code.splitlines() if "tl.static_assert" not in line
-    )
-
-
 try:
     try:
         import triton  # @manual
@@ -640,7 +634,6 @@ class CudaReproTests(TestCase):
 
         # fwd, backward
         for code in codes:
-            code = _strip_triton_static_asserts(code)
             f = FileCheck()
             # in eager, there are two down casts
             for _ in range(2):
@@ -1172,7 +1165,7 @@ class CudaReproTests(TestCase):
         # tmp0 - not wrapping of negative numbers
         FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
             "atomic_add"
-        ).run(_strip_triton_static_asserts(code[0]))
+        ).run(code[0])
         self.assertEqual(
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
@@ -2425,7 +2418,7 @@ foo(torch.rand([256], device=\"{device_type}\"))
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        lines = _strip_triton_static_asserts(code[0]).split("\n")
+        lines = code[0].split("\n")
         start = lines.index("@triton.jit")
         kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(

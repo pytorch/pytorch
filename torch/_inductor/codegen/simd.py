@@ -223,14 +223,6 @@ class IterationRangesRoot(IterationRanges):
     def owns_mask(self, mask_var: str) -> bool:
         return mask_var == self.mask_name()
 
-    def mask_shape(self, tensor_ndim: int) -> tuple[str, ...]:
-        if self.tensor_dim is None:
-            return ()
-
-        shape = ["1"] * tensor_ndim
-        shape[self.tensor_dim] = self.block_size_str()
-        return tuple(shape)
-
     def supports_constant_mask(self) -> bool:
         return True
 

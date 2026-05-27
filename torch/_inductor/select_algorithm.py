@@ -387,25 +387,6 @@ class SubgraphInfo:
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
-    index_input_names = frozenset(
-        OrderedSet(
-            [
-                "b",
-                "h",
-                "m",
-                "n",
-                "idx_b",
-                "idx_h",
-                "idx_m",
-                "idx_n",
-                "b_idx",
-                "h_idx",
-                "q_idx",
-                "kv_idx",
-            ]
-        )
-    )
-
     def __init__(
         self,
         kernel,
@@ -446,14 +427,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
-            dtype=self._fixed_input_dtype(name),
+            dtype=torch.float32,
             shape=shape,
         )
-
-    def _fixed_input_dtype(self, name: str) -> torch.dtype:
-        if name in self.index_input_names:
-            return torch.int64 if self.kernel.index_dtype == "tl.int64" else torch.int32
-        return torch.float32
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
