@@ -67,9 +67,17 @@ def _register_test(*test_metainfo):
 
 def _extract_device(init_dict):
     """Extract the target device inside init_dict."""
-    assert init_dict is not None and "device" in init_dict, f"init_dict should have a 'device' key, got {init_dict}"
+    if init_dict is None:
+        raise AssertionError("cannot extract device from None init_dict.")
+    if "device" not in init_dict:
+        raise AssertionError(f"init_dict should have a 'device' key, got: {init_dict}")
+
     dev = init_dict["device"]
-    assert isinstance(dev, str), f"expected the value of key 'device' in init_dict to be of type str, got {dev} of type {type(dev)}"
+    if not isinstance(dev, str):
+        raise ValueError(
+            f"expected the value of key 'device' in init_dict to be of type str, got {dev} of type {type(dev)}"
+        )
+
     return torch.device(dev)
 
 
@@ -111,10 +119,16 @@ def _get_module_name(
     initialization or JIT/Compile compilation.
     """
     if op_name_function is not None:
-        assert isinstance(op_name_function, dict) and "op_name" in op_name_function, (
-            "op_name_function should be either None or a dictionary with format {{ 'op_name': ...,"
-            f"'op_func': ...}}, got {op_name_function}"
-        )
+        if not isinstance(op_name_function, dict):
+            raise AssertionError(
+                "op_name_function should be either None or a dictionary, got "
+                f"{op_name_function} of type {type(op_name_function)}"
+            )
+        if "op_name" not in op_name_function:
+            raise AssertionError(
+                "op_name_function should be a dictionary with format "
+                f"{{ 'op_name': ..., 'op_func': ...}}, got {op_name_function}"
+            )
         return op_name_function["op_name"]
 
     # If `op_name_function` was not given, then we assume `op.module_name()`
@@ -866,7 +880,9 @@ class BenchmarkRunner:
             else:
                 launch_func = self._launch_forward
 
-            def output_benchmark_results_to_csv(*, time_us, peak_memory, memory_bandwidth):
+            def output_benchmark_results_to_csv(
+                test_case, *, time_us, peak_memory, memory_bandwidth
+            ):
                 """Wrapper around self._output_csv() method."""
                 self._output_csv(
                     output_csv_filename,
@@ -917,6 +933,7 @@ class BenchmarkRunner:
 
                 # output results to csv
                 output_benchmark_results_to_csv(
+                    test_case,
                     time_us=result_dict["reported_run_time_us"][0],
                     peak_memory=result_dict["peak_memory"],
                     memory_bandwidth=result_dict["memory_bandwidth_gb_s"],
@@ -939,6 +956,7 @@ class BenchmarkRunner:
 
                     # output results to csv as FAILED
                     output_benchmark_results_to_csv(
+                        test_case,
                         time_us="FAILED",
                         peak_memory=0.0,
                         memory_bandwidth=0.0,
