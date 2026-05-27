@@ -202,9 +202,9 @@ void lookup(
     bool is_skip_guard_eval_unsafe);
 
 // Try to resolve a cache lookup without materializing frame locals or running
-// guard managers. Returns true when the lookup is complete, and false when the
-// caller must fall back to lookup().
-bool lookup_guardless(
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup().
+bool try_lookup_without_guard_eval(
     ExtraState* extra_state,
     PyObject* backend,
     int64_t isolate_recompiles_id,

@@ -535,7 +535,7 @@ PyObject* dynamo__custom_eval_frame(
 
   PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
-  if (!lookup_guardless(
+  if (!try_lookup_without_guard_eval(
           extra,
           backend,
           isolate_recompiles_id,

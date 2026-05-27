@@ -187,6 +187,16 @@ static bool backend_match(PyObject* saved_backend, PyObject* backend) {
   return true;
 }
 
+static bool cache_entry_has_no_guards(
+    const CacheEntry& cache_entry,
+    bool is_skip_guard_eval_unsafe) {
+  if (is_skip_guard_eval_unsafe && cache_entry.diff_guard_root_mgr != nullptr) {
+    return torch::dynamo::root_guard_manager_has_no_guards(
+        cache_entry.diff_guard_root_mgr);
+  }
+  return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
+}
+
 // Search a region's cache list for a matching entry.
 // Returns the matching CacheEntry, or nullptr if no match.
 // Sets *guard_error = true if a guard evaluation exception occurred.
@@ -205,12 +215,10 @@ static CacheEntry* lookup_in_list(
     if (valid) {
       try {
         if (is_skip_guard_eval_unsafe) {
-          valid = cache_entry.diff_guard_root_mgr == nullptr &&
-                  torch::dynamo::root_guard_manager_has_no_guards(
-                      cache_entry.root_mgr)
-              ? true
-              : torch::dynamo::run_root_guard_manager(
-                    cache_entry.diff_guard_root_mgr, f_locals);
+          valid = cache_entry_has_no_guards(
+                      cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
+              torch::dynamo::run_root_guard_manager(
+                      cache_entry.diff_guard_root_mgr, f_locals);
         } else {
           valid = torch::dynamo::run_root_guard_manager(
               cache_entry.root_mgr, f_locals);
@@ -240,17 +248,7 @@ static CacheEntry* lookup_in_list(
   return nullptr;
 }
 
-static bool cache_entry_has_no_guards(
-    CacheEntry& cache_entry,
-    bool is_skip_guard_eval_unsafe) {
-  if (is_skip_guard_eval_unsafe && cache_entry.diff_guard_root_mgr != nullptr) {
-    return torch::dynamo::root_guard_manager_has_no_guards(
-        cache_entry.diff_guard_root_mgr);
-  }
-  return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
-}
-
-static bool lookup_guardless_in_list(
+static bool try_lookup_without_guard_eval_in_list(
     std::list<CacheEntry>& entries,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
@@ -329,14 +327,18 @@ void lookup(
   *maybe_cached_code = py::none().ptr();
 }
 
-bool lookup_guardless(
+bool try_lookup_without_guard_eval(
     ExtraState* extra_state,
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  for (const auto& entry : extra_state->precompile_entries) {
+  if (!extra_state->precompile_entries.empty()) {
+    // Only the first precompile entry can be safely fast-pathed: a later
+    // guardless entry must not preempt an earlier guarded entry whose guards
+    // may pass.
+    const auto& entry = extra_state->precompile_entries.front();
     if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
       *maybe_cached_code = entry.code.ptr();
       return true;
@@ -352,7 +354,7 @@ bool lookup_guardless(
   for (int i = 0; i < num_ids && found == nullptr; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
-      if (!lookup_guardless_in_list(
+      if (!try_lookup_without_guard_eval_in_list(
               it->second, backend, is_skip_guard_eval_unsafe, &found)) {
         return false;
       }
