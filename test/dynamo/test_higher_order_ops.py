@@ -4502,6 +4502,104 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_vjp_returning_fullgraph_errors(self):
+        def fn(x):
+            return torch.randn_like(x)
+
+        def wrapper_fn(x):
+            return torch.func.vjp(fn, x)
+
+        x = torch.randn(2, 3, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Returning vjpfunc from a compiled region is not supported",
+        ):
+            torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_vjp_returning_graph_breaks_in_non_fullgraph(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            a = x.cos() * 2
+            out, vjpfunc = torch.func.vjp(fn, a)
+            return out, vjpfunc
+
+        x = torch.randn(3, 3)
+        backend = EagerAndRecordGraphs()
+        compiled_out, compiled_vjpfunc = torch.compile(
+            wrapper_fn, backend=backend, fullgraph=False
+        )(x)
+        eager_out, eager_vjpfunc = wrapper_fn(x)
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(
+            compiled_vjpfunc(torch.ones_like(compiled_out))[0],
+            eager_vjpfunc(torch.ones_like(eager_out))[0],
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        graph_code = backend.graphs[0].code
+        self.assertIn("cos", graph_code)
+        self.assertNotIn("_wrap_for_grad", graph_code)
+
+    def test_vjp_returning_graph_breaks_at_offending_call_site(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x, cotangent):
+            vjp = torch.func.vjp
+            out1, vjpfunc1 = vjp(fn, x.cos())
+            grad1 = vjpfunc1(cotangent)[0]
+            out2, vjpfunc2 = vjp(fn, x)
+            return out1, grad1, out2, vjpfunc2
+
+        x = torch.randn(3, 3)
+        cotangent = torch.randn(())
+        backend = EagerAndRecordGraphs()
+        compiled_out1, compiled_grad1, compiled_out2, compiled_vjpfunc2 = torch.compile(
+            wrapper_fn, backend=backend, fullgraph=False
+        )(x, cotangent)
+        eager_out1, eager_grad1, eager_out2, eager_vjpfunc2 = wrapper_fn(x, cotangent)
+
+        self.assertEqual(compiled_out1, eager_out1)
+        self.assertEqual(compiled_grad1, eager_grad1)
+        self.assertEqual(compiled_out2, eager_out2)
+        self.assertEqual(
+            compiled_vjpfunc2(torch.ones_like(compiled_out2))[0],
+            eager_vjpfunc2(torch.ones_like(eager_out2))[0],
+        )
+
+        self.assertGreaterEqual(len(backend.graphs), 1)
+        graph_code = backend.graphs[0].code
+        self.assertIn("_autograd_grad", graph_code)
+        self.assertIn("cos", graph_code)
+
+    def test_vjp_consumed_in_compiled_region_still_compiles(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x, cotangent):
+            out, vjpfunc = torch.func.vjp(fn, x)
+            grad = vjpfunc(cotangent)[0]
+            return out, grad
+
+        x = torch.randn(3, 3)
+        cotangent = torch.randn(())
+        backend = EagerAndRecordGraphs()
+
+        expected = wrapper_fn(x, cotangent)
+        actual = torch.compile(wrapper_fn, backend=backend, fullgraph=True)(
+            x, cotangent
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(backend.graphs), 1)
+        graph_code = backend.graphs[0].code
+        self.assertIn("_wrap_for_grad", graph_code)
+        self.assertIn("_autograd_grad", graph_code)
+
     def test_functional_call(self):
         def wrapper_fn(model, params, inputs, targets):
             prediction = torch.func.functional_call(model, params, (inputs,))

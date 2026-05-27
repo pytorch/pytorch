@@ -302,6 +302,12 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # vjp call sites to graph break at instead of inlining. Populated when
+    # vjp's deferred backward closure leaks dead TensorWrapper tensors as graph
+    # outputs.
+    vjp_offending_call_sites: set[tuple[str, int, int | None]] = dataclasses.field(
+        default_factory=set
+    )
 
     def restart(self) -> None:
         self.index = 0
