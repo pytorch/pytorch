@@ -14234,9 +14234,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.empty(4, 4, device=self.device)
 
         with DeterministicGuard(True, fill_uninitialized_memory=True):
-            with self.assertWarnsRegex(
-                UserWarning, "not supported with cpp_wrapper"
-            ):
+            with self.assertWarnsRegex(UserWarning, "not supported with cpp_wrapper"):
                 torch.compile(fn, fullgraph=True)()
 
     def test_inplace_resize_as(self):
