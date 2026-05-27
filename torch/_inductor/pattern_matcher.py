@@ -2168,44 +2168,6 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
         nd.meta["mutation_region_id"] = mutation_region_id
 
 
-def _mutation_region_anchor(
-    graph: torch.fx.Graph, nodes: Sequence[torch.fx.Node]
-) -> tuple[torch.fx.Node, int]:
-    matched_nodes = OrderedSet(nodes)
-    first_matched_node = None
-    for nd in graph.nodes:
-        if nd in matched_nodes:
-            first_matched_node = nd
-            break
-
-    if first_matched_node is None:
-        first_node = next(iter(graph.nodes))
-        return first_node.prev, 0
-
-    anchor = first_matched_node.prev
-    mutation_region_id = (
-        0 if anchor.op == "root" else get_mutation_region_id(graph, anchor)
-    )
-    return anchor, mutation_region_id
-
-
-def _refresh_mutation_region_ids_from(
-    graph: torch.fx.Graph,
-    anchor: torch.fx.Node,
-    mutation_region_id: int,
-) -> None:
-    if anchor._erased:
-        compute_mutation_region_ids(graph)
-        return
-
-    nd = anchor.next
-    while nd.op != "root":
-        if is_mutation_op(nd):
-            mutation_region_id += 1
-        nd.meta["mutation_region_id"] = mutation_region_id
-        nd = nd.next
-
-
 def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
     """
     Wrap a bound method to remove 'self' from its signature for FX tracing.
@@ -2321,13 +2283,7 @@ class PatternMatcherPass:
 
                     if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
-                        mutation_region_anchor, mutation_region_id = (
-                            _mutation_region_anchor(graph, m.nodes)
-                        )
                         entry.apply(m, graph, node)
-                        _refresh_mutation_region_ids_from(
-                            graph, mutation_region_anchor, mutation_region_id
-                        )
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
 
