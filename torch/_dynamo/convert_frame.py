@@ -906,6 +906,11 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    if torch.cuda.is_current_stream_capturing():
+        raise exc.TorchRuntimeError(
+            "torch.compile cannot JIT compile during CUDA graph capture."
+        )
+
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
     tracer = InstructionTranslator(
