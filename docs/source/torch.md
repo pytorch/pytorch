@@ -409,6 +409,15 @@ False
 ### Constants
 
 ```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    e
+    pi
+```
+
+```{eval-rst}
 ======================================= ===========================================
 ``e``                                       Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
