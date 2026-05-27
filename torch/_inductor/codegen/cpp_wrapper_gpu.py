@@ -87,9 +87,9 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         if params is None:
             raise RuntimeError(
                 "When autotune_at_compile_time is False, AOTInductor generates"
-                "both JIT code and AOT code. They are expected to have exactly"
-                f"the same kernels. However, AOT code contains kernels, {kernel_names},"
-                "that is not in the JIT code."
+                " both JIT code and AOT code. They are expected to have exactly"
+                f" the same kernels. However, AOT code contains kernels, {kernel_names},"
+                " that is not in the JIT code."
             )
 
         macro_prefix = kernel_name.upper()
