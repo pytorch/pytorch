@@ -106,7 +106,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,14
+moco,pass,13
 
 
 
@@ -149,7 +149,7 @@ resnet18,pass,6
 
 
 
-resnet50,pass,7
+resnet50,pass,6
 
 
 
@@ -193,7 +193,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_to_run,39
+vision_maskrcnn,fail_to_run,38
 
 
 
