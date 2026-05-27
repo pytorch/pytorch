@@ -3870,6 +3870,12 @@ def pointwise(
         raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_configs_by_launch_geometry(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        configs=configs,
+    )
     if return_configs:
         return configs
 
@@ -4365,6 +4371,129 @@ def filter_reduction_configs_for_determinism(
     return configs
 
 
+def filter_configs_by_launch_geometry(
+    *,
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any],
+    triton_meta: dict[str, Any],
+    configs: list[Config],
+) -> list[Config]:
+    """
+    Filter extremely poor launch configurations based on launch geometry and
+    device parallelism, while preserving at least one candidate.
+    """
+    device = triton_meta["device"]
+    if (
+        not inductor_meta.get("filter_configs_by_launch_geometry", False)
+        or device.type != "xpu"
+    ):
+        return configs
+    if len(configs) <= 1:
+        return configs
+
+    cta_count = getattr(device, "multi_processor_count", 0)
+    if not isinstance(cta_count, int) or cta_count <= 0:
+        return configs
+
+    def _size_hint_meta() -> dict[str, int]:
+        # GridExpr expects runtime numel names like xnumel/r0_numel.
+        return {f"{prefix}numel": numel for prefix, numel in size_hints.items()}
+
+    size_hint_meta = _size_hint_meta()
+
+    def _block(cfg: Config, name: str, default: int = 1) -> int:
+        value = cfg.kwargs.get(name, default)
+        return value if isinstance(value, int) and value > 0 else default
+
+    def _block_product(cfg: Config, keys: list[str]) -> int:
+        product = 1
+        for key in keys:
+            product *= _block(cfg, key)
+        return product
+
+    def _estimate_grid_ctas(cfg: Config) -> int:
+        grid_ctas = 1
+        if inductor_meta.get("grid_type"):
+            try:
+                grid = GridExpr.from_meta(inductor_meta, cfg)
+                x_grid, y_grid, z_grid = grid.eval_slow(size_hint_meta)
+                grid_ctas = (
+                    max(1, int(x_grid)) * max(1, int(y_grid)) * max(1, int(z_grid))
+                )
+            except Exception:
+                # Fall back to a generic estimate when grid metadata is incomplete.
+                grid_ctas = 1
+
+        if grid_ctas == 1:
+            for prefix, numel in size_hints.items():
+                if prefix_is_reduction(prefix):
+                    continue
+                block = cfg.kwargs.get(prefix.upper() + "BLOCK", 1)
+                if not isinstance(block, int) or block <= 0:
+                    block = 1
+                grid_ctas *= ceildiv(numel, block)
+
+        return grid_ctas
+
+    def _estimate_cta_work(cfg: Config, grid_ctas: int) -> int:
+        reduction_prefixes = [
+            prefix for prefix in size_hints if prefix_is_reduction(prefix)
+        ]
+        reduction_block_keys = [
+            f"{prefix.upper()}BLOCK" for prefix in reduction_prefixes
+        ]
+        pointwise_work = _block_product(cfg, ["XBLOCK", "YBLOCK", "ZBLOCK"])
+        reduction_work = _block_product(cfg, reduction_block_keys)
+
+        cta_work = pointwise_work * (reduction_work if reduction_prefixes else 1)
+        grid_type = inductor_meta.get("grid_type")
+        if grid_type == MixOrderReductionGrid.__name__:
+            cta_work = max(cta_work, _block(cfg, "XBLOCK") * _block(cfg, "RSPLIT_SIZE"))
+        elif grid_type == CooperativeReductionGrid.__name__ and reduction_prefixes:
+            # Cooperative reduction partitions the reduction dimension across RSPLIT CTAs.
+            cta_work = max(1, cta_work // _block(cfg, "RSPLIT"))
+        elif grid_type == SplitScanGrid.__name__:
+            cta_work = max(cta_work, _block(cfg, "R0_BLOCK"))
+
+        if cta_work <= 1 and grid_ctas > 0:
+            # Last-resort estimate when block metadata is sparse.
+            non_reduction_numel = math.prod(
+                numel
+                for prefix, numel in size_hints.items()
+                if not prefix_is_reduction(prefix)
+            )
+            cta_work = max(1, ceildiv(non_reduction_numel, grid_ctas))
+
+        return cta_work
+
+    def _config_stats(cfg: Config) -> tuple[int, int]:
+        grid_ctas = _estimate_grid_ctas(cfg)
+        return grid_ctas, _estimate_cta_work(cfg, grid_ctas)
+
+    def _is_extremely_bad(grid_ctas: int, cta_work: int) -> bool:
+        return (cta_work <= 32 and grid_ctas >= cta_count * 1024) or (
+            cta_work <= 64 and grid_ctas >= cta_count * 2048
+        )
+
+    config_stats = [(cfg, *_config_stats(cfg)) for cfg in configs]
+    filtered_configs = [
+        cfg
+        for cfg, grid_ctas, cta_work in config_stats
+        if not _is_extremely_bad(grid_ctas, cta_work)
+    ]
+    if len(filtered_configs) == 0:
+        # Keep one candidate with smallest grid_ctas when all configs are deemed poor.
+        return [min(config_stats, key=lambda stats: stats[1])[0]]
+
+    if len(filtered_configs) != len(configs) and log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            "Filtered configs by device heuristics. Input size: %d. Output size: %d",
+            len(configs),
+            len(filtered_configs),
+        )
+    return filtered_configs
+
+
 def reduction(
     size_hints,
     reduction_hint=False,
@@ -4411,6 +4540,12 @@ def reduction(
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_configs_by_launch_geometry(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        configs=configs,
+    )
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
 
     if return_configs:
@@ -4469,6 +4604,12 @@ def cooperative_reduction(
     # TODO(jansel): add more configs in max_autotune
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_configs_by_launch_geometry(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        configs=configs,
+    )
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
@@ -4669,6 +4810,12 @@ def persistent_reduction(
     inductor_meta[persistent_reduction_key] = True
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
+    configs = filter_configs_by_launch_geometry(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        configs=configs,
+    )
 
     max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
         "max_autotune_pointwise"
@@ -4776,6 +4923,12 @@ def split_scan(
                 cfg.kwargs[var] = min_rblock
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_configs_by_launch_geometry(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        configs=configs,
+    )
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,

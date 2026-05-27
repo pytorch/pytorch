@@ -5960,6 +5960,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "deterministic": config.deterministic or config.batch_invariant,
             "batch_invariant": config.batch_invariant,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
+            "filter_configs_by_launch_geometry": config.triton.filter_configs_by_launch_geometry,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }

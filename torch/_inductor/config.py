@@ -1890,6 +1890,16 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Filter out obviously poor autotune configs based on launch geometry
+    # vs device CTA count. This is independent of deterministic mode and
+    # intended to reduce futile benchmarking.
+    # Currently working only for XPUs, but can be extended to other devices
+    # by updating the device guard in implementation after testing on the device.
+    filter_configs_by_launch_geometry = (
+        os.environ.get("TORCHINDUCTOR_TRITON_FILTER_CONFIGS_BY_LAUNCH_GEOMETRY", "0")
+        == "1"
+    )
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
