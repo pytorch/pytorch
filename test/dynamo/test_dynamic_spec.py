@@ -759,9 +759,11 @@ class TestShapeVarDedup(TestCase):
         of two tensor positions sharing one ShapeVar.
         """
         B = ShapeVar("b", min=4, max=16)
+        from typing import cast
+
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        captured_env: ShapeEnv | None = None
+        captured_env = None
 
         def grab_env(gm, _example_inputs):
             nonlocal captured_env
@@ -791,22 +793,22 @@ class TestShapeVarDedup(TestCase):
             },
         )
         compiled(torch.randn(8, 3), torch.randn(8, 4))
-        if captured_env is None:
-            self.fail("expected to capture the compile-time ShapeEnv")
+        env = cast(ShapeEnv, captured_env)
+        self.assertIsNotNone(env, "expected to capture the compile-time ShapeEnv")
         # Every symbol corresponding to ShapeVar B should have the
         # refined range [4, 16] — the second occurrence inherits it
         # via _set_replacement/_refine_ranges across the Eq runtime
         # assert in _wire_spec_slot.
         refined = [
             (sym, vr)
-            for sym, vr in captured_env.var_to_range.items()
+            for sym, vr in env.var_to_range.items()
             if vr.lower == 4 and vr.upper == 16
         ]
         self.assertGreaterEqual(
             len(refined),
             2,
             f"min/max [4,16] did not propagate to repeat occurrence; "
-            f"var_to_range={dict(captured_env.var_to_range)}",
+            f"var_to_range={dict(env.var_to_range)}",
         )
 
     def test_distinct_shape_vars_still_dde(self):
