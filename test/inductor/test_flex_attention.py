@@ -4178,6 +4178,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    def test_xcd_remap_correctness(self, device):
+        """XCD remap should produce identical results to no remap for all H values."""
+        for H in [8, 16, 32, 64]:
+            B, S, D = 1, 512, 64
+            make_tensor = functools.partial(
+                torch.randn,
+                (B, H, S, D),
+                device=device,
+                dtype=torch.bfloat16,
+            )
+            q, k, v = make_tensor(), make_tensor(), make_tensor()
+            block_mask = create_block_mask(
+                _causal_mask, B, H, S, S, device=device
+            )
+
+            remap_opts = {"ENABLE_XCD_REMAP": True, "NUM_XCDS": 8}
+            no_remap_opts = {"ENABLE_XCD_REMAP": False, "NUM_XCDS": 1}
+
+            torch._dynamo.reset()
+            out_remap = torch.compile(
+                lambda q, k, v, bm: flex_attention(
+                    q, k, v, block_mask=bm, kernel_options=remap_opts
+                ),
+                fullgraph=True,
+            )(q, k, v, block_mask)
+
+            torch._dynamo.reset()
+            out_no_remap = torch.compile(
+                lambda q, k, v, bm: flex_attention(
+                    q, k, v, block_mask=bm, kernel_options=no_remap_opts
+                ),
+                fullgraph=True,
+            )(q, k, v, block_mask)
+
+            torch.testing.assert_close(
+                out_remap,
+                out_no_remap,
+                atol=0.0,
+                rtol=0.0,
+                msg=f"XCD remap mismatch at H={H}",
+            )
+
+    @supported_platform
+    @skip_on_cpu
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(

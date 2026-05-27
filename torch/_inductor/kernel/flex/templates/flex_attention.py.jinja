@@ -213,7 +213,7 @@
 
     acc = acc / l_i[:, None]
     idx_zq = tl.program_id(1).to(INDEX_DTYPE)
-    idx_hq = tl.program_id(2).to(INDEX_DTYPE)
+    idx_hq = off_hq
     idx_m = offs_m[:, None].to(INDEX_DTYPE)
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 
