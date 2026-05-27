@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import atexit
 import contextlib
-import copy
 import dataclasses
 import functools
 import logging
@@ -886,58 +885,6 @@ class FakeTensor(Tensor):
             and torch._export.config.detect_non_strict_fake_tensor_leaks
         ):
             fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
-
-    def __copy__(self) -> Self:
-        with no_dispatch():
-            if self.layout is torch.strided:
-                elem = torch.empty((0,), dtype=self.dtype, device="meta")
-                elem.set_(
-                    self.untyped_storage(),
-                    self.storage_offset(),
-                    tuple(self.size()),
-                    self.stride(),
-                )
-                metadata = torch._utils.get_tensor_metadata(self)
-                if metadata:
-                    torch._utils.set_tensor_metadata(elem, metadata)
-                elem.requires_grad_(self.requires_grad)
-            else:
-                elem = self.detach()
-                elem.requires_grad_(self.requires_grad)
-            real_tensor = (
-                copy.copy(self.real_tensor) if self.real_tensor is not None else None
-            )
-
-        out = FakeTensor(
-            self.fake_mode,
-            elem,
-            self.fake_device,
-            constant=self.constant,
-            real_tensor=real_tensor,
-            pytype=self.pytype,
-            dispatch_keys=self.dispatch_keys,
-        )
-        out = torch._utils._set_obj_state(out, torch._utils._get_obj_state(self))
-        out.real_tensor = real_tensor
-        if out.constant is not None:
-            self.fake_mode.fake_tensor_converter.add_constant_storage_mapping(out)
-
-        proxy_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-        pre_dispatch_proxy_mode = torch._ops._get_dispatch_mode_pre_dispatch(
-            torch._C._TorchDispatchModeKey.PROXY
-        )
-        if proxy_mode is not None or pre_dispatch_proxy_mode is not None:
-            from torch.fx.experimental.proxy_tensor import (
-                get_proxy_slot,
-                set_proxy_slot,
-            )
-
-            mode = proxy_mode or pre_dispatch_proxy_mode
-            proxy = get_proxy_slot(self, mode.tracer, None)
-            if proxy is not None:
-                set_proxy_slot(out, mode.tracer, proxy)
-
-        return out
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:

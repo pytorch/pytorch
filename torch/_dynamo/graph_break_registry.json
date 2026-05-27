@@ -535,6 +535,17 @@
       ]
     }
   ],
+  "GB2191": [
+    {
+      "Gb_type": "copy.copy() on Tensor requiring grad",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "torch.export does not support copy.copy() on tensors with requires_grad=True.",
+      "Hints": [
+        "Avoid calling copy.copy() on tensors that require grad.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0042": [
     {
       "Gb_type": "Encountered non user function variable during invoke_subgraph HOP tracing",

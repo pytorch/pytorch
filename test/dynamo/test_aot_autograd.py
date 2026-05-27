@@ -1163,61 +1163,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             with FakeTensorMode():
-                x = torch.randn(3, 3)
+                x = torch.randn(3)
                 y = copy.copy(x)
         self.assertEqual(y.shape, x.shape)
-        self.assertEqual(y.device, x.device)
-        self.assertEqual(y.untyped_storage().device.type, "meta")
-        self.assertEqual(torch._C._dispatch_keys(y), torch._C._dispatch_keys(x))
-        self.assertTrue(torch._C._is_alias_of(x, y))
-        self.assertFalse(y._is_view())
-
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            self.assertEqual(torch.mm(x, x).dtype, torch.bfloat16)
-            self.assertEqual(torch.mm(y, y).dtype, torch.bfloat16)
-
-        with FakeTensorMode():
-            x = torch.randn(3, 3, dtype=torch.complex64)
-            for view, check_metadata in (
-                (x.conj(), torch.Tensor.is_conj),
-                (x._neg_view(), torch.Tensor.is_neg),
-            ):
-                view_copy = copy.copy(view)
-                self.assertTrue(check_metadata(view_copy))
-                self.assertEqual(
-                    torch._C._dispatch_keys(view_copy),
-                    torch._C._dispatch_keys(view),
-                )
-                self.assertTrue(torch._C._is_alias_of(view, view_copy))
-                self.assertFalse(view_copy._is_view())
-
-        fake_mode = FakeTensorMode()
-        real = torch.ones(())
-        fake = fake_mode.fake_tensor_converter.from_real_tensor(
-            fake_mode, real, make_constant=True
-        )
-        fake_copy = copy.copy(fake)
-        self.assertIsNotNone(fake.constant)
-        self.assertIsNotNone(fake_copy.constant)
-        with fake_mode:
-            fake.random_()
-        self.assertIsNone(fake.constant)
-        self.assertIsNone(fake_copy.constant)
-
-        with _config.patch(fake_tensor_propagate_real_tensors=True):
-            fake_mode = FakeTensorMode()
-            fake = fake_mode.from_tensor(torch.randn(2, 3))
-            fake_copy = copy.copy(fake)
-            self.assertIsNot(fake.real_tensor, fake_copy.real_tensor)
-            self.assertTrue(
-                torch._C._is_alias_of(fake.real_tensor, fake_copy.real_tensor)
-            )
-            with fake_mode:
-                fake_copy.resize_(6)
-            self.assertEqual(fake.shape, torch.Size([2, 3]))
-            self.assertEqual(fake_copy.shape, torch.Size([6]))
-            self.assertEqual(fake.real_tensor.shape, torch.Size([2, 3]))
-            self.assertEqual(fake_copy.real_tensor.shape, torch.Size([6]))
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

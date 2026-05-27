@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
+import copy
 import functools
 import inspect
 import logging
@@ -13,6 +14,7 @@ from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -27,7 +29,7 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._opaque_base import OpaqueBase
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -370,11 +372,23 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     return real_callable(*args, **kwargs)
 
 
+def _copy_fake_tensor_for_export(t):
+    if t.requires_grad:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "copy.copy() on tensors with requires_grad=True is not supported "
+            "by torch.export.",
+        )
+    return torch.ops.aten.detach.default(t)
+
+
 @contextmanager
 def _override_builtin_ops():
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
+    copy_dispatch = copy._copy_dispatch  # pyrefly: ignore[missing-attribute]
+    original_fake_tensor_copy = copy_dispatch.get(FakeTensor)
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -387,6 +401,7 @@ def _override_builtin_ops():
     )
 
     math.pow = lambda x, y: x**y  # type: ignore[operator]
+    copy_dispatch[FakeTensor] = _copy_fake_tensor_for_export
 
     try:
         yield
@@ -394,6 +409,10 @@ def _override_builtin_ops():
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow
+        if original_fake_tensor_copy is None:
+            copy_dispatch.pop(FakeTensor, None)
+        else:
+            copy_dispatch[FakeTensor] = original_fake_tensor_copy
 
 
 def make_fake_inputs(
