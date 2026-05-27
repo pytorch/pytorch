@@ -570,7 +570,7 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
-  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
@@ -591,7 +591,7 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(inner_len, outer_len, 1);
   auto tg_x = std::min(maxThreadsPerGroup, inner_len);
-  auto tg_y = std::max(NSUInteger(1), std::min(outer_len, maxThreadsPerGroup / tg_x));
+  auto tg_y = std::clamp(outer_len, 1UL, maxThreadsPerGroup / tg_x);
   auto threadGroupSize = MTLSizeMake(tg_x, tg_y, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
