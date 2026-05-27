@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_FunctionCtx = torch.autograd.function.FunctionCtx
+_TensorTree = torch.Tensor | tuple[object, ...] | list[object] | dict[object, object]
+_MaybeTensor = torch.Tensor | None
+_MaybeTensorTree = _MaybeTensor | tuple[object, ...] | list[object] | dict[object, object]
+_InDims = int | None | tuple[object, ...]
 
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
@@ -107,7 +112,7 @@ custom_function_call = CustomFunctionHigherOrderOperator()
 def custom_function_call_grad(
     interpreter: FuncTorchInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: Any,
+    *operands: torch.Tensor,
 ) -> Any:
     Generated = generate_single_level_function(interpreter, autograd_function)
     with enable_single_level_autograd_function():
@@ -122,7 +127,7 @@ def generate_single_level_function(
 ) -> type[torch.autograd.function._SingleLevelFunction]:
     level = interpreter.level()
 
-    def forward(*operands: Any) -> Any:
+    def forward(*operands: torch.Tensor) -> _TensorTree:
         unwrapped_operands = pytree.tree_map_only(
             torch.Tensor, lambda x: _unwrap_for_grad(x, level), operands
         )
@@ -142,16 +147,18 @@ def generate_single_level_function(
             unwrapped_output, unwrapped_operands, operands, wrap_fn
         )
 
-    def setup_context(ctx: Any, inputs: Any, output: Any) -> Any:
+    def setup_context(
+        ctx: _FunctionCtx, inputs: tuple[Any, ...], output: _TensorTree
+    ) -> Any:
         return autograd_function.setup_context(ctx, inputs, output)
 
     # backward is only used if the transform is TransformType.Grad
-    def backward(ctx: Any, *grads: Any) -> Any:
+    def backward(ctx: _FunctionCtx, *grads: _MaybeTensor) -> _MaybeTensorTree:
         result = autograd_function.backward(ctx, *grads)
         return result
 
     # jvp is only used if the transform is TransformType.Jvp
-    def jvp(ctx: Any, *tangents: Any) -> Any:
+    def jvp(ctx: _FunctionCtx, *tangents: _MaybeTensor) -> _MaybeTensorTree:
         result = autograd_function.jvp(ctx, *tangents)
         return result
 
@@ -190,12 +197,12 @@ NO_OUT_DIMS = "not specified"
 # to have the same object identity as the input.
 # Mode-only functorch will greatly simplify this logic.
 def wrap_outputs_maintaining_identity(
-    outputs: Any,
-    unwrapped_inputs: Any,
-    orig_inputs: Any,
-    wrap_fn: Callable[..., Any],
-    out_dims: Any = NO_OUT_DIMS,
-) -> Any:
+    outputs: _TensorTree,
+    unwrapped_inputs: tuple[Any, ...],
+    orig_inputs: tuple[Any, ...],
+    wrap_fn: Callable[..., torch.Tensor],
+    out_dims: object = NO_OUT_DIMS,
+) -> _TensorTree:
     flat_unwrapped_inputs = pytree.arg_tree_leaves(*unwrapped_inputs)
     flat_orig_inputs = pytree.arg_tree_leaves(*orig_inputs)
 
@@ -313,7 +320,7 @@ def validate_vmap_returns_tuple_of_two_elements(result: Any) -> None:
 def custom_function_call_vmap(
     interpreter: VmapInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: Any,
+    *operands: torch.Tensor,
     **kwargs: Any,
 ) -> Any:
     if any(
@@ -362,7 +369,7 @@ def custom_function_call_vmap_helper(
     interpreter: VmapInterpreter,
     vmap_function: Callable[..., Any],
     op: Any,
-    *operands: Any,
+    *operands: torch.Tensor,
     **kwargs: Any,
 ) -> Any:
     current_level = interpreter.level()
@@ -411,7 +418,7 @@ def custom_function_call_vmap_helper(
     )
 
 
-def unpack_outputs(outputs: tuple[Any, ...]) -> tuple[Any, Any]:
+def unpack_outputs(outputs: tuple[Any, ...]) -> tuple[_TensorTree, _InDims]:
     out_dims = outputs[-1]
     if isinstance(out_dims, tuple):
         outputs = outputs[:-1]
@@ -423,7 +430,7 @@ def unpack_outputs(outputs: tuple[Any, ...]) -> tuple[Any, Any]:
 def custom_function_call_vmap_generate_rule(
     interpreter: VmapInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: Any,
+    *operands: torch.Tensor,
 ) -> Any:
     unwrapped_operands, in_dims = unwrap_batched(operands, interpreter.level())
     vmapped_function = vmapify_autograd_function(
@@ -446,18 +453,18 @@ def custom_function_call_functionalize(
     interpreter: FuncTorchInterpreter,
     autograd_function: type[torch.autograd.Function],
     generate_vmap_rule: bool,
-    *operands: Any,
+    *operands: torch.Tensor,
 ) -> Any:
     raise RuntimeError("NYI: Functionalize rule for custom_function_call")
 
 
 def vmapify_autograd_function(
     autograd_function: type[torch.autograd.Function],
-    in_dims: Any,
+    in_dims: _InDims,
     batch_size: int,
     randomness: str,
 ) -> type[torch.autograd.Function]:
-    def forward(*operands: Any) -> Any:
+    def forward(*operands: torch.Tensor) -> _TensorTree:
         outputs, out_dims = restore_vmap(
             autograd_function.forward, in_dims, batch_size, randomness
         )(*operands)
@@ -466,11 +473,13 @@ def vmapify_autograd_function(
         else:
             return *outputs, out_dims
 
-    def setup_context(ctx: Any, inputs: Any, outputs: Any) -> None:
+    def setup_context(
+        ctx: _FunctionCtx, inputs: tuple[Any, ...], outputs: tuple[Any, ...]
+    ) -> None:
         outputs, out_dims = unpack_outputs(outputs)
         key = id(Generated)
 
-        def inner(inputs: Any, outputs: Any) -> None:
+        def inner(inputs: tuple[Any, ...], outputs: _TensorTree) -> None:
             # wrapped_ctx.save_for_backward will:
             # - unwrap batchedtensors into (tensor, bdim)
             # - save_for_backward(*unwrapped_tensors)
@@ -510,10 +519,12 @@ def vmapify_autograd_function(
             ctx._pt_out_dims = {}
         ctx._pt_out_dims.update({key: out_dims})
 
-    def jvp(ctx: Any, *tangents: Any) -> Any:
+    def jvp(ctx: _FunctionCtx, *tangents: _MaybeTensor) -> _MaybeTensorTree:
         key = id(Generated)
 
-        def jvp_no_context(saved_tensors: Any, tangents: Any) -> Any:
+        def jvp_no_context(
+            saved_tensors: Sequence[torch.Tensor], tangents: tuple[_MaybeTensor, ...]
+        ) -> _MaybeTensorTree:
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
             return autograd_function.jvp(wrapped_ctx, *tangents)
 
@@ -533,7 +544,7 @@ def vmapify_autograd_function(
         else:
             return *result, None
 
-    def backward(ctx: Any, *grad_outputs: Any) -> Any:
+    def backward(ctx: _FunctionCtx, *grad_outputs: _MaybeTensor) -> _MaybeTensorTree:
         key = id(Generated)
         grad_outputs_ = grad_outputs[:-1]
         grad_outputs_in_dims = ctx._pt_out_dims[key]
@@ -546,7 +557,9 @@ def vmapify_autograd_function(
             for grad_output, in_dim in zip(grad_outputs_, grad_outputs_in_dims)
         )
 
-        def backward_no_context(inputs: Any) -> Any:
+        def backward_no_context(
+            inputs: tuple[Sequence[torch.Tensor], tuple[_MaybeTensor, ...]]
+        ) -> _MaybeTensorTree:
             saved_tensors, grad_outputs = inputs
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
             return autograd_function.backward(wrapped_ctx, *grad_outputs)
@@ -580,7 +593,9 @@ def vmapify_autograd_function(
 
 # tangents might be None, so we need to replace
 # the corresponding in_dims with None.
-def get_tangents_in_dims(input_dims: Any, tangents: tuple[Any, ...]) -> Any:
+def get_tangents_in_dims(
+    input_dims: _InDims, tangents: tuple[_MaybeTensor, ...]
+) -> _InDims:
     flat_in_dims, spec = pytree.tree_flatten(input_dims)
     flat_tangents = pytree.arg_tree_leaves(*tangents)
     result = [
@@ -646,7 +661,7 @@ def get_tangents_in_dims(input_dims: Any, tangents: tuple[Any, ...]) -> Any:
 class WrappedCtx:
     _pt_reserved_attrs: tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: _FunctionCtx) -> None:
         if not isinstance(ctx, WrappedCtx):
             reserved_attrs = type(self)._pt_reserved_attrs
             for name in reserved_attrs:
@@ -673,7 +688,9 @@ class WrappedCtx:
 class CtxWithSavedTensors(WrappedCtx):
     _pt_reserved_attrs = ("_pt_new_saved_tensors", *WrappedCtx._pt_reserved_attrs)
 
-    def __init__(self, ctx: Any, new_saved_tensors: Sequence[torch.Tensor]) -> None:
+    def __init__(
+        self, ctx: _FunctionCtx, new_saved_tensors: Sequence[torch.Tensor]
+    ) -> None:
         super().__init__(ctx)
         self._pt_new_saved_tensors = new_saved_tensors
 
@@ -689,7 +706,7 @@ class CtxCustomSave(WrappedCtx):
         *WrappedCtx._pt_reserved_attrs,
     )
 
-    def __init__(self, ctx: Any, current_level: int) -> None:
+    def __init__(self, ctx: _FunctionCtx, current_level: int) -> None:
         super().__init__(ctx)
         self._pt_saved_tensors_bdims: tuple[Any, ...] = ()
         self._pt_current_level = current_level
@@ -707,11 +724,11 @@ class CtxCustomSave(WrappedCtx):
 
 def reductify(
     grad_input: torch.Tensor | tuple[torch.Tensor, ...],
-    grad_input_bdim: int | tuple[int, ...],
-    input_bdim: int | tuple[int, ...],
+    grad_input_bdim: int | None | tuple[int | None, ...],
+    input_bdim: int | None | tuple[int | None, ...],
     batch_size: int,
-    target_shape_without_bdim_to_reduce_to: Any = None,
-) -> tuple[Any, ...]:
+    target_shape_without_bdim_to_reduce_to: Sequence[torch.Size | None] | None = None,
+) -> tuple[torch.Tensor | None, ...]:
     if not isinstance(grad_input, tuple):
         grad_input = (grad_input,)
     if not isinstance(grad_input_bdim, tuple):
@@ -738,7 +755,7 @@ def reductify_leaf(
     grad_input_bdim: int | None,
     input_bdim: int | None,
     batch_size: int,
-    target_shape_without_bdim_to_reduce_to: Any = None,
+    target_shape_without_bdim_to_reduce_to: torch.Size | None = None,
 ) -> torch.Tensor | None:
     if grad_input is None:
         return None
@@ -797,7 +814,9 @@ def autograd_function_forward_rewritten(
     original_forward: Callable[_P, _R],
     original_setup_context: Callable[..., Any],
 ) -> Callable[..., _R]:
-    def new_forward(ctx: Any, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def new_forward(
+        ctx: _FunctionCtx, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _R:
         output = original_forward(*args, **kwargs)
         original_setup_context(ctx, args, output)
         return output
@@ -824,7 +843,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
-            def forward(*args: Any, **kwargs: Any) -> Any:
+            def forward(*args: torch.Tensor, **kwargs: Any) -> Any:
                 nonlocal saved_values
 
                 # The Interpreter here is required to propagate metadata
@@ -846,7 +865,9 @@ class AutogradFunctionApply(HigherOrderOperator):
                 return output
 
             @staticmethod
-            def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+            def setup_context(
+                ctx: _FunctionCtx, inputs: tuple[Any, ...], output: _TensorTree
+            ) -> None:
                 def selected_outputs(idx: Iterable[int]) -> list[Any]:
                     idx_set = set(idx)
                     if isinstance(output, (tuple, list)):
@@ -864,7 +885,7 @@ class AutogradFunctionApply(HigherOrderOperator):
                     )
 
             @staticmethod
-            def backward(ctx: Any, *grad: Any) -> Any:
+            def backward(ctx: _FunctionCtx, *grad: _MaybeTensor) -> _MaybeTensorTree:
                 # The Interpreter here is required to propagate metadata
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
