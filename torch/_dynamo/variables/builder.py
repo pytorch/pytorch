@@ -4373,6 +4373,17 @@ def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
     shape_env._shape_spec_pending_assumptions[:] = keep
 
 
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
+    """Append each ShapesSpec.assumptions SymBool to the pending list.
+    Called BEFORE any input is processed.
+    """
+    for a in shapes_spec._assumptions:
+        bool_expr = a.node.expr
+        shape_env._shape_spec_pending_assumptions.append(
+            (bool_expr.free_symbols, bool_expr)
+        )
+
+
 def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
     """Verify all pending spec assumptions/derived-dim checks have been
     emitted (i.e. every spec IntVar referenced by a derived expression or
@@ -4383,17 +4394,35 @@ def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
         return
 
     subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
-    unbound: set[sympy.Symbol] = set()
-    for free, _ in pending:
-        unbound |= free - subst_keys
-    # Spec symbol names are formatted as "name#uid" by IntVar; strip the
-    # "#uid" suffix to recover the user-facing IntVar name.
-    names = sorted(str(s).rsplit("#", 1)[0] for s in unbound)
+
+    # Strip "#N" uid suffixes for user-facing error messages so callers see
+    # the original IntVar name ("a") rather than the disambiguated internal
+    # form ("a#0"). Works on both single sympy.Symbols and stringified
+    # expressions (e.g. "a#0 > b#1" -> "a > b").
+    def _pretty(s: object) -> str:
+        return re.sub(r"#\d+", "", str(s))
+
+    # Build a "expr (unbound: [...])" line per pending check that still
+    # has unbound deps.
+    lines = []
+    all_unbound: set[sympy.Symbol] = set()
+    for free, bool_expr in pending:
+        missing = free - subst_keys
+        if not missing:
+            raise RuntimeError(
+                f"_finalize_spec_wiring: pending entry has all symbols bound "
+                f"({bool_expr}); _drain_shape_spec_pending_assumptions should "
+                f"have removed it before finalize."
+            )
+        all_unbound |= missing
+        missing_names = sorted(_pretty(s) for s in missing)
+        lines.append(f"  - {_pretty(bool_expr)}  (unbound: {missing_names})")
     raise ValueError(
-        f"shapes_spec: {len(pending)} pending check(s) reference unbound "
-        f"IntVar(s) {names}. Every IntVar used in a derived expression or "
-        f"assumption must also appear as a bare-IntVar slot somewhere in "
-        f"the spec."
+        f"shapes_spec: {len(lines)} pending check(s) reference unbound "
+        f"IntVar(s) {sorted(_pretty(s) for s in all_unbound)}. Every IntVar "
+        f"used in a derived expression or assumption must also appear as a "
+        f"bare-IntVar slot somewhere in the spec. Offending checks:\n"
+        + "\n".join(lines)
     )
 
 
