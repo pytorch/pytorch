@@ -106,8 +106,11 @@ class TestMultiheadAttentionNN(NNTestCase):
                 for j in range(x.shape[1]):
                     for k in range(x.shape[2]):
                         x_curr = x[i, j, k, :]
-                        e_x = np.exp(x_curr - np.amax(x_curr))
-                        output[i, j, k, :] = e_x / np.sum(e_x)
+                        if np.isneginf(x_curr).all():
+                            output[i, j, k, :] = 0
+                        else:
+                            e_x = np.exp(x_curr - np.amax(x_curr))
+                            output[i, j, k, :] = e_x / np.sum(e_x)
             return output
 
         def _split_heads_ref(X, dims, nheads, d_head):
@@ -504,6 +507,74 @@ class TestMultiheadAttentionNN(NNTestCase):
 
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
+
+    def test_multihead_attn_fully_masked_head_need_weights(self):
+        torch.manual_seed(0)
+        src_len = 5
+        embed_dim = 3
+        num_heads = 3
+        query = torch.randn(1, src_len, embed_dim)
+        attn_mask = (
+            torch.tensor([False, False, True])
+            .view(num_heads, 1, 1)
+            .expand(num_heads, src_len, src_len)
+        )
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+        output_ref, _ = mha(
+            query,
+            query,
+            query,
+            attn_mask=attn_mask,
+            average_attn_weights=False,
+            need_weights=False,
+        )
+        output, weights = mha(
+            query,
+            query,
+            query,
+            attn_mask=attn_mask,
+            average_attn_weights=False,
+            need_weights=True,
+        )
+
+        self.assertFalse(torch.isnan(output).any())
+        self.assertFalse(torch.isnan(weights).any())
+        self.assertEqual(output, output_ref)
+        self.assertEqual(weights[:, 2], torch.zeros_like(weights[:, 2]))
+
+    def test_multihead_attn_fully_masked_row_need_weights(self):
+        torch.manual_seed(0)
+        batch_size = 2
+        src_len = 4
+        embed_dim = 8
+        num_heads = 2
+        query = torch.randn(batch_size, src_len, embed_dim)
+        attn_mask = torch.zeros(src_len, src_len, dtype=torch.bool)
+        attn_mask[1] = True
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+        output_ref, _ = mha(
+            query,
+            query,
+            query,
+            attn_mask=attn_mask,
+            average_attn_weights=False,
+            need_weights=False,
+        )
+        output, weights = mha(
+            query,
+            query,
+            query,
+            attn_mask=attn_mask,
+            average_attn_weights=False,
+            need_weights=True,
+        )
+
+        self.assertFalse(torch.isnan(output).any())
+        self.assertFalse(torch.isnan(weights).any())
+        self.assertEqual(output, output_ref)
+        self.assertEqual(weights[:, :, 1], torch.zeros_like(weights[:, :, 1]))
 
     def test_multihead_attn_no_bias(self):
         embed_dim = 8
