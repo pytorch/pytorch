@@ -40,6 +40,7 @@
 #include <ATen/ops/_foreach_add.h>
 #include <ATen/ops/_foreach_mm.h>
 #include <ATen/ops/_foreach_mm_native.h>
+#include <ATen/ops/_grouped_mm_from_ptrs_native.h>
 #include <ATen/ops/_foreach_mul.h>
 #include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
@@ -806,6 +807,15 @@ std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
   }
 
   return outputs;
+}
+
+std::vector<at::Tensor> _grouped_mm_from_ptrs_cuda(
+    const at::Tensor& a_ptrs,
+    const at::Tensor& b_ptrs,
+    int64_t M, int64_t N, int64_t K, int64_t G,
+    int64_t lda, int64_t ldb) {
+  return at::cuda::detail::grouped_mm_from_ptrs(
+      a_ptrs, b_ptrs, M, N, K, G, lda, ldb);
 }
 
 } // namespace at::native

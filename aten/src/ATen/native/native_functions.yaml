@@ -7406,6 +7406,12 @@
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
 
+- func: _grouped_mm_from_ptrs(Tensor a_ptrs, Tensor b_ptrs, int M, int N, int K, int G, int lda, int ldb) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _grouped_mm_from_ptrs_cuda
+
 # NOTE [ Sparse: autograd and API ]
 #
 #

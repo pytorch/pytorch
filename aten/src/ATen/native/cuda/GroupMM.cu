@@ -8,6 +8,15 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_grouped_mm.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/stack.h>
+#endif
+
 
 // Three warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
@@ -666,6 +675,41 @@ void bf16bf16_foreach_mm(
 #else
   TORCH_CHECK(false, "foreach mm is not supported on your system");
 #endif
+}
+
+std::vector<at::Tensor> grouped_mm_from_ptrs(
+    const at::Tensor& a_ptrs,
+    const at::Tensor& b_ptrs,
+    int64_t M, int64_t N, int64_t K, int64_t G,
+    int64_t lda, int64_t ldb) {
+  TORCH_CHECK(a_ptrs.dtype() == at::kLong && b_ptrs.dtype() == at::kLong);
+  TORCH_CHECK(a_ptrs.size(0) == G && b_ptrs.size(0) == G);
+
+  auto a_cpu = a_ptrs.is_cpu() ? a_ptrs : a_ptrs.cpu();
+  auto b_cpu = b_ptrs.is_cpu() ? b_ptrs : b_ptrs.cpu();
+  int64_t* a_p = a_cpu.data_ptr<int64_t>();
+  int64_t* b_p = b_cpu.data_ptr<int64_t>();
+
+  auto device = at::Device(at::kCUDA, at::cuda::current_device());
+  auto opts = at::TensorOptions().device(device).dtype(at::kBFloat16);
+
+  // Wrap each pointer as a 2D tensor (no data copy), then stack into 3D.
+  std::vector<at::Tensor> a_vec, b_vec;
+  a_vec.reserve(G);
+  b_vec.reserve(G);
+  for (int64_t i = 0; i < G; i++) {
+    a_vec.push_back(
+        at::from_blob(reinterpret_cast<void*>(a_p[i]), {M, K}, {lda, 1}, opts));
+    b_vec.push_back(
+        at::from_blob(reinterpret_cast<void*>(b_p[i]), {K, N}, {ldb, 1}, opts));
+  }
+  auto A = at::stack(a_vec);
+  auto B = at::stack(b_vec);
+
+  // Delegate to _grouped_mm — uses whatever kernel it dispatches to
+  // (CUTLASS, cublasLt, etc.)
+  auto out_3d = at::_grouped_mm(A, B);
+  return out_3d.unbind(0);
 }
 
 } // namespace at::cuda::detail
