@@ -853,7 +853,9 @@ class DebugMode(TorchDispatchMode):
         input shapes/dtypes, etc.), then compares tensor hash values, and returns a list of call outputs
         where mismatches were found. With ``fuzzy=True``, the logs are aligned by call signature first,
         so inserted/deleted calls are returned as machine-readable structural mismatches instead of
-        raising immediately.
+        raising immediately. Fuzzy alignment is intentionally conservative: for torch ops, the
+        signature includes rendered args/kwargs, so shape/dtype changes are reported as structure
+        mismatches instead of forcing an operator-name-only alignment.
         Expects input logs to have been run with log_tensor_hashes, and looks for hashes in .log["hash"] & .log["input_hash"]
         (or .post_hashes & .pre_hashes for triton kernels).
 
@@ -929,6 +931,7 @@ class DebugMode(TorchDispatchMode):
                 signature += (repr(tuple(log)),)
             elif isinstance(log, _OutputPlacementCall):
                 signature += (log.placements_str,)
+            # _get_call_name includes the annotation tag, so annotations need no extra fields here.
             return signature
 
         def add_fuzzy_metadata(info, log1_index, log2_index):
@@ -1094,7 +1097,7 @@ class DebugMode(TorchDispatchMode):
                 has_hash2 = log2.log is not None and "hash" in log2.log
                 if has_hash1 != has_hash2:
                     raise ValueError(
-                        f"Output hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                        f"Output hash presence inconsistent for torch op {call_type}[{op_name}] "
                         f"at index {i}: log1 has hash={has_hash1}, log2 has hash={has_hash2}"
                     )
 
@@ -1111,7 +1114,7 @@ class DebugMode(TorchDispatchMode):
                     has_hash2 = log2.log is not None and "input_hash" in log2.log
                     if has_hash1 != has_hash2:
                         raise ValueError(
-                            f"Input hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                            f"Input hash presence inconsistent for torch op {call_type}[{op_name}] "
                             f"at index {i}: log1 has input_hash={has_hash1}, log2 has input_hash={has_hash2}"
                         )
 
@@ -1151,6 +1154,8 @@ class DebugMode(TorchDispatchMode):
                             log2_index,
                         )
                     except (AssertionError, ValueError) as exc:
+                        # Matching signatures can still disagree on hash presence or hash pytree shape.
+                        # In fuzzy mode, keep that machine-readable instead of raising.
                         difference_info.append(
                             structure_mismatch_info(
                                 logs1[log1_index],

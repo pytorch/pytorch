@@ -1219,6 +1219,26 @@ class TestDebugModeUtils(TestCase):
         self.assertEqual(mismatches[0]["call1"], "aten::sin")
         self.assertEqual(mismatches[0]["call2"], "aten::cos")
 
+    def test_check_hash_mismatches_fuzzy_annotation_tags(self):
+        x = torch.arange(8, dtype=torch.float32)
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            DebugMode._annotate("before left")
+            x.sin()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            DebugMode._annotate("before right")
+            x.sin()
+
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs, fuzzy=True)
+
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0]["mismatch_type"], "structure")
+        self.assertEqual(mismatches[0]["reason"], "calls_do_not_align")
+        self.assertEqual(mismatches[0]["call_type1"], "annotation")
+        self.assertEqual(mismatches[0]["call_type2"], "annotation")
+        self.assertEqual(mismatches[0]["call1"], "[annotate] before left")
+        self.assertEqual(mismatches[0]["call2"], "[annotate] before right")
+
     def test_check_hash_mismatches_fuzzy_compare_inputs(self):
         x1 = torch.arange(8, dtype=torch.float32)
         x2 = x1 + 0.5
