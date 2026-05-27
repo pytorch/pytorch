@@ -101,10 +101,6 @@ if (acc := torch.accelerator.current_accelerator()):
     if device_module and hasattr(device_module, 'is_bf16_supported'):
         BFLOAT16_AVAILABLE = device_module.is_bf16_supported()
 
-CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
-    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
-)
-
 _start_time = time.time()
 _logger = logging.getLogger(__name__)
 
@@ -366,7 +362,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
+            if (IS_SANDCASTLE and not TEST_MULTIGPU)
             else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
@@ -567,9 +563,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
-        # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
-        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+        not TEST_MULTIGPU,
+        "NCCL test requires 2+ GPUs",
     )
     @parametrize(
         "type",
