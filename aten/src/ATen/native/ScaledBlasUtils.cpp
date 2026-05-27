@@ -276,18 +276,6 @@ bool is_fp4_type(ScalarType dtype) {
   return dtype == ScalarType::Float4_e2m1fn_x2;
 }
 
-bool is_row_major_2d(const Tensor& t) {
-  return t.stride(0) > t.stride(1) && t.stride(1) == 1;
-}
-
-bool is_col_major_2d(const Tensor& t) {
-  return t.stride(0) == 1 && t.stride(1) > 1;
-}
-
-bool has_zero_dim_2d(const Tensor& t) {
-  return t.size(0) == 0 || t.size(1) == 0;
-}
-
 bool is_single_recipe(
     ArrayRef<ScalingType> recipe_a,
     ArrayRef<ScalingType> recipe_b,
@@ -347,10 +335,30 @@ void validate_scaled_mm_v2_inputs(
     return sym_ceil_div(a, b) * b;
   };
 
-  // Per-recipe scale checks. Wording matches the kernel-side checks in
-  // aten/src/ATen/native/cuda/ScaledBlas.cpp so eager and tracing surface
-  // the same regex-matchable messages.
-  if (is_single_recipe(recipe_a, recipe_b, ScalingType::TensorWise, ScalingType::TensorWise)) {
+  // Per-recipe scale checks. Shapes and dtypes mirror the per-recipe
+  // acceptance functions in aten/src/ATen/native/cuda/ScaledBlas.cpp so a
+  // configuration that survives the meta also survives the kernel
+  // dispatch's `find_scaled_gemm_impl` table walk.
+  const bool is_tw = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::TensorWise, ScalingType::TensorWise);
+  const bool is_rw = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
+  const bool is_mx_1x32 = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
+  const bool is_nv_1x16 = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
+  const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
+  // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately
+  // not validated here: they require SM90 and fail with NotImplementedError
+  // from the kernel on other archs, which tests rely on.
+  const bool is_deepseek = is_single_recipe(
+          recipe_a, recipe_b, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128) ||
+      is_single_recipe(
+          recipe_a, recipe_b, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128) ||
+      is_single_recipe(
+          recipe_a, recipe_b, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128);
+
+  if (is_tw) {
     TORCH_CHECK_VALUE(
         scale_a.size() == 1 && scale_a[0].sym_numel() == 1 &&
             scale_a[0].scalar_type() == ScalarType::Float,
@@ -359,7 +367,10 @@ void validate_scaled_mm_v2_inputs(
         scale_b.size() == 1 && scale_b[0].sym_numel() == 1 &&
             scale_b[0].scalar_type() == ScalarType::Float,
         "scale_b must have 1 Float element");
-  } else if (is_single_recipe(recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise)) {
+  } else if (is_rw) {
+    // Match the kernel's per-tensor RowWise wording exactly. We don't check
+    // dim()/contiguity here -- the kernel has specific, more actionable
+    // diagnostics for those (e.g. "expected scale_b.stride(1) to be 1...").
     TORCH_CHECK_VALUE(
         scale_a.size() == 1 && scale_a[0].sym_numel() == M &&
             scale_a[0].scalar_type() == ScalarType::Float,
@@ -370,16 +381,22 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float,
         "scale_b must have ", N, " Float elements, got ",
         scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-  } else if (is_single_recipe(recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32)) {
+  } else if (is_mx_1x32) {
     c10::SymInt expected_a_elems;
     c10::SymInt expected_b_elems;
-    // ROCm uses a different (simpler) blockwise scale shape than CUDA. We
-    // detect at runtime to keep aten-cpu free of GPU-conditional compilation.
+    // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
+    // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
+    // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
     if (at::globalContext().hasROCM()) {
-      expected_a_elems = sym_ceil_div(M, 32) * mat_a.sym_size(1);
-      expected_b_elems = sym_ceil_div(mat_a.sym_size(1), 32) * mat_b.sym_size(1);
+      // ROCm: K_multiplier=2 doubles M and N (the non-contraction dims) for
+      // packed fp4; K (= mat_a.sym_size(1)) is used raw on both sides.
+      const auto K = mat_a.sym_size(1);
+      const auto M_eff = both_fp4 ? M * 2 : M;
+      const auto N_eff = both_fp4 ? N * 2 : N;
+      expected_a_elems = sym_ceil_div(M_eff, 32) * K;
+      expected_b_elems = sym_ceil_div(N_eff, 32) * K;
     } else {
-      // Match kernel formula: K_unpacked is doubled for packed fp4.
+      // NVIDIA: K_unpacked is doubled for packed fp4 (K_multiplier=2).
       expected_a_elems = sym_round_up(M, 128) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
       expected_b_elems = sym_round_up(N, 128) *
@@ -395,7 +412,10 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-  } else if (is_single_recipe(recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16)) {
+    TORCH_CHECK_VALUE(
+        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        "For Blockwise scaling both scales should be contiguous");
+  } else if (is_nv_1x16) {
     const auto expected_a_elems = sym_round_up(M, 128) *
         sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
     const auto expected_b_elems = sym_round_up(N, 128) *
@@ -410,54 +430,89 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float8_e4m3fn,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-  } else if (is_two_level_nvfp4(recipe_a, recipe_b)) {
+    TORCH_CHECK_VALUE(
+        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        "For Blockwise scaling both scales should be contiguous");
+  } else if (is_nv_2lvl) {
     const auto expected_a_elems = sym_round_up(M, 128) *
         sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
     const auto expected_b_elems = sym_round_up(N, 128) *
         sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    // Split the count check from the per-element check so the error
+    // message points at the actual mismatch.
     TORCH_CHECK_VALUE(
-        scale_a.size() == 2 &&
-            scale_a[0].sym_numel() == expected_a_elems &&
+        scale_a.size() == 2 && scale_b.size() == 2,
+        "Two-level NVFP4 scaling requires 2 scale tensors per side, got ",
+        scale_a.size(), " and ", scale_b.size());
+    TORCH_CHECK_VALUE(
+        scale_a[0].sym_numel() == expected_a_elems &&
             scale_a[0].scalar_type() == ScalarType::Float8_e4m3fn &&
             scale_a[1].sym_numel() == 1 &&
             scale_a[1].scalar_type() == ScalarType::Float,
         "For Blockwise scaling scale_a should have ", expected_a_elems,
-        " elements, got: ", scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
+        " elements, got: ", scale_a[0].sym_numel());
     TORCH_CHECK_VALUE(
-        scale_b.size() == 2 &&
-            scale_b[0].sym_numel() == expected_b_elems &&
+        scale_b[0].sym_numel() == expected_b_elems &&
             scale_b[0].scalar_type() == ScalarType::Float8_e4m3fn &&
             scale_b[1].sym_numel() == 1 &&
             scale_b[1].scalar_type() == ScalarType::Float,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
-        " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
+        " elements, got: ", scale_b[0].sym_numel());
+    TORCH_CHECK_VALUE(
+        scale_a[0].is_contiguous() && scale_b[0].is_contiguous(),
+        "For Blockwise scaling both scales should be contiguous");
+  } else if (!is_deepseek) {
+    // Match the kernel's `find_scaled_gemm_impl` fall-through so unrecognized
+    // recipe combinations fail at trace time rather than at kernel dispatch.
+    TORCH_CHECK_VALUE(
+        false,
+        "Invalid scaling configuration for _scaled_mm_v2: unsupported recipe(s). "
+        "Got mat_a.dtype=", mat_a.scalar_type(),
+        ", mat_b.dtype=", mat_b.scalar_type(),
+        ", recipe_a.size()=", recipe_a.size(),
+        ", recipe_b.size()=", recipe_b.size());
   }
-  // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately not
-  // validated here: they require SM90 and fail with NotImplementedError from
-  // the kernel on other archs, which tests rely on.
 
-  // Swizzle count check, matching the kernel-side `check_swizzle_lengths` in
-  // aten/src/ATen/native/cuda/ScaledBlas.cpp. Only MX/NVFP recipes require
-  // swizzle entries; tensorwise/rowwise/deepseek paths don't consult them.
-  // ROCm has its own (looser) rules, so skip at runtime there.
-  const bool is_mx_or_nvfp = is_single_recipe(
-        recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32) ||
-      is_single_recipe(
-        recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16) ||
-      is_two_level_nvfp4(recipe_a, recipe_b);
-  if (is_mx_or_nvfp && !at::globalContext().hasROCM()) {
+  // Swizzle count + value check, matching the kernel-side checks
+  // `check_swizzle_lengths` and the per-impl `swizzle_a == ...` asserts in
+  // aten/src/ATen/native/cuda/ScaledBlas.cpp. Only MX/NVFP recipes consult
+  // swizzle; tensorwise/rowwise/deepseek paths don't.
+  const bool is_mx_or_nvfp = is_mx_1x32 || is_nv_1x16 || is_nv_2lvl;
+  if (is_mx_or_nvfp) {
     const auto num_args_a = recipe_a.size();
     const auto num_args_b = recipe_b.size();
-    TORCH_CHECK_VALUE(
-        swizzle_a.size() == num_args_a,
-        "swizzle_a must have ", num_args_a, " value",
-        num_args_a == 1 ? "" : "s",
-        ", got ", swizzle_a.size());
-    TORCH_CHECK_VALUE(
-        swizzle_b.size() == num_args_b,
-        "swizzle_b must have ", num_args_b, " value",
-        num_args_b == 1 ? "" : "s",
-        ", got ", swizzle_b.size());
+    const bool is_rocm = at::globalContext().hasROCM();
+    if (!is_rocm) {
+      TORCH_CHECK_VALUE(
+          swizzle_a.size() == num_args_a,
+          "swizzle_a must have ", num_args_a, " value",
+          num_args_a == 1 ? "" : "s",
+          ", got ", swizzle_a.size());
+      TORCH_CHECK_VALUE(
+          swizzle_b.size() == num_args_b,
+          "swizzle_b must have ", num_args_b, " value",
+          num_args_b == 1 ? "" : "s",
+          ", got ", swizzle_b.size());
+      // The first swizzle slot is the blockwise scale's swizzle and must be
+      // SWIZZLE_32_4_4 on NVIDIA. The second slot (NVFP4 two-level) is the
+      // tensorwise scale and is unused, so don't check it.
+      TORCH_CHECK_VALUE(
+          swizzle_a[0] == SwizzleType::SWIZZLE_32_4_4,
+          "scale_a must be swizzled to SWIZZLE_32_4_4 format");
+      TORCH_CHECK_VALUE(
+          swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4,
+          "scale_b must be swizzled to SWIZZLE_32_4_4 format");
+    } else if (is_mx_1x32) {
+      // ROCm only supports the MX path (no NVFP4) and requires NO_SWIZZLE.
+      TORCH_CHECK_VALUE(
+          swizzle_a.size() == 1 && swizzle_b.size() == 1,
+          "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
+          swizzle_a.size(), " and ", swizzle_b.size());
+      TORCH_CHECK_VALUE(
+          swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
+              swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+          "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE");
+    }
   }
 }
 
