@@ -8,6 +8,7 @@ import textwrap
 import unittest
 from threading import Event
 
+import torch
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
@@ -45,6 +46,15 @@ class TestCompileWorker(TestCase):
                 "torch._inductor.compile_worker.subproc_pool.TestException",
             ):
                 a.result()
+        finally:
+            pool.shutdown()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available.")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_cuda_init_in_forked_worker(self):
+        pool = self.make_pool(1)
+        try:
+            self.assertIsNone(pool.submit(torch.cuda.set_device, 0).result())
         finally:
             pool.shutdown()
 
