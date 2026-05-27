@@ -12,16 +12,6 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
-
-
-def _get_cudnn_version():
-    """Safely get cuDNN version, returning None if unavailable."""
-    try:
-        return torch.backends.cudnn.version()
-    except RuntimeError:
-        return None
-
-
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
@@ -51,31 +41,40 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     floating_types_and,
 )
-from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
+from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
 from torch.testing._internal.common_utils import (
-    download_file,
-    dtype2prec_DONTUSE,
-    gradcheck,
     GRADCHECK_NONDET_TOL,
-    gradgradcheck,
-    instantiate_parametrized_tests,
     IS_ARM64,
     IS_LINUX,
     MACOS_VERSION,
     MI300_ARCH,
-    parametrize as parametrize_test,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    download_file,
+    dtype2prec_DONTUSE,
+    gradcheck,
+    gradgradcheck,
+    instantiate_parametrized_tests,
     run_tests,
     serialTest,
     set_default_dtype,
     skipIfRocmArch,
     subtest,
-    TEST_SCIPY,
-    TEST_WITH_ROCM,
     xfailIf,
 )
-
+from torch.testing._internal.common_utils import (
+    parametrize as parametrize_test,
+)
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+
+def _get_cudnn_version():
+    """Safely get cuDNN version, returning None if unavailable."""
+    try:
+        return torch.backends.cudnn.version()
+    except RuntimeError:
+        return None
 
 
 if TEST_WITH_ROCM:
