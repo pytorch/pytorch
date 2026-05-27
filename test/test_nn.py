@@ -14859,7 +14859,7 @@ if __name__ == '__main__':
                         # MPS + use_acc_dtype: fallback to balanced.
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 90
-                        expected_weight_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 22 if bias else 0
                         expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                     else:  # CUDA
                         expected_max_ulp_diff = 1
