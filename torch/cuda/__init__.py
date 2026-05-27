@@ -2091,6 +2091,7 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "use_mem_pool",
+    "_use_uvm",
     "temperature",
     "power_draw",
     "clock_rate",
