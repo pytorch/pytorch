@@ -250,6 +250,27 @@ PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_peek_should_skip_torch_function(
+    PyObject* /*self*/,
+    PyObject* /*unused*/) {
+  HANDLE_TH_ERRORS
+  if (torch::peek_should_skip_torch_function()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_set_skip_next_torch_function(
+    PyObject* /*self*/,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  at::impl::PythonTorchFunctionTLS::exchange_skip_next(
+      PyObject_IsTrue(arg) != 0);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_skip_one_hop_torch_function(
     PyObject* /*self*/,
     PyObject* a) {
@@ -259,10 +280,10 @@ PyObject* THPModule_skip_one_hop_torch_function(
   if (!PyArg_ParseTuple(a, "OOOO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
-  py::tuple py_args = args == Py_None ? py::make_tuple()
+  py::tuple py_args = Py_IsNone(args) ? py::make_tuple()
                                       : py::reinterpret_borrow<py::tuple>(args);
 
-  if (kwargs == Py_None) {
+  if (Py_IsNone(kwargs)) {
     kwargs = nullptr;
   } else {
     TORCH_CHECK_TYPE(PyDict_Check(kwargs), "kwargs must be a dictionary");

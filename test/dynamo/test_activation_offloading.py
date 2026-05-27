@@ -477,26 +477,24 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertGreaterEqual(result, 0)
         _gpu_numa_node.cache_clear()
 
-    def test_wait_tensor_dep_arg_preserved_in_graph(self):
-        """Test that the dep arg on wait_tensor is preserved in the FX graph
-        and that the op accepts all 3 positional args."""
+    def test_wait_tensor_last_use_of_storage_arg_preserved_in_graph(self):
+        """Test that the last_use_of_storage arg on wait_tensor is preserved
+        in the FX graph and that the op accepts all 3 positional args."""
         import torch._functorch._activation_offloading.offload_ops as _offload_ops  # noqa: F401
 
-        # Verify wait_tensor works with all 3 args at the op level
         x_gpu = torch.randn(4, 4, device=GPU_TYPE)
         cpu_result = torch.ops.ao.offload.default(x_gpu)
-        dep = torch.randn(4, device=GPU_TYPE)
-        result = torch.ops.ao.wait_tensor.default(cpu_result, x_gpu, dep)
+        last_use = torch.randn(4, device=GPU_TYPE)
+        result = torch.ops.ao.wait_tensor.default(cpu_result, x_gpu, last_use)
         self.assertEqual(result.shape, cpu_result.shape)
         self.assertEqual(result.device.type, "cpu")
 
-        # Verify the dep arg appears in the FX graph and is not DCE'd
-        def fn_with_dep(x, dep_tensor):
+        def fn_with_last_use(x, last_use_tensor):
             cpu = torch.ops.ao.offload.default(x)
-            out = torch.ops.ao.wait_tensor.default(cpu, x, dep_tensor)
+            out = torch.ops.ao.wait_tensor.default(cpu, x, last_use_tensor)
             return out
 
-        gm = torch.fx.symbolic_trace(fn_with_dep)
+        gm = torch.fx.symbolic_trace(fn_with_last_use)
         wait_nodes = [
             n
             for n in gm.graph.nodes
@@ -505,15 +503,15 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         self.assertEqual(len(wait_nodes), 1)
         self.assertEqual(len(wait_nodes[0].args), 3)
 
-    def test_wait_tensor_dep_arg_fake_tensor(self):
+    def test_wait_tensor_last_use_of_storage_arg_fake_tensor(self):
         """Test wait_tensor fake impl accepts 3 args."""
         import torch._functorch._activation_offloading.offload_ops as _offload_ops  # noqa: F401
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             x_gpu = torch.randn(4, 8, device=GPU_TYPE)
-            dep = torch.randn(4, device=GPU_TYPE)
-            result = torch.ops.ao.wait_tensor.default(x_gpu, None, dep)
+            last_use = torch.randn(4, device=GPU_TYPE)
+            result = torch.ops.ao.wait_tensor.default(x_gpu, None, last_use)
             self.assertEqual(result.shape, x_gpu.shape)
             self.assertEqual(result.device, x_gpu.device)
 

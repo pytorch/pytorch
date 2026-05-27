@@ -131,8 +131,7 @@ static inline PyObject* convertArgToPython(const T& arg) {
     return _THPVariable_Wrap(*tensor_ptr);
   } else if constexpr (std::is_same_v<DecayedT, bool>) {
     PyObject* py_arg = arg ? Py_True : Py_False;
-    Py_INCREF(py_arg);
-    return py_arg;
+    return Py_NewRef(py_arg);
   } else if constexpr (std::is_integral_v<DecayedT>) {
     return PyLong_FromLongLong(static_cast<long long>(arg));
   } else if constexpr (std::is_floating_point_v<DecayedT>) {
