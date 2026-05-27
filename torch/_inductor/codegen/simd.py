@@ -3592,7 +3592,13 @@ class SIMDScheduling(BaseScheduling):
 
         if config.combo_kernels_seed_autotune_cap:
             configs = configs[: _combo_seed_max_configs(seed_kernel)]
-        return configs[0] if len(configs) == 1 else None
+        if len(configs) == 1:
+            return configs[0]
+        # Stash for _bench_combo_seeds_inline so it can override the worker-
+        # built autotuner.configs without recomputing the cap or re-running
+        # the heuristic.
+        seed_kernel._combo_seed_capped_configs = configs
+        return None
 
     @staticmethod
     def _bench_combo_seeds_inline(
@@ -3649,17 +3655,14 @@ class SIMDScheduling(BaseScheduling):
             if src_named not in source_to_autotuner:
                 handle = source_to_handle[src_named]
                 autotuner = handle.result() if hasattr(handle, "result") else handle
-                # Compile-time cap: trim the autotuner's config list before
-                # bench so we don't pay for configs the prepick path would
-                # have rejected.  Safe to mutate -- the autotuner is unique
-                # per source (PyCodeCache dedup) and only used here.
-                if (
-                    config.combo_kernels_seed_autotune_cap
-                    and autotuner.configs is not None
-                ):
-                    cap = _combo_seed_max_configs(seed_kernel)
-                    if len(autotuner.configs) > cap:
-                        autotuner.configs = autotuner.configs[:cap]
+                # Reuse the (already-capped) configs from _try_prepick_seed_
+                # config instead of recomputing the cap and re-trimming the
+                # worker-built list.  Safe -- the autotuner is unique per
+                # source (PyCodeCache dedup) and only used here; identical
+                # sources yield identical capped configs.
+                capped = getattr(seed_kernel, "_combo_seed_capped_configs", None)
+                if capped is not None and autotuner.configs is not None:
+                    autotuner.configs = capped
                 source_to_autotuner[src_named] = autotuner
             compiled.append((slot_idx, source_to_autotuner[src_named], seed_kernel))
 
