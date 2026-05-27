@@ -62,7 +62,6 @@ __all__ = [
     "change_current_allocator",
     "MemPool",
     "use_mem_pool",
-    "_use_uvm",
 ]
 
 
@@ -1369,10 +1368,6 @@ def _use_uvm(device: "Device" = None):
     system RAM on demand. Numerics are identical to regular device allocations;
     only performance is affected due to page migration overhead.
 
-    This is useful for running models or artifacts that were compiled for more
-    GPUs than are locally available (e.g., validating numerics of a 64-GPU
-    precompile artifact on a single 8-GPU node).
-
     Args:
         device (torch.device or int, optional): selected device. Uses the
             current device, given by :func:`~torch.cuda.current_device`,
@@ -1387,10 +1382,12 @@ def _use_uvm(device: "Device" = None):
     .. note::
         Only the current thread's allocations are routed to managed memory.
         Allocations in threads spawned inside this context (e.g. by backward)
-        will use the default allocator.
+        will use the default allocator. Use
+        ``torch.autograd.set_multithreading_enabled(False)`` to force backward
+        onto the calling thread so that backward allocations also use UVM.
 
     .. note::
-        Requires ``cuda.bindings`` package (``pip install cuda-python``).
+        Requires the ``cuda-python`` package (``cuda.bindings``).
     """
     try:
         from cuda.bindings import (  # pyrefly: ignore[missing-import]
@@ -1398,9 +1395,9 @@ def _use_uvm(device: "Device" = None):
         )
     except ImportError:
         raise ImportError(
-            "torch.cuda._use_uvm() requires the 'cuda-python' package for "
-            "cuda.bindings.runtime (cudaMallocManaged, cudaMemAdvise, cudaFree).\n"
-            "Install it with: pip install cuda-python"
+            "torch.cuda._use_uvm() requires the 'cuda-python' package "
+            "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
+            "and cudaFree."
         ) from None
 
     ALLOC_FN = ctypes.CFUNCTYPE(
@@ -1409,6 +1406,11 @@ def _use_uvm(device: "Device" = None):
     FREE_FN = ctypes.CFUNCTYPE(
         None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
     )
+
+    def _check_err(result):
+        err = result if not isinstance(result, tuple) else result[0]
+        if err != cuda_runtime.cudaError_t.cudaSuccess:
+            warnings.warn(f"UVM allocator: CUDA error {err}")
 
     def _uvm_alloc(size, device, stream):
         err, ptr = cuda_runtime.cudaMallocManaged(
@@ -1420,23 +1422,27 @@ def _use_uvm(device: "Device" = None):
             location = cuda_runtime.cudaMemLocation()
             location.type = cuda_runtime.cudaMemLocationType.cudaMemLocationTypeDevice
             location.id = device
-            cuda_runtime.cudaMemAdvise(
-                ptr,
-                size,
-                cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                location,
+            _check_err(
+                cuda_runtime.cudaMemAdvise(
+                    ptr,
+                    size,
+                    cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                    location,
+                )
             )
-            cuda_runtime.cudaMemAdvise(
-                ptr,
-                size,
-                cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                location,
+            _check_err(
+                cuda_runtime.cudaMemAdvise(
+                    ptr,
+                    size,
+                    cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                    location,
+                )
             )
         return ptr
 
     def _uvm_free(ptr, size, device, stream):
         if ptr:
-            cuda_runtime.cudaFree(ptr)
+            _check_err(cuda_runtime.cudaFree(ptr))
 
     c_alloc = ALLOC_FN(_uvm_alloc)
     c_free = FREE_FN(_uvm_free)

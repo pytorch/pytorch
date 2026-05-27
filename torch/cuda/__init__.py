@@ -1664,6 +1664,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 
@@ -2091,7 +2092,6 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "use_mem_pool",
-    "_use_uvm",
     "temperature",
     "power_draw",
     "clock_rate",

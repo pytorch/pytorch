@@ -8424,6 +8424,10 @@ class TestMemPool(TestCase):
             torch.cuda.empty_cache()
             torch.cuda.memory._set_allocator_settings("")
 
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
             x = torch.randn(256, 256, device="cuda")
@@ -8432,6 +8436,10 @@ class TestMemPool(TestCase):
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
 
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
         with torch.cuda._use_uvm():
@@ -8440,6 +8448,10 @@ class TestMemPool(TestCase):
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
 
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
             with torch.autograd.set_multithreading_enabled(False):
