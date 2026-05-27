@@ -355,6 +355,26 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.cubin_raw = kernel.asm.get("zebin", None)
         super().__init__(kernel)
 
+    def load_kernel(self, device: int) -> None:
+        if self.function is not None:
+            return
+
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
+        # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
+        # not a separate module/function pair like the CUDA/HIP launcher.
+        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+            self.cubin_path, self.name, self.shared, device
+        )
+        self.module = None
+        self.cubin_path = None
+        self.cubin_raw = None
+
+    def close(self) -> None:
+        self.module = None
+        # Drop the PyCapsule reference so its destructor can release sycl::kernel.
+        self.function = None
+
 
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"

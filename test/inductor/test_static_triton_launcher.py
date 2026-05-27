@@ -42,6 +42,41 @@ def _patched_getitem(self, grid):
     return launcher_with_native_code
 
 
+class TestStaticTritonLauncherUnit(TestCase):
+    def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
+        load_calls = []
+        kernel_capsule = object()
+
+        class FakeImpl:
+            @staticmethod
+            def _load_kernel(path, name, shared, device):
+                load_calls.append((path, name, shared, device))
+                return kernel_capsule, 7, 11
+
+        launcher = object.__new__(StaticallyLaunchedXpuKernel)
+        launcher.function = None
+        launcher.module = None
+        launcher.cubin_path = "/tmp/kernel.zebin"
+        launcher.cubin_raw = b"zebin"
+        launcher.name = "kernel"
+        launcher.shared = 13
+        launcher.C_impl = FakeImpl
+
+        launcher.load_kernel(3)
+
+        self.assertEqual(load_calls, [("/tmp/kernel.zebin", "kernel", 13, 3)])
+        self.assertIs(launcher.function, kernel_capsule)
+        self.assertEqual(launcher.n_regs, 7)
+        self.assertEqual(launcher.n_spills, 11)
+        self.assertIsNone(launcher.module)
+        self.assertIsNone(launcher.cubin_path)
+        self.assertIsNone(launcher.cubin_raw)
+
+        launcher.close()
+        self.assertIsNone(launcher.function)
+        self.assertIsNone(launcher.module)
+
+
 @requires_gpu_and_triton
 class TestStaticTritonLauncher(TestCase):
     def setUp(self):
