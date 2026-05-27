@@ -1650,6 +1650,85 @@ class FakeTensorConstHandling(TestCase):
                 inputs = [a, b]
                 ref = fn(inputs)
 
+    def test_compile_fake_tensor_in_intlist_repro(self):
+        def fn():
+            max_size = torch.tensor([800, 1216], dtype=torch.int64)
+            batch_shape = list(max_size)
+            return torch.ones(batch_shape)
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._subclasses.fake_tensor.DataDependentOutputException,
+                "aten._local_scalar_dense.default",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    compiled_fn()
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_user_input_item_preserves_non_fake_assertion(self):
+        def fn(x):
+            return torch.ones((x.item(),))
+
+        def check_non_fake_assertion(fn):
+            x = torch.tensor(3, dtype=torch.int64)
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Please convert all Tensors to FakeTensors first",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    fn(x)
+
+        check_non_fake_assertion(fn)
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            check_non_fake_assertion(compiled_fn)
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_input_intermediate_item_preserves_non_fake_assertion(
+        self,
+    ):
+        def fn(x):
+            y = x.abs()
+            return torch.ones((y.item(),))
+
+        def check_non_fake_assertion(fn):
+            x = torch.tensor(-3, dtype=torch.int64)
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Please convert all Tensors to FakeTensors first",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    fn(x)
+
+        check_non_fake_assertion(fn)
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            check_non_fake_assertion(compiled_fn)
+
+    @skipIfTorchDynamo("compares eager and torch.compile exception behavior")
+    def test_compile_fake_tensor_constant_intermediate_item_preserves_non_fake_assertion(
+        self,
+    ):
+        x = torch.tensor(-3, dtype=torch.int64)
+
+        def fn():
+            y = x.abs()
+            return torch.ones((y.item(),))
+
+        def check_non_fake_assertion(fn):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Please convert all Tensors to FakeTensors first",
+            ):
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    fn()
+
+        check_non_fake_assertion(fn)
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            check_non_fake_assertion(compiled_fn)
+
     def test_fake_tensor_batch_norm_cpu(self):
         with torch._subclasses.CrossRefFakeMode():
             m = torch.nn.Sequential(

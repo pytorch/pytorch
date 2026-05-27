@@ -1560,6 +1560,47 @@ class PythonWrapperCodegen(CodeGen):
     def write_get_raw_stream_header_once(self) -> None:
         self.write_get_raw_stream_header()
 
+    @cache_on_self
+    def write_item_with_fake_tensor_mode_helper_once(self) -> None:
+        self.imports.writeline(
+            "from torch._subclasses.fake_tensor import fake_tensor_tls"
+        )
+        self.header.splice(
+            """
+            def _item_with_optional_fake_mode(t, allow_non_fake_inputs):
+                fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+                if fake_mode is None or not allow_non_fake_inputs:
+                    return t.item()
+
+                # This scalar source is a compiler-created buffer. If a user
+                # FakeTensorMode is active, let it fakify the buffer so item()
+                # follows FakeTensorMode's scalar-output semantics.
+                old = fake_tensor_tls.allow_non_fake_inputs_override
+                fake_tensor_tls.allow_non_fake_inputs_override = True
+                try:
+                    return t.item()
+                finally:
+                    fake_tensor_tls.allow_non_fake_inputs_override = old
+            """,
+            strip=True,
+        )
+
+    def dynamic_scalar_source_allows_non_fake_inputs(self, source: ir.IRNode) -> bool:
+        def only_reads_internal_buffers(name: str, seen: OrderedSet[str]) -> bool:
+            if name in V.graph.graph_inputs or name in V.graph.constants:
+                return False
+            buffer = V.graph.name_to_buffer.get(name)
+            if buffer is None or name in seen:
+                return False
+            seen.add(name)
+            return all(
+                only_reads_internal_buffers(read_name, seen)
+                for read_name in buffer.get_read_names()
+            )
+
+        name = source.maybe_get_name()
+        return name is not None and only_reads_internal_buffers(name, OrderedSet())
+
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         # pyrefly: ignore [bad-assignment]
         meta = repr(meta)
@@ -2588,13 +2629,19 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(DynamicScalarLine(self, node))
 
     def _codegen_dynamic_scalar(self, node):
-        (data,) = (t.codegen_reference() for t in node.inputs)
+        self.write_item_with_fake_tensor_mode_helper_once()
+        (source,) = node.inputs
+        data = source.codegen_reference()
+        allow_non_fake_inputs = self.dynamic_scalar_source_allows_non_fake_inputs(
+            source
+        )
+        item_expr = f"_item_with_optional_fake_mode({data}, {allow_non_fake_inputs})"
         if len(node.keypath) == 0:
-            self.writeline(f"{node.sym} = {data}.item()")
+            self.writeline(f"{node.sym} = {item_expr}")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
-            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+            self.writeline(f"{node.sym} = 1 if {item_expr} else 0")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
-            self.writeline(f"{node.sym}_undivided = {data}.item()")
+            self.writeline(f"{node.sym}_undivided = {item_expr}")
             self.writeline(
                 f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
                 f"f'{{{node.sym}_undivided}} not divisible by {node.keypath[0].divisor}'"
