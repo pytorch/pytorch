@@ -122,6 +122,7 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     Identity,
+    Max,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -193,7 +194,7 @@ def _align(nbytes: int) -> int:
 
 def _is_aligned(v: sympy.Expr) -> bool:
     """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
+    if isinstance(v, (sympy.Add, sympy.Max, Max)):
         return all(map(_is_aligned, v.args))
     return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
 
@@ -1422,36 +1423,24 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
-    share_triton: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
-
-    When share_triton=True, the Triton compilation cache is placed in a
-    persistent shared directory rather than inside the per-test temp dir.
-    Triton compilation is a pure function of the kernel source, so sharing
-    compiled kernels across tests is safe and avoids redundant compilation.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
-    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            if share_triton:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(default_cache_dir(), "triton")
-                )
-            else:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(inductor_cache_dir, "triton")
-                )
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
@@ -3134,6 +3123,13 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     )
     if ds_tops is not None:
         return ds_tops
+
+    if not torch.cuda.is_available():
+        log.warning(
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
+        return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
