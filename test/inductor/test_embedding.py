@@ -16,7 +16,7 @@ class TestEmbedding(TestCase):
         indices = torch.tensor([-1, 0])
         opt_fn = torch.compile(fn, backend="inductor")
 
-        with self.assertRaises(IndexError):
+        with self.assertRaisesRegex(IndexError, "index out of range"):
             fn(weight, indices)
         with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
             opt_fn(weight, indices)
