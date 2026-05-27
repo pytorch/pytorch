@@ -662,11 +662,11 @@ class AOTInductorModelContainer {
         offset = constants_internal_offset_[this_main_idx] /
             aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
-        AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+        aoti_cuda_memcpy_throttled(
             internal_constants_ptr,
             user_constant_ptr,
-            constant_size,
-            cudaMemcpyDefault));
+            static_cast<size_t>(constant_size),
+            cudaMemcpyDefault);
 #else
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
