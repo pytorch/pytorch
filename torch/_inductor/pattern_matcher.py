@@ -455,8 +455,6 @@ class MatchContext:
 
     def match(self, pattern: PatternExpr, node: NodeOrConstant) -> MatchResult:
         """wrapper to check reused nodes in patterns"""
-        if not isinstance(node, torch.fx.Node):
-            return FailedMatch("pattern expects node")
         if pattern in self.pattern_to_node:
             if self.pattern_to_node[pattern] == node:
                 return Match(self, pattern)  # already checked this node
