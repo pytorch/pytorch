@@ -60,7 +60,14 @@ from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
-from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._guards import (
+    active_fake_mode,
+    compile_context,
+    compile_runtime_fake_mode,
+    CompileContext,
+    CompileId,
+    tracing,
+)
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -2615,7 +2622,12 @@ class CatchErrorsWrapper:
                         frame,
                     )
 
-        with compile_lock, _disable_current_modes():
+        runtime_fake_mode = active_fake_mode()
+        with (
+            compile_lock,
+            compile_runtime_fake_mode(runtime_fake_mode),
+            _disable_current_modes(),
+        ):
             # skip=1: skip this frame
             result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1

@@ -1118,6 +1118,7 @@ class OutputGraph(OutputGraphCommon):
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.RUNTIME_FAKE_MODE))
 
         ci = torch._C._functorch.peek_interpreter_stack()
         if ci is not None:
@@ -3156,7 +3157,17 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        result = [arg.example for arg in self.graphargs]
+        fake_mode = self.tracing_context.fake_mode
+        result = []
+        for arg in self.graphargs:
+            example = arg.example
+            if (
+                fake_mode is not None
+                and isinstance(example, FakeTensor)
+                and example.fake_mode is not fake_mode
+            ):
+                example = fake_mode.from_tensor(example)
+            result.append(example)
         # pyrefly: ignore[bad-return]
         return result
 

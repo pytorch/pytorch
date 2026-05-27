@@ -1005,6 +1005,7 @@ class HopDispatchSetCache:
 
 
 _TLS = threading.local()
+_MISSING = object()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -1584,10 +1585,35 @@ def active_fake_mode() -> FakeTensorMode | None:
     Returns None if no fake mode is active.
     """
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+    for idx in range(torch._C._len_torch_dispatch_stack() - 1, -1, -1):
+        m = torch._C._get_dispatch_stack_at(idx)
         if isinstance(m, FakeTensorMode):
             return m
 
     return None
+
+
+@contextmanager
+def compile_runtime_fake_mode(fake_mode: FakeTensorMode | None) -> Any:
+    """
+    Preserve an active user FakeTensorMode while compilation disables dispatch
+    modes internally.
+    """
+    prior = getattr(_TLS, "compile_runtime_fake_mode", _MISSING)
+    _TLS.compile_runtime_fake_mode = fake_mode
+    try:
+        yield
+    finally:
+        if prior is _MISSING:
+            del _TLS.compile_runtime_fake_mode
+        else:
+            _TLS.compile_runtime_fake_mode = prior
+
+
+def get_compile_runtime_fake_mode() -> FakeTensorMode | None:
+    return getattr(_TLS, "compile_runtime_fake_mode", None)
+
+
+def compile_runtime_fake_mode_active() -> bool:
+    return get_compile_runtime_fake_mode() is not None or active_fake_mode() is not None

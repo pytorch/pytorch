@@ -99,6 +99,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -759,6 +760,10 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         yield
 
 
+def _has_fake_tensor(inputs: Sequence[InputType]) -> bool:
+    return any(isinstance(t, FakeTensor) for t in inputs)
+
+
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     static_input_idxs: Sequence[int]
@@ -772,6 +777,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
+    runtime_inputs_are_fake: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -2427,6 +2433,7 @@ def compile_fx_forward(
     compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     is_inference: bool = False,
+    runtime_inputs_are_fake: bool = False,
 ) -> OutputCode:
     """
     Compile the forward graph of the given graph module.
@@ -2531,16 +2538,18 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
+    compile_kwargs: _CompileFxKwargs = {
+        "static_input_idxs": get_static_input_idxs(fixed),
+        "cudagraphs": compiler_config_extra.cudagraphs,
+        "graph_id": compiler_config_extra.graph_id,
+        "is_inference": is_inference,
+        "boxed_forward_device_index": compiler_config_extra.forward_device,
+    }
+    if runtime_inputs_are_fake:
+        compile_kwargs["runtime_inputs_are_fake"] = True
+
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        result = inner_compile(
-            gm,
-            example_inputs,
-            static_input_idxs=get_static_input_idxs(fixed),
-            cudagraphs=compiler_config_extra.cudagraphs,
-            graph_id=compiler_config_extra.graph_id,
-            is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device,
-        )
+        result = inner_compile(gm, example_inputs, **compile_kwargs)
 
         if (
             not is_inference
@@ -2558,6 +2567,7 @@ def compile_fx_backward(
     example_inputs: Sequence[InputType],
     compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
+    runtime_inputs_are_fake: bool = False,
 ) -> OutputCode:
     """
     Compile the backward graph of the given graph module.
@@ -2604,15 +2614,17 @@ def compile_fx_backward(
             ),
             cudagraph_annotation_context(cudagraphs),
         ):
-            return inner_compile(
-                gm,
-                example_inputs,
-                static_input_idxs=static_input_idxs,
-                cudagraphs=cudagraphs,
-                is_backward=True,
-                graph_id=compiler_config_extra.graph_id,
-                boxed_forward_device_index=compiler_config_extra.forward_device,
-            )
+            compile_kwargs: _CompileFxKwargs = {
+                "static_input_idxs": static_input_idxs,
+                "cudagraphs": cudagraphs,
+                "is_backward": True,
+                "graph_id": compiler_config_extra.graph_id,
+                "boxed_forward_device_index": compiler_config_extra.forward_device,
+            }
+            if runtime_inputs_are_fake:
+                compile_kwargs["runtime_inputs_are_fake"] = True
+
+            return inner_compile(gm, example_inputs, **compile_kwargs)
 
 
 def run_pre_grad_passes(
@@ -2888,6 +2900,10 @@ def _compile_fx_main(
         assert not config._raise_error_for_testing
 
         num_example_inputs = len(example_inputs_)
+        runtime_inputs_are_fake = (
+            _has_fake_tensor(example_inputs_)
+            or torch._guards.compile_runtime_fake_mode_active()
+        )
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
@@ -2912,6 +2928,7 @@ def _compile_fx_main(
                     compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                     is_inference=is_inference,
+                    runtime_inputs_are_fake=runtime_inputs_are_fake,
                 )
 
         fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
@@ -2947,6 +2964,7 @@ def _compile_fx_main(
                     example_inputs,
                     compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
+                    runtime_inputs_are_fake=runtime_inputs_are_fake,
                 )
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)

@@ -1227,6 +1227,11 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
                 else:
                     self.fx_kwargs[k] = v
+        if torch._guards.compile_runtime_fake_mode_active():
+            # Fake-mode runtime calls need the inductor_compiled_code wrapper
+            # and therefore a cached graph that serialized its original FX graph.
+            # Keep those entries separate from ordinary real-input compiles.
+            self.runtime_fake_mode_active = True
 
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
