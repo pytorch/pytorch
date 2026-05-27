@@ -273,6 +273,28 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_conv_rejects_mismatched_fake_devices(self):
+        with FakeTensorMode() as mode:
+            x = FakeTensor(
+                mode,
+                torch.empty(1, 3, 8, 8, device="meta"),
+                torch.device("cpu"),
+            )
+            w = FakeTensor(
+                mode,
+                torch.empty(3, 3, 3, 3, device="meta"),
+                torch.device("cuda:0"),
+            )
+            b = FakeTensor(mode, torch.empty(3, device="meta"), torch.device("cuda:0"))
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected all tensors to be on the same device.*weight is on cuda:0",
+            ):
+                torch.ops.aten.convolution.default(
+                    x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
+                )
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
