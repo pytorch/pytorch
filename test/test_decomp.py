@@ -561,6 +561,25 @@ comprehensive_failures = {
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
 }
+if IS_LINUX or TEST_WITH_ROCM:
+    # https://github.com/pytorch/pytorch/issues/131050
+    comprehensive_failures.add(
+        skip(
+            "nn.functional.pad",
+            "reflect",
+            device_type="cuda",
+            dtypes=(torch.bfloat16,),
+        )
+    )
+if IS_LINUX:
+    # https://github.com/pytorch/pytorch/issues/76962
+    comprehensive_failures.add(
+        skip(
+            "linalg.ldl_factor_ex",
+            device_type="cuda",
+            dtypes=(torch.complex64, torch.complex128),
+        )
+    )
 
 
 @unMarkDynamoStrictTest
@@ -604,10 +623,6 @@ class TestDecomp(TestCase):
                 torch.autograd.gradcheck(func, args)
             self.check_decomposed(aten_name, mode)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/131050"
-    )
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/76962")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef

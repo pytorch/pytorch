@@ -1,7 +1,6 @@
 # Owner(s): ["module: complex"]
 from __future__ import annotations
 
-import unittest
 from typing import TYPE_CHECKING
 
 import torch
@@ -99,6 +98,15 @@ SKIPS = {
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
 }
+if TEST_WITH_ASAN:
+    SKIPS[
+        Descriptor(
+            op=aten.diagonal_scatter,
+            variant=Variant.GradCheck,
+            device_type="cpu",
+            dtype=torch.complex128,
+        )
+    ] = "https://github.com/pytorch/pytorch/issues/168169"
 
 EXTRA_KWARGS = {
     Descriptor(op=aten.asinh, dtype=torch.complex64, variant=Variant.Op): {
@@ -167,7 +175,6 @@ class TestComplexTensor(TestCase):
 class TestComplexBwdGradients(TestCase):
     _default_dtype_check_enabled = True
 
-    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/168169")
     @ops(
         implemented_op_db,
         dtypes=OpDTypes.supported_backward,
