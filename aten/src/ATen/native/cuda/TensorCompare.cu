@@ -44,7 +44,7 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
-      scalar_t result = ::min(::max(v, lower), upper);
+      scalar_t result = std::min(std::max(v, lower), upper);
 
       result = at::_isnan(upper) ? upper : result;
       result = at::_isnan(lower) ? lower : result;
@@ -66,11 +66,11 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
       if (_isnan(static_cast<opmath_t>(v))) {
         return v;
       } else if (minmax==at::native::detail::ClampLimits::Min){
-        return ::max(static_cast<opmath_t>(v), lim0_val);
+        return std::max(static_cast<opmath_t>(v), lim0_val);
       } else if (minmax==at::native::detail::ClampLimits::Max){
-        return ::min(static_cast<opmath_t>(v), lim0_val);
+        return std::min(static_cast<opmath_t>(v), lim0_val);
       } else {
-        return ::min(::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
+        return std::min(std::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
       }
     });
   });
