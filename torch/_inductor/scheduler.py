@@ -3239,12 +3239,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def combinable_nodes(
         cls, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
-        """Filter a node list down to combo-kernel candidates.
-
-        Drops node kinds that can't or shouldn't share a combo kernel:
-        extern, grouped, mixed-order reduction, existing foreach, and
-        template nodes.
-        """
         extern = [x for x in nodes if isinstance(x, ExternKernelSchedulerNode)]
         if extern:
             log.debug(
@@ -3304,22 +3298,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     len(reduction_nodes),
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
-
-        if config.combo_kernels_exclude_indirect_indexing:
-            indirect_nodes = [
-                n
-                for n in filtered_nodes
-                if any(
-                    isinstance(dep, MemoryDep) and dep.is_indirect()
-                    for dep in n.read_writes.reads_and_writes()
-                )
-            ]
-            if indirect_nodes:
-                log.debug(
-                    "ComboKernels: %d indirect-indexing nodes are filtered",
-                    len(indirect_nodes),
-                )
-                filtered_nodes = [n for n in filtered_nodes if n not in indirect_nodes]
 
         return filtered_nodes
 
