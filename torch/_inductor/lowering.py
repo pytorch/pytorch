@@ -5855,9 +5855,12 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
+    if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_avg_pool2d(x, output_size)
+
+    h_kernel_max = V.graph.sizevars.guard_int(h_kernel_max)
+    w_kernel_max = V.graph.sizevars.guard_int(w_kernel_max)
 
     def start_index(index, out_dim, inp_dim):
         return FloorDiv((index * inp_dim), out_dim)
