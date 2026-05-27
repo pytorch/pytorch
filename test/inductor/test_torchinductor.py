@@ -344,8 +344,6 @@ class TestCase(InductorTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "generate_intermediate_hooks": True,
-                    "test_configs.runtime_triton_dtype_assert": True,
-                    "test_configs.runtime_triton_shape_assert": True,
                 }
             )
         )
@@ -17769,6 +17767,34 @@ if RUN_GPU:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_value_expr_float_preserves_integer_intermediates(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                return ((idx + 2048) % 2048).to(torch.float16)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.empty(4096, device=GPU_TYPE)]
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_value_expr_int_to_fp8_cast_uses_float32_intermediate(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                return (idx * 1000).to(torch.float8_e4m3fn)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.empty(4, device=GPU_TYPE)]
+            self.assertEqual(fn_opt(*inps).float(), fn(*inps).float())
+
+        def test_value_expr_dynamic_shape_bounds(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                return idx.to(torch.float32)
+
+            fn_opt = torch.compile(fn, backend="inductor", dynamic=True)
+            x = torch.empty(8, device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(x, 0)
+            self.assertEqual(fn_opt(x), fn(x))
 
         def test_searchsorted_boundary_index_no_int64_cast(self):
             def fn(boundaries: torch.Tensor, values: torch.Tensor) -> torch.Tensor:

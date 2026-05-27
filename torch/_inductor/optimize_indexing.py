@@ -8,7 +8,7 @@ import sympy
 import torch
 from torch.fx.node import map_aggregate, map_arg
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .loop_body import LoopBody
 from .ops_handler import OP_NAMES
@@ -49,7 +49,6 @@ def _dominated_uses_fit_in_32_bits(
     indirect_vars: list[Any],
     indices: dict[Any, sympy.Expr],
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
-    value_use: OrderedSet[torch.fx.Node] | None = None,
 ) -> bool:
     # If a downstream use explicitly converts to int32 or float, precision is
     # fixed for that chain and we do not need to inspect dominated values past it.
@@ -61,9 +60,6 @@ def _dominated_uses_fit_in_32_bits(
         )
 
     for dominated in dominated_nodes([node], skip_filter):
-        if value_use is not None and dominated not in value_use:
-            continue
-
         if dominated.target in ["store", "output"]:
             continue
 
@@ -723,57 +719,6 @@ def _mark_value_ancestors(
     return marked
 
 
-def _compute_value_expr_dtype(
-    loop_body: LoopBody,
-    node: torch.fx.Node,
-    bounds: dict[torch.fx.Node, ValueRanges[Any]],
-    replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
-    value_use: OrderedSet[torch.fx.Node],
-) -> torch.dtype | None:
-    dtype_arg = node.args[2] if len(node.args) > 2 else None
-    if not isinstance(dtype_arg, torch.dtype):
-        return None
-    dtype: torch.dtype = dtype_arg
-    if dtype == torch.int32:
-        return torch.int32
-
-    get_index_node = node.args[1] if len(node.args) > 1 else None
-    if (
-        not isinstance(get_index_node, torch.fx.Node)
-        or get_index_node.target != "get_index"
-    ):
-        return None
-    index_name = get_index_node.args[0] if len(get_index_node.args) > 0 else None
-    if not isinstance(index_name, str):
-        return None
-    sympy_expr = loop_body.indexing_exprs.get(index_name)
-    if not isinstance(sympy_expr, sympy.Expr):
-        return None
-
-    if not sympy_expr.is_integer:
-        return dtype
-
-    if dtype == torch.bool:
-        return dtype
-
-    if dtype not in (torch.int32, torch.int64):
-        if range_expressable_in_32_bits(bound_sympy(sympy_expr, replacement_vals)):
-            return dtype
-        return torch.int64
-
-    requires_int64 = not _dominated_uses_fit_in_32_bits(
-        node,
-        bounds,
-        loop_body.indirect_vars,
-        loop_body.indexing_exprs,
-        replacement_vals,
-        value_use=value_use,
-    )
-    if dtype == torch.int64:
-        return torch.int64 if requires_int64 else torch.int32
-    return dtype
-
-
 def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     """
     Rewrite value uses of ``index_expr`` FX nodes to ``value_expr``. This lets
@@ -807,7 +752,6 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
         return
 
     output_contexts = _graph_output_contexts(loop_body)
-    graph_value_uses: dict[torch.fx.Graph, OrderedSet[torch.fx.Node]] = {}
 
     def rewrite_graph(graph: torch.fx.Graph) -> None:
         output_is_indexing, output_is_value = output_contexts[graph]
@@ -816,7 +760,6 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             output_is_indexing=output_is_indexing,
             output_is_value=output_is_value,
         )
-        rewritten_value_use = OrderedSet(value_use)
         value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
 
         def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
@@ -838,7 +781,6 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                             "value_expr", node.args, dict(node.kwargs)
                         )
                     clone.meta = node.meta.copy()
-                    rewritten_value_use.add(clone)
                     value_clones[node] = clone
                 return value_clones[node]
 
@@ -863,7 +805,6 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                     clone_value_inputs = clone_rule.rule.value_inputs
                     assert clone_value_inputs is not None
                     rewrite_rule_args(clone, clone_rule, clone_value_inputs)
-                    rewritten_value_use.add(clone)
                     value_clones[node] = clone
                 return value_clones[node]
 
@@ -876,7 +817,6 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 with graph.inserting_before(anchor):
                     clone = graph.node_copy(node, lambda n: value_version(n, anchor))
                 clone.meta = node.meta.copy()
-                rewritten_value_use.add(clone)
                 value_clones[node] = clone
             return value_clones[node]
 
@@ -915,24 +855,10 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 assert value_inputs is not None
                 rewrite_rule_args(node, node_rule, value_inputs)
 
-        graph_value_uses[graph] = rewritten_value_use
         _lint_loop_body_graph(graph)
 
     for graph in graphs:
         rewrite_graph(graph)
 
-    bound_vars = loop_body.bounds()
-    bounds = bound_vars.get_bounds()
-    for graph in graphs:
-        value_use = graph_value_uses[graph]
-        for node in graph.find_nodes(op="call_method", target="value_expr", sort=False):
-            if node not in value_use:
-                continue
-            dtype = _compute_value_expr_dtype(
-                loop_body, node, bounds, bound_vars.replacement_vals, value_use
-            )
-            if dtype is not None:
-                args = list(node.args)
-                args[2] = dtype
-                node.args = tuple(args)
-        _lint_loop_body_graph(graph)
+    LoopBody.get_nodes.clear_cache(loop_body)
+    LoopBody.bounds.clear_cache(loop_body)
