@@ -193,7 +193,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
     # Calculate GQA head sharing
-    gqa_shared_heads = FloorDiv(Hq, Hkv)
+    gqa_shared_heads = V.graph.sizevars.guard_int(FloorDiv(Hq, Hkv))
     if not is_power_of_2(gqa_shared_heads):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
@@ -234,6 +234,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     freeze_irnodes(score_mod_other_buffers)
     freeze_irnodes(mask_mod_other_buffers)
 
+    # Mark SPARSE_KV_BLOCK_SIZE and SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+
     choices: list[Any] = []
     dtype = key.get_dtype()
     head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
@@ -272,20 +276,18 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
-    kernel_options.setdefault(
-        "BLOCK_M",
-        (
-            # m
-            # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
-            # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-            max(
-                next_power_of_2(
-                    V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
-                ),
-                1 if torch.xpu.is_available() else 16,
-            )
+    min_block_m = 1 if torch.xpu.is_available() else 16
+    default_block_m = max(
+        next_power_of_2(
+            V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
         ),
+        min_block_m,
     )
+    if SPARSE_Q_BLOCK_SIZE >= min_block_m:
+        # BLOCK_M is packed over GQA heads, but sparse block mask rows are in
+        # query-index space. Keep the default tile within one sparse query block.
+        default_block_m = min(default_block_m, SPARSE_Q_BLOCK_SIZE)
+    kernel_options.setdefault("BLOCK_M", default_block_m)
 
     query = ir.ExternKernel.realize_input(query)
     stride_b, stride_hq, stride_seq_len_q, stride_qk_head_dim = query.get_stride()
@@ -307,9 +309,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
-    # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
@@ -323,9 +322,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if conf.block_n > SPARSE_KV_BLOCK_SIZE:
             conf.block_n = SPARSE_KV_BLOCK_SIZE
 
-        if SPARSE_Q_BLOCK_SIZE % kernel_options["BLOCK_M"] != 0:
-            continue
-
         if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
             continue
 
@@ -337,6 +333,26 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 cur_kernel_options[k[4:]] = v
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
+
+        block_m = cur_kernel_options["BLOCK_M"]
+        if block_m % gqa_shared_heads != 0:
+            if len(configs) == 1:
+                raise ValueError(
+                    f"BLOCK_M must be divisible by GQA_SHARED_HEADS. We got "
+                    f"BLOCK_M={block_m} and GQA_SHARED_HEADS={gqa_shared_heads}."
+                )
+            continue
+
+        block_m_per_hq = block_m // gqa_shared_heads
+        if block_m_per_hq == 0 or SPARSE_Q_BLOCK_SIZE % block_m_per_hq != 0:
+            if len(configs) == 1:
+                raise ValueError(
+                    f"Q block size must be divisible by BLOCK_M / GQA_SHARED_HEADS. "
+                    f"We got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE}, BLOCK_M={block_m}, "
+                    f"and GQA_SHARED_HEADS={gqa_shared_heads}."
+                )
+            continue
+
         # Performance tuning
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)

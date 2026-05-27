@@ -4253,6 +4253,44 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    def test_flex_decoding_short_gqa_block_m(self, device):
+        S = 100
+        KV_LEN = 256
+        D = 128
+        q = torch.randn(1, 2, S, D, device=device, dtype=torch.float32)
+        k = torch.randn(1, 1, KV_LEN, D, device=device, dtype=torch.float32)
+        v = torch.randn(1, 1, KV_LEN, D, device=device, dtype=torch.float32)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = torch.compile(create_block_mask, fullgraph=True)(
+            causal, 1, 1, S, KV_LEN, device=device
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            ref = flex_attention(q, k, v, block_mask=block_mask, enable_gqa=True)
+
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        with mock.patch.object(
+            flex_kernel_mod,
+            "create_flex_decoding_kernel",
+            wraps=flex_kernel_mod.create_flex_decoding_kernel,
+        ) as decode_kernel:
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, block_mask=block_mask, enable_gqa=True
+            )
+            self.assertTrue(
+                decode_kernel.called,
+                "Expected short GQA query to dispatch to flex decoding kernel.",
+            )
+
+        torch.testing.assert_close(out, ref, atol=3e-3, rtol=1e-2)
+
+    @supported_platform
+    @skip_on_cpu
     def test_backend_triton_decode_errors_when_not_supported(self, device):
         """Requesting decode on unsupported shapes should raise a helpful error."""
         make_tensor = functools.partial(
