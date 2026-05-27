@@ -75,11 +75,21 @@ TORCH_API Module import_ir_module(
 ///
 /// The istream must contain a serialized `Module`, exported via
 /// `torch::jit::ExportModule` in C++.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     std::istream& in,
     std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
+/// Loads a serialized `Module` and any requested extra files from the given
+/// `istream`.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     std::istream& in,
     std::optional<c10::Device> device,
@@ -91,11 +101,21 @@ TORCH_API Module load(
 /// The file stored at the location given in `filename` must contain a
 /// serialized `Module`, exported either via `ScriptModule.save()` in
 /// Python or `torch::jit::ExportModule` in C++.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     const std::string& filename,
     std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
+/// Loads a serialized `Module` and any requested extra files from the given
+/// `filename`.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     const std::string& filename,
     std::optional<c10::Device> device,
@@ -107,11 +127,21 @@ TORCH_API Module load(
 /// The reader adapter, which is for customized input stream, must contain a
 /// serialized `Module`, exported either via `ScriptModule.save()` in
 /// Python or `torch::jit::ExportModule` in C++.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
+/// Loads a serialized `Module` and any requested extra files from the given
+/// shared_ptr `rai`.
+///
+/// When `load_debug_files` is false, records ending in `.debug_pkl` are
+/// skipped. These records contain debug/source-location metadata and are not
+/// required to reconstruct model parameters or run inference.
 TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     std::optional<c10::Device> device,
