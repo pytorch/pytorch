@@ -50,6 +50,9 @@ import torch
 import torch.utils._pytree as pytree
 from itertools import product
 import operator
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+)
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
@@ -389,6 +392,7 @@ class TestCaseMPS(TestCase):
         return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
 
 class TestMemoryLeak(TestCaseMPS):
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/160550")
     def test_mps_memory_leak_detection(self):
         l = []
 
@@ -7673,37 +7677,61 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
-    def test_embedding_dense_backward(self):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("idx_dtype", [torch.int32, torch.int64])
+    @parametrize("padding_idx", [None, 0, 2])
+    @parametrize("scale_grad_by_freq", [False, True])
+    def test_embedding_dense_backward(self, dtype, idx_dtype, padding_idx, scale_grad_by_freq):
         def helper(n, d, m, idx):
-            embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
+            kw = dict(max_norm=True, padding_idx=padding_idx, scale_grad_by_freq=scale_grad_by_freq)
+            embeddingMPS = nn.Embedding(n, d, device='mps', dtype=dtype, **kw)
             embedding_weight = embeddingMPS.weight.detach().cpu()
-            W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
-            idx_MPS = torch.tensor(idx, device='mps')
+            W_MPS = torch.randn((m, d), requires_grad=True, device='mps', dtype=dtype)
+            idx_MPS = torch.tensor(idx, device='mps', dtype=idx_dtype)
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
             a_MPS.retain_grad()
             b_MPS = embeddingMPS(idx_MPS) @ W_MPS.t()  # modifies weight in-place
             b_MPS.retain_grad()
-            out_MPS = (a_MPS.unsqueeze(0) + b_MPS)
-            loss_MPS = out_MPS.sigmoid().prod()
+            loss_MPS = (a_MPS.unsqueeze(0) + b_MPS).sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=embedding_weight)
+            embeddingCPU = nn.Embedding(n, d, _weight=embedding_weight, **kw)
             W_CPU = W_MPS.to('cpu')
-            idx_CPU = torch.tensor(idx)
-            a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
+            idx_CPU = idx_MPS.cpu()
+            a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()
             a_CPU.retain_grad()
-            b_CPU = embeddingCPU(idx_CPU) @ W_CPU.t()  # modifies weight in-place
+            b_CPU = embeddingCPU(idx_CPU) @ W_CPU.t()
             b_CPU.retain_grad()
-            out_CPU = (a_CPU.unsqueeze(0) + b_CPU)
-            loss_CPU = out_CPU.sigmoid().prod()
+            loss_CPU = (a_CPU.unsqueeze(0) + b_CPU).sigmoid().prod()
             loss_CPU.backward()
 
-            self.assertEqual(b_CPU.grad, b_MPS.grad)
-            self.assertEqual(a_CPU.grad, a_MPS.grad)
+            atol = {torch.float32: 1e-5, torch.bfloat16: 5e-3}[dtype]
+            self.assertEqual(b_CPU.grad, b_MPS.grad, atol=atol, rtol=atol)
+            self.assertEqual(a_CPU.grad, a_MPS.grad, atol=atol, rtol=atol)
+            self.assertEqual(embeddingCPU.weight.grad, embeddingMPS.weight.grad, atol=atol, rtol=atol)
 
         helper(3, 5, 7, [0, 1, 2])
         helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
+
+    def test_embedding_dense_backward_strided(self):
+        torch.manual_seed(0)
+        weight = torch.randn(8, 5)
+        ids0 = torch.randint(0, 8, (3, 4))
+        grad0 = torch.randn(3, 4, 5)
+        layouts = {
+            "grad permuted": lambda i, g: (i, g.permute(1, 0, 2).contiguous().permute(1, 0, 2)),
+            "grad sliced": lambda i, g: (i, torch.cat([g, g], dim=1)[:, ::2, :]),
+            "ids permuted": lambda i, g: (i.t().contiguous().t(), g),
+            "ids sliced": lambda i, g: (torch.cat([i, i], dim=1)[:, ::2], g),
+        }
+        for name, layout in layouts.items():
+            def run(device):
+                w = weight.to(device).detach().clone().requires_grad_()
+                ids, g = layout(ids0.to(device), grad0.to(device))
+                nn.functional.embedding(ids, w, padding_idx=0, scale_grad_by_freq=True).backward(g)
+                return w.grad.cpu()
+            self.assertEqual(run("mps"), run("cpu"), msg=name)
 
     # Test pytorch gather
     def test_gather(self):
@@ -13175,8 +13203,8 @@ class TestAdvancedIndexing(TestCaseMPS):
             y_cpu = x_cpu[1:4, [1, 2]]
             y_mps = x_mps[1:4, [1, 2]]
             self.assertEqual(y_cpu, y_mps, str(dtype))
-        # FIXME: use supported_dtypes once uint8 is fixed
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16]]
+        for dtype in self.supported_dtypes:
+            helper(dtype)
 
     def test_boolean_array_indexing(self):
         def helper(dtype):
@@ -13506,12 +13534,29 @@ class TestAdvancedIndexing(TestCaseMPS):
                     torch.use_deterministic_algorithms(False)
 
         for accumulate, deterministic in product((False, True), (False, True)):
-            dtype = torch.float if accumulate else torch.long
+            dtype = torch.long
             if not accumulate and not deterministic:
                 with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
                     helper(dtype, accumulate, deterministic)
             else:
                 helper(dtype, accumulate, deterministic)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_index_put_accumulate_nondeterministic(self, dtype):
+        device = "mps"
+        t = torch.zeros(3, dtype=dtype, device=device)
+        idx = torch.tensor([0, 0, 1, 2, 2, 2], device=device)
+        src = torch.arange(idx.numel(), device=device, dtype=dtype)
+        try:
+            torch.use_deterministic_algorithms(True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                t.index_put_((idx,), src, accumulate=True)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
+            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
+                torch.zeros(3, dtype=dtype, device=device).scatter_add_(0, idx, src)
+        finally:
+            torch.use_deterministic_algorithms(False)
 
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
@@ -14717,6 +14762,61 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(x.grad.cpu(), x_cpu.grad)
             self.assertEqual(gamma.grad.cpu(), gamma_cpu.grad)
 
+    # Test large tensor inputs to `group_norm`. This test currently passes
+    # because 64-bit indexing is supported. But if 64-bit is turned off, the
+    # test fails.
+    #
+    # Input parameters were tuned such that they cause an overflow in 32-bit
+    # indexing while still fitting in MPS memory. For float16 dtypes, the input
+    # is a little larger than 8 GB. MPS allocations are capped at 16 GB, so it
+    # cannot be run on float32.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("trigger_32bit_overflow", [False, True])
+    def test_group_norm_large_input(self, device, dtype, trigger_32bit_overflow):
+        N = 2**7
+        C = 2**6
+        HxW = 2**19 + 64 + (1 if trigger_32bit_overflow else 0)
+
+        # Since we're reducing a large number of half-precision values, a
+        # `torch.rand` input would produce too much floating point error.
+        # So instead, we make the last batch-channel alternating 0 and 1000
+        x = torch.zeros(N, C, HxW, device=device, dtype=dtype)
+        x[-1, -1, 1::2] = 1000.0
+        mps_out = torch.group_norm(x, num_groups=C)
+
+        # Run CPU group_norm only on the last batch-channel to avoid processing
+        # the full tensor on CPU, which would take a long time.
+        x_last_cpu = x[-1:, -1:].cpu()
+        cpu_out_last = torch.group_norm(x_last_cpu, num_groups=1)
+        mps_out_last = mps_out[-1:, -1:].cpu()
+
+        self.assertEqual(mps_out_last, cpu_out_last)
+
+    # Test large tensor inputs to `group_norm`. This test currently passes
+    # because 64-bit indexing is supported. But if 64-bit is turned off, the
+    # test fails.
+    @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("trigger_32bit_overflow", [False, True])
+    def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
+        N = 2**7
+        C = 2**6
+        HxW = 2**19 + (2 if trigger_32bit_overflow else 0)
+
+        x = torch.zeros(N, C, HxW, device=device, dtype=dtype)
+        x[-1, -1, :] = 1000.0
+        x = x.requires_grad_(True)
+        weight = torch.ones(C, device=device, dtype=dtype, requires_grad=True)
+        torch.group_norm(x, num_groups=C, weight=weight).sum().backward()
+
+        x_last_cpu = x[-1:, -1:].detach().cpu().requires_grad_(True)
+        weight_last_cpu = torch.ones(1, dtype=dtype, requires_grad=True)
+        torch.group_norm(x_last_cpu, num_groups=1, weight=weight_last_cpu).sum().backward()
+
+        self.assertEqual(x.grad[-1:, -1:].cpu(), x_last_cpu.grad)
+        self.assertEqual(weight.grad[-1].cpu(), weight_last_cpu.grad.squeeze())
+
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
         # MPSGraph matrixMultiplication produces incorrect results with stride-0
@@ -14791,6 +14891,20 @@ class TestErrorInputs(TestCase):
             torch.mps.synchronize()
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
             torch.nn.functional.one_hot(torch.tensor([-1], device=device), num_classes=8)
+            torch.mps.synchronize()
+
+    def test_bernoulli_invalid_probabilities(self, device):
+        # Scalar-p path: host-side TORCH_CHECK
+        for bad_p in (-0.1, 1.1, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(RuntimeError, r"expects p to be in \[0, 1\]"):
+                torch.empty(4, device=device).bernoulli_(bad_p)
+        # Tensor-p path: device-side assert
+        mixed = torch.tensor([0.5, 1.5, -0.3, float("nan"), float("inf")], device=device)
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.bernoulli(mixed)
+            torch.mps.synchronize()
+        with self.assertRaisesRegex(torch.AcceleratorError, r"expects p to be in \[0, 1\]"):
+            torch.empty_like(mixed).bernoulli_(mixed)
             torch.mps.synchronize()
 
 
@@ -15273,6 +15387,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
 instantiate_parametrized_tests(TestLogical)
