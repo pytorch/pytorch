@@ -12115,6 +12115,23 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
 
+    @skipMeta
+    @parametrize_test("dropout_p", [0.0, 0.5])
+    @parametrize_test("training", [True, False])
+    def test_LSTM_dropout_per_call_randomness(self, device, dropout_p, training):
+        # Consecutive forwards must produce different outputs if dropout > 0
+        # and training: each call should sample a fresh mask
+        torch.manual_seed(0)
+        rnn = nn.LSTM(8, 8, num_layers=2, dropout=dropout_p).to(device)
+        rnn.train(training)
+        x = torch.randn(5, 1, 8, device=device)
+        out1, _ = rnn(x)
+        out2, _ = rnn(x)
+        if dropout_p > 0 and training:
+            self.assertNotEqual(out1, out2)
+        else:
+            self.assertEqual(out1, out2)
+
     @skipMeta  # GRU cell reuses output which was resized
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)

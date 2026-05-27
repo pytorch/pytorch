@@ -2352,20 +2352,51 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # index_expr is the materialization point for SymPy expressions on the
-        # indexing path. int32/int64 requests are normalized to the kernel's
-        # selected index dtype; smaller integer and non-integer requests still
-        # use the requested dtype as the logical cast dtype.
+        # Our sympy expr printing casts to the current kernel index dtype.
+        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        cast_dtype = index_dtype if dtype in (torch.int32, torch.int64) else dtype
-        output_dtype = upcast_compute_type(cast_dtype)
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            cls.to_dtype(f"({indexing.index_str})", cast_dtype),
-            bounds=get_bounds_index_expr(expr),
-            dtype=output_dtype,
-            shape=shape,
-        )
+        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
+
+        # after we emit this var we cast it to the correct dtype
+        orig = config.test_configs.runtime_triton_dtype_assert
+        try:
+            config.test_configs.runtime_triton_dtype_assert = False
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                indexing.index_str,
+                bounds=get_bounds_index_expr(expr),
+                dtype=dtype,
+                shape=shape,
+            )
+        finally:
+            config.test_configs.runtime_triton_dtype_assert = orig
+
+        if dtype not in (torch.int32, torch.int64):
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                cls.to_dtype(var, dtype),
+                dtype=upcast_compute_type(dtype),
+                shape=var.shape,
+            )
+        else:
+            # TODO: we are not always consistent in enforcing that the output of the index expr printing
+            # results in the indexing dtype. So if we detect that we have an input which might type promote
+            # to a dtype other than indexing dtype, add a cast.
+            # Trying to avoid
+            dtype = index_dtype
+            for index_var in expr.free_symbols:
+                if symbol_is_type(index_var, SymT.TMP):
+                    dtype = torch.promote_types(
+                        dtype, V.kernel.cse.varname_map[index_var.name].dtype
+                    )
+
+            if dtype != index_dtype:
+                var = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    cls.to_dtype(var, index_dtype),
+                    dtype=index_dtype,
+                    shape=var.shape,
+                )
 
         var.mask_vars = indexing.mask_vars
         return var
@@ -3918,34 +3949,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
-    def _range_tree_mask_shape(self, mask: str) -> BlockShapeType:
-        for tree in self.active_range_trees():
-            if tree.owns_mask(mask):
-                return tree.mask_shape(self.triton_tensor_ndim())
-        return None
-
-    def _mask_shape(self, mask: str | TritonCSEVariable) -> BlockShapeType:
-        if isinstance(mask, TritonCSEVariable):
-            return mask.shape
-        return self._range_tree_mask_shape(mask)
-
-    def _broadcast_shape_with_masks(
-        self,
-        shape: BlockShapeType,
-        mask_vars: OrderedSet[str | TritonCSEVariable],
-    ) -> BlockShapeType:
-        if shape is None:
-            return None
-
-        result_shape = tuple(shape)
-        for mask in mask_vars:
-            mask_shape = self._mask_shape(mask)
-            if mask_shape is None:
-                return None
-            result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
-
-        return result_shape
-
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
@@ -4217,12 +4220,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 line = f"tl.where({indexing.mask_str}, {result_var}, {other_val})"
                 result_var = self.cse.generate(
-                    load_buffer,
-                    line,
-                    dtype=dtype,
-                    shape=self._broadcast_shape_with_masks(
-                        result_var.shape, indexing.mask_vars
-                    ),
+                    load_buffer, line, dtype=dtype, shape=result_var.shape
                 )
 
         if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
@@ -4594,15 +4592,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
-        index_dtype = (
-            self.features.select_index_dtype()
-            if reduction_type in ("argmax", "argmin")
-            else None
-        )
-        result_dtype = index_dtype if index_dtype is not None else torch_acc_type
         result_shape = list(self.dense_size_list())
         result_shape[dim] = "1"
-        result_var: Any = self.cse.newvar(dtype=result_dtype, shape=tuple(result_shape))
+        result_var: Any = self.cse.newvar(
+            dtype=torch_acc_type, shape=tuple(result_shape)
+        )
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
@@ -4665,17 +4659,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
-                assert index_dtype is not None
+                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
                 if logical_index:
-                    accumulator_index = (
-                        f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
-                    )
+                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
                 else:
                     accumulator_index = str(
                         self.cse.generate(
                             self.compute,
                             f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                            dtype=index_dtype,
+                            dtype=accumulator_dtype,
                             shape=masked_value.shape,
                         )
                     )
@@ -4683,6 +4675,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4755,7 +4748,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
-                assert index_dtype is not None
+                index_dtype = self.features.select_index_dtype()
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, "
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
