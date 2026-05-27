@@ -1388,15 +1388,19 @@ class TestConvolutionNNDeviceType(NNTestCase):
         with torch.backends.cudnn.flags(enabled=False):
             inputs = torch.randn(1, 1, 16, 16, device=device, dtype=torch.half)
             deconv = nn.ConvTranspose2d(
-                1, 1, 3, stride=2, padding=1, output_padding=1,
-                device=device, dtype=torch.half,
+                1,
+                1,
+                3,
+                stride=2,
+                padding=1,
+                output_padding=1,
+                device=device,
+                dtype=torch.half,
             )
             output = deconv(inputs)
             output.mean().backward()
 
-    @dtypesIfCUDA(
-        torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []
-    )
+    @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -1436,9 +1440,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     # Covering special case when group > 1, input-channel / group < 16
     # and output-channel is multiple of 16
-    @dtypesIfCUDA(
-        torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []
-    )
+    @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -3492,8 +3494,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
             1, in_channels, dim, dim, device=device, dtype=torch.half
         )
         model = nn.Conv2d(
-            in_channels, out_channels, kernel_size, stride, padding,
-            device=device, dtype=torch.half,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            device=device,
+            dtype=torch.half,
         )
         output = model(input_tensor)
         model_cpu = model.cpu().float()
@@ -4107,9 +4114,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
-            self._test_conv_nhwc_nchw(
-                nn.Conv2d, n, c, h, w, k, filter_size, device
-            )
+            self._test_conv_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_nhwc_nchw(
                 nn.ConvTranspose2d, n, c, h, w, k, filter_size, device
             )
