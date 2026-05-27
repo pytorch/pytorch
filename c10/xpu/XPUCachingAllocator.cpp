@@ -410,16 +410,11 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
-#if SYCL_COMPILER_VERSION >= 20260000
-    *ptr = sycl::ext::oneapi::experimental::aligned_alloc_device(
-        kDeviceAlignment, size, xpu::get_raw_device(p.device()));
-#else
     *ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
         xpu::get_raw_device(p.device()),
         xpu::get_device_context());
-#endif
   }
 }
 
@@ -427,11 +422,7 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
-#if SYCL_COMPILER_VERSION >= 20260000
-    sycl::ext::oneapi::experimental::free(ptr);
-#else
     sycl::free(ptr, xpu::get_device_context());
-#endif
   }
 }
 

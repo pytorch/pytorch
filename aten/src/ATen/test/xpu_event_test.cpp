@@ -93,11 +93,7 @@ TEST(XpuEventTest, testXPUEventFunction) {
   EXPECT_TRUE(event.query());
 
   stream.synchronize();
-#if SYCL_COMPILER_VERSION >= 20260000
-  sycl::ext::oneapi::experimental::free(deviceData);
-#else
   sycl::free(deviceData, c10::xpu::get_device_context());
-#endif
 
   if (at::xpu::device_count() <= 1) {
     return;

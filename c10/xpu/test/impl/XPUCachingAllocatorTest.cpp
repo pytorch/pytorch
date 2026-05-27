@@ -27,13 +27,8 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocate) {
   auto buffer = allocator->allocate(_10mb);
   void* ptr0 = buffer.get();
   // tmp is not allocated via device caching allocator.
-#if SYCL_COMPILER_VERSION >= 20260000
-  void* tmp = sycl::ext::oneapi::experimental::aligned_alloc_device(
-      512, _10mb, c10::xpu::get_raw_device(0));
-#else
   void* tmp = sycl::aligned_alloc_device(
       512, _10mb, c10::xpu::get_raw_device(0), c10::xpu::get_device_context());
-#endif
   void* ptr1 = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   // We have reserved 500M memory that can be reused. When we allocate ptr0
   // and ptr1 via device caching allocator, they should be on the same block.
@@ -44,11 +39,7 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocate) {
   auto diff = static_cast<char*>(ptr1) - static_cast<char*>(ptr0);
   EXPECT_EQ(diff, _10mb);
   c10::xpu::XPUCachingAllocator::raw_delete(ptr1);
-#if SYCL_COMPILER_VERSION >= 20260000
-  sycl::ext::oneapi::experimental::free(tmp);
-#else
   sycl::free(tmp, c10::xpu::get_device_context());
-#endif
   c10::xpu::XPUCachingAllocator::emptyCache();
 }
 
@@ -104,13 +95,8 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocateByExternalStream) {
   auto buffer = allocator->allocate(_10mb);
   void* ptr0 = buffer.get();
   // tmp is not allocated via device caching allocator.
-#if SYCL_COMPILER_VERSION >= 20260000
-  void* tmp = sycl::ext::oneapi::experimental::aligned_alloc_device(
-      512, _10mb, c10::xpu::get_raw_device(0));
-#else
   void* tmp = sycl::aligned_alloc_device(
       512, _10mb, c10::xpu::get_raw_device(0), c10::xpu::get_device_context());
-#endif
   void* ptr1 = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
   // We have reserved 500M of memory for reuse. When allocating `ptr0` and
   // `ptr1` through the device caching allocator, they should be allocated from
@@ -123,11 +109,7 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocateByExternalStream) {
   auto diff = static_cast<char*>(ptr1) - static_cast<char*>(ptr0);
   EXPECT_EQ(diff, _10mb);
   c10::xpu::XPUCachingAllocator::raw_delete(ptr1);
-#if SYCL_COMPILER_VERSION >= 20260000
-  sycl::ext::oneapi::experimental::free(tmp);
-#else
   sycl::free(tmp, c10::xpu::get_device_context());
-#endif
   delete ext_queue;
   c10::xpu::XPUCachingAllocator::emptyCache();
 }
