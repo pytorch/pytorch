@@ -46,9 +46,11 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
       scalar_t result = std::min(std::max(v, lower), upper);
 
-      result = at::_isnan(upper) ? upper : result;
-      result = at::_isnan(lower) ? lower : result;
-      result = at::_isnan(v) ? v : result;
+      if constexpr (std::numeric_limits<scalar_t>::has_quiet_NaN) {
+        result = at::_isnan(upper) ? upper : result;
+        result = at::_isnan(lower) ? lower : result;
+        result = at::_isnan(v) ? v : result;
+      }
 
       return result;
     });
