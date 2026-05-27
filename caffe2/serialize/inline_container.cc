@@ -9,6 +9,7 @@
 #include <ostream>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
@@ -908,8 +909,17 @@ void PyTorchStreamWriter::writeSerializationId() {
   // This is best effort to create a fixed-length, unique and deterministic id
   // for the serialized files without incurring additional computation overhead.
   if (files_written_.find(kSerializationIdRecordName) == files_written_.end()) {
+    // Iterate the record names in sorted order so the resulting hash doesn't
+    // depend on the iteration order of ``files_written_`` which is an
+    // ``unordered_set`` and so depends on the standard libary implementation
+    // / build configuration. Without sorting two machines writing the same
+    // set of records can otherwise produce different serialization ids for
+    // bit-identical model weights (see #184219).
+    std::vector<std::string> sorted_record_names(
+        files_written_.begin(), files_written_.end());
+    std::sort(sorted_record_names.begin(), sorted_record_names.end());
     uint64_t combined_record_name_hash = 0;
-    for (const std::string& record_name : files_written_) {
+    for (const std::string& record_name : sorted_record_names) {
       size_t record_name_hash = c10::hash<std::string>{}(record_name);
       combined_record_name_hash =
           c10::hash_combine(combined_record_name_hash, record_name_hash);
