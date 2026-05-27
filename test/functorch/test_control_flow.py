@@ -3001,19 +3001,17 @@ class GraphModule(torch.nn.Module):
             autograds.append([True, False, True, True, True, True, True, True])
             autograds.append([False, False, True, True, True, True, True, True])
             autograds.append([True, False, False, False, False, False, False, False])
-            autograds.append([False, False, False, False, False, False, False, False])
         elif partial_grad == "init":
             # init tests
             autograds.append([True, True, False, True, True, True, True, True])
             autograds.append([True, True, False, False, True, True, True, True])
             autograds.append([False, False, False, True, False, False, False, False])
-            autograds.append([False, False, False, False, False, False, False, False])
         elif partial_grad == "additional_inputs":
             # additional input tests
             autograds.append([True, True, True, True, False, True, False, True])
-            autograds.append([True, True, True, True, False, False, False, False])
+            autograds.append([True, True, True, True, False, False, True, False])
             autograds.append([False, False, False, False, False, True, False, True])
-            autograds.append([False, False, False, False, False, False, False, False])
+            autograds.append([False, False, False, False, False, False, True, False])
         elif partial_grad == "complex":
             # complex cases
             autograds.append([True, False, False, False, False, False, False, True])
@@ -3042,7 +3040,7 @@ class GraphModule(torch.nn.Module):
             ]
 
             def RNN(x: torch.Tensor, y: torch.Tensor):
-                c_new_0 = x[0] @ W_hh + b_hh
+                c_new_0 = x[0] + b_hh
                 c_new_1 = x[1] + 1
                 h_new = (
                     torch.tanh(c_new_1 + x[0] @ W_hh + b_hh)

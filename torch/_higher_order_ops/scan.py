@@ -817,12 +817,10 @@ class ScanAutogradImpl:
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
     with disable_proxy_modes_tracing():
-        # The per-step bw_gm must compute d(carry_next)/d(init): in the reverse
-        # scan that gradient becomes the previous step's grad_carry. If init was
-        # passed in with requires_grad=False, AOT joint creation drops it from
+        # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
         # zeroing gradients that should reach closed-over additional_inputs from
-        # earlier steps. Force the carry samples to require grad during tracing;
+        # earlier steps. Thus, we force the carry samples to require grad during tracing;
         # this only affects the traced graphs, not the operands passed to apply.
         sample_init = []
         for t in init:
@@ -833,7 +831,6 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
         hop_partitioned_graph: HopPartitionedGraph = (
             HopGraphMinCutPartitioner.create_partitioned_graph(
                 combine_fn,
-                # (*init, *[x[0] for x in xs], *additional_inputs),
                 (*sample_init, *[x[0] for x in xs], *additional_inputs),
                 always_recompute_complex_exprs=True,
             )
