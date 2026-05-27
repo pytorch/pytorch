@@ -80,25 +80,21 @@ class Vectorized<double> {
     return b;
   }
   static Vectorized<double> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size())
+    if (count >= size())
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
-
-    // Zero tail past `count`.
-    __at_align__ double tmp_values[size()] = {};
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const double*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(double));
-    return _mm256_load_pd(tmp_values);
+    // Masked load: lanes [0, count) are read, the rest are zero.
+    const __m256i mask = _mm256_cmpgt_epi64(
+        _mm256_set1_epi64x(count), _mm256_setr_epi64x(0, 1, 2, 3));
+    return _mm256_maskload_pd(reinterpret_cast<const double*>(ptr), mask);
   }
   void store(void* ptr, int count = size()) const {
-    if (count == size()) {
+    if (count >= size()) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
-      double tmp_values[size()];
-      _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(
-          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(double));
+      // Masked store: only lanes [0, count) are written.
+      const __m256i mask = _mm256_cmpgt_epi64(
+          _mm256_set1_epi64x(count), _mm256_setr_epi64x(0, 1, 2, 3));
+      _mm256_maskstore_pd(reinterpret_cast<double*>(ptr), mask, values);
     }
   }
   const double& operator[](int idx) const = delete;
