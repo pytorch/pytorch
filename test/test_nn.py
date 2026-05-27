@@ -15102,18 +15102,11 @@ if __name__ == '__main__':
             allow_retain_graph=True,
         )
 
-        if bias:
-            def f(i, w, b):
-                return nn.functional.linear_cross_entropy(
-                    i, w, target, linear_bias=b, reduction="mean", options=options,
-                )
-            torch.autograd.gradcheck(f, (inp, weight, linear_bias))
-        else:
-            def f(i, w):
-                return nn.functional.linear_cross_entropy(
-                    i, w, target, reduction="mean", options=options,
-                )
-            torch.autograd.gradcheck(f, (inp, weight))
+        def f(i, w, b=None):
+            return nn.functional.linear_cross_entropy(
+                i, w, target, linear_bias=b, reduction="mean", options=options,
+            )
+        torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
 
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
