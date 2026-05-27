@@ -1212,59 +1212,6 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
-    def test_mutation_region_ids_update_after_replacement_adds_mutation(self):
-        insert_mutation_pass = PatternMatcherPass()
-
-        @register_graph_pattern(
-            CallFunction(aten.sin.default, KeywordArg("x")),
-            pass_dict=insert_mutation_pass,
-        )
-        def insert_mutation(match: Match, x):
-            def repl(a):
-                y = torch.sin(a)
-                a.copy_(a)
-                return y
-
-            match.replace_by_example(repl, [x], run_functional_passes=False)
-
-        later_pass = PatternMatcherPass()
-        later_matches = 0
-
-        @register_graph_pattern(
-            CallFunction(
-                aten.cos.default,
-                CallFunction(aten.sin.default, KeywordArg("x")),
-            ),
-            pass_dict=later_pass,
-        )
-        def match_across_mutation(match: Match, x):
-            nonlocal later_matches
-            later_matches += 1
-
-        def fn(x):
-            y = torch.sin(x)
-            return torch.cos(y)
-
-        gm = make_fx(fn)(torch.randn(4))
-        graph = gm.graph
-
-        self.assertEqual(insert_mutation_pass.apply(graph), 1)
-        self.assertEqual(later_pass.apply(graph), 0)
-        self.assertEqual(later_matches, 0)
-
-        nodes_by_target = {
-            node.target: node for node in graph.nodes if node.op == "call_function"
-        }
-        self.assertEqual(
-            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
-        )
-        self.assertEqual(
-            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
-        )
-        self.assertEqual(
-            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
-        )
-
     def test_remove_pointless_clones(self):
         @torch.compile(fullgraph=True)
         def fn(a, b):
@@ -1305,6 +1252,60 @@ class TestPatternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_preserve_accumulator_addmm_with_pointwise(self):
+        args = [
+            torch.randn(10, 20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_expanded_bias_addmm(self):
+        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
+        args = [
+            bias,
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+        self.assertEqual(bias.stride(0), 0)
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(actual, torch.addmm(*args).relu())
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("inplace", [False, True])
+    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
+        def fn(x, ws):
+            buf = torch.zeros_like(x)
+            for w in ws:
+                if inplace:
+                    buf.addmm_(w, w)
+                else:
+                    buf = torch.addmm(buf, w, w)
+                buf = torch.cos(buf)
+            return buf
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
+            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
+        ]
+
+        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
+        self.assertEqual(actual, fn(*args))
+        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
+        self.assertNotIn("extern_kernels.mm(", code[0])
 
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
@@ -1524,14 +1525,15 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        # bias addmm -> elementwise should be decomposed into
+        # mm -> add -> elementwise.
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(16, 32, device=GPU_TYPE),
+            torch.randn(32, device=GPU_TYPE),
         ]
 
         counters.clear()

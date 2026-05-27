@@ -27,7 +27,13 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, DualIndentedBuffer, make_codegen_buffer, normalize_name
+from ..utils import (
+    _align,
+    AotOnlyBuffer,
+    DualIndentedBuffer,
+    make_codegen_buffer,
+    normalize_name,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -57,9 +63,9 @@ if TYPE_CHECKING:
 @dataclasses.dataclass
 class DualWrapperCodeLine(WrapperLine):
     jit_code: IndentedBuffer
-    aot_code: IndentedBuffer
+    aot_code: AotOnlyBuffer
 
-    def codegen(self, code: IndentedBuffer) -> None:
+    def codegen(self, code: DualIndentedBuffer) -> None:
         # In dual-wrapper replay, these route each captured snippet to the
         # matching side. If replayed on a plain IndentedBuffer, splice_jit writes
         # normally and splice_aot is a no-op, preserving the same selection.
@@ -3063,7 +3069,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode and V.graph.is_dual_wrapper_mode:
-            jit_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+            jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
             with (
                 self._target_buf("wrapper_call", jit_code),
                 self.set_writeline(jit_code, jit_code.writeline_jit),
@@ -3078,7 +3084,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     outputs,
                 )
 
-            aot_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+            aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
             with (
                 self._target_buf("wrapper_call", aot_code),
                 self.set_writeline(aot_code, aot_code.writeline_aot),
