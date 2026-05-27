@@ -27,11 +27,11 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
+    from torch.autograd.function import FunctionCtx as _FunctionCtx
     from torch._functorch.pyfunctorch import FuncTorchInterpreter, VmapInterpreter
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-_FunctionCtx = torch.autograd.function.FunctionCtx
 _TensorTree = torch.Tensor | tuple[object, ...] | list[object] | dict[object, object]
 _MaybeTensor = torch.Tensor | None
 _MaybeTensorTree = _MaybeTensor | tuple[object, ...] | list[object] | dict[object, object]
@@ -112,7 +112,7 @@ custom_function_call = CustomFunctionHigherOrderOperator()
 def custom_function_call_grad(
     interpreter: FuncTorchInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: torch.Tensor,
+    *operands: Any,
 ) -> Any:
     Generated = generate_single_level_function(interpreter, autograd_function)
     with enable_single_level_autograd_function():
@@ -127,7 +127,7 @@ def generate_single_level_function(
 ) -> type[torch.autograd.function._SingleLevelFunction]:
     level = interpreter.level()
 
-    def forward(*operands: torch.Tensor) -> _TensorTree:
+    def forward(*operands: Any) -> _TensorTree:
         unwrapped_operands = pytree.tree_map_only(
             torch.Tensor, lambda x: _unwrap_for_grad(x, level), operands
         )
@@ -320,7 +320,7 @@ def validate_vmap_returns_tuple_of_two_elements(result: Any) -> None:
 def custom_function_call_vmap(
     interpreter: VmapInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: torch.Tensor,
+    *operands: Any,
     **kwargs: Any,
 ) -> Any:
     if any(
@@ -369,7 +369,7 @@ def custom_function_call_vmap_helper(
     interpreter: VmapInterpreter,
     vmap_function: Callable[..., Any],
     op: Any,
-    *operands: torch.Tensor,
+    *operands: Any,
     **kwargs: Any,
 ) -> Any:
     current_level = interpreter.level()
@@ -430,7 +430,7 @@ def unpack_outputs(outputs: tuple[Any, ...]) -> tuple[_TensorTree, _InDims]:
 def custom_function_call_vmap_generate_rule(
     interpreter: VmapInterpreter,
     autograd_function: type[torch.autograd.Function],
-    *operands: torch.Tensor,
+    *operands: Any,
 ) -> Any:
     unwrapped_operands, in_dims = unwrap_batched(operands, interpreter.level())
     vmapped_function = vmapify_autograd_function(
@@ -453,7 +453,7 @@ def custom_function_call_functionalize(
     interpreter: FuncTorchInterpreter,
     autograd_function: type[torch.autograd.Function],
     generate_vmap_rule: bool,
-    *operands: torch.Tensor,
+    *operands: Any,
 ) -> Any:
     raise RuntimeError("NYI: Functionalize rule for custom_function_call")
 
@@ -464,7 +464,7 @@ def vmapify_autograd_function(
     batch_size: int,
     randomness: str,
 ) -> type[torch.autograd.Function]:
-    def forward(*operands: torch.Tensor) -> _TensorTree:
+    def forward(*operands: Any) -> _TensorTree:
         outputs, out_dims = restore_vmap(
             autograd_function.forward, in_dims, batch_size, randomness
         )(*operands)
