@@ -26,8 +26,13 @@ from ._utils import (
     generate_stage_to_rank_mapping,
     InferenceMode,
 )
-from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .stage import _PipelineStageBase, PipelineStage
+from .microbatch import (
+    _split_tensor,
+    merge_chunks,
+    split_args_kwargs_into_chunks,
+    TensorChunkSpec,
+)
+from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
 
 
 __all__ = [
@@ -81,6 +86,13 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+
+
+# Targets (e.g. labels) are always split along the batch dim (0). Use
+# _split_tensor so DTensor targets preserve their Shard placements instead of
+# being silently all-gathered to Replicate by the default dispatch path.
+_TARGET_CHUNK_SPEC = TensorChunkSpec(0)
+
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -753,10 +765,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(
@@ -1790,6 +1803,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
     def _initialize_stages(
         self, args: tuple[Any, ...], kwargs, target=None, loss_kwargs=None
     ):
+        reinit_for_mode_switch = self._stages_forward_initialized and (
+            self._has_backward != self._stages_backward_initialized
+        )
+        forward_initialized_before = self._stages_forward_initialized
         (
             self._stages_forward_initialized,
             self._stages_backward_initialized,
@@ -1802,6 +1819,64 @@ class PipelineScheduleMulti(_PipelineSchedule):
             self._stages_backward_initialized,
             loss_kwargs=loss_kwargs,
         )
+
+        if self._stages_forward_initialized and (
+            not forward_initialized_before or reinit_for_mode_switch
+        ):
+            self._validate_adjacent_stage_communication()
+
+    def _validate_adjacent_stage_communication(self) -> None:
+        """Validate that stage communication follows adjacent-stage topology only."""
+
+        def _check_stage_indices(
+            stage_idx: int,
+            direction: str,
+            actual_stage_indices: set[int],
+            expected_stage_indices: set[int],
+        ) -> None:
+            non_adjacent_stage_indices = actual_stage_indices - expected_stage_indices
+            if non_adjacent_stage_indices:
+                raise RuntimeError(
+                    "PipelineScheduleMulti only supports adjacent-stage "
+                    f"communication, but stage {stage_idx} has {direction} "
+                    f"stages {sorted(actual_stage_indices)} with "
+                    f"non-adjacent stages {sorted(non_adjacent_stage_indices)} "
+                    f"(allowed adjacent stages: "
+                    f"{sorted(expected_stage_indices)}). This commonly "
+                    "indicates skip connections, which are unsupported in "
+                    "this schedule runtime."
+                )
+
+        for stage in self._stages:
+            stage_idx = stage.stage_index
+            actual_fwd_recv_sources: set[int] = {
+                info.source
+                for info in stage.args_recv_info[0]
+                if isinstance(info, _RecvInfo) and info.source is not None
+            }
+            expected_fwd_recv_sources = set() if stage.is_first else {stage_idx - 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward recv",
+                actual_fwd_recv_sources,
+                expected_fwd_recv_sources,
+            )
+
+            # act_send_info is keyed by output index (not microbatch index),
+            # so .values() yields per-output destination lists.
+            actual_fwd_send_dests: set[int] = {
+                dst
+                for dsts in stage.act_send_info.values()
+                for dst in dsts
+                if dst is not None
+            }
+            expected_fwd_send_dests = set() if stage.is_last else {stage_idx + 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward send",
+                actual_fwd_send_dests,
+                expected_fwd_send_dests,
+            )
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[_Action | None]]
@@ -1890,10 +1965,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(
