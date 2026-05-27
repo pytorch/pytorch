@@ -557,7 +557,9 @@ def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
 
 
 # Returns the number of detected copy_
-def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
+def _is_functional_graph(
+    fx_g: torch.fx.Graph, *, allow_backward_copy_to_non_input: bool = False
+) -> tuple[str | None, int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
@@ -580,7 +582,14 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    if n.args[0] not in placeholders:
+                    if n.args[0] not in placeholders and not (
+                        # Joint graphs may contain a backward-only copy_ into
+                        # a forward intermediate. Partitioning turns the target
+                        # into a backward saved-tensor placeholder.
+                        allow_backward_copy_to_non_input
+                        and n.target is torch.ops.aten.copy_.default
+                        and n.meta.get("partitioner_tag") == "must_be_in_backward"
+                    ):
                         error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
@@ -589,8 +598,13 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
     return error, mutation_count
 
 
-def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
-    error, mutation_count = _is_functional_graph(fx_g)
+def assert_functional_graph(
+    fx_g: torch.fx.Graph, *, allow_backward_copy_to_non_input: bool = False
+) -> int:
+    error, mutation_count = _is_functional_graph(
+        fx_g,
+        allow_backward_copy_to_non_input=allow_backward_copy_to_non_input,
+    )
     if error is not None:
         raise AssertionError(error)
     return mutation_count
