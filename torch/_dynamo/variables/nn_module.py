@@ -26,7 +26,7 @@ import inspect
 import itertools
 import re
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 from typing import Any, TYPE_CHECKING
 
@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 def initialize_lazy_module(
     tx: "InstructionTranslator",
     mod: torch.nn.Module,
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> None:
     """
@@ -238,6 +238,11 @@ class NNModuleVariable(VariableTracker):
 
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def _wrap_submodule(
         self,
@@ -489,7 +494,7 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
@@ -705,7 +710,7 @@ class NNModuleVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
@@ -1083,7 +1088,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = self.value
@@ -1178,7 +1183,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ["_call_impl", "_wrapped_call_impl"]:
