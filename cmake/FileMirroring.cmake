@@ -29,6 +29,8 @@ install(DIRECTORY
 install(DIRECTORY
   "${PROJECT_SOURCE_DIR}/tools/autograd/"
   DESTINATION "${SKBUILD_PLATLIB_DIR}/torchgen/packaged/autograd"
+  PATTERN "BUILD.bazel" EXCLUDE
+  PATTERN "*.bzl" EXCLUDE
 )
 
 # --- mirror_inductor_external_kernels ---
