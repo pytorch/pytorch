@@ -387,6 +387,17 @@ class SubgraphInfo:
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
+    _fixed_integer_inputs = (
+        "b",
+        "h",
+        "m",
+        "n",
+        "idx_b",
+        "idx_h",
+        "idx_m",
+        "idx_n",
+    )
+
     def __init__(
         self,
         kernel,
@@ -424,10 +435,20 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             return out
 
         shape = self.input_shapes.get(name, ())
+        if name in self._fixed_integer_inputs:
+            index_dtype = self.kernel.index_dtype
+            if index_dtype == "tl.int64":
+                dtype = torch.int64
+            elif index_dtype == "tl.int32":
+                dtype = torch.int32
+            else:
+                raise NotImplementedError(f"Unsupported index dtype: {index_dtype}")
+        else:
+            dtype = torch.float32
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
-            dtype=torch.float32,
+            dtype=dtype,
             shape=shape,
         )
 

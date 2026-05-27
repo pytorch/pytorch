@@ -22,7 +22,7 @@ import sympy
 
 import torch
 import torch.fx
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -885,7 +885,7 @@ class PythonPrinter(_PythonPrinter):
 
 class OpDecompositions:
     """
-    Decomposes inductor ops
+    Decomposes high-level Inductor ops into backend primitives.
     """
 
     @staticmethod
@@ -969,6 +969,48 @@ class OpDecompositions:
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
+        if get_current_backend() == "triton":
+
+            def dtype_of(value: OpVarT) -> torch.dtype | None:
+                if isinstance(value, OpsValue):
+                    value = value.value
+                return getattr(value, "dtype", None)
+
+            integer_dtypes = [
+                dtype
+                for dtype in (dtype_of(a), dtype_of(b))
+                if isinstance(dtype, torch.dtype) and is_integer_dtype(dtype)
+            ]
+            if integer_dtypes:
+                dtype = integer_dtypes[0]
+                for other_dtype in integer_dtypes[1:]:
+                    dtype = torch.promote_types(dtype, other_dtype)
+
+                # Avoid raw signed `%` for the same reason Triton floordiv
+                # avoids raw signed `//`: Triton's AxisInfo analysis can
+                # mis-handle negative operands.  Compute Python remainder
+                # through the safe floor-divide lowering instead.
+                zero = ops.constant(0, dtype)
+                one = ops.constant(1, dtype)
+                if torch.version.hip is not None:
+                    # HIP eager integer remainder by zero returns the dividend.
+                    zero_result = a
+                    a_dtype = dtype_of(a)
+                    if isinstance(a_dtype, torch.dtype) and a_dtype != dtype:
+                        zero_result = ops.to_dtype(a, dtype, src_dtype=a_dtype)
+                else:
+                    neg_one = ops.constant(-1, dtype)
+                    zero_result = neg_one
+                    if dtype == torch.int64:
+                        zero_result = ops.where(
+                            ops.lt(a, zero), neg_one, ops.constant(2**32 - 1, dtype)
+                        )
+                b_zero = ops.eq(b, zero)
+                safe_b = ops.where(b_zero, one, b)
+                quotient = ops.floordiv(a, safe_b)
+                r = ops.sub(a, ops.mul(quotient, safe_b))
+                return ops.where(b_zero, zero_result, r)
+
         r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),

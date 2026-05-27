@@ -2844,6 +2844,60 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.testing.assert_close(grad, grad_compiled, atol=3e-2, rtol=3e-2)
 
     @supported_platform
+    @skip_on_cpu
+    @config.patch(force_disable_caches=True)
+    def test_negative_index_div_mod_block_mask(self, device):
+        torch.manual_seed(0)
+        seq_len = 128
+        window = 4
+        offset = 4
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            same_group = (q_idx - offset - seq_len) // window == (
+                kv_idx - offset - seq_len
+            ) // window
+            keep_row = (q_idx - seq_len) % window != 1
+            return (q_idx >= kv_idx) & (same_group | keep_row)
+
+        block_mask = create_block_mask(
+            mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=3 * seq_len,
+            KV_LEN=3 * seq_len,
+            _compile=False,
+            device=device,
+        )
+        shape = (1, 2, 3 * seq_len, 16)
+        query = torch.randn(
+            shape, device=device, dtype=torch.float32, requires_grad=True
+        )
+        key = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
+        value = torch.randn(
+            shape, device=device, dtype=torch.float32, requires_grad=True
+        )
+        query_ref = query.detach().clone().requires_grad_()
+        key_ref = key.detach().clone().requires_grad_()
+        value_ref = value.detach().clone().requires_grad_()
+
+        with temp_float32_matmul_precision("highest"):
+            compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+            actual = compiled_flex_attention(query, key, value, block_mask=block_mask)
+            expected = flex_attention(
+                query_ref, key_ref, value_ref, block_mask=block_mask
+            )
+            actual_grads = torch.autograd.grad(actual.mean(), (query, key, value))
+            expected_grads = torch.autograd.grad(
+                expected.mean(), (query_ref, key_ref, value_ref)
+            )
+
+            torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+            for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+                torch.testing.assert_close(
+                    actual_grad, expected_grad, atol=1e-6, rtol=1e-6
+                )
+
+    @supported_platform
     def test_multiple_score_mod_calls2(self, device):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=device)
         keys = [
