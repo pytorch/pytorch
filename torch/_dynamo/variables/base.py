@@ -753,7 +753,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def mp_ass_subscript_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
@@ -766,7 +766,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_ass_item_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
@@ -779,7 +779,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_concat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """Sequence concatenation via + operator (sq_concat slot)."""
@@ -792,7 +792,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_inplace_concat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """In-place sequence concatenation via += operator (sq_inplace_concat slot)."""
@@ -1410,7 +1410,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_multiply_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1425,7 +1425,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_multiply_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
@@ -1433,7 +1433,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_repeat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         count: VariableTracker,
     ) -> VariableTracker:
         """tp_as_sequence->sq_repeat slot.
@@ -1451,7 +1451,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_inplace_repeat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         count: VariableTracker,
     ) -> VariableTracker:
         """tp_as_sequence->sq_inplace_repeat slot."""

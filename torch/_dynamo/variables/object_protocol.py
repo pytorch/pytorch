@@ -531,7 +531,9 @@ def generic_delitem(
     raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
 
 
-def generic_int(tx: "InstructionTranslatorBase", obj: VariableTracker) -> VariableTracker:
+def generic_int(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Long (int(x) dispatch).
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1520-L1632
@@ -675,7 +677,9 @@ def generic_pos(
     )
 
 
-def generic_abs(tx: "InstructionTranslatorBase", obj: VariableTracker) -> VariableTracker:
+def generic_abs(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Absolute.
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1395
