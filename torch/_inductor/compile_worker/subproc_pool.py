@@ -328,6 +328,33 @@ class SubprocPool:
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)
 
+    def _dump_worker_log(self, reason: str) -> None:
+        # MI355 hang debug: read the worker stdio log file from disk and echo
+        # it to sys.__stderr__ so it lands in the CI log. Best-effort.
+        stderr = sys.__stderr__ or sys.stderr
+        path = getattr(self.log_file, "name", None) if self.log_file else None
+        if not path:
+            return
+        try:
+            try:
+                self.log_file.flush()  # type: ignore[union-attr]
+            except Exception:
+                pass
+            with open(path, errors="replace") as f:
+                content = f.read()
+            print(
+                f"\n===== PYTORCH SUBPROC LOG DUMP BEGIN path={path} reason={reason} =====",
+                file=stderr,
+            )
+            print(content, file=stderr)
+            print(
+                f"===== PYTORCH SUBPROC LOG DUMP END path={path} =====\n",
+                file=stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+
     def shutdown(self) -> None:
         try:
             with self.write_lock:
@@ -339,7 +366,18 @@ class SubprocPool:
                 self.running_waitcounter.__exit__()
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
-            self.process.wait(300)
+            try:
+                self.process.wait(300)
+            except subprocess.TimeoutExpired:
+                # MI355 hang debug: worker didn't shut down in time. Dump its
+                # captured stdio to sys.__stderr__ before SIGKILL so we can see
+                # why it hung in CI logs.
+                self._dump_worker_log("subproc_pool.shutdown.timeout")
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+                self.process.wait()
             if self.log_file:
                 self.log_file.close()
         except OSError:

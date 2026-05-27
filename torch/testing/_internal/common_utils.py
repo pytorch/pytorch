@@ -1115,6 +1115,55 @@ def _dump_subprocess_stacks(pid):
     time.sleep(3)
 
 
+def dump_subprocess_log_files(reason: str, max_age_seconds: float = 1800.0) -> None:
+    # MI355 hang debug: cat every recently-touched subprocess stdio capture
+    # file to sys.__stderr__ so it lands in the CI log. Covers:
+    #   - test/test-reports/*_toprint.log (run_test.py --pipe-logs tempfiles
+    #     that hold each test subprocess's combined stdout+stderr; normally
+    #     only printed via handle_log_file() on failure, lost on kill paths)
+    #   - inductor compile worker log files under /tmp/torchinductor_*
+    # Best-effort and idempotent; swallows all exceptions.
+    import glob
+
+    stderr = sys.__stderr__ or sys.stderr
+    cutoff = time.time() - max_age_seconds
+
+    patterns = [
+        os.path.join(os.getcwd(), "test", "test-reports", "*_toprint.log"),
+        # In case cwd is already the test/ dir.
+        os.path.join(os.getcwd(), "test-reports", "*_toprint.log"),
+        "/tmp/torchinductor_*/sub_proc_pool*.log",
+        "/tmp/torchinductor_*/compile_worker*.log",
+        "/tmp/torchinductor_*/*worker*.log",
+    ]
+    seen: set[str] = set()
+    for pat in patterns:
+        try:
+            for path in glob.glob(pat):
+                if path in seen:
+                    continue
+                seen.add(path)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        continue
+                    with open(path, errors="replace") as f:
+                        content = f.read()
+                    print(
+                        f"\n===== PYTORCH SUBPROC LOG DUMP BEGIN path={path} reason={reason} =====",
+                        file=stderr,
+                    )
+                    print(content, file=stderr)
+                    print(
+                        f"===== PYTORCH SUBPROC LOG DUMP END path={path} =====\n",
+                        file=stderr,
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def wait_for_process(p, timeout=None):
     try:
         return p.wait(timeout=timeout)
@@ -1133,6 +1182,10 @@ def wait_for_process(p, timeout=None):
         # masked by CUDA/Triton runtimes, unlike SIGINT.
         try:
             _dump_subprocess_stacks(p.pid)
+        except Exception:
+            pass
+        try:
+            dump_subprocess_log_files("wait_for_process.timeout")
         except Exception:
             pass
         # send SIGINT to give pytest a chance to make xml

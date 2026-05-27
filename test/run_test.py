@@ -27,6 +27,7 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
+    dump_subprocess_log_files,
     get_report_path,
     IS_CI,
     IS_MACOS,
@@ -1239,19 +1240,9 @@ def handle_log_file(
     )
     os.rename(file_path, REPO_ROOT / new_file)
 
-    if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
-        # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran
-        print_to_stderr(
-            f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
-        )
-        for line in full_text.splitlines():
-            if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.rstrip())
-        print_to_stderr("")
-        return
-
-    # otherwise: print entire file
+    # MI355 hang debug: always print the entire captured log so subprocess
+    # output is visible in CI even on the success path. Previously gated on
+    # failed/was_rerun.
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
@@ -2128,6 +2119,10 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
+                try:
+                    dump_subprocess_log_files("run_tests.pool.terminate")
+                except Exception:
+                    pass
                 pool.terminate()
 
         for test in selected_tests_parallel:
@@ -2146,6 +2141,10 @@ def run_tests(
 
     finally:
         if pool:
+            try:
+                dump_subprocess_log_files("run_tests.finally.pool.terminate")
+            except Exception:
+                pass
             pool.terminate()
             pool.join()
 
