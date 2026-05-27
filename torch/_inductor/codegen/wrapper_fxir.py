@@ -40,7 +40,12 @@ from torch.utils._sympy.solve import try_solve
 
 from .. import config, ir
 from ..runtime.triton_compat import Config
-from ..utils import cache_property_on_self, LineContext, ValueWithLineMap
+from ..utils import (
+    cache_property_on_self,
+    is_sympy_boolean,
+    LineContext,
+    ValueWithLineMap,
+)
 from .common import (
     CodegenSymbol,
     FileBackedGraphModule,
@@ -181,7 +186,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def get_fx_graph_inputs(
         self,
-    ) -> dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]:
+    ) -> dict[
+        str,
+        ir.TensorBox
+        | ir.TorchBindObject
+        | sympy.Expr
+        | sympy.logic.boolalg.Boolean
+        | None,
+    ]:
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
@@ -281,7 +293,14 @@ class FxConverter:
 
     lines: list[Line]
     prologue: str
-    graph_inputs: dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]
+    graph_inputs: dict[
+        str,
+        ir.TensorBox
+        | ir.TorchBindObject
+        | sympy.Expr
+        | sympy.logic.boolalg.Boolean
+        | None,
+    ]
     graph_outputs: list[ir.IRNode]
     subgms: dict[str, torch.fx.GraphModule]
     is_subgraph: bool
@@ -295,7 +314,7 @@ class FxConverter:
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
         self._unique_symbol_ids: Counter[str] = Counter()
         self.tracer = torch.fx.proxy.GraphAppendingTracer(graph)
-        self.expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
+        self.expr_to_proxy: dict[sympy.Basic, torch.fx.Proxy] = {}
 
     def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
         """
@@ -379,7 +398,7 @@ class FxConverter:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
     def _generate_size_proxy(
-        self, node: torch.fx.Node, expr: sympy.Expr
+        self, node: torch.fx.Node, expr: sympy.Expr | sympy.logic.boolalg.Boolean
     ) -> torch.fx.Proxy:
         proxy = torch.fx.Proxy(node, tracer=self.tracer)
         self.expr_to_proxy[expr] = proxy
@@ -394,6 +413,12 @@ class FxConverter:
             if ir_node is None:
                 # Create dummy input nodes to match the input signature
                 self.gm.graph.placeholder(name)
+                continue
+
+            if is_sympy_boolean(ir_node):
+                placeholder_node = self.gm.graph.placeholder(name)
+                placeholder_node.meta["val"] = ir_node
+                self._generate_size_proxy(placeholder_node, ir_node)
                 continue
 
             # Introduce a new symbol for constant inputs.
@@ -627,7 +652,9 @@ class FxConverter:
         self.gm.recompile()
         return self.gm
 
-    def _sympy_interp(self, expr: sympy.Expr) -> torch.fx.Proxy:
+    def _sympy_interp(
+        self, expr: sympy.Expr | sympy.logic.boolalg.Boolean
+    ) -> torch.fx.Proxy:
         # hash cons
         if expr in self.expr_to_proxy:
             return self.expr_to_proxy[expr]
@@ -653,7 +680,9 @@ class FxConverter:
         )
         return self.expr_to_proxy[expr]
 
-    def _generate_sym_node(self, s: int | sympy.Expr) -> int | torch.fx.Node:
+    def _generate_sym_node(
+        self, s: int | sympy.Expr | sympy.logic.boolalg.Boolean
+    ) -> int | torch.fx.Node:
         if isinstance(s, (int, sympy.Integer)):
             return int(s)
         elif isinstance(s, sympy.Symbol):
@@ -662,6 +691,9 @@ class FxConverter:
             )
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
+            return self._sympy_interp(s).node
+
+        elif is_sympy_boolean(s):
             return self._sympy_interp(s).node
 
         elif isinstance(s, torch.fx.Node):

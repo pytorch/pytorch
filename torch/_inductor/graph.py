@@ -114,6 +114,8 @@ from .utils import (
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
+    is_symbolic_scalar,
+    is_sympy_boolean,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -162,24 +164,18 @@ else:
         pass
 
 
-def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> torch.dtype | None:
-    assert isinstance(
-        constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
-    ), (
-        "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
+def may_get_constant_buffer_dtype(
+    constant_buffer: sympy.Expr | SympyBoolean,
+) -> torch.dtype | None:
+    assert is_symbolic_scalar(constant_buffer), (
+        "get_constant_buffer_dtype only supports symbolic scalar inputs"
     )
-    if isinstance(constant_buffer, sympy.core.numbers.Integer):
-        return torch.int64
 
-    if isinstance(constant_buffer, sympy.Expr):
-        return get_sympy_Expr_dtype(constant_buffer)
+    if is_sympy_boolean(constant_buffer):
+        return torch.bool
 
-    if constant_buffer.is_integer:
-        return torch.int64
-    elif constant_buffer.is_float:
-        return torch.float32
-    else:
-        return None
+    assert isinstance(constant_buffer, sympy.Expr)
+    return get_sympy_Expr_dtype(constant_buffer)
 
 
 def is_magic_method(op: Any) -> bool:
@@ -1239,7 +1235,7 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[object],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Expr | TensorBox | None:
+    ) -> Expr | SympyBoolean | TensorBox | None:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
