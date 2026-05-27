@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-Constant: TypeAlias = int | float | bool | str | None
+Constant: TypeAlias = torch.fx.node.Argument
 NodeOrConstant = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
