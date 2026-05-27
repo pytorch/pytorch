@@ -131,9 +131,8 @@ def fix_rpath(libtorch_lib: Path, platform: str) -> None:
             if result.returncode == 0:
                 print(f"  Fixed rpath: {item.name}")
             else:
-                print(
-                    f"  Warning: patchelf failed on {item.name}: {result.stderr.strip()}",
-                    file=sys.stderr,
+                raise RuntimeError(
+                    f"patchelf failed on {item.name}: {result.stderr.strip()}"
                 )
 
 
