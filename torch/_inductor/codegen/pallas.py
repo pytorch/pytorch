@@ -832,10 +832,6 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
-    def rand4x(seed: str, offset: str) -> str:
-        return PallasKernelOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed: str, offset: str) -> str:
         """Generate standard normal random numbers.
 
@@ -849,10 +845,6 @@ class PallasKernelOverrides(OpOverrides):
             f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
             f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
         )
-
-    @staticmethod
-    def randn4x(seed: str, offset: str) -> str:
-        return PallasKernelOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed: str, offset: str, low: str, high: str) -> str:
