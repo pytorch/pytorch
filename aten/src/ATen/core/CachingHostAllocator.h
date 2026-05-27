@@ -632,12 +632,12 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual void process_events(BlockPool& pool) {
-    // process all events in the given pool until the last unready event.
+    // process all events in the given pool, skipping any that are not yet ready.
     process_events_for_specific_size(-1, pool);
   }
 
-  // If size is -1, process all events from backwards until the last unready
-  // event. Otherwise, process events for a specific size and on first ready block
+  // If size is -1, process all events, skipping any that are not yet ready.
+  // Otherwise, process events for a specific size and on first ready block
   // is found, add it to the free list and return.
   virtual void process_events_for_specific_size(int64_t size, BlockPool& pool) {
     size_t event_count = 0;
@@ -681,6 +681,12 @@ struct CachingHostAllocatorImpl {
           }
           continue;
         }
+      } else if (event_count++ > max_events) {
+        {
+          std::lock_guard<std::mutex> g(pool.events_mutex_);
+          pool.events_.push_front(std::move(*processed));
+        }
+        return;
       }
 
       // otherwise, query the event
@@ -688,17 +694,14 @@ struct CachingHostAllocatorImpl {
         // now, see if we can handle this element
         auto& event = processed->first;
         if (!query_event(event)) {
-          // push the event onto the back if it's not ready.
+          // Event not ready yet -- put it back and continue processing
+          // remaining events. A single stuck event should not block
+          // returning other completed blocks to the free list.
           {
             std::lock_guard<std::mutex> g(pool.events_mutex_);
-            if (size == -1) {
-              pool.events_.push_back(std::move(*processed));
-              return;
-            } else {
-              pool.events_.push_front(std::move(*processed));
-              continue;
-            }
+            pool.events_.push_front(std::move(*processed));
           }
+          continue;
         }
       }
 
