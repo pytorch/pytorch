@@ -629,9 +629,12 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
-    if (
-        not torch.distributed.is_available()
-        or not torch.distributed.is_nccl_available()
+    if not (
+        torch.distributed.is_available()
+        and (
+            torch.distributed.is_nccl_available()
+            or torch.distributed.is_xccl_available()
+        )
     ):
         return
 
@@ -875,9 +878,12 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     Returns boolean indicating if fusion was successful or not.
     """
-    if (
-        not torch.distributed.is_available()
-        or not torch.distributed.is_nccl_available()
+    if not (
+        torch.distributed.is_available()
+        and (
+            torch.distributed.is_nccl_available()
+            or torch.distributed.is_xccl_available()
+        )
     ):
         return
 
