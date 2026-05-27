@@ -415,6 +415,200 @@ class CondTests(TestCase):
             torch.testing.assert_close(out, x + 1)
             self.assertEqual(seen, ["true"])
 
+    def test_cond_branch_ordered_effect_requires_grad(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+            seen = []
+
+            @torch.library.custom_op(
+                "mylib::cond_log_metric_requires_grad", mutates_args=()
+            )
+            def cond_log_metric_requires_grad(x: torch.Tensor, prefix: str) -> None:
+                seen.append(prefix)
+
+            @cond_log_metric_requires_grad.register_fake
+            def cond_log_metric_requires_grad_fake(x, prefix):
+                return
+
+            cond_log_metric_requires_grad.register_effect(
+                torch._higher_order_ops.effects._EffectType.ORDERED
+            )
+
+            def true_fn(x):
+                cond_log_metric_requires_grad(x, "true")
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+
+            x = torch.randn(3, 3, requires_grad=True)
+            out = torch.compile(M(), dynamic=True)(x)
+            torch.testing.assert_close(out, x + 1)
+            out.sum().backward()
+            torch.testing.assert_close(x.grad, torch.ones_like(x))
+            self.assertEqual(seen, ["true"])
+
+    def test_cond_branch_ordered_effect_tensor_output_requires_grad(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+            seen = []
+
+            @torch.library.custom_op(
+                "mylib::cond_log_identity_requires_grad", mutates_args=()
+            )
+            def cond_log_identity_requires_grad(
+                x: torch.Tensor, prefix: str
+            ) -> torch.Tensor:
+                seen.append(prefix)
+                return x.clone()
+
+            @cond_log_identity_requires_grad.register_fake
+            def cond_log_identity_requires_grad_fake(x, prefix):
+                return torch.empty_like(x)
+
+            def setup_context(ctx, inputs, output):
+                pass
+
+            def backward(ctx, grad):
+                return grad, None
+
+            cond_log_identity_requires_grad.register_autograd(
+                backward, setup_context=setup_context
+            )
+            cond_log_identity_requires_grad.register_effect(
+                torch._higher_order_ops.effects._EffectType.ORDERED
+            )
+
+            def true_fn(x):
+                return cond_log_identity_requires_grad(x, "true") + 1
+
+            def false_fn(x):
+                return x - 1
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+
+            x = torch.randn(3, 3, requires_grad=True)
+            out = torch.compile(M(), dynamic=True)(x)
+            torch.testing.assert_close(out, x + 1)
+            out.sum().backward()
+            torch.testing.assert_close(x.grad, torch.ones_like(x))
+            self.assertEqual(seen, ["true"])
+
+    def test_cond_branch_ordered_effect_false_branch(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+            seen = []
+
+            @torch.library.custom_op(
+                "mylib::cond_log_metric_false_branch", mutates_args=()
+            )
+            def cond_log_metric_false_branch(x: torch.Tensor, prefix: str) -> None:
+                seen.append(prefix)
+
+            @cond_log_metric_false_branch.register_fake
+            def cond_log_metric_false_branch_fake(x, prefix):
+                return
+
+            cond_log_metric_false_branch.register_effect(
+                torch._higher_order_ops.effects._EffectType.ORDERED
+            )
+
+            def true_fn(x):
+                return x + 1
+
+            def false_fn(x):
+                cond_log_metric_false_branch(x, "false")
+                return x - 1
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+
+            x = torch.randn(2, 3)
+            out = torch.compile(M(), dynamic=True)(x)
+            torch.testing.assert_close(out, x - 1)
+            self.assertEqual(seen, ["false"])
+
+    def test_cond_branch_ordered_effect_both_branches(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+            seen = []
+
+            @torch.library.custom_op(
+                "mylib::cond_log_metric_both_branches", mutates_args=()
+            )
+            def cond_log_metric_both_branches(x: torch.Tensor, prefix: str) -> None:
+                seen.append(prefix)
+
+            @cond_log_metric_both_branches.register_fake
+            def cond_log_metric_both_branches_fake(x, prefix):
+                return
+
+            cond_log_metric_both_branches.register_effect(
+                torch._higher_order_ops.effects._EffectType.ORDERED
+            )
+
+            def true_fn(x):
+                cond_log_metric_both_branches(x, "true")
+                return x + 1
+
+            def false_fn(x):
+                cond_log_metric_both_branches(x, "false")
+                return x - 1
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+
+            compiled = torch.compile(M(), dynamic=True)
+            true_x = torch.randn(3, 3)
+            false_x = torch.randn(2, 3)
+            true_out = compiled(true_x)
+            false_out = compiled(false_x)
+            torch.testing.assert_close(true_out, true_x + 1)
+            torch.testing.assert_close(false_out, false_x - 1)
+            self.assertEqual(seen, ["true", "false"])
+
+    def test_cond_branch_ordered_effect_nested(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+            seen = []
+
+            @torch.library.custom_op("mylib::cond_log_metric_nested", mutates_args=())
+            def cond_log_metric_nested(x: torch.Tensor, prefix: str) -> None:
+                seen.append(prefix)
+
+            @cond_log_metric_nested.register_fake
+            def cond_log_metric_nested_fake(x, prefix):
+                return
+
+            cond_log_metric_nested.register_effect(
+                torch._higher_order_ops.effects._EffectType.ORDERED
+            )
+
+            def inner_true_fn(x):
+                cond_log_metric_nested(x, "inner_true")
+                return x + 1
+
+            def inner_false_fn(x):
+                return x - 1
+
+            def true_fn(x):
+                return torch.cond(x.shape[1] > 2, inner_true_fn, inner_false_fn, (x,))
+
+            def false_fn(x):
+                return x - 2
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+
+            x = torch.randn(3, 3)
+            out = torch.compile(M(), dynamic=True)(x)
+            torch.testing.assert_close(out, x + 1)
+            self.assertEqual(seen, ["inner_true"])
+
     @requires_gpu
     def test_cond_subgraph_output_stride_padding(self):
         self._run_test(
@@ -881,6 +1075,39 @@ class CondTests(TestCase):
             model=FactoryBranches(),
             inputs=(),
             device="cpu",  # device for predicate
+            dynamic=True,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_buffer_reuse_with_large_subgraph(self, device):
+        # Regression test: torch.cond subgraph with more buffers than main
+        # graph scheduler nodes caused segmented_tree OOB in memory planning.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(64, 64) for _ in range(10)]
+                )
+
+            def forward(self, p, x):
+                def true_fn(inp):
+                    h = inp
+                    for layer in self.layers:
+                        h = torch.relu(layer(h))
+                    return h.clone()
+
+                def false_fn(inp):
+                    return inp.new_zeros(inp.shape[0], 64)
+
+                return torch.cond(p, true_fn, false_fn, (x,))
+
+        model = Model().to(device)
+        inputs = (torch.randn(8, 64),)
+        self._run_test(
+            model=model,
+            inputs=inputs,
+            device=device,
             dynamic=True,
         )
 

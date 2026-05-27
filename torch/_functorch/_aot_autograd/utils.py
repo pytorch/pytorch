@@ -393,7 +393,6 @@ def unlift_tokens(
         module: torch.fx.GraphModule,
         subgraph_str: str,
         expected_num_erased: int | None,
-        num_tokens: int,
     ) -> None:
         input_token_nodes = set()
         output_token_nodes = set()
@@ -450,13 +449,13 @@ def unlift_tokens(
                     # Note: The subgraph itself will be unlifted separately when we iterate
                     # through named_modules() below.
 
-                    num_tokens = len(effects)
-                    if num_tokens != 1:
+                    invoke_num_tokens = len(effects)
+                    if invoke_num_tokens != 1:
                         raise AssertionError(
-                            f"Multiple token subgraph NYI, got {num_tokens} tokens"
+                            f"Multiple token subgraph NYI, got {invoke_num_tokens} tokens"
                         )
-                    token_args = operands[:num_tokens]
-                    non_token_args = operands[num_tokens:]
+                    token_args = operands[:invoke_num_tokens]
+                    non_token_args = operands[invoke_num_tokens:]
 
                     # Create with_effects wrapper around invoke_subgraph
                     # with_effects(token, op, *args) where op is invoke_subgraph
@@ -587,13 +586,11 @@ def unlift_tokens(
             if isinstance(m, torch.fx.GraphModule):
                 if name == "":
                     _unlift_tokens_from_module_helper(
-                        m, subgraph_str, expected_num_erased, expected_num_erased
+                        m, subgraph_str, expected_num_erased
                     )
                 else:
                     # Subgraph -- we may or may not have effects applied
-                    _unlift_tokens_from_module_helper(
-                        m, f"{subgraph_str}_{name}", None, expected_num_erased
-                    )
+                    _unlift_tokens_from_module_helper(m, f"{subgraph_str}_{name}", None)
 
     if num_forward_tokens > 0:
         if aot_config.enable_log:
