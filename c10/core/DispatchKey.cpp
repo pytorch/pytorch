@@ -1,6 +1,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
+#include <algorithm>
 #include <regex>
 #include <unordered_map>
 
@@ -393,11 +394,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
   auto it = key_map.find(k);
   if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
     std::string pu1_backend_name = c10::get_privateuse1_backend();
-    std::transform(
-        pu1_backend_name.begin(),
-        pu1_backend_name.end(),
-        pu1_backend_name.begin(),
-        ::toupper);
+    std::ranges::transform(
+        pu1_backend_name, pu1_backend_name.begin(), ::toupper);
     std::string processed_k =
         std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
     it = key_map.find(processed_k);
