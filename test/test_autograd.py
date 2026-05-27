@@ -7519,6 +7519,36 @@ Done""",
         xz.add_(1)
         self.assertTrue(x._version == xz._version)
 
+    def test_gradient_version_check_no_false_positive(self):
+        # Verify that the gradient version check in the engine does not produce
+        # false positives for various graph topologies.
+
+        # Simple chain: a -> b -> c
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        c = b.sum()
+        c.backward()
+
+        # Fan-in: a used by both b and c, gradients accumulate at a
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        c = a * 3
+        (b + c).sum().backward()
+
+        # Hooks that return new tensors (not in-place)
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        b.register_hook(lambda grad: grad * 0.5)
+        c = b.sum()
+        c.backward()
+
+        # Multiple backward with retain_graph
+        a = torch.randn(3, requires_grad=True)
+        b = (a * 2).sum()
+        b.backward(retain_graph=True)
+        b.backward(retain_graph=True)
+        b.backward()
+
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while sparse tensor has impl
         # of type `SparseTensorImpl`.
@@ -7929,6 +7959,46 @@ for shape in [(1,), ()]:
 
         self.assertEqual(context.exc_type, ValueError)
         self.assertEqual(str(context.exc_value), "forward failed")
+
+    def test_checkpoint_debug_with_context_fn(self):
+        # debug=True should compose with a user-provided context_fn
+        class VerboseTorchDispatchMode(TorchDispatchMode):
+            def __init__(self) -> None:
+                self.operators = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                self.operators.append(func.__name__)
+                return func(*args, **kwargs)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        verbose_mode = VerboseTorchDispatchMode()
+
+        def context_fn():
+            return verbose_mode, contextlib.nullcontext()
+
+        # Non-deterministic function to trigger the debug error
+        counter = [0]
+
+        def fn(x):
+            counter[0] += 1
+            if counter[0] == 1:
+                return x.sin().exp()
+            else:
+                return x.sin() * torch.tensor([1.0, 2.0])
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "You are seeing this error because you passed `debug=True` to checkpoint",
+        ):
+            out = checkpoint(
+                fn, x, use_reentrant=False, debug=True, context_fn=context_fn
+            )
+            out.backward()
+
+        # The user's context_fn should still have run during forward
+        self.assertIn("sin.default", verbose_mode.operators)
 
     def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(1, requires_grad=True)
@@ -16505,6 +16575,46 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Trying to backward an extra time"):
             out.sum().backward(retain_graph=True)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_checkpoint_name_skips_recomputation(self):
+        from torch.utils.checkpoint import checkpoint_name
+
+        with (
+            _counter_op("name_a") as (op_a, counts_a, _),
+            _counter_op("name_b") as (op_b, counts_b, _),
+        ):
+
+            def policy_fn(ctx, op, *args, **kwargs):
+                if ctx.tensor_name == "keep_this":
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def fn(x):
+                y = op_a(x, 0)
+                checkpoint_name(y, "keep_this")
+                return op_b(y, 0)
+
+            x = torch.randn(4, requires_grad=True)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            self.assertEqual(counts_a[0], 1)
+            self.assertEqual(counts_b[0], 1)
+
+            out.sum().backward()
+            # op_a was named "keep_this" and policy returned MUST_SAVE: not recomputed
+            self.assertEqual(counts_a[0], 1)
+            # op_b was not named: recomputed
+            self.assertEqual(counts_b[0], 2)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_checkpoint_name_no_sac_is_noop(self):
+        from torch.utils.checkpoint import checkpoint_name
+
+        x = torch.randn(4)
+        checkpoint_name(x, "foo")  # should not raise
 
     @skipIfTorchDynamo("torch dispatch modes don't support compile")
     def test_auto_naming_mode_names(self):
