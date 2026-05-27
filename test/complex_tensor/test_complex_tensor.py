@@ -1,7 +1,6 @@
 # Owner(s): ["module: complex"]
 from __future__ import annotations
 
-import unittest
 from typing import TYPE_CHECKING
 
 import torch
@@ -33,11 +32,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_ASAN,
-    unMarkDynamoStrictTest,
-)
+from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
 
 
 if TYPE_CHECKING:
@@ -167,7 +162,6 @@ class TestComplexTensor(TestCase):
 class TestComplexBwdGradients(TestCase):
     _default_dtype_check_enabled = True
 
-    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/168169")
     @ops(
         implemented_op_db,
         dtypes=OpDTypes.supported_backward,

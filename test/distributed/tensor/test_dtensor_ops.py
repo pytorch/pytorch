@@ -5,7 +5,6 @@ import copy
 import random
 import re
 import threading
-import unittest
 import warnings
 
 import torch
@@ -33,7 +32,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
-    IS_LINUX,
     np,
     run_tests,
     SEED,
@@ -220,6 +218,12 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
     xfail("multinomial"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
+    skip("full_like"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
+    skip("bmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/180522
+    skip("baddbmm"),
 }
 
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
@@ -286,6 +290,10 @@ dtensor_compiled_fails = {
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
+    skip("norm", "nuc"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
+    skip("histc"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -681,9 +689,6 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/167252")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179779")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180522")
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -961,7 +966,6 @@ class TestUnbackedDTensorOps(TestDTensorOps):
                     ) from e
         return rs
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179881")
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -998,7 +1002,6 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
         self.skipTest(f"Op {torch_op} failed to extract aten op")
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184463")
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1164,8 +1167,6 @@ class TestCompiledDTensorOps(TestDTensorOps):
             # Just run - if it compiles and runs without error, we pass
             compiled_func(*dtensor_args, **dtensor_kwargs)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/181204")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176973")
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
