@@ -40,10 +40,26 @@
 
 namespace at::meta {
 
-// Shape inference + output allocation for `_scaled_mm_v2`. Backend-specific
-// dtype/scale/recipe/swizzle validation lives in TORCH_IMPL_FUNC; this meta
-// only does what's needed to size the output. The output dtype defaults to
-// `mat_a`'s dtype when `out_dtype` is unset, matching the legacy functional.
+// V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
+// Scales are only applicable when matrices are of Float8 / Float4 type and assumed to be 1.0
+// by default. Shape inference + output allocation runs here; backend-specific
+// dtype/scale/recipe/swizzle validation lives in TORCH_IMPL_FUNC. The output dtype defaults
+// to `mat_a`'s dtype when `out_dtype` is unset, matching the legacy functional.
+//
+// Arguments:
+//  - `mat_a`: the first operand, `torch.float8_e4m3fn[uz]`, `torch.float8_e5m2[uz]`,
+//    or `torch.float4_e2m1fn_x2`
+//  - `mat_b`: the second operand, dtype matching the constraints for `mat_a`
+//  - `scale_a`: tensor list with the inverse scale(s) of `mat_a`; shape/strides/dtype depend
+//    on the scaling scheme and may include 1 (single-level) or 2 (two-level NVFP4) entries
+//  - `recipe_a`: int list mapping to `ScalingType` enum entries for `scale_a`
+//  - `swizzle_a`: int list mapping to `SwizzleType` enum entries for `scale_a`
+//  - `scale_b`/`recipe_b`/`swizzle_b`: as above, for `mat_b`
+//  - `bias`: optional bias, `torch.float16` or `torch.bfloat16`
+//  - `out_dtype`: optional output dtype; defaults to `mat_a.dtype()`
+//  - `contraction_dim`: optional pair `(a_dim, b_dim)` overriding the default `(1, 0)`
+//    contraction; useful for packed formats (e.g. NVFP4 x2) where cheap `.t()` is unavailable
+//  - `use_fast_accum`: enables fast tensor-core accumulation (Hopper+ only); ignored otherwise
 TORCH_META_FUNC(_scaled_mm_v2)(
     const Tensor& self,
     const Tensor& mat2,
