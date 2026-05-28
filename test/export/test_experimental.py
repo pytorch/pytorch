@@ -1772,9 +1772,11 @@ def forward(self, arg0_1):
 
         leaves, spec = pytree.tree_flatten(block_mask)
 
-        # 8 regular BlockMask tensor attrs + offset extracted from
+        # Present BlockMask tensor attrs + offset extracted from
         # offset_mask's closure
-        n_regular = len(BlockMask._TENSOR_ATTRS)
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
         self.assertEqual(len(leaves), n_regular + 1)
         self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
         self.assertIs(leaves[n_regular], offset)
