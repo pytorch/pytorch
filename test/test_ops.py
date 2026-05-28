@@ -459,7 +459,6 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
     # XPU test will be enabled step by step. Skip the tests temporarily.
     # MPS does not support double precision, so single precision has to be used instead.
     @skipXPU
@@ -467,15 +466,6 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
-        if (
-            TEST_WITH_TORCHINDUCTOR
-            and op.formatted_name
-            in ("signal_windows_exponential", "signal_windows_bartlett")
-            and dtype == torch.float64
-            and ("cpu" in device or "cuda" in device or "xpu" in device)
-        ):
-            raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
-
         # Sets the default dtype to NumPy's default dtype of double
         with set_default_dtype(highest_precision_float(device)):
             for sample_input in op.reference_inputs(device, dtype):
