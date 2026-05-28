@@ -1377,6 +1377,16 @@ quiesce_async_compile_time: int = Config(
     default=60,
 )
 
+# MALLOC_CONF to set for the compile worker subprocess. Tuned to reduce
+# memory fragmentation and retention in the jemalloc allocator used by
+# Triton/LLVM compilation. Default reduces RSS ~20% vs stock jemalloc
+# settings by limiting arena count and returning freed pages immediately.
+# Set to empty string to disable.
+compile_worker_malloc_conf: str = Config(
+    env_name_force="TORCHINDUCTOR_COMPILE_WORKER_MALLOC_CONF",
+    default="dirty_decay_ms:0,narenas:4",
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
