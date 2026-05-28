@@ -2156,7 +2156,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if kwargs:
             raise_type_error(
                 tx,
-                f"{self.fn.__name__} takes no keyword arguments",
+                f"{self.fn.__name__}() takes no keyword arguments",
             )
         if len(args) == 0:
             return TupleVariable([], mutation_type=ValueMutationNew())
@@ -3650,7 +3650,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())
-        lst.call_method(tx, "extend", [args[0]], kwargs)
+        lst.call_method(tx, "extend", [args[0]], {})
         return lst
 
     def call_method(
