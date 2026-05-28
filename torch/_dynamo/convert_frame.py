@@ -908,7 +908,9 @@ def trace_frame(
 
     if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
         raise exc.TorchRuntimeError(
-            "torch.compile cannot JIT compile during CUDA graph capture."
+            "torch.compile cannot JIT compile during CUDA graph capture. "
+            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            "compilation, then capture the graph after compilation has completed."
         )
 
     speculation_log.restart()  # type: ignore[has-type]
