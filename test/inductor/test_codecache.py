@@ -3262,6 +3262,55 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details3),
         )
 
+    def test_hash_sdpa_backend_state(self):
+        """
+        Test that SDPA backend selection affects hashes.
+        """
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION
+        ):
+            flash_details1 = FxGraphHashDetails(None, [], {}, [])
+            flash_details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+        ):
+            cudnn_details = FxGraphHashDetails(None, [], {}, [])
+
+        with torch.nn.attention.sdpa_kernel(
+            [
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+            ],
+            set_priority=True,
+        ):
+            cudnn_then_flash_details = FxGraphHashDetails(None, [], {}, [])
+
+        with torch.nn.attention.sdpa_kernel(
+            [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+            ],
+            set_priority=True,
+        ):
+            flash_then_cudnn_details = FxGraphHashDetails(None, [], {}, [])
+
+        self.assertEqual(
+            pickler.dumps(flash_details1),
+            pickler.dumps(flash_details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(flash_details1),
+            pickler.dumps(cudnn_details),
+        )
+        self.assertNotEqual(
+            pickler.dumps(cudnn_then_flash_details),
+            pickler.dumps(flash_then_cudnn_details),
+        )
+
     def test_hash_private_config_changes(self):
         """
         Test that private config settings affect hashes.

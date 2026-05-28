@@ -1312,6 +1312,16 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
 
+        # SDPA backend selection can affect lowering to backend-specific aten ops.
+        self.cuda_sdpa_settings = (
+            torch.backends.cuda.flash_sdp_enabled(),
+            torch.backends.cuda.mem_efficient_sdp_enabled(),
+            torch.backends.cuda.math_sdp_enabled(),
+            torch.backends.cuda.cudnn_sdp_enabled(),
+            torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed(),
+            tuple(torch._C._get_sdp_priority_order()),
+        )
+
         # Include cudagraph annotation in cache key only when it changes
         # behavior. When both fwd and bwd are overridden to the same value,
         # normalize to a simple boolean (equivalent to flipping the config).
