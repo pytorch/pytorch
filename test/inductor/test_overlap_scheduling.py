@@ -1,3 +1,6 @@
+# Owner(s): ["module: inductor"]
+
+import operator
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -137,16 +140,14 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
 
         self.assertEqual(estimations[relu], 7.0)
 
-    def test_gather_node_runtime_estimations_does_not_use_roofline_for_non_compute_when_custom_estimator_exists(
-        self,
-    ):
+    def test_custom_estimator_skips_non_compute_roofline(self):
         graph = fx.Graph()
         x = graph.placeholder("x")
-        alias = graph.call_function(torch.ops.aten.alias.default, (x,))
-        graph.output(alias)
+        getitem = graph.call_function(operator.getitem, ((x,), 0))
+        graph.output(getitem)
         gm = fx.GraphModule({}, graph)
 
-        alias.meta["val"] = torch.empty(4, device="meta")
+        getitem.meta["val"] = torch.empty(4, device="meta")
 
         def custom_runtime_estimation(
             node: fx.Node,
@@ -163,7 +164,7 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
                 log_estimations=False,
             )
 
-        self.assertNotIn(alias, estimations)
+        self.assertNotIn(getitem, estimations)
         mock_estimate_roofline.assert_not_called()
 
     def test_manual_overlap_scheduler_uses_noop_default_estimator(self):
