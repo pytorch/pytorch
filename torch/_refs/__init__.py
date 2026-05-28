@@ -1333,20 +1333,22 @@ def pow(
     a: TensorLikeType | NumberType,
     b: TensorLikeType | NumberType,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     if not (isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)):
         raise AssertionError("at least one of a or b must be TensorLikeType")
 
     if isinstance(b, Number):
-        if b == 1.0:
+        if statically_known_true(b == 1.0):
             return a.clone()  # type: ignore[return-value,union-attr]
-        elif b == 2.0:
+        elif statically_known_true(b == 2.0):
             return a * a  # type: ignore[return-value]
-        elif b == 0.5:
+        elif statically_known_true(b == 0.5):
             return torch.sqrt(a)  # type: ignore[arg-type]
     elif isinstance(a, Number):
-        if a == 1.0:
+        if statically_known_true(a == 1.0):
             return torch.fill(b, True)
-        if a == 2.0 and (
+        if statically_known_true(a == 2.0) and (
             utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
         ):
             return torch.exp2(b)
@@ -3408,8 +3410,6 @@ def native_group_norm(
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-        # Native CPU affine group norm contracts this multiply-add. Use addcmul
-        # as the explicit decomposition op instead of spelling it as mul + add.
         out = torch.addcmul(unsqueeze_b, input_acc, unsqueeze_w, value=1)
     else:
         out = (input_reshaped - mean) * rstd

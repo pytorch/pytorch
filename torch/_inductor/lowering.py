@@ -1494,10 +1494,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return 0
         elif fn(sympy.Ge(index, 0)):
             # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
+            return Min(index, size)
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
+            return Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -2385,8 +2385,23 @@ def split(x, sizes, dim=0):
     # If sizes is an integer (or a SymInt), we turn it into a list of sizes
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(sizes, 0):
+            raise RuntimeError(
+                f"split expects split_size be non-negative, but got split_size={sizes}"
+            )
+
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+        if sizevars.statically_known_equals(x_size, 0):
+            return [slice_(x, dim, 0, 0, clamp=False)]
+
+        if sizevars.statically_known_equals(sizes, 0):
+            raise RuntimeError(
+                "split_size can only be 0 if dimension size is 0, "
+                f"but got dimension size of {x_size}"
+            )
+
+        chunks = sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -6873,7 +6888,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -6884,7 +6899,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
+def use_two_step_variance(x, axis, keepdim, *, max_reduction_numel=None):
     # two-step algorithm can get better performance in small reductions size
     # while it can accumulate more numerical error than Welford algorithm.
     axis = _validate_reduction_axis(x, axis)
@@ -6901,11 +6916,35 @@ def use_two_step_variance(x, axis, keepdim):
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+    reduction_numel = int(reduction_numel)
+    if max_reduction_numel is not None and reduction_numel > max_reduction_numel:
+        return False
+    return reduction_numel <= threshold and sympy_product(ranges) != 1
+
+
+def preserve_welford_mean(x, axis, keepdim):
+    device = x.get_device()
+    if device is None or device.type != "cpu" or not keepdim:
+        return False
+
+    current_node = V.graph.current_node
+    original_aten = (
+        current_node.meta.get("original_aten")
+        if current_node is not None and current_node.meta is not None
+        else None
     )
+    # native_group_norm's CPU affine path consumes this mean, so keep Welford
+    # across the two-step threshold to match native RowwiseMoments.
+    if (
+        isinstance(original_aten, torch._ops.OpOverload)
+        and original_aten._schema.name == "aten::native_group_norm"
+        and original_aten._overloadname == "default"
+    ):
+        return True
+
+    return use_two_step_variance(x, axis=axis, keepdim=keepdim, max_reduction_numel=64)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -6962,10 +7001,12 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         keepdim=keepdim,
         return_mean=return_mean,
     )
-    # Preserve eager var_mean's Welford-style mean when it is an output.
-    use_two_step = not return_mean and use_two_step_variance(
-        x, axis=axis, keepdim=keepdim
-    )
+    use_two_step = use_two_step_variance(x, axis=axis, keepdim=keepdim)
+    # Preserve eager var_mean's Welford-style mean for native norm patterns
+    # where small rounding differences can be amplified by downstream
+    # clamp/log operations.
+    if return_mean and use_two_step and preserve_welford_mean(x, axis, keepdim):
+        use_two_step = False
     output = (
         var_mean_sum_(**kwargs)
         if (config.mtia.disable_welford_reduction or use_two_step)
@@ -7721,18 +7762,13 @@ sub = register_pointwise(aten.sub, allow_alpha=True)
 @register_lowering(aten.addcmul, broadcast=True)
 def addcmul(self, tensor1, tensor2, *, value=1):
     """
-    Computes self + value * tensor1 * tensor2 while matching eager contraction.
+    Computes self + value * tensor1 * tensor2 using FMA for better precision.
 
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    For value=1, native addcmul produces FMA-contracted numerics. Preserve
-    that API behavior directly so decompositions can use addcmul to request
-    the same numerics instead of relying on a backend pattern match.
-
-    Outside the CPU value=1 case, FMA is only used for floating-point types on
-    non-AMD GPUs/XPU. For integer types, we fall back to regular arithmetic
-    since FMA doesn't support integers.
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
@@ -7751,7 +7787,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t2_loader = tensor2.make_loader()
 
     # mul_rn/div_rn are only available for floating-point types on CUDA/XPU.
-    # CPU addcmul(value=1) uses FMA to match native addcmul semantics.
+    # CPU addcmul(value=1) still uses FMA to match native addcmul semantics.
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
