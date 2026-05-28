@@ -1279,15 +1279,28 @@ class TestWarpSizeUnification(TestCase):
         # Default warp_size is 32; confirm the default path matches wave32.
         self.assertEqual(_num_warps(8, max_num_warps=8), 8)
 
-    def test_check_max_grid_x_respects_warp_size(self):
+    def test_check_max_grid_x_respects_warp_size_hip(self):
+        # _check_max_grid_x only uses warp_size on the HIP path, where the
+        # bound is on total threads (num_blocks * num_warps * warp_size).
+        # Force the HIP branch so the assertion exercises that path even on
+        # a non-HIP build.
         size_hints = {"x": 2**32}
-        x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
-        x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
-        # With warp_size=64 on HIP the total-threads bound is reached twice as
-        # fast, so x must scale up at least as much as with warp_size=32.
-        # Both must not exceed TRITON_MAX_BLOCK["X"].
+        with patch.object(torch.version, "hip", "6.0.0"):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        # Doubling warp_size halves the per-block thread budget, so x must
+        # double to keep total threads under 2**31 - 1.
+        self.assertEqual(x64, 2 * x32)
         self.assertLessEqual(x32, TRITON_MAX_BLOCK["X"])
         self.assertLessEqual(x64, TRITON_MAX_BLOCK["X"])
+
+    def test_check_max_grid_x_ignores_warp_size_on_nvidia(self):
+        # NVIDIA bounds num_blocks directly, so warp_size must not change x.
+        size_hints = {"x": 2**32}
+        with patch.object(torch.version, "hip", None):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        self.assertEqual(x32, x64)
 
     def test_triton_config_uses_warp_size_for_min_elem(self):
         # min_elem_per_thread * warp_size * num_warps drives the floor for
