@@ -95,7 +95,7 @@ T env_to_value(std::string_view env_key, const T& default_value) {
     return string_to_bool(value);
   } else if constexpr (std::is_same_v<T, std::string>) {
     // String conversion (just return the value as is)
-    return std::move(value);
+    return value;
   } else {
     // For all other types, use stringstream for conversion
     try {
