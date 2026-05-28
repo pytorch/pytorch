@@ -30,4 +30,15 @@ TORCH_API void nccl_reduce_scatter_offset(
     std::optional<at::IntArrayRef> offsets,
     std::optional<at::IntArrayRef> dst_ranks,
     const std::string& red_op);
+
+// AllToAllV with split sizes that live on device. Drop-in for the
+// NVSHMEM `all_to_all_vdev` -- see ops/nccl_alltoall_vdev.cu for the
+// kernel description and the user-visible contract on `out_splits_offsets`.
+// All four tensors must come from the NCCL symmetric memory backend.
+TORCH_API void nccl_all_to_all_vdev(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_splits,
+    at::Tensor& out_splits_offsets,
+    const std::string& group_name);
 } // namespace c10d::nccl_extension
