@@ -762,6 +762,11 @@ class DeferredTritonCallWrapper:
             prefix.splice_jit(jit_init)
 
             # AOTI: load precompiled cubin from compile-time-initialized result.
+            loaded_modules_arg = (
+                ",\n                        &kernels_.loaded_modules_"
+                if V.graph.device_type != "xpu"
+                else ""
+            )
             aoti_init = IndentedBuffer(initial_indent=prefix._indent)
             aoti_init.writeline(f"if (kernels_.{kernel_name} == nullptr) {{")
             with aoti_init.indent():
@@ -771,7 +776,7 @@ class DeferredTritonCallWrapper:
                         {kernel_name}_result.cubin_path,
                         {kernel_name}_result.mangled_name,
                         {kernel_name}_result.shared_mem,
-                        cubin_dir_);
+                        cubin_dir_{loaded_modules_arg});
                     """
                 )
             aoti_init.writeline("}")
