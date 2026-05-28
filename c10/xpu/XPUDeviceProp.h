@@ -74,6 +74,9 @@ namespace c10::xpu {
   /* the type of global memory cache supported. */                             \
   _(global_mem_cache_type)                                                     \
                                                                                \
+  /* the size of global memory cache in bytes. */                              \
+  _(global_mem_cache_size)                                                     \
+                                                                               \
   /* the size of global memory cache line in bytes. */                         \
   _(global_mem_cache_line_size)                                                \
                                                                                \
@@ -185,13 +188,6 @@ namespace c10::xpu {
 
 struct C10_XPU_API DeviceProp{
     AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP)
-
-    // Alias for `global_mem_cache_size`, which is implementation-defined.
-    // TODO: drop this alias once SYCL exposes per-level cache sizes.
-    _DEFINE_SYCL_PROP(
-        sycl::info::device,
-        global_mem_cache_size,
-        last_level_cache_size)
 
     // the platform name.
     DEFINE_PLATFORM_PROP(name, platform_name)
