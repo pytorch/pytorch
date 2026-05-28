@@ -1461,7 +1461,9 @@ class TestAutogradFunction(TestCase):
         grad(f)(x)
         self.assertEqual(names, ["FooBarGeneratedBackward"])
 
-    @skipIfTorchDynamo("set_data inside grad(f) is not traceable; the dispatch-key invariant only matters in eager")
+    @skipIfTorchDynamo(
+        "set_data inside grad(f) is not traceable; the dispatch-key invariant only matters in eager"
+    )
     def test_set_data_does_not_propagate_functorch_keys(self, device):
         # set_data used to copy FuncTorchGradWrapper onto a plain destination,
         # which then triggered an unchecked TensorWrapper cast. The return is
