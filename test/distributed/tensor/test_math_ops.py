@@ -1145,6 +1145,31 @@ class DistMathOpsTest(DTensorTestBase):
                         self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
+    def test_cumprod_backward_higher_order(self):
+        device_mesh = self.build_device_mesh()
+        dim = 0
+        x = torch.rand(4, 3, device=self.device_type).add_(0.1)
+        x.select(dim, x.size(dim) // 2).zero_()
+        x.requires_grad_()
+
+        ref_out = torch.cumprod(x, dim=dim)
+        ref_grad = torch.autograd.grad(ref_out.sum(), x, create_graph=True)[0]
+        ref_grad.sum().backward()
+
+        dist_x = distribute_tensor(
+            x.detach().clone().requires_grad_(True),
+            device_mesh,
+            [Shard(0)],
+        )
+        dist_out = torch.cumprod(dist_x, dim=dim)
+        dist_grad = torch.autograd.grad(dist_out.sum(), dist_x, create_graph=True)[0]
+        dist_grad.full_tensor().sum().backward()
+
+        self.assertEqual(dist_out.full_tensor(), ref_out)
+        self.assertEqual(dist_grad.full_tensor(), ref_grad)
+        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
     def test_masked_cumprod_backward(self):
         device_mesh = self.build_device_mesh()
         row_idx = torch.arange(12, device=self.device_type).unsqueeze(1)

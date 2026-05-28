@@ -638,10 +638,6 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return are_inputs_tensors_sublcass ? grad.new_zeros_symint(sizes)
                                        : at::zeros_symint(sizes, grad.options());
   };
-  auto make_subclass_aware_ones = [&](c10::SymIntArrayRef sizes) {
-    return are_inputs_tensors_sublcass ? grad.new_ones_symint(sizes)
-                                       : at::ones({1}, grad.options()).expand_symint(sizes);
-  };
 
   const auto w = output_conj * grad;
   const auto is_zero = input == 0;
@@ -675,7 +671,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // there is no first zero:
     // indices = (cumsum == 1).max(dim, keepdim=True).indices
     // The mask for the first zero:
-    // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
+    // zeros_like(indices).scatter(dim, indices, true).logical_and(cumsum == 1)
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
     Tensor grad_input = make_subclass_aware_zeros(input.sym_sizes());
@@ -768,6 +764,28 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
+      if (are_inputs_tensors_sublcass) {
+        Tensor grad_slice;
+        if (k == 0) {
+          prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
+          grad_slice = grad.select(dim, k) + at::sum(grad.slice(dim, k + 1) * prods_from_k_plus_1, dim);
+        } else {
+          // Avoid at::prod here: its backward uses cat internally and breaks
+          // higher-order DTensor gradients by mixing Tensor and DTensor inputs.
+          const Tensor prods_until_k =
+              at::cumprod(input_conj.slice(dim, 0, k), dim).slice(dim, k - 1, k);
+          grad_slice = grad.select(dim, k) * prods_until_k.squeeze(dim);
+          if (k != dim_size - 1) {
+            prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
+            const Tensor omitted_products_tail =
+                prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+            grad_slice = grad_slice + at::sum(grad.slice(dim, k + 1) * omitted_products_tail, dim);
+          }
+        }
+        grad_inputs.push_back(grad_slice);
+        continue;
+      }
+
       if (k == 0) {
         prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
         omitted_products = at::cat({ones, std::move(prods_from_k_plus_1)}, dim);
@@ -787,11 +805,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       TORCH_CHECK(omitted_products.sym_size(dim) == dim_size - k);
 
       auto grad_slice = at::sum(grad.slice(dim, k) * omitted_products, dim);
-      if (are_inputs_tensors_sublcass) {
-        grad_inputs.push_back(grad_slice);
-      } else {
-        grad_input.select(dim, k).copy_(grad_slice);
-      }
+      grad_input.select(dim, k).copy_(grad_slice);
     }
 
     return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : std::move(grad_input);
