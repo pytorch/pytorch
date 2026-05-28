@@ -77,7 +77,7 @@ void for_each_tensor(
 }
 
 bool has_symbolic_sizes(
-    torch::jit::Stack* stack,
+    torch::jit::Stack const* const stack,
     size_t begin,
     size_t num_arguments) {
   bool found = false;
@@ -104,7 +104,7 @@ bool has_symbolic_sizes(
 }
 
 std::optional<c10::Device> _find_common_device(
-    torch::jit::Stack* stack,
+    torch::jit::Stack const* const stack,
     size_t begin,
     size_t num_arguments) {
   std::optional<c10::Device> common_device;
@@ -335,9 +335,12 @@ std::vector<at::Tensor> validate_and_convert_non_fake_tensors(
 }
 
 bool is_lift_func(const c10::OperatorHandle& op) {
-  const auto& name = op.operator_name();
-  return (
-      name.name == "aten::lift_fresh" || name.name == "aten::lift_fresh_copy");
+  static const c10::OperatorHandle lift_fresh =
+      c10::Dispatcher::singleton().findSchemaOrThrow("aten::lift_fresh", "");
+  static const c10::OperatorHandle lift_fresh_copy =
+      c10::Dispatcher::singleton().findSchemaOrThrow(
+          "aten::lift_fresh_copy", "");
+  return op == lift_fresh || op == lift_fresh_copy;
 }
 
 void maybe_run_unsafe_fallback(
