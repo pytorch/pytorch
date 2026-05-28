@@ -367,6 +367,11 @@ class PythonPrinter(ExprPrinter):
                     result = f"({expr_str} if {cond_str} else {result})"
         return result if result else "0"
 
+    def _print_ITE(self, expr: sympy.Expr) -> str:
+        c, t, f = expr.args
+        # pyrefly: ignore [missing-attribute]
+        return f"({self._print(t)} if {self._print(c)} else {self._print(f)})"
+
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
@@ -408,6 +413,12 @@ class CppPrinter(ExprPrinter):
                 else:
                     result = f"{cond_str} ? {expr_str} : {result}"
         return f"({result})" if result else "0"
+
+    def _print_ITE(self, expr: sympy.Expr) -> str:
+        c, t, f = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
+        return f"({c} ? {t} : {f})"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
