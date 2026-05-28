@@ -221,6 +221,7 @@ class LazyModuleMixin:
         See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
         for the details of the hook specification.
         """
+        had_lazy = False
         for name, param in itertools.chain(
             self._parameters.items(), self._buffers.items()
         ):
@@ -233,9 +234,10 @@ class LazyModuleMixin:
                     if not is_lazy(input_param):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
+                        had_lazy = True
 
         # _materialize removes hooks, but only for future calls; the current load completes normally.
-        if not self.has_uninitialized_params():
+        if had_lazy and not self.has_uninitialized_params():
             self._lazy_load_pre_materialize_hook()
             self._materialize()
 
@@ -246,14 +248,13 @@ class LazyModuleMixin:
         ``in_features``, ``in_channels``) from the already-loaded parameters,
         since ``initialize_parameters`` is not called on the load path.
         """
-        pass
 
     def _materialize(self: _LazyProtocol):
         """Remove lazy hooks and, if ``cls_to_become`` is set, mutate ``__class__`` to the concrete type."""
         self._initialize_hook.remove()
         self._load_hook.remove()
-        delattr(self, '_initialize_hook')
-        delattr(self, '_load_hook')
+        delattr(self, "_initialize_hook")
+        delattr(self, "_load_hook")
         if self.cls_to_become is not None:
             self.__class__ = self.cls_to_become
 

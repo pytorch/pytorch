@@ -643,9 +643,11 @@ class TestLazyModules(TestCase):
                     affine=affine, track_running_stats=track_running_stats
                 )
                 lazy_module.load_state_dict(module.state_dict())
-                self.assertIsInstance(lazy_module, cls)
                 if affine or track_running_stats:
+                    self.assertIsInstance(lazy_module, cls)
                     self.assertEqual(lazy_module.num_features, 10)
+                else:
+                    self.assertIsInstance(lazy_module, lazy_cls)
                 if affine:
                     self.assertEqual(lazy_module.weight.shape, (10,))
                     self.assertEqual(lazy_module.bias.shape, (10,))
@@ -740,6 +742,17 @@ class TestLazyModules(TestCase):
     def test_lazy_instancenorm2d_state(self):
         self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
         self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
+
+    def test_lazy_instancenorm2d_stateless_load(self):
+        module = nn.InstanceNorm2d(10, affine=False, track_running_stats=False)
+        lazy_module = nn.LazyInstanceNorm2d(affine=False, track_running_stats=False)
+        lazy_module.load_state_dict(module.state_dict())
+        self.assertIsInstance(lazy_module, nn.LazyInstanceNorm2d)
+
+        x = torch.randn(2, 10, 4, 4)
+        lazy_module(x)
+        self.assertIsInstance(lazy_module, nn.InstanceNorm2d)
+        self.assertNotIsInstance(lazy_module, nn.LazyInstanceNorm2d)
 
     def test_lazy_instancenorm3d(self):
         self._check_lazy_norm(
