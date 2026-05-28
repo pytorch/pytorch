@@ -42,7 +42,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL,
@@ -14218,7 +14218,14 @@ op_db: list[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_diagonal_scatter),
+           sample_inputs_func=sample_inputs_diagonal_scatter,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/168169
+               DecorateInfo(unittest.skip("Flaky under ASAN"),
+                            'TestComplexBwdGradients', 'test_fn_grad',
+                            device_type='cpu', dtypes=(torch.complex128,),
+                            active_if=TEST_WITH_ASAN),
+           )),
     OpInfo('alias_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_alias_copy,
@@ -15774,14 +15781,6 @@ op_db: list[OpInfo] = [
                 "TestCompositeCompliance", "test_cow_input",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-            # RuntimeError: LLD failed to link hsaco source... while
-            # compiling
-            # triton_per_fused__log_softmax_nll_loss_forward_prepare_softmax_online_sub_0
-            DecorateInfo(
-                unittest.skip("link failure"),
-                "TestInductorOpInfo", "test_comprehensive",
-                device_type="cuda",
-                active_if=TEST_WITH_ROCM),
         )
     ),
     OpInfo('nn.functional.normalize',
@@ -15925,11 +15924,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
-            # tensor-likes are not close
-            DecorateInfo(unittest.expectedFailure, "TestInductorOpInfo", "test_comprehensive", device_type="cuda", dtypes=(torch.float16,)),
-            # fails in TorchScript interpreter with failures associated with batch_norm
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
-            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness_with_reusing_ir"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
             # native_group_norm expects contiguous inputs on CUDA
@@ -16795,6 +16789,11 @@ op_db: list[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # https://github.com/pytorch/pytorch/issues/131050
+               DecorateInfo(unittest.skip("Flaky on Linux/ROCm CUDA"),
+                            'TestDecomp', 'test_comprehensive',
+                            device_type='cuda', dtypes=(torch.bfloat16,),
+                            active_if=IS_LINUX or TEST_WITH_ROCM),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
@@ -17454,7 +17453,12 @@ op_db: list[OpInfo] = [
            dtypesIfMPS=floating_types_and(
                torch.float16, torch.bfloat16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.bool, torch.int8
            ),
-           sample_inputs_func=sample_inputs_max_unpool_grad),
+           sample_inputs_func=sample_inputs_max_unpool_grad,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/184463
+               DecorateInfo(unittest.skip("Flaky in CI"),
+                            'TestSingleDimStrategies', 'test_single_dim_strategy'),
+           )),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
