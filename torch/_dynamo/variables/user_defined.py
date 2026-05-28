@@ -3822,6 +3822,18 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value, **kwargs)
 
+    def _force_lazy_graph_module_recompile(self) -> None:
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(
+            self.value  # pyrefly: ignore[bad-argument-type]
+        )
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "forward":
+            self._force_lazy_graph_module_recompile()
+        return super().var_getattr(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3829,6 +3841,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self._force_lazy_graph_module_recompile()
         fn_variable = VariableTracker.build(tx, self.value.forward.__func__)  # type: ignore[attr-defined]
         args = [self] + args
         return tx.inline_user_function_return(
