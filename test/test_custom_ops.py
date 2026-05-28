@@ -3367,6 +3367,49 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    def test_custom_op_call_annotations(self):
+        @torch.library.custom_op("_torch_testing::annotated_scale", mutates_args=())
+        def annotated_scale(x: Tensor, scale: float) -> Tensor:
+            return x * scale
+
+        scale_op = torch.ops._torch_testing.annotated_scale.default
+        self.assertEqual(
+            annotated_scale.__call__.__annotations__,
+            annotated_scale._init_fn.__annotations__,
+        )
+        self.assertEqual(
+            scale_op.__call__.__annotations__,
+            annotated_scale._init_fn.__annotations__,
+        )
+
+        @torch.library.custom_op("_torch_testing::annotated_shift", mutates_args=())
+        def annotated_shift(x: Tensor, shift: int) -> Tensor:
+            return x + shift
+
+        shift_op = torch.ops._torch_testing.annotated_shift.default
+        self.assertEqual(
+            annotated_shift.__call__.__annotations__,
+            annotated_shift._init_fn.__annotations__,
+        )
+        self.assertEqual(
+            shift_op.__call__.__annotations__,
+            annotated_shift._init_fn.__annotations__,
+        )
+        self.assertEqual(
+            annotated_scale.__call__.__annotations__,
+            annotated_scale._init_fn.__annotations__,
+        )
+        self.assertEqual(
+            scale_op.__call__.__annotations__,
+            annotated_scale._init_fn.__annotations__,
+        )
+
+        x = torch.ones(2)
+        self.assertEqual(annotated_scale(x, 3.0), x * 3.0)
+        self.assertEqual(scale_op(x, 3.0), x * 3.0)
+        self.assertEqual(annotated_scale.__call__(x, 3.0), x * 3.0)
+        self.assertEqual(scale_op.__call__(x, 3.0), x * 3.0)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_no_grad_skips_autograd(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import inspect
 import logging
 import warnings
@@ -293,6 +294,7 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
+        self._set_call_metadata()
 
         self._backend_fns: dict[str | None, Callable] = {}
         self._abstract_fn: Callable | None = None
@@ -317,6 +319,13 @@ class CustomOpDef:
 
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
+
+    def _set_call_metadata(self) -> None:
+        def __call__(*args, **kwargs):
+            return type(self).__call__(self, *args, **kwargs)
+
+        functools.update_wrapper(__call__, self._init_fn)
+        self.__call__ = __call__
 
     @contextmanager
     def set_kernel_enabled(self, device_type: str, enabled: bool = True):
@@ -767,6 +776,16 @@ class CustomOpDef:
             tags=_with_pt2_compliant_tag(tags),
         )
         self._opoverload = utils.lookup_op(self._qualname)
+        self._set_opoverload_call_metadata()
+
+    def _set_opoverload_call_metadata(self) -> None:
+        opoverload = self._opoverload
+
+        def __call__(*args, **kwargs):
+            return type(opoverload).__call__(opoverload, *args, **kwargs)
+
+        functools.update_wrapper(__call__, self._init_fn)
+        opoverload.__call__ = __call__
 
     def _register_fake_dispatcher_impl(self) -> None:
         def fake_impl(*args, **kwargs):
