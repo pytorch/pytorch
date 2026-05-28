@@ -34,8 +34,8 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_LINUX,
+    IS_WINDOWS,
     MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
@@ -1547,6 +1547,15 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/76962
+            DecorateInfo(
+                unittest.skip("Flaky on Linux CUDA"),
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -1603,14 +1612,15 @@ op_db: list[OpInfo] = [
             ),
             # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/95412
             # see https://github.com/pytorch/pytorch/issues/177249
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip,
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cpu",
                 dtypes=[torch.complex64],
-                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+                active_if=IS_LINUX or IS_WINDOWS,
             ),
         ),
     ),
@@ -2094,6 +2104,14 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # https://github.com/pytorch/pytorch/issues/137684
+            DecorateInfo(
+                unittest.skip,
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.float32,),
             ),
         ),
     ),

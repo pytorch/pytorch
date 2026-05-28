@@ -1291,6 +1291,28 @@ class TestPatternMatcher(TestCase):
         ):
             self.assertEqual(pure_replacement_pass.apply(gm.graph), 1)
 
+    def test_pure_graph_pattern_skips_mutation_region_refresh(self):
+        pure_graph_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.sin.default, KeywordArg("x")),
+            pass_dict=pure_graph_pass,
+        )
+        def pure_graph_pattern(match: Match, x):
+            pass
+
+        def fn(x):
+            return torch.sin(x)
+
+        gm = make_fx(fn)(torch.randn(4))
+        pattern_matcher.compute_mutation_region_ids(gm.graph)
+        with unittest.mock.patch.object(
+            pattern_matcher,
+            "compute_mutation_region_ids",
+            side_effect=AssertionError("pure graph patterns should not refresh"),
+        ):
+            self.assertEqual(pure_graph_pass.apply(gm.graph), 1)
+
     def test_mutating_register_replacement_refreshes_mutation_regions(self):
         insert_mutation_pass = PatternMatcherPass()
 

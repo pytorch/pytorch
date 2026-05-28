@@ -2176,6 +2176,52 @@ class _MutationRegionRefresh:
     mutation_count: int
 
 
+@dataclasses.dataclass
+class _GraphMutationTracker:
+    created_nodes: list[torch.fx.Node] = dataclasses.field(default_factory=list)
+    erased_mutation_node: bool = False
+
+    def changed_mutation_regions(self) -> bool:
+        return self.erased_mutation_node or _contains_mutation_op(self.created_nodes)
+
+
+@contextlib.contextmanager
+def _track_graph_mutation_ops(
+    graph: torch.fx.Graph,
+) -> Generator[_GraphMutationTracker, None, None]:
+    tracker = _GraphMutationTracker()
+    create_node = graph.create_node
+    erase_node = graph.erase_node
+    sentinel = object()
+    graph_dict = graph.__dict__
+    create_node_attr = graph_dict.get("create_node", sentinel)
+    erase_node_attr = graph_dict.get("erase_node", sentinel)
+
+    def tracked_create_node(*args: Any, **kwargs: Any) -> torch.fx.Node:
+        created_node = create_node(*args, **kwargs)
+        tracker.created_nodes.append(created_node)
+        return created_node
+
+    def tracked_erase_node(to_erase: torch.fx.Node) -> Any:
+        if not to_erase._erased and is_mutation_op(to_erase):
+            tracker.erased_mutation_node = True
+        return erase_node(to_erase)
+
+    graph_dict["create_node"] = tracked_create_node
+    graph_dict["erase_node"] = tracked_erase_node
+    try:
+        yield tracker
+    finally:
+        if create_node_attr is sentinel:
+            del graph_dict["create_node"]
+        else:
+            graph_dict["create_node"] = create_node_attr
+        if erase_node_attr is sentinel:
+            del graph_dict["erase_node"]
+        else:
+            graph_dict["erase_node"] = erase_node_attr
+
+
 def _count_mutation_ops_until(start: torch.fx.Node, stop: torch.fx.Node) -> int:
     mutation_count = 0
     nd = start
@@ -2371,26 +2417,28 @@ class PatternMatcherPass:
 
                     if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
-                        full_mutation_region_refresh = isinstance(
-                            entry, GraphPatternEntry
-                        )
                         if isinstance(entry, ReplacementPatternEntry):
                             mutation_region_refresh = (
                                 _mutation_region_refresh(graph, m.nodes)
                                 if _replacement_changes_mutation_regions(entry, m)
                                 else None
                             )
-                        elif full_mutation_region_refresh:
+                        elif isinstance(entry, GraphPatternEntry):
                             mutation_region_refresh = None
                         else:
                             mutation_region_refresh = _mutation_region_refresh(
                                 graph, m.nodes
                             )
-                        entry.apply(m, graph, node)
-                        if full_mutation_region_refresh:
-                            compute_mutation_region_ids(graph)
+                        if isinstance(entry, GraphPatternEntry):
+                            with _track_graph_mutation_ops(graph) as mutation_tracker:
+                                entry.apply(m, graph, node)
+                            if mutation_tracker.changed_mutation_regions():
+                                compute_mutation_region_ids(graph)
                         elif mutation_region_refresh is not None:
+                            entry.apply(m, graph, node)
                             _refresh_mutation_region_ids(graph, mutation_region_refresh)
+                        else:
+                            entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
 
