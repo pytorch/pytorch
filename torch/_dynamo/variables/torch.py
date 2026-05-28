@@ -75,6 +75,7 @@ from ..source import (
 )
 from ..utils import (
     _is_tensorify_enabled,
+    check_args_peekable_as_constant,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -2993,6 +2994,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import SymNodeVariable
         from .builder import wrap_fx_proxy
+        from .lazy import LazyVariableTracker
+
+        args = [a.realize() if isinstance(a, LazyVariableTracker) else a for a in args]
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
@@ -3003,8 +3007,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
 
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        if self.can_constant_fold_through() and (
+            check_unspec_or_constant_args(args, kwargs)
+            or check_args_peekable_as_constant(args, kwargs)
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
@@ -3015,6 +3020,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
+            from .base import AsPythonConstantNotImplementedError
+
             try:
                 return VariableTracker.build(
                     tx,
@@ -3023,6 +3030,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     ),
                 )
+            except AsPythonConstantNotImplementedError:
+                pass
             except (OverflowError, TypeError, ValueError) as exc:
                 raise_observed_exception(
                     type(exc),

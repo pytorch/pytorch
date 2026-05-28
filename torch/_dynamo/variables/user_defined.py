@@ -77,6 +77,7 @@ from ..source import (
 )
 from ..utils import (
     base_exception_methods,
+    check_args_peekable_as_constant,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -188,7 +189,8 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
     # in independent try blocks so that one missing symbol doesn't drop the others.
     try:
-        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
+        # pyrefly: ignore [missing-import]
+        from _pytest.raises import RaisesExc, RaisesGroup
 
         f_ctxs.append(RaisesExc)
         f_ctxs.append(RaisesGroup)
@@ -203,7 +205,8 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         pass
 
     try:
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
+        # pyrefly: ignore [missing-import]
+        from _pytest.recwarn import WarningsChecker
 
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -1120,18 +1123,26 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 [],
             )
-            var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
+            var.call_method(tx, "__init__", list(args), kwargs)
             return var
 
-        if self.can_constant_fold_through() and constant_args:
-            # constant fold
-            return VariableTracker.build(
-                tx,
-                self.as_python_constant()(  # type: ignore[operator]
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
+        if (
+            self.can_constant_fold_through()
+            and self.value is not torch.Size
+            and (constant_args or check_args_peekable_as_constant(args, kwargs))
+        ):
+            # constant fold - catch AsPythonConstantNotImplementedError for lazy
+            # args that realize into SymNodeVariable (specialize_int=False)
+            try:
+                return VariableTracker.build(
+                    tx,
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+            except AsPythonConstantNotImplementedError:
+                pass
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
@@ -1738,7 +1749,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def python_type(self) -> type:
-        return self.value_type  # type: ignore[return-value]
+        return self.value_type
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -2576,17 +2587,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     method = unpatched_nn_module_init
                 return UserMethodVariable(
                     method, self, source_fn=source_fn, source=source
-                ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+                ).call_function(tx, args, kwargs)
 
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
-            if trace_rules.is_polyfilled_callable(method):  # type: ignore[arg-type]
+            if trace_rules.is_polyfilled_callable(method):
                 from .functions import PolyfilledFunctionVariable
 
                 polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
-                wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
+                wrapped: Any = polyfill_handlers.get(method)
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
                     return variables.UserMethodVariable(
@@ -3277,7 +3288,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         variables.NNModuleVariable,
                     ),
                 ):
-                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
+                    out.set_nn_module_stack_source(
                         AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
                     )
             return out
@@ -3455,7 +3466,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         elif isinstance(type_attr, types.FunctionType):
             while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
+                type_attr = type_attr._torchdynamo_inline
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
@@ -3945,7 +3956,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         args: list[object] = []
         kwargs: dict[str, object] = {}
-        for field in fields(self.value):  # type: ignore[arg-type]
+        for field in fields(self.value):
             if field.init:
                 data = self._get_field_vt(field.name).as_python_constant()
                 if getattr(field, "kw_only", False):
@@ -4581,7 +4592,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
             if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
                 last = kwargs["last"].as_python_constant()
 
-            k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            if isinstance(self._base_vt.items, collections.OrderedDict):  # type: ignore[union-attr]
+                k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            else:
+                k, v = self._base_vt.items.popitem()  # type: ignore[union-attr]
             self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
             tx.output.side_effects.mutation(self._base_vt)
             return variables.TupleVariable([k.vt, v])
@@ -4888,7 +4902,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
+                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(
                     tx, init_args, {}
                 )
         else:
@@ -4981,7 +4995,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return StructSequenceVariable
         return NamedTupleVariable
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         from .lists import TupleVariable
 
         tx = kwargs.pop("tx", None)
@@ -5034,6 +5048,23 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             _, (idx, _) = type_attr.__reduce__()
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
+
+    def is_python_constant(self) -> bool:
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        return can_peek and not is_unrealized
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        from .lists import TupleVariable
+
+        if not isinstance(self._base_vt, TupleVariable):
+            return (False, False, None)
+        can_peek, any_unrealized, values = self._base_vt._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        try:
+            return (True, any_unrealized, self.get_construct_fn()(values))
+        except NotImplementedError:
+            return (False, False, None)
 
     def richcompare_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, op: str
@@ -5202,19 +5233,19 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             # We emulate _tuplegetter.__get__ by indexing into the tracked
             # tuple items, because self.value may not hold actual runtime values.
             _, (idx, _) = type_attr.__reduce__()
-            return self.items[idx]  # type: ignore[union-attr]
+            return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def get_construct_fn(self) -> Callable[..., Any]:
-        return self.tuple_cls._make  # type: ignore[attr-defined]
+        return self.tuple_cls._make
 
     def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
-        return self.tuple_cls(*items)  # type: ignore[arg-type]
+        return self.tuple_cls(*items)
 
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
-        return self.tuple_cls(*items)  # type: ignore[arg-type]
+        return self.tuple_cls(*items)
 
     def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         fields = namedtuple_fields(self.tuple_cls)
