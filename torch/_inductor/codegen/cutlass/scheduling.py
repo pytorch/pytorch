@@ -123,12 +123,16 @@ class CUTLASSScheduling(BaseScheduling):
             )
 
             # For JIT cpp_wrapper, the kernel call site emits a bare
-            # `extern "C"` symbol reference; capture the .so path so the
-            # wrapper compile links against it via extra_flags.
+            # `extern "C"` symbol reference; compile the .so now so the
+            # wrapper compile can link against it via extra_flags.
+            # Autotune compiled a .so for the unfused kernel name
+            # (e.g. cutlass_<hash>), but at codegen time the kernel name
+            # gains a descriptive prefix (cutlass_fused_mm_<hash>), so the
+            # exported symbol differs and we need a fresh compile.
             if V.graph.cpp_wrapper and not V.graph.aot_mode:
                 from ...codecache import CUDACodeCache
 
-                so_path = CUDACodeCache.get_output_path(src_code, "so")
+                so_path, _, _ = CUDACodeCache.compile(src_code, "so")
                 wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 

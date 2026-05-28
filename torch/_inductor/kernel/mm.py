@@ -695,8 +695,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else:
                 templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(addmm_contiguous_subgraph_template)
-
+        # Manually call get_template_configs as use 1-D bias if possible
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+            )
+        )
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
@@ -961,7 +965,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)

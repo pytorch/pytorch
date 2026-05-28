@@ -77,8 +77,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 
 # Only mkl-static and mkl-include are needed; the mkl package contains
 # dynamic libraries that are not discoverable by our build scripts.
-mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
-mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
@@ -111,14 +111,14 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-ninja==1.11.1.4
+ninja==1.13.0
 #Description: build system. Used in some tests. Used in build to generate build
 #time tracing information
-#Pinned versions: 1.11.1.4
+#Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -379,7 +379,7 @@ pip==26.0.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
-packaging==24.0
+packaging==24.2
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"

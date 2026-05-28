@@ -68,15 +68,6 @@ class ROCmCPPScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
-
-            # For JIT cpp_wrapper, the kernel call site emits a bare
-            # `extern "C"` symbol reference; capture the .so path so the
-            # wrapper compile links against it via extra_flags.
-            if V.graph.cpp_wrapper and not V.graph.aot_mode:
-                from ...codecache import ROCmCodeCache
-
-                so_path = ROCmCodeCache.get_output_path(src_code, "so")
-                wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
     def codegen_template(

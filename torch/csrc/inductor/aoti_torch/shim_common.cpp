@@ -45,6 +45,7 @@
 #include <ATen/ops/_wrapped_linear_prepack.h>
 #include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
@@ -75,6 +76,18 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   }
 }
 } // namespace
+
+namespace torch::aot_inductor {
+const char* get_last_error() {
+  const auto& error_msg =
+      torch::csrc::shim::details::get_torch_exception_what();
+  return error_msg.empty() ? nullptr : error_msg.c_str();
+}
+
+void set_last_error(const char* msg) {
+  torch::csrc::shim::details::set_torch_exception_what(msg ? msg : "");
+}
+} // namespace torch::aot_inductor
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
@@ -1309,8 +1322,9 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
       // (similar for max) Skip printing min/max value for complex type tensors
       // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
-      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+      auto [min_t, max_t] = at::aminmax(t->to(float_dtype));
+      std::cout << "Min value: " << min_t.item() << '\n';
+      std::cout << "Max value: " << max_t.item() << '\n';
     } else {
       // Set the numel threshold to print as 256 to avoid printing out too much
       // More info for aten native cuda kernel for "min_all_cuda" implementation

@@ -511,10 +511,24 @@ __global__ void warpMergeSortTopK(
   scalar_t local_values[items_per_thread];
   int64_t local_indices[items_per_thread];
 
-  // Invalid sentinel for padding
+  // Invalid sentinel for padding.
+  //
+  // For integer types std::numeric_limits<T>::infinity() returns 0 (the
+  // default-constructed value of T), which is a legal value in the input and
+  // therefore not a valid out-of-band sentinel. With a zero sentinel the
+  // padding slots interleave with real input values during the sort and their
+  // placeholder indices (inputSliceSize..sort_size-1) can leak into the top-k
+  // output, producing out-of-bounds indices.
+  //
+  // Use has_infinity to pick a true "sorts-to-the-end" sentinel for each type:
+  // infinity() for floats, lowest()/max() for integer types.
   const scalar_t invalid_value = is_descending
-      ? -std::numeric_limits<scalar_t>::infinity()
-      : std::numeric_limits<scalar_t>::infinity();
+      ? (std::numeric_limits<scalar_t>::has_infinity
+             ? -std::numeric_limits<scalar_t>::infinity()
+             : std::numeric_limits<scalar_t>::lowest())
+      : (std::numeric_limits<scalar_t>::has_infinity
+             ? std::numeric_limits<scalar_t>::infinity()
+             : std::numeric_limits<scalar_t>::max());
 
   // Initialize indices for this slice in blocked arrangement
   // WARP_LOAD_TRANSPOSE uses blocked layout: thread t gets items [t*items_per_thread, t*items_per_thread+items_per_thread-1]

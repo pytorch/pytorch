@@ -2914,9 +2914,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
-devices = ["cuda", "hpu"]
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), only_for=devices
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
 )
 
 

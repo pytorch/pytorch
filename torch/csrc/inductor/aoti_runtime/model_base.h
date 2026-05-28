@@ -288,14 +288,6 @@ int munmap(void* addr, size_t length) {
 #endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
-  } while (0)
-
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
 // symbol and link it into the final .so.
@@ -330,16 +322,26 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr = nullptr;
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
-  auto deleter = [](void* ptr) {
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  auto deleter = [](void* ptr) noexcept {
+    auto err = aoti_torch_cuda_caching_allocator_raw_delete(ptr);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free GPU memory in AOTInductor model (caching allocator): error code "
+          << err << '\n';
+    }
   };
   return RAIIDataPtr(data_ptr, deleter);
 #else
   // Use cudaMalloc directly for allocating GPU memory
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
-  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+  auto deleter = [](void* ptr) noexcept {
+    auto code = cudaFree(ptr);
+    if (code != cudaSuccess) {
+      std::cerr << "Failed to free GPU memory in AOTInductor model: "
+                << cudaGetErrorString(code) << '\n';
+    }
+  };
   return RAIIDataPtr(data_ptr, deleter);
 #endif
 }
@@ -579,6 +581,11 @@ class AOTInductorModelBase {
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
+
+    // Wait for the constant folding kernels to complete. The folded
+    // constants may be read by inference on a different stream after
+    // swap_constant_buffer(), which has no GPU synchronization.
+    wait_for_completion();
 
     return folded_constants;
   }
@@ -1118,7 +1125,29 @@ class AOTInductorModelBase {
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
 class AOTInductorModelKernelsBase {
  public:
-  virtual ~AOTInductorModelKernelsBase() = default;
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~AOTInductorModelKernelsBase() {
+#ifdef USE_CUDA
+    for (auto mod : loaded_modules_) {
+      if (mod) {
+        auto err = cuModuleUnload(mod);
+        if (err != CUDA_SUCCESS) {
+          const char* msg = nullptr;
+          cuGetErrorString(err, &msg);
+          std::cerr << "Failed to unload CUDA module in AOTInductor model: "
+                    << (msg ? msg : "unknown error") << '\n';
+        }
+      }
+    }
+#endif // USE_CUDA
+  }
+
+#ifdef USE_CUDA
+  // Tracks CUmodule handles loaded by loadKernel() so they can be
+  // properly unloaded when the model is destroyed, preventing GPU
+  // code object leaks.
+  std::vector<CUmodule> loaded_modules_;
+#endif // USE_CUDA
 };
 
 } // namespace torch::aot_inductor

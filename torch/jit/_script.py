@@ -460,7 +460,7 @@ if _enabled:
             _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
                 calls are forwarded.
             _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
-                exposed on this wrppaer.
+                exposed on this wrapper.
         """
 
         def __init__(self, cpp_class):

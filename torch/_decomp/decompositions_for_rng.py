@@ -173,7 +173,7 @@ class PhiloxStateTracker:
         # concat the (seed, offset) to create a tensor for get_rng_state, and
         # then split it back to get (seed, offset) tuple in set_rng_state.
 
-        # TODO: Investigate if there is be a better way to wrap the tuple in a
+        # TODO: Investigate if there is a better way to wrap the tuple in a
         # false Tensor object, and then desugar it later on.
         return cls.running_state.get_state_as_tensor()
 

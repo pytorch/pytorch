@@ -99,6 +99,11 @@ dead_code_elimination = None
 # never be False by default. At the moment, only export will need it.
 replay_side_effects = True
 
+# Generate Python code strings for compiled graph calls.
+# When enabled, the generated Python code will be stored in output_pycode.
+# [@compile_ignored: debug]
+generate_pycode = False
+
 # Configure side effect warning level
 # If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
 # If `silent`, we allow side effects, no logs are made.
@@ -168,6 +173,10 @@ use_lazy_graph_module = (
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
 assume_static_by_default = True
+
+# Internal: Shape specification patched during tracing by enter_exit_hooks.
+# Set via torch.compile(shapes_spec=...), not directly by users.
+_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
@@ -442,9 +451,6 @@ use_lamba_guard_for_object_aliasing = True
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
-# Defaults to True. If Traceable FSDP2 is used, set this to False.
-skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -485,7 +491,7 @@ assume_dunder_attributes_remain_unchanged = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = True
+use_recursive_dict_tags_for_guards = False
 
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
@@ -556,6 +562,9 @@ enable_trace_contextlib = True
 # Enable tracing through unittest
 enable_trace_unittest = False
 
+# Enable tracing LOAD_BUILD_CLASS bytecode
+enable_trace_load_build_class = False
+
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
 enable_faithful_generator_behavior = True
@@ -611,7 +620,8 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo.
+# There are slight differences between this config and wrap_top_frame.
 debug_force_nested_calls = False
 
 # Used for testing - forces a graph break when a function

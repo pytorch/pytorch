@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -167,14 +167,12 @@ class TestReductions(TestCase):
         self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
 
-    @skipIfMPS
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty(self, device, op: ReductionOpInfo):
         """Tests that dim=[] is a no-op"""
         self._test_dim_keepdim(op, device, ndim=0, dim=[])
         self._test_dim_keepdim(op, device, ndim=2, dim=[])
 
-    @skipIfMPS
     @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[], when keepdim=True, is a no-op"""
@@ -214,14 +212,12 @@ class TestReductions(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
 
-    @skipIfMPS
     @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
         """Tests that ops claiming to not support multi dim actually don't."""
         with self.assertRaises(TypeError):
             self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
 
-    @skipIfMPS
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_offbounds(self, device, op: ReductionOpInfo):
         """Tests that passing an off-bounds dim throws"""
@@ -237,7 +233,6 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
             op(t, dim=0)
 
-    @skipIfMPS
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
         """Tests that the identity value is an identity for the operator"""
@@ -527,7 +522,7 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
-    @skipIfMPS
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_logsumexp(self, device, dtype):
         from scipy.special import logsumexp
         a = torch.randn(5, 4, device=device, dtype=dtype)
@@ -548,7 +543,7 @@ class TestReductions(TestCase):
         self.assertEqual(expected, b[:, 0])
 
     @skipIfNoSciPy
-    @skipIfMPS
+    @skipIfMPS  # promotes to float64, unsupported on MPS
     def test_logsumexp_integral_promotion(self, device):
         from scipy.special import logsumexp
         # check integral inputs is promoted to floating point
@@ -560,9 +555,7 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
-    @dtypesIfXPU(torch.complex128)
-    # Skip the torch.complex64 for XPU, see https://github.com/intel/torch-xpu-ops/issues/2279 for details
-    @skipIfMPS
+    @dtypesIfMPS(torch.complex64)
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
@@ -1295,7 +1288,7 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
-    @skipIfMPS
+    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1309,7 +1302,7 @@ class TestReductions(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
-    @skipIfMPS
+    @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
@@ -1879,6 +1872,49 @@ class TestReductions(TestCase):
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
+    @dtypes(torch.int32, torch.int64)
+    def test_nansum_int_out_dtype_float_input(self, device, dtype):
+        # Regression for #183318.
+        x = torch.tensor(
+            [[float("nan"), 2.0], [3.0, float("nan")]],
+            dtype=torch.float32,
+            device=device,
+        )
+        expected = torch.tensor([2, 3], dtype=dtype, device=device)
+        self.assertEqual(torch.nansum(x, dim=1, dtype=dtype), expected)
+
+        y = torch.arange(1, 46, device=device, dtype=torch.float32).reshape(5, 9)
+        for idx in [(0, 2), (1, 0), (2, 4), (4, 8)]:
+            y[idx] = float("nan")
+        ref_dim = torch.nan_to_num(y, nan=0.0).sum(dim=1, dtype=dtype)
+        self.assertEqual(torch.nansum(y, dim=1, dtype=dtype), ref_dim)
+        ref_all = torch.nan_to_num(y, nan=0.0).sum(dtype=dtype)
+        self.assertEqual(torch.nansum(y, dtype=dtype), ref_all)
+
+        all_nan = torch.full((6,), float("nan"), device=device, dtype=torch.float32)
+        self.assertEqual(
+            torch.nansum(all_nan, dtype=dtype),
+            torch.zeros((), dtype=dtype, device=device),
+        )
+
+    @onlyCPU
+    @dtypes(torch.int32, torch.int64)
+    def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
+        # Eager/inductor parity for #183318.
+        out_dtype = dtype
+        x = torch.tensor(
+            [[float("nan"), 2.0], [3.0, float("nan")]],
+            dtype=torch.float32,
+            device=device,
+        )
+        eager = torch.nansum(x, dim=1, dtype=out_dtype)
+        compiled = torch.compile(
+            lambda t: torch.nansum(t, dim=1, dtype=out_dtype),
+            backend="inductor",
+            fullgraph=True,
+        )(x)
+        self.assertEqual(eager, compiled)
+
     @dtypes(*all_types_and(torch.half))
     @dtypesIfXPU(torch.half, torch.int8, torch.uint8, torch.float32)
     # Acc issue for other types on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
@@ -2257,14 +2293,10 @@ class TestReductions(TestCase):
             torch.int8: torch.int64,
         }
 
-        # prod is not supported for float16 & bfloat16 on CPU
-        if not (self.device_type == 'cpu' and dtype in [torch.float16, torch.bfloat16]):
-            x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.prod().item(), -180)
-            self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
-            self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
-
         x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.prod().item(), -180)
+        self.assertEqual(x.prod(0), torch.tensor([-5, 6, 6], dtype=prod_dtype[dtype]))
+        self.assertEqual(x.prod(1), torch.tensor([-2, 90], dtype=prod_dtype[dtype]))
 
         self.assertEqual(x.min().item(), -1)
         self.assertEqual(x.argmin().item(), 0)
@@ -3813,7 +3845,6 @@ as the input tensor excluding its innermost dimension'):
         test_reduction(torch.cumprod, False)
         test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
-    @skipIfMPS
     @ops(reference_masked_ops)
     def test_reference_masked(self, device, dtype, op):
         """Test masked reduction operations on strided-only tensors using

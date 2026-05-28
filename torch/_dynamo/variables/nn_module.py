@@ -26,7 +26,7 @@ import inspect
 import itertools
 import re
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 from typing import Any, TYPE_CHECKING
 
@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 def initialize_lazy_module(
     tx: "InstructionTranslator",
     mod: torch.nn.Module,
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> None:
     """
@@ -210,7 +210,8 @@ class NNModuleVariable(VariableTracker):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        assert res
+        if not res:
+            raise AssertionError("nn_module_stack_source must not be None")
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -218,6 +219,9 @@ class NNModuleVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.module_type
+
+    def get_id(self, tx: "InstructionTranslator") -> int | None:
+        return id(tx.output.get_submodule(self.module_key))
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -261,9 +265,12 @@ class NNModuleVariable(VariableTracker):
                 result.append(name_var)
             return result
 
-        assert isinstance(
+        if not isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
-        ), typestr(base)
+        ):
+            raise AssertionError(
+                f"Expected ModuleList, ParameterList, or Sequential, got {typestr(base)}"
+            )
         for idx, submod in enumerate(base):
             result.append(
                 tx.output.register_attr_or_module(
@@ -482,7 +489,7 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
@@ -502,9 +509,10 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert not is_lazy, (
-                    "Expected lazy sequential isn't a valid combination?"
-                )
+                if is_lazy:
+                    raise AssertionError(
+                        "Expected lazy sequential isn't a valid combination?"
+                    )
                 if kwargs:
                     raise_args_mismatch(
                         tx,
@@ -581,7 +589,8 @@ class NNModuleVariable(VariableTracker):
                     fn_source = AttrSource(fn_source, "__func__")
                     args = [self] + list(args)
                 else:
-                    assert istype(fn, types.FunctionType)
+                    if not istype(fn, types.FunctionType):
+                        raise AssertionError(f"Expected FunctionType, got {type(fn)}")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
@@ -595,8 +604,6 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
-        # TODO(follow-up): add tests for ModuleList negative index, ModuleList/Sequential
-        # slice, ModuleDict missing key, invalid key types
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
@@ -624,7 +631,8 @@ class NNModuleVariable(VariableTracker):
                 )
             fn = module.__getitem__.__func__  # pyrefly: ignore[missing-attribute]
 
-            assert isinstance(fn, types.FunctionType)
+            if not isinstance(fn, types.FunctionType):
+                raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
@@ -697,7 +705,7 @@ class NNModuleVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
@@ -1026,7 +1034,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        assert res
+        if not res:
+            raise AssertionError("nn_module_stack_source must not be None")
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -1074,7 +1083,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         mod = self.value
@@ -1160,7 +1169,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Ideally we would have just used VariableTracker.build(tx, fn,
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we dont need this guard.
+                # forward not present in generic dict, we don't need this guard.
                 return variables.UserFunctionVariable(fn, source=source).call_function(
                     tx, [self] + list(args), kwargs
                 )
@@ -1169,7 +1178,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ["_call_impl", "_wrapped_call_impl"]:
@@ -1362,7 +1371,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     f"'{type(self.value).__name__}' object has no attribute '{name}'"
                 ],
             )
-        assert out is not None
+        if out is None:
+            raise AssertionError(
+                f"manually_trace_nn_module_getattr failed to find attribute '{name}'"
+            )
         return out
 
 
@@ -1390,9 +1402,10 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value: torch.nn.Module, **kwargs: Any) -> None:
         source = kwargs.get("source")
-        assert source is not None, (
-            "FSDPManagedNNModule depends on having an accurate source to control guarding."
-        )
+        if source is None:
+            raise AssertionError(
+                "FSDPManagedNNModule depends on having an accurate source to control guarding."
+            )
 
         super().__init__(value=value, **kwargs)
         self.source = source
