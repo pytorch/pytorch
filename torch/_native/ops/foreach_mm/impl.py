@@ -19,6 +19,8 @@ Dispatch:
                           Grouped GEMM gives 2-6x over loop at small dims.
 """
 
+import warnings
+
 import torch
 
 from ... import registry
@@ -30,6 +32,7 @@ from ...common_utils import _unavailable_reason
 # grouped_matrix_layout_create which raises FunctionNotFoundError if the
 # runtime library lacks the symbol. We cache the result after first attempt.
 _nvmath_available: "bool | None" = None
+_nvmath_warned = False
 
 _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
@@ -138,6 +141,18 @@ def _foreach_mm_impl(
             return _foreach_mm_impl_nvmath(self, mat2)
         except Exception:
             _nvmath_available = False
+    else:
+        global _nvmath_warned
+        if not _nvmath_warned:
+            _nvmath_warned = True
+            reason = _unavailable_reason(_NVMATH_DEPS) or (
+                "cublasLt >= 13.2 runtime not found"
+            )
+            warnings.warn(
+                f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
+                f"using slower fallback.",
+                stacklevel=3,
+            )
 
     # At dim >= 2048, individual cuBLAS mm calls already saturate the GPU
     # and the torch.stack data copy in the _grouped_mm path hurts more
