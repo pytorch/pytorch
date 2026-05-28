@@ -13,6 +13,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import try_import_ck_lib
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -175,6 +176,56 @@ class TestCKBackend(TestCase):
             Y1_compiled = compiled_mm(a1, b)
             Y1 = a1 @ b
             torch.testing.assert_close(Y1_compiled, Y1)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, _test_env)
+    @parametrize("num_gemms", (1, 2))
+    def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
+        """
+        Verify that CK GEMM templates work under JIT cpp_wrapper mode.
+        ``num_gemms=2`` chains a second GEMM of a different shape so the
+        wrapper has to link against multiple distinct .so files.
+        """
+        M, N, K = 2240, 2048, 256
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b, c):
+                out = a @ b
+                if num_gemms > 1:
+                    out = out @ c
+                return out
+
+        model = MyModel().cuda()
+        a = torch.randn(M, K, **tensor_options)
+        b = torch.randn(K, N, **tensor_options)
+        c = torch.randn(N, N // 2, **tensor_options)
+        expected = model(a, b, c)
+
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CK",
+                    "compile_threads": 2,
+                    "rocm.ck_max_profiling_configs": 2,
+                    "rocm.ck_dir": self.ck_dir,
+                    "cpp_wrapper": True,
+                }
+            ),
+            tf32_off(),
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            compiled = torch.compile(model, fullgraph=True)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
+            # JIT path must call the bare extern "C" symbol, not via the
+            # AOT-only `kernels.` member.
+            FileCheck().check("rocm_").check_not("kernels.rocm_").run(codes[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
