@@ -1494,10 +1494,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return 0
         elif fn(sympy.Ge(index, 0)):
             # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
+            return Min(index, size)
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
+            return Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -2385,8 +2385,23 @@ def split(x, sizes, dim=0):
     # If sizes is an integer (or a SymInt), we turn it into a list of sizes
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(sizes, 0):
+            raise RuntimeError(
+                f"split expects split_size be non-negative, but got split_size={sizes}"
+            )
+
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+        if sizevars.statically_known_equals(x_size, 0):
+            return [slice_(x, dim, 0, 0, clamp=False)]
+
+        if sizevars.statically_known_equals(sizes, 0):
+            raise RuntimeError(
+                "split_size can only be 0 if dimension size is 0, "
+                f"but got dimension size of {x_size}"
+            )
+
+        chunks = sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -2763,6 +2778,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -4948,12 +4964,8 @@ def _create_constants(*args, dtype):
 @register_lowering(prims.rev.default)
 def rev(x, dims):
     # note - dims pre-canonicalized
-    sizes = x.get_size()
-
-    if len(sizes) == 0:
-        return clone(x)
-
     x_loader = x.make_loader()
+    sizes = x.get_size()
 
     def loader(idx):
         idx = list(idx)
@@ -6876,7 +6888,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
