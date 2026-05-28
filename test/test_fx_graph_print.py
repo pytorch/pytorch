@@ -9,6 +9,20 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class TestFxGraphPrint(TestCase):
     """Tests for GraphModule.print_readable() with additional_meta."""
 
+    def test_codegen_torch_op_overload_with_keyword_attribute(self):
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.placeholder("x")
+        random_from = getattr(torch.ops.aten.random_, "from")
+        random: torch.fx.Node = graph.call_function(random_from, (x, 0, 2))
+        graph.output(random)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertIn('getattr(torch.ops.aten.random_, "from")', gm.code)
+
+        input = torch.ones(4)
+        output = gm(input)
+        self.assertEqual(output, input)
+
     def test_print_readable_with_list_of_meta_keys(self):
         """Test print_readable with a list of meta keys to include."""
 
