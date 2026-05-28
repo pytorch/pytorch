@@ -1057,6 +1057,69 @@ class TestJitReplaceSubmodule(TestCase):
             new_child._c._type().name(),
         )
 
+    def test_jit_replace_submodule_mutates_in_place(self):
+        # _jit_replace_submodule must mutate the input ``root._c`` in
+        # place rather than swap on a clone.  Old behaviour cloned root
+        # first, returned the clone, and left ``root._c`` untouched --
+        # which silently broke callers that hold onto the original root
+        # and discard the return value (e.g. regional-AOTI's
+        # create_lowered_from_scripted_merge before the in-place fix).
+        #
+        # We must NOT inspect via ``root.child`` -- ``RecursiveScriptModule``
+        # caches Python child wrappers at construction and would return the
+        # stale SubA wrapper regardless of any underlying C++ swap.  Re-wrap
+        # ``root._c`` after the call to get a fresh Python view that reflects
+        # the current C++ attribute slots; under the in-place contract the
+        # re-wrap sees SubB, under the cloned contract it still sees SubA.
+        from torch.jit._recursive import wrap_cpp_module
+
+        class SubA(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class SubB(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) * 2
+
+        class Parent(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = SubA()
+
+            def forward(self, x):
+                return self.child(x)
+
+        root = torch.jit.script(Parent())
+        new_child = torch.jit.script(SubB())
+        root_c_before = root._c
+        original_child_type_name = root.child._c._type().name()
+        new_child_type_name = new_child._c._type().name()
+        self.assertNotEqual(original_child_type_name, new_child_type_name)
+
+        # Intentionally discard the return value so we are checking the
+        # mutation on the input ``root._c``.
+        torch._C._jit_replace_submodule(root._c, "child", new_child._c)
+
+        # Underlying C++ ScriptModule object must be the same instance --
+        # the in-place contract returns the input, not a clone.
+        self.assertIs(root._c, root_c_before)
+
+        # Re-wrap to bypass RecursiveScriptModule's cached children dict
+        # and read the current state of ``root._c``'s attribute slots.
+        re_wrapped = wrap_cpp_module(root._c)
+        self.assertEqual(
+            re_wrapped.child._c._type().name(),
+            new_child_type_name,
+        )
+
     def test_jit_replace_submodule_nested(self):
         class Leaf(torch.nn.Module):
             def __init__(self, scale: float) -> None:
