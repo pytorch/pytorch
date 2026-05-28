@@ -5479,7 +5479,7 @@ class CppScheduling(BaseScheduling):
         node: OuterLoopFusedSchedulerNode | FusedSchedulerNode | SchedulerNode,
     ):
         """
-        Turn an set of pre-fused nodes into a C++ kernel.
+        Turn a set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
 
