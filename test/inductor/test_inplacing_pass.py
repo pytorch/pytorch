@@ -11,6 +11,7 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
+from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
@@ -129,6 +130,112 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             return x
 
         self._test(f)
+
+    def test_index_put_source_alias_should_not_reinplace(self):
+        def f(x, y):
+            x = x.cos()
+            source = aten.alias(x)
+            return aten.index_put.default(x, [y], source)
+
+        x = torch.randn(4, 4, device=device)
+        y = torch.tensor([3, 1, 0, 2], device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        self.assertEqual(gm(x, y), f(x, y))
+
+    def test_index_put_indices_alias_should_not_reinplace(self):
+        def f(x):
+            x = x.clone()
+            index = aten.alias(x)
+            values = torch.zeros_like(x)
+            return aten.index_put.default(x, [index], values)
+
+        x = torch.tensor([3, 1, 0, 2], device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        self.assertEqual(gm(x), f(x))
+
+    def test_unsafe_index_put_source_alias_should_not_reinplace(self):
+        def f(x, y):
+            x = x.cos()
+            source = aten.alias(x)
+            return aten._unsafe_index_put.default(x, [y], source)
+
+        x = torch.randn(4, 4, device=device)
+        y = torch.tensor([3, 1, 0, 2], device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._unsafe_index_put.default, targets)
+        self.assertNotIn(inductor_prims._unsafe_index_put_, targets)
+        self.assertEqual(gm(x, y), f(x, y))
+
+    def test_with_effects_index_put_source_alias_should_not_reinplace(self):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(x, y):
+            x = x.cos()
+            source = aten.alias(x)
+            token = torch.ops.aten._make_dep_token()
+            _, result = with_effects(token, aten.index_put.default, x, [y], source)
+            return result
+
+        x = torch.randn(4, 4, device=device)
+        y = torch.tensor([3, 1, 0, 2], device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        with_effects_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.higher_order.with_effects
+        ]
+        self.assertEqual(len(with_effects_nodes), 1)
+        self.assertEqual(with_effects_nodes[0].args[1], aten.index_put.default)
+        self.assertEqual(gm(x, y), f(x, y))
+
+    def test_with_effects_index_put_indices_alias_should_not_reinplace(self):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(x):
+            x = x.clone()
+            index = aten.alias(x)
+            values = torch.zeros_like(x)
+            token = torch.ops.aten._make_dep_token()
+            _, result = with_effects(token, aten.index_put.default, x, [index], values)
+            return result
+
+        x = torch.tensor([3, 1, 0, 2], device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        with_effects_nodes = [
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.higher_order.with_effects
+        ]
+        self.assertEqual(len(with_effects_nodes), 1)
+        self.assertEqual(with_effects_nodes[0].args[1], aten.index_put.default)
+        self.assertEqual(gm(x), f(x))
 
     def test_should_modify_input(self):
         def f(x, y):
