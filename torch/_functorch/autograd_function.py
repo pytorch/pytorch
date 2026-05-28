@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -37,7 +37,7 @@ _R = TypeVar("_R")
 _TensorTree = torch.Tensor | tuple[object, ...] | list[object] | dict[object, object]
 _MaybeTensor = torch.Tensor | None
 _MaybeTensorTree = _MaybeTensor | tuple[object, ...] | list[object] | dict[object, object]
-_InDims = int | None | tuple[object, ...]
+_InDims = int | None | tuple[Any, ...]
 
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
@@ -447,7 +447,11 @@ def custom_function_call_vmap_generate_rule(
     if not isinstance(outputs, tuple):
         raise AssertionError(f"expected outputs to be a tuple, got {type(outputs)}")
     outputs, out_dims = unpack_outputs(outputs)
-    return wrap_batched(outputs, out_dims, interpreter.level())
+    return wrap_batched(
+        cast(tuple[Any, ...], outputs),
+        cast(int | tuple[Any, ...], out_dims),
+        interpreter.level(),
+    )
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
@@ -468,7 +472,10 @@ def vmapify_autograd_function(
 ) -> type[torch.autograd.Function]:
     def forward(*operands: Any) -> _TensorTree:
         outputs, out_dims = restore_vmap(
-            autograd_function.forward, in_dims, batch_size, randomness
+            autograd_function.forward,
+            cast(int | tuple[Any, ...], in_dims),
+            batch_size,
+            randomness,
         )(*operands)
         if isinstance(outputs, torch.Tensor):
             return outputs, out_dims
@@ -478,7 +485,8 @@ def vmapify_autograd_function(
     def setup_context(
         ctx: _FunctionCtx, inputs: tuple[Any, ...], outputs: tuple[Any, ...]
     ) -> None:
-        outputs, out_dims = unpack_outputs(outputs)
+        ctx_any = cast(Any, ctx)
+        unwrapped_outputs, out_dims = unpack_outputs(outputs)
         key = id(Generated)
 
         def inner(inputs: tuple[Any, ...], outputs: _TensorTree) -> None:
@@ -496,15 +504,13 @@ def vmapify_autograd_function(
             input_shapes = tuple(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
-            if not hasattr(ctx, "_pt_input_shapes"):
-                # pyrefly: ignore [implicit-any]
-                ctx._pt_input_shapes = {}
-            ctx._pt_input_shapes.update({key: input_shapes})
+            if not hasattr(ctx_any, "_pt_input_shapes"):
+                ctx_any._pt_input_shapes = {}
+            ctx_any._pt_input_shapes.update({key: input_shapes})
 
-            if not hasattr(ctx, "_pt_saved_tensors_bdims_stack"):
-                # pyrefly: ignore [implicit-any]
-                ctx._pt_saved_tensors_bdims_stack = {}
-            ctx._pt_saved_tensors_bdims_stack.update(
+            if not hasattr(ctx_any, "_pt_saved_tensors_bdims_stack"):
+                ctx_any._pt_saved_tensors_bdims_stack = {}
+            ctx_any._pt_saved_tensors_bdims_stack.update(
                 {key: (wrapped_ctx._pt_saved_tensors_bdims)}
             )
 
@@ -514,14 +520,14 @@ def vmapify_autograd_function(
             (in_dims, out_dims),
             batch_size,
             randomness,
-        )(inputs, outputs)
+        )(inputs, unwrapped_outputs)
 
-        if not hasattr(ctx, "_pt_out_dims"):
-            # pyrefly: ignore [implicit-any]
-            ctx._pt_out_dims = {}
-        ctx._pt_out_dims.update({key: out_dims})
+        if not hasattr(ctx_any, "_pt_out_dims"):
+            ctx_any._pt_out_dims = {}
+        ctx_any._pt_out_dims.update({key: out_dims})
 
     def jvp(ctx: _FunctionCtx, *tangents: _MaybeTensor) -> _MaybeTensorTree:
+        ctx_any = cast(Any, ctx)
         key = id(Generated)
 
         def jvp_no_context(
@@ -533,13 +539,13 @@ def vmapify_autograd_function(
         tangent_in_dims = get_tangents_in_dims(in_dims, tangents)
         out_tangents, out_tangents_dims = restore_vmap(
             jvp_no_context,
-            (ctx._pt_saved_tensors_bdims_stack[key], tangent_in_dims),
+            (ctx_any._pt_saved_tensors_bdims_stack[key], tangent_in_dims),
             batch_size,
             randomness,
-        )(ctx.saved_tensors, tangents)
+        )(ctx_any.saved_tensors, tangents)
 
         result = reductify(
-            out_tangents, out_tangents_dims, ctx._pt_out_dims[key], batch_size
+            out_tangents, out_tangents_dims, ctx_any._pt_out_dims[key], batch_size
         )
         if isinstance(result, torch.Tensor):
             return result, None
@@ -547,9 +553,10 @@ def vmapify_autograd_function(
             return *result, None
 
     def backward(ctx: _FunctionCtx, *grad_outputs: _MaybeTensor) -> _MaybeTensorTree:
+        ctx_any = cast(Any, ctx)
         key = id(Generated)
         grad_outputs_ = grad_outputs[:-1]
-        grad_outputs_in_dims = ctx._pt_out_dims[key]
+        grad_outputs_in_dims = ctx_any._pt_out_dims[key]
 
         if not isinstance(grad_outputs_in_dims, tuple):
             grad_outputs_in_dims = (grad_outputs_in_dims,)
@@ -568,12 +575,12 @@ def vmapify_autograd_function(
 
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context,
-            ((ctx._pt_saved_tensors_bdims_stack[key], grad_outputs_in_dims),),
+            ((ctx_any._pt_saved_tensors_bdims_stack[key], grad_outputs_in_dims),),
             batch_size,
             randomness,
-        )((ctx.saved_tensors, grad_outputs_))
+        )((ctx_any.saved_tensors, grad_outputs_))
         result = reductify(
-            grad_ins, grad_ins_dims, in_dims, batch_size, ctx._pt_input_shapes[key]
+            grad_ins, grad_ins_dims, in_dims, batch_size, ctx_any._pt_input_shapes[key]
         )
         return result
 
@@ -816,9 +823,7 @@ def autograd_function_forward_rewritten(
     original_forward: Callable[_P, _R],
     original_setup_context: Callable[..., Any],
 ) -> Callable[..., _R]:
-    def new_forward(
-        ctx: _FunctionCtx, *args: _P.args, **kwargs: _P.kwargs
-    ) -> _R:
+    def new_forward(ctx: _FunctionCtx, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         output = original_forward(*args, **kwargs)
         original_setup_context(ctx, args, output)
         return output
