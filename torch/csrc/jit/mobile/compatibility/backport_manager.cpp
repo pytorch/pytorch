@@ -252,7 +252,7 @@ namespace {
 
 /*
 The following functions needed for backport model from v5 to v4.
-Backport function bytecode v5 that deduplicate constanst table.
+Backport function bytecode v5 that deduplicate constants table.
 Previously, in v4, constant table will be exported twice, in both archive
 bytecode and archive constants, and majority (almost all) are duplicates.
 Currently, in v5, JIT and mobile will share archive constants, and all
