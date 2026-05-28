@@ -357,7 +357,7 @@ __FORCE_INLINE void QuantizeAvx512(
     // cases.
     transformed = zero_point + std::nearbyint(transformed);
     float clipped =
-        std::min(std::max(transformed, float(min_val)), float(max_val));
+        std::clamp(transformed, float(min_val), float(max_val));
     dst[i] = clipped;
   }
 }
