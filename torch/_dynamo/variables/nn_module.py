@@ -239,6 +239,11 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def _wrap_submodule(
         self,
         tx: "InstructionTranslator",
