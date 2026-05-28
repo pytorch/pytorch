@@ -218,6 +218,12 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
     xfail("multinomial"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
+    skip("full_like"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
+    skip("bmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/180522
+    skip("baddbmm"),
 }
 
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
@@ -284,6 +290,10 @@ dtensor_compiled_fails = {
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
+    skip("norm", "nuc"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
+    skip("histc"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
