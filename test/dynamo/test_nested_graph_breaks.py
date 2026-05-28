@@ -1371,7 +1371,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(inp), inp + 6)
         self.assertEqual(cnts.frame_count, 1)
 
-
     def test_inlined_function_globals_across_graph_break(self):
         """Module-level globals in inlined functions survive graph breaks.
 
@@ -1379,7 +1378,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         the resume function must use that module's globals (not the caller's).
         This is handled by install_resume_function_global().
         """
-        from test_nested_graph_break_helper import fn_with_module_global
+        from _test_nested_graph_breaks_helper import fn_with_module_global
 
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1428,6 +1427,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
