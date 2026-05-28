@@ -1168,8 +1168,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+    def gen_send_ex2(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Objects/genobject.c#L259
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -1179,6 +1181,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
+            tracer.push(arg)
             return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
@@ -1201,6 +1204,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if not tx.one_graph and not tx.error_on_graph_break:
                 e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
             raise
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+        return self.gen_send_ex2(tx, ConstantVariable.create(None))
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1273,9 +1280,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
                 if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
-            tracer = self.inline_tracer
-            tracer.push_many(args)
-            return self.tp_iternext_impl(tx)
+            return self.gen_send_ex2(tx, args[0])
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
             # * If the generator function catches the exception and returns a
@@ -1330,7 +1335,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 # Raise RuntimeError if the generator yields any other value
-                if self.tp_iternext_impl(tx):
+                if tracer.inline_call_():
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
@@ -1364,7 +1369,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.tp_iternext_impl(tx)
+            retval = tracer.inline_call_()
 
             # The exception raised before is still active. We need to check the exception
             # table one more time to find the next target. But why? Let's walk
@@ -1430,7 +1435,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 self._setup_exception(tx, variables.ExceptionVariable(exc_type, []))
-                self.next_variable(tx)
+                tracer.inline_call_()
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
@@ -1528,6 +1533,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
+        if sys.version_info >= (3, 11):
+            inline_tracer.inline_call_()
         # calling a generator returns a generator object
         return self.generator_cls(
             code,
