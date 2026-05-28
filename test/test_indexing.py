@@ -1743,10 +1743,13 @@ class TestIndexing(TestCase):
         dim = 0
         t = make_tensor(shape, device=device, dtype=dtype)
         indices = torch.argsort(t, dim=dim)
+        gather_cross_device_error = (
+            r"Expected all tensors to be on the same device|Passed CPU tensor to MPS op"
+            if torch.device(device).type == "mps"
+            else "Expected all tensors to be on the same device"
+        )
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Expected all tensors to be on the same device"
-        ):
+        with self.assertRaisesRegex(RuntimeError, gather_cross_device_error):
             torch.gather(t, 0, indices.cpu())
 
         with self.assertRaisesRegex(
@@ -1755,9 +1758,7 @@ class TestIndexing(TestCase):
         ):
             torch.take_along_dim(t, indices.cpu(), dim=0)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Expected all tensors to be on the same device"
-        ):
+        with self.assertRaisesRegex(RuntimeError, gather_cross_device_error):
             torch.gather(t.cpu(), 0, indices)
 
         with self.assertRaisesRegex(
