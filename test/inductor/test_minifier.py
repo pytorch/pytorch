@@ -5,7 +5,7 @@ from unittest.mock import patch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch._inductor.utils import get_current_backend, set_current_backend
+from torch._inductor.utils import get_current_backend, with_device_backend
 from torch.export import load as export_load
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
@@ -56,17 +56,21 @@ inner(torch.randn(20, 20).to("{device}"))
 
     @requires_triton
     def test_after_aot_triton_compile_error(self):
-        set_current_backend("triton", TRITON_TYPE)
-        with try_patch_inductor_backend_config(
-            TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
         ):
             self._test_after_aot(TRITON_TYPE, "SyntaxError")
 
     @requires_triton
     def test_after_aot_triton_accuracy_error(self):
-        set_current_backend("triton", TRITON_TYPE)
-        with try_patch_inductor_backend_config(
-            TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
         ):
             self._test_after_aot(TRITON_TYPE, "AccuracyError")
 
@@ -319,18 +323,22 @@ def forward(self, linear):
 
     @requires_triton
     def test_aoti_triton_compile_error(self):
-        set_current_backend("triton", TRITON_TYPE)
-        with try_patch_inductor_backend_config(
-            TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
         ):
             res = self._test_aoti(TRITON_TYPE, "SyntaxError")
             self._aoti_check_relu_repro(res)
 
     @requires_triton
     def test_aoti_triton_compile_error_unflatten(self):
-        set_current_backend("triton", TRITON_TYPE)
-        with try_patch_inductor_backend_config(
-            TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            ),
         ):
             res = self._test_aoti_unflattened_inputs(TRITON_TYPE, "SyntaxError")
             self._aoti_check_relu_repro(res)
@@ -348,9 +356,11 @@ def forward(self, linear):
 
     @requires_triton
     def test_aoti_triton_accuracy_error(self):
-        set_current_backend("triton", TRITON_TYPE)
-        with try_patch_inductor_backend_config(
-            TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+        with (
+            with_device_backend("triton", TRITON_TYPE),
+            try_patch_inductor_backend_config(
+                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
+            ),
         ):
             res = self._test_aoti(TRITON_TYPE, "AccuracyError")
             self._aoti_check_relu_repro(res)

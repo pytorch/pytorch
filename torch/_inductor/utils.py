@@ -4060,6 +4060,24 @@ def set_current_backend(value: str, device_type: str | None = None) -> bool:
         return True
 
 
+@contextlib.contextmanager
+def with_device_backend(
+    value: str, device_type: str | None = None
+) -> Generator[None, None, None]:
+    from torch._inductor.virtualized import V
+
+    if not device_type:
+        device_type = V.graph.get_current_device_or_throw().type
+
+    prev_value = get_current_backend(device_type)
+
+    try:
+        set_current_backend(value, device_type)
+        yield
+    finally:
+        set_current_backend(prev_value, device_type)
+
+
 def device_supports_fp64(device: torch.device | None) -> bool:
     """Check if the given device supports float64."""
     if device is not None and device.type == "xpu":
