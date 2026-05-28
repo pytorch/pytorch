@@ -15,6 +15,7 @@ from sympy.printing.precedence import PRECEDENCE
 import torch
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -93,23 +94,25 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
-    def _print_Min(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::min only supported for 2 args")
+    def _print_min_max(self, expr: sympy.Expr, fn: str) -> str:
         # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
+        args = list(map(self._print, expr.args))
+        result = args[0]
+        for arg in args[1:]:
+            result = self._print_binary_min_max(result, arg, fn)
+        return result
+
+    @staticmethod
+    def _print_binary_min_max(a: str, b: str, fn: str) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::min({typecast_a}, {typecast_b})"
+        return f"metal::{fn}({typecast_a}, {typecast_b})"
+
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        return self._print_min_max(expr, "min")
 
     def _print_Max(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 2:
-            raise RuntimeError("metal::max only supported for 2 args")
-        # pyrefly: ignore [missing-attribute]
-        a, b = map(self._print, expr.args)
-        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
-        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"metal::max({typecast_a}, {typecast_b})"
+        return self._print_min_max(expr, "max")
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -530,7 +533,7 @@ MetalOverrides._initialize_special_ops()
 class MetalKernel(SIMDKernel):
     """Implement Metal codegen based on the SIMDKernel abstraction"""
 
-    overrides = MetalOverrides
+    overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
@@ -672,8 +675,16 @@ class MetalKernel(SIMDKernel):
                     f"{rd.prefix}numel", integer=True, positive=True
                 )
 
-        acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
+        acc_buf_size = Min(acc_buf_size, self.max_threadgroup_size)
         acc_buf_size_str = self.sexpr(acc_buf_size)
+        # metal threadgroup arrays need a compile time constant size, so
+        # fall back to the static upper bound when acc buf size is symbolic
+        # happens when dynamic=True
+        acc_buf_alloc_size = (
+            acc_buf_size
+            if isinstance(acc_buf_size, sympy.Integer)
+            else self.max_threadgroup_size
+        )
         shmem_buf_size = (
             ceildiv(acc_buf_size, self.simd_group_size)
             if isinstance(acc_buf_size, sympy.Integer)
@@ -777,7 +788,7 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
+                acc_buf = self._new_idxvar(src_dtype, acc_buf_alloc_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
                     self.compute,
@@ -785,7 +796,7 @@ class MetalKernel(SIMDKernel):
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
-            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             self.compute.writeline(
@@ -793,13 +804,13 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
-            acc_buf = self._new_idxvar("float3", acc_buf_size)
+            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -820,7 +831,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = self.sexpr(index_expr)
+        index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
@@ -919,8 +930,11 @@ class MetalKernel(SIMDKernel):
                 )
             )
             # And loop codegen
-            while self.multistage_reduction_entry:
-                self.multistage_reduction_entry.pop().cache_clear()
+            roots = [e.root for e in self.multistage_reduction_entry]
+            self.multistage_reduction_entry.clear()
+            for node in self.range_tree_nodes.values():
+                if any(node.root is r for r in roots):
+                    node.cache_clear()
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -1084,7 +1098,7 @@ class MetalKernel(SIMDKernel):
         if len(self.active_range_trees()) > 0:
             threads = [
                 expr_printer(
-                    sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
+                    Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
                     else v.numel
                 )
@@ -1099,7 +1113,7 @@ class MetalKernel(SIMDKernel):
 
         if self.inside_reduction:
             threads = [
-                expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
+                expr_printer(Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()
@@ -1180,7 +1194,7 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
-    kernel_type = MetalKernel
+    kernel_type = MetalKernel  # type: ignore[assignment]
     _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:
