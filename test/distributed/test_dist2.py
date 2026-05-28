@@ -13,7 +13,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, run_tests, TestCase
 
 
 def synchronize_accelerator():
@@ -227,6 +227,7 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
         else:
             self.assertEqual(subgroup, None)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162250")
     def test_remote_group_merge(self) -> None:
         group = self.new_group()
         subgroup_1 = group.split_group([0], timeout=timedelta(seconds=30))
