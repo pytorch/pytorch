@@ -79,7 +79,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     load_tests,
     MI200_ARCH,
-    MI300_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     run_tests,
@@ -98,6 +97,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TestCase,
 )
 from torch.utils._triton import has_triton
@@ -206,6 +206,21 @@ class TestCuda(TestCase):
     def expandable_segments(self):
         return EXPANDABLE_SEGMENTS
 
+    def test_embedding_renorm_negative_indices(self):
+        indices = torch.arange(-32, 32, dtype=torch.int32).repeat(8).reshape(32, 16)
+        weight = torch.full((1000, 64), 0.01)
+        weight[torch.arange(968, 1000)] = 1.0
+        weight[torch.arange(0, 32)] = 1.0
+
+        expected = torch.ops.aten.embedding_renorm_.default(
+            weight.clone(), indices, 1.0, 1.0
+        )
+        actual = torch.ops.aten.embedding_renorm_.default(
+            weight.cuda(), indices.cuda(), 1.0, 1.0
+        )
+
+        self.assertEqual(actual.cpu(), expected, rtol=1e-4, atol=1e-6)
+
     def test_pinned_memory_with_cudaregister(self):
         try:
             torch.cuda.memory._set_allocator_settings(
@@ -237,6 +252,10 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148607",
+    )
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
@@ -1400,6 +1419,25 @@ print(t.is_pinned())
         self.assertEqual(external_result[0], 0)
         self.assertEqual(external_result[1], external_stream.cuda_stream)
 
+    def test_external_stream_wraps_null_handle(self):
+        # Regression for https://github.com/pytorch/pytorch/issues/182960
+        # ExternalStream(0) must wrap the NULL stream (handle 0x0), not return
+        # a pooled stream, and must behave identically to
+        # torch.cuda.get_stream_from_external(0).
+        device = torch.cuda.current_device()
+        external_stream = torch.cuda.ExternalStream(0, device=device)
+        from_get_stream_from_external = torch.cuda.get_stream_from_external(
+            0, device=device
+        )
+        default = torch.cuda.default_stream(device)
+
+        self.assertEqual(external_stream.cuda_stream, 0)
+        self.assertEqual(from_get_stream_from_external.cuda_stream, 0)
+        self.assertEqual(external_stream.cuda_stream, default.cuda_stream)
+
+        self.assertEqual(external_stream.device, from_get_stream_from_external.device)
+        self.assertEqual(external_stream.device, default.device)
+
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
@@ -1582,6 +1620,7 @@ print(t.is_pinned())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/120318")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
@@ -2708,6 +2747,7 @@ torch.cuda.synchronize()
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180232")
     @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -2803,6 +2843,7 @@ torch.cuda.synchronize()
         self.assertEqual(buf0, ref0)
         self.assertEqual(buf1, ref1)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177001")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3036,6 +3077,7 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3358,15 +3400,11 @@ exit(2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/104055")
     @unittest.skipIf(
-        (not TEST_CUDA_GRAPH)
-        or IS_WINDOWS
-        or (  # appears to still be broken on Windows as of 11.4+
-            torch.version.cuda
-            and int(torch.version.cuda.split(".")[0]) == 11
-            and int(torch.version.cuda.split(".")[1]) < 4
-        ),
-        "Graph bindings disallow concurrent replay for CUDA < 11.4, see "
+        (not TEST_CUDA_GRAPH) or IS_WINDOWS,
+        "Graph bindings disallow concurrent replay; "
+        + "still appears broken on Windows. See "
         + "https://github.com/pytorch/pytorch/pull/57556",
     )
     @unittest.skipIf(
@@ -4037,6 +4075,7 @@ exit(2)
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179961")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4402,6 +4441,10 @@ exit(2)
         self.assertTrue(torch.all(x == 6.0))
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/122413",
+    )
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_allocator_propagates_stream(self):
@@ -4719,6 +4762,258 @@ print(ret)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(
+    TEST_WITH_ROCM and EXPANDABLE_SEGMENTS,
+    "expandable_segments mode is not supported on ROCm",
+)
+class TestResizeStorageWithAddr(TestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    def _find_pool_block(self, pool, addr):
+        for segment in pool.snapshot(include_traces=False):
+            for idx, block in enumerate(segment["blocks"]):
+                if block["address"] == addr:
+                    return segment["blocks"], idx
+        self.fail(f"Could not find block at address {addr}")
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_exact_allocation(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+        other.untyped_storage().resize_(0)
+
+        # `resize_(0)` does not record mempool information. We still need `use_mem_pool`
+        # when resizing it back.
+        with torch.cuda.use_mem_pool(pool):
+            t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
+
+        self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+        self.assertNotEqual(other.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_occupied_address_errors(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            occupied = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            t = torch.empty(2048, dtype=torch.uint8, device="cuda")
+
+        occupied_ptr = occupied.untyped_storage().data_ptr()
+        occupied_size = occupied.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "exact address"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(occupied_size, occupied_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_middle_of_block(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            prefix = torch.empty(3729, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4017, dtype=torch.uint8, device="cuda")
+            suffix = torch.empty(2738, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        prefix.untyped_storage().resize_(0)
+        t.untyped_storage().resize_(0)
+        suffix.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+
+        # when `original_ptr` is in the middle of an empty block, `_resize_with_addr_`
+        # should still allocate a tensor with exactly `original_size` at `original_ptr`.
+        # It should also keep prefix and suffix blocks inactive. These assertions
+        # check that the block state matches expectations.
+        blocks, idx = self._find_pool_block(pool, original_ptr)
+        self.assertGreater(idx, 0)
+        self.assertLess(idx + 1, len(blocks))
+        self.assertEqual(blocks[idx]["state"], "active_allocated")
+        self.assertEqual(blocks[idx - 1]["state"], "inactive")
+        self.assertEqual(
+            blocks[idx - 1]["address"] + blocks[idx - 1]["size"],
+            original_ptr,
+        )
+        self.assertEqual(blocks[idx + 1]["state"], "inactive")
+        self.assertEqual(
+            blocks[idx]["address"] + blocks[idx]["size"],
+            blocks[idx + 1]["address"],
+        )
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_misaligned_address_errors(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        t.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "aligned to kMinBlockSize"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(2048, original_ptr + 1)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_recovers_viewed_slices(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            base = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            view1 = base[512:1024]
+            view2 = base[1024:1536]
+
+        storage = base.untyped_storage()
+        original_ptr = storage.data_ptr()
+        original_size = storage.nbytes()
+        storage.resize_(0)
+
+        self.assertEqual(base.untyped_storage().nbytes(), 0)
+        self.assertEqual(view1.untyped_storage().nbytes(), 0)
+        self.assertEqual(view2.untyped_storage().nbytes(), 0)
+
+        with torch.cuda.use_mem_pool(pool):
+            storage._resize_with_addr_(original_size, original_ptr)
+
+        # This test mimics a state offloading pattern where we offload a large
+        # tensor and keep many small tensors as slices of the large tensor.
+        self.assertEqual(base.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(view1.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(view2.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(base.untyped_storage().nbytes(), original_size)
+        self.assertEqual(view1.untyped_storage().nbytes(), original_size)
+        self.assertEqual(view2.untyped_storage().nbytes(), original_size)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_requires_zero_sized_source(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        with self.assertRaisesRegex(RuntimeError, "zero-sized CUDA storage"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_size_zero_ignores_addr(self):
+        t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+        t.untyped_storage()._resize_with_addr_(0, 0)
+        self.assertEqual(t.untyped_storage().nbytes(), 0)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_multiple_blocks_in_the_middle(self):
+        # Test allocating multiple target tensors in the middle of an empty memory segment
+        pool = torch.cuda.MemPool()
+
+        targets = []
+        dummys = []
+        with torch.cuda.use_mem_pool(pool):
+            for _ in range(10):
+                dummy = torch.empty(3729, dtype=torch.uint8, device="cuda")
+                target = torch.empty(4017, dtype=torch.uint8, device="cuda")
+                targets.append(target)
+                dummys.append(dummy)
+
+        original_ptrs = [t.untyped_storage().data_ptr() for t in targets]
+        original_sizes = [t.untyped_storage().nbytes() for t in targets]
+
+        for t, d in zip(targets, dummys):
+            t.untyped_storage().resize_(0)
+            d.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            for i in range(10):
+                ptr = original_ptrs[i]
+                size = original_sizes[i]
+                targets[i].untyped_storage()._resize_with_addr_(size, ptr)
+
+        for i in range(10):
+            ptr = original_ptrs[i]
+            size = original_sizes[i]
+            t = targets[i]
+            self.assertEqual(t.untyped_storage().data_ptr(), ptr)
+            self.assertEqual(t.untyped_storage().nbytes(), size)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_coalesced_small_prefixes(self):
+        # Suppose we have allocated many small prefix tensors and a target tensor, where
+        # all tensors falls into the small block pool. When resize the target tensor later,
+        # we allocate 1 large prefix tensors for all small prefix tensors, then allocate
+        # the target tensor, and finally free the large prefix tensor. This large prefix
+        # tensor should come from the small block pool, even if its size is beyond the threshold.
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            small_prefixes = []
+            for _ in range(800):
+                prefix = torch.empty(3729, dtype=torch.uint8, device="cuda")
+                small_prefixes.append(prefix)
+            t1 = torch.empty(4017, dtype=torch.uint8, device="cuda")
+            mid = torch.empty(2738, dtype=torch.uint8, device="cuda")
+            t2 = torch.empty(3897, dtype=torch.uint8, device="cuda")
+            suffix = torch.empty(9124, dtype=torch.uint8, device="cuda")
+
+        original_ptr1 = t1.untyped_storage().data_ptr()
+        original_size1 = t1.untyped_storage().nbytes()
+        original_ptr2 = t2.untyped_storage().data_ptr()
+        original_size2 = t2.untyped_storage().nbytes()
+
+        for prefix in small_prefixes:
+            prefix.untyped_storage().resize_(0)
+        mid.untyped_storage().resize_(0)
+        suffix.untyped_storage().resize_(0)
+        t1.untyped_storage().resize_(0)
+        t2.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            t1.untyped_storage()._resize_with_addr_(original_size1, original_ptr1)
+            t2.untyped_storage()._resize_with_addr_(original_size2, original_ptr2)
+
+        self.assertEqual(t1.untyped_storage().data_ptr(), original_ptr1)
+        self.assertEqual(t1.untyped_storage().nbytes(), original_size1)
+        self.assertEqual(t2.untyped_storage().data_ptr(), original_ptr2)
+        self.assertEqual(t2.untyped_storage().nbytes(), original_size2)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
     def tearDown(self):
@@ -4729,6 +5024,9 @@ class TestCudaAllocator(TestCase):
         md = torch.cuda.memory._snapshot()["allocator_settings"]
         self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179745"
+    )
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -4944,6 +5242,9 @@ class TestCudaAllocator(TestCase):
             disarm()
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179744"
+    )
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5108,6 +5409,9 @@ class TestCudaAllocator(TestCase):
             torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179798"
+    )
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
@@ -5238,6 +5542,9 @@ class TestCudaAllocator(TestCase):
                 finally:
                     torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180263"
+    )
     @serialTest()
     def test_max_split_expandable(self):
         try:
@@ -5779,6 +6086,7 @@ print(value, end="")
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180227")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
@@ -5798,6 +6106,7 @@ print(value, end="")
                 matching = False
         self.assertEqual(True, matching)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
@@ -6435,6 +6744,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             self.assertLess(allocated, 256 * 1024 * 1024)
             self.assertGreaterEqual(allocated, size_bytes)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182111"
+    )
     def test_max_cached_size(self):
         size_bytes = 64 * 1024 * 1024
 
@@ -6446,6 +6758,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(stats["allocations.current"], 0)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182087"
+    )
     def test_both_thresholds(self):
         size_bytes = 150 * 1024 * 1024
 
@@ -6460,6 +6775,9 @@ class TestCachingHostAllocatorConfig(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(stats["allocations.current"], 1)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182261"
+    )
     def test_round_threshold_larger_than_cached_size(self):
         # When round_threshold > cached_size, allocations above the cache
         # limit should be neither rounded up nor cached.
@@ -7000,6 +7318,7 @@ class TestMemPool(TestCase):
         finally:
             self._teardown_mempool_limited_memory_test()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180325")
     @serialTest()
     def test_mempool_no_split(self):
         torch.cuda.empty_cache()
@@ -7059,6 +7378,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
     @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
@@ -7148,6 +7468,7 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180367")
     @serialTest()
     def test_nested_mempool(self):
         torch.cuda.empty_cache()
@@ -7462,6 +7783,9 @@ class TestMemPool(TestCase):
         )
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/177000"
+    )
+    @unittest.skipIf(
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
@@ -7497,6 +7821,10 @@ class TestMemPool(TestCase):
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/153460",
+    )
     @serialTest()
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
@@ -9216,8 +9544,13 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.005)
+    # AMD CDNA3 XF32 (v_mfma_f32_*_xf32) uses round-down accumulation, which
+    # produces a negative-biased error ~-5e-3 with max_abs ~8e-3 at K=32 for
+    # uniform[0,1] operands — exceeding the 0.005 tolerance that NVIDIA TF32
+    # comfortably meets (~2e-3). This is the documented behavior of CDNA3's
+    # matrix instructions (arXiv:2511.10909 §IV-F), not a hipBLASLt bug.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -9829,6 +10162,9 @@ class TestCudaGreenContexts(TestCase):
         self.assertEqual(partial_res, full_res)
         self.assertGreater(t1 - t0, t3 - t2)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181370"
+    )
     @serialTest()
     def test_greencontext_stream_carveout(self):
         # By default, everything is performed on the current device
@@ -9958,6 +10294,9 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
+    )
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
