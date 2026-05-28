@@ -1439,6 +1439,18 @@ def is_wrapper_or_member_descriptor(
     )
 
 
+def tracked_repr(tx: InstructionTranslator, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
+
+
 def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
@@ -5693,19 +5705,23 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(
