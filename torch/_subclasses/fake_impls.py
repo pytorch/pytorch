@@ -364,6 +364,8 @@ def non_kwarg_to(
     inp = new_kwargs.pop("input")
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp, **new_kwargs)
+    if isinstance(fake_mode, CppFakeModeShim):
+        return r
     # TODO: I think this does the wrong thing if r is inp
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, r, out_device
@@ -1469,12 +1471,15 @@ def foreach_run_and_map_input_device(
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
-        device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
-        out_fake.append(
-            fake_mode.fake_tensor_converter.from_meta_and_device(
-                fake_mode, meta_t, device
+        if isinstance(fake_mode, CppFakeModeShim):
+            out_fake.append(meta_t)
+        else:
+            device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
+            out_fake.append(
+                fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, meta_t, device
+                )
             )
-        )
 
     return out_fake
 
