@@ -87,7 +87,7 @@ class CausalBias(torch.Tensor):
     """
     A bias representing causal attention patterns. For an overview of the bias structure, see the :class:`CausalVariant` enum.
 
-    This class is used for defining causal (triangular) attention biases. For construing the bias, there exist
+    This class is used for defining causal (triangular) attention biases. For constructing the bias, there exist
     two factory functions: :func:`causal_upper_left` and :func:`causal_lower_right`.
 
     Example:

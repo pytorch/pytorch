@@ -44,6 +44,22 @@ inline long offset_from_thread_index(
   return offset_from_coord(pos, strides, ndim);
 }
 
+template <typename T>
+inline T val_at_offs(constant void* ptr, long offs) {
+  return *reinterpret_cast<constant T*>(
+      static_cast<constant char*>(ptr) + offs);
+}
+
+template <typename T>
+inline T val_at_offs(device void* ptr, long offs) {
+  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
+template <typename T>
+inline device T& ref_at_offs(device void* ptr, long offs) {
+  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
 // One thread per element. Used for small dense tensors where the ILP variant's
 // per-thread overhead isn't amortized (see ILP_DISPATCH_THRESHOLD on the host).
 template <typename T, typename F>
@@ -90,21 +106,50 @@ kernel void unary_dense(
 
 template <typename T, typename F>
 kernel void unary_strided(
-    device result_of<F, T>* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
     constant long* sizes [[buffer(2)]],
     constant long* input_strides [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant uint& ndim [[buffer(5)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using res_t = result_of<F, T>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  output[output_offs] = f(input[input_offs]);
+  ref_at_offs<res_t>(output, output_offs) =
+      f(val_at_offs<T>(input, input_offs));
 }
 
+// Forward declarations for the castout templates (defined after store_at_offs,
+// which they call). REGISTER_UNARY_OP expands to explicit template
+// instantiations of these, so they must be declared before the macro is used.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output,
+    constant Tin* input,
+    constant uint2& size_outtype,
+    uint index);
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output,
+    constant void* input,
+    constant long* sizes,
+    constant long* input_strides,
+    constant long* output_strides,
+    constant uint2& ndim_outtype,
+    uint index);
+
+// Registers the direct per-(out,in) unary kernels and the castout variants
+// keyed on the input dtype. Castout kernels compute the functor in DTYPE0
+// precision and cast the result to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch), matching CPU semantics for
+// cross-dtype unary ops. Each (NAME, DTYPE0) pair must be registered at most
+// once across the library, since the castout host_names are keyed only on
+// DTYPE0.
 #define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
   static_assert(                                                               \
       ::metal::                                                                \
@@ -124,12 +169,27 @@ kernel void unary_strided(
               uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
       c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
-          constant DTYPE0 * input,                                             \
+          device void* output,                                                 \
+          constant void* input,                                                \
           constant long* sizes,                                                \
           constant long* input_strides,                                        \
           constant long* output_strides,                                       \
           constant uint& ndim,                                                 \
+          uint index);                                                         \
+  template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::c10::  \
+      metal::unary_dense_castout<DTYPE0, NAME##_functor>(                      \
+          device void* output,                                                 \
+          constant DTYPE0* input,                                              \
+          constant uint2& size_outtype,                                        \
+          uint index);                                                         \
+  template [[host_name(#NAME "_strided_castout_" #DTYPE0)]] kernel void ::     \
+      c10::metal::unary_strided_castout<DTYPE0, NAME##_functor>(               \
+          device void* output,                                                 \
+          constant void* input,                                                \
+          constant long* sizes,                                                \
+          constant long* input_strides,                                        \
+          constant long* output_strides,                                       \
+          constant uint2& ndim_outtype,                                        \
           uint index)
 
 #define DEFINE_UNARY_FLOATING_FUNCTOR(NAME)                                     \
@@ -166,8 +226,8 @@ kernel void unary_alpha_dense(
 
 template <typename T, typename T2, typename F>
 kernel void unary_alpha_strided(
-    device result_of<F, T, T2>* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
     constant long* sizes [[buffer(2)]],
     constant long* input_strides [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
@@ -175,11 +235,13 @@ kernel void unary_alpha_strided(
     constant T2& alpha [[buffer(6)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using res_t = result_of<F, T, T2>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  output[output_offs] = f(input[input_offs], alpha);
+  ref_at_offs<res_t>(output, output_offs) =
+      f(val_at_offs<T>(input, input_offs), alpha);
 }
 
 #define REGISTER_UNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \
@@ -199,9 +261,8 @@ kernel void unary_alpha_strided(
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI               \
                              "_" #DTYPEA)]] kernel void ::c10::metal::     \
       unary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                 \
-          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
-              output,                                                      \
-          constant DTYPEI * input,                                         \
+          device void* output,                                             \
+          constant void* input,                                            \
           constant long* sizes,                                            \
           constant long* input_strides,                                    \
           constant long* output_strides,                                   \
@@ -209,18 +270,7 @@ kernel void unary_alpha_strided(
           constant DTYPEA& alpha,                                          \
           uint index)
 
-template <typename T>
-inline T val_at_offs(constant void* ptr, long offs) {
-  return *reinterpret_cast<constant T*>(
-      static_cast<constant char*>(ptr) + offs);
-}
-
 // Value at offset with dynamic cast from provided type
-template <typename T>
-inline T val_at_offs(device void* ptr, long offs) {
-  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
-}
-
 template <typename T, typename P>
 inline T val_at_offs(P ptr, long offs, ScalarType type) {
   switch (type) {
@@ -230,11 +280,6 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
     C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
 #undef _CASE_
   }
-}
-
-template <typename T>
-inline device T& ref_at_offs(device void* ptr, long offs) {
-  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
 }
 
 // Store with dynamic cast to provided type. Mirrors val_at_offs's runtime
@@ -254,6 +299,51 @@ inline void store_at_offs(
     C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
 #undef _CASE_
   }
+}
+
+// Castout variants of the unary kernels: input is loaded at compile-time Tin
+// precision (no cast), the functor runs in Tin precision, and the result
+// (result_of<F, Tin>) is cast to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch). Matches CPU semantics for
+// cross-dtype unary ops (compute in input precision, cast on store). Mirrors
+// binary_*_castout but is keyed per input dtype, since unary has no separate
+// common-compute dtype.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output [[buffer(0)]],
+    constant Tin* input [[buffer(1)]],
+    constant uint2& size_outtype [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  store_at_offs<res_t>(
+      output,
+      long(index) * size_outtype.x,
+      static_cast<ScalarType>(size_outtype.y),
+      f(input[index]));
+}
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint2& ndim_outtype [[buffer(5)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_outtype.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_outtype.x);
+  const auto output_offs =
+      offset_from_coord(pos, output_strides, ndim_outtype.x);
+  store_at_offs<res_t>(
+      output,
+      output_offs,
+      static_cast<ScalarType>(ndim_outtype.y),
+      f(val_at_offs<Tin>(input, input_offs)));
 }
 
 // Binary elementwise ops kernels

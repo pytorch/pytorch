@@ -1547,7 +1547,7 @@ def _calculate_potential_peak_memory_sink_waits(
     _post_alloc_update[candidate] = candidate_post_alloc
     potential_peak = candidate_post_alloc
     candidate_size_free_to_move = sum(
-        buf.mpi_buffer.size_free
+        buf.mpi_buffer.size_free  # type: ignore[attr-defined]
         for buf in itertools.chain.from_iterable(
             group_n_to_bufs_after_swap_dealloc_instead_of_candidate.values()
         )
@@ -1958,19 +1958,21 @@ def _sink_waits_iterative_internal(
                     c_runtime = runtimes[candidate]
 
                     if c_runtime > 0 and len(group_colls) > 0:
-                        # Advantage for current Wait to do the Swap
                         # pyrefly: ignore[no-matching-overload]
-                        exposed_delta = max(
-                            0,
-                            info.comm_time - info.comp_time,
+                        exposed_before = max(0, info.comm_time - info.comp_time)
+                        # pyrefly: ignore[no-matching-overload]
+                        exposed_after = max(
+                            0, info.comm_time - info.comp_time - c_runtime
                         )
-                        # pyrefly: ignore[no-matching-overload]
-                        -max(0, info.comm_time - info.comp_time - c_runtime)
+                        exposed_delta = exposed_after - exposed_before
                         for gc_comm_time, gc_comp_time in group_colls.values():
                             # pyrefly: ignore [no-matching-overload]
-                            exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
+                            gc_exposed_before = max(0, gc_comm_time - gc_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
+                            gc_exposed_after = max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
+                            exposed_delta += gc_exposed_after - gc_exposed_before
                         if exposed_delta > 0:
                             info.limiting_factor = (
                                 f"candidate has compute {c_runtime}, group contains collectives,"

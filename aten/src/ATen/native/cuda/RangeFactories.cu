@@ -124,7 +124,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     // skip
   } else if (steps == 1) {
     r.fill_(start);
-  } else if (isIntegralType(r.scalar_type(), 0)) {
+  } else if (isIntegralType(r.scalar_type(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
@@ -179,7 +179,7 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     } else {
       r.fill_(std::pow(base, start.to<double>()));
     }
-  } else if (isIntegralType(r.scalar_type(), 0)) {
+  } else if (isIntegralType(r.scalar_type(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
       float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
       scalar_t scalar_start = start.to<scalar_t>();
@@ -266,6 +266,7 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
     if constexpr (std::is_same_v<scalar_t, int64_t>) {
+      TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {

@@ -108,9 +108,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Any", c10::TypeFactory::get<c10::AnyType>()},
       {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
       {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
-      // PyObjectType::get() used directly because PyObjectType is excluded
-      // from FORALL_DYNAMIC_TYPES (not supported on xplat/mobile)
-      {"PyObject", c10::PyObjectType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
