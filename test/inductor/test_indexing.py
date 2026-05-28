@@ -57,6 +57,21 @@ class TestIndexingSimplification(InductorTestCase):
             ModularIndexing(i, 1, 10),
         )
 
+    def test_simplify_index_in_vec_range_with_relational(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181115
+
+        sympy.simplify crashes with 'StrictLessThan has no attribute diff'
+        when index expressions contain relational sub-expressions. This happens
+        with dynamic=True + torch.func.grad producing Piecewise/Min/Max terms.
+        """
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+        index = sympy.Piecewise((i, i < s0), (s0 - 1, True))
+        result = simplify_index_in_vec_range(index, i, 16)
+        self.assertIsNotNone(result)
+        result2 = stride_at_vec_range(index, i, 16)
+        self.assertIsNotNone(result2)
+
     def test_analyze_lane_contiguity(self):
         sizevars = SizeVarAllocator()
         i = sympy.Symbol("i", integer=True, nonnegative=True)
