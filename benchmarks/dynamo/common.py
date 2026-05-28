@@ -3896,6 +3896,10 @@ def parse_args(args=None):
     parsed = parser.parse_args(args)
     if parsed.batch_invariant and not parsed.accuracy:
         parser.error("--batch-invariant requires --accuracy")
+    if parsed.dashboard and parsed.performance:
+        # Dashboard memory should measure the warmed model, not compile/autotune
+        # transients.
+        parsed.use_warm_peak_memory = True
     return parsed
 
 
