@@ -1,12 +1,13 @@
 # Owner(s): ["oncall: jit"]
 # ruff: noqa: F841
 
+import collections
 import inspect
 import os
 import sys
 import types
 import unittest
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 from textwrap import dedent
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -25,6 +26,9 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
 )
 from torch.testing._internal.jit_utils import JitTestCase, make_global
+
+
+_FactoryCollision = None
 
 
 class TestList(JitTestCase):
@@ -2204,6 +2208,76 @@ class TestNamedTuple(JitTestCase):
             return some_module.Type(1)
 
         self.checkScript(fn, [])
+
+    def test_namedtuple_factory_in_script(self):
+        def fn(x: Tensor, y: Tensor):
+            T = namedtuple("T", ["x", "y"])
+            out = T(x, y)
+            return out.x + out.y
+
+        self.checkScript(fn, (torch.ones(2), torch.ones(2) * 2))
+
+    def test_namedtuple_factory_preserves_typename(self):
+        def fn(x: Tensor):
+            T = namedtuple("T", ["x"])
+            return T(x)
+
+        scripted = torch.jit.script(fn)
+        out = scripted(torch.ones(2))
+        self.assertEqual(type(out).__name__, "T")
+        self.assertTrue(repr(out).startswith("T("))
+
+    def test_collections_namedtuple_factory_in_module(self):
+        class M(nn.Module):
+            def forward(self, x: Tensor):
+                VggOutputs = collections.namedtuple(
+                    "VggOutputs", ["relu1_2", "relu2_2", "relu3_3", "relu4_3"]
+                )
+                h_relu1_2 = x
+                h_relu2_2 = x + 1
+                h_relu3_3 = x + 2
+                h_relu4_3 = x + 3
+                return VggOutputs(h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_3)
+
+        x = torch.ones(2)
+        scripted = torch.jit.script(M())
+        eager_out = M()(x)
+        script_out = scripted(x)
+
+        self.assertEqual(script_out.relu1_2, eager_out.relu1_2)
+        self.assertEqual(script_out.relu2_2, eager_out.relu2_2)
+        self.assertEqual(script_out.relu3_3, eager_out.relu3_3)
+        self.assertEqual(script_out.relu4_3, eager_out.relu4_3)
+
+    def test_namedtuple_factory_same_typename_different_fields(self):
+        def fn(x: Tensor, y: Tensor):
+            T1 = namedtuple("T", ["x"])
+            T2 = namedtuple("T", ["x", "y"])
+            return T1(x).x + T2(x, y).y
+
+        self.checkScript(fn, (torch.ones(2), torch.ones(2) * 2))
+
+    def test_namedtuple_factory_global_local_same_name(self):
+        global _FactoryCollision
+        _FactoryCollision = namedtuple(
+            "FactoryCollision", ["global_field"], module="__main__"
+        )
+
+        def use_global(x: Tensor):
+            return _FactoryCollision(x).global_field
+
+        def use_local(x: Tensor):
+            FactoryCollision = namedtuple("FactoryCollision", ["local_field"])
+            return FactoryCollision(x).local_field
+
+        try:
+            scripted_global = torch.jit.script(use_global)
+            scripted_local = torch.jit.script(use_local)
+            x = torch.ones(2)
+            self.assertEqual(scripted_global(x), x)
+            self.assertEqual(scripted_local(x), x)
+        finally:
+            _FactoryCollision = None
 
     def test_namedtuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
