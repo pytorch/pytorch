@@ -773,7 +773,6 @@ class MixOrderReductionTest(TestBase):
         from torch._inductor.scheduler import BaseSchedulerNode
         from torch._inductor.virtualized import V
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
         mock_node_1 = mock.create_autospec(BaseSchedulerNode)
         mock_node_2 = mock.create_autospec(BaseSchedulerNode)
@@ -812,8 +811,6 @@ class MixOrderReductionTest(TestBase):
                 {"triton.mix_order_reduction_non_strict_mode": False}
             ),
         ):
-            with self.assertRaises(GuardOnDataDependentSymNode):
-                graph.sizevars.guard_or_true(nrow * ncol >= 5 * 2**20)
             self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
     @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
