@@ -7,13 +7,22 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.ir import GraphPartitionSignature
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.scheduler import (
+    _get_benchmarkable_extern_fn,
+    BaseSchedulerNode,
+    ExternKernelSchedulerNode,
+    NestedReduction,
+    Scheduler,
+)
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -84,6 +93,98 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _extern_snode_for_op(self, op_overload, python_kernel_name):
+        node = object.__new__(ir.ExternKernel)
+        node.op_overload = op_overload
+        node.python_kernel_name = python_kernel_name
+        snode = object.__new__(ExternKernelSchedulerNode)
+        snode.node = node
+        return snode
+
+    def test_get_benchmarkable_extern_fn_uses_op_overload(self):
+        self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(torch.ops.aten.mm.out, "renamed_mm")
+            ),
+            torch.ops.aten.mm,
+        )
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten._scaled_mm.out, "extern_kernels.mm"
+                )
+            ),
+            torch.ops.aten._scaled_mm,
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(None, "extern_kernels.mm")
+            )
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten.relu.out, "extern_kernels.relu"
+                )
+            )
+        )
+
+    def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [torch.empty(2, 2), torch.empty(2, 2)]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"out_dtype": torch.float16}
+        snode.node.op_overload = torch.ops.aten.mm.dtype_out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: [
+            *args,
+            kwargs["out_dtype"],
+        ]
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(args[2], torch.float16)
+        self.assertEqual(kwargs, {})
+
+    def test_snode_args_kwargs_preserves_keyword_only_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+        ]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"alpha": 2}
+        snode.node.op_overload = torch.ops.aten.addmm.out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: args
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(len(args), 3)
+        self.assertEqual(kwargs, {"alpha": 2})
+
+    def test_snode_args_kwargs_unflattens_fallback_kernel_args(self):
+        node = object.__new__(ir.FallbackKernel)
+        node.inputs = [torch.empty(2, 3), torch.empty(2, 3)]
+        node.constant_args = (1,)
+        node.kwargs = {}
+        node.op_overload = torch.ops.aten.cat.default
+        node.unflatten_args = lambda tensor_args, constant_args: (
+            [list(tensor_args)],
+            {"dim": constant_args[0]},
+        )
+        node.fill_non_provided_args = lambda args, kwargs: [*args, kwargs["dim"]]
+        snode = Mock()
+        snode.node = node
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
+        self.assertEqual(args[1], 1)
+        self.assertEqual(kwargs, {})
+
     def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
@@ -263,6 +364,151 @@ class TestScheduler(TestCase):
                     group_size=16,
                 )
             )
+
+    def test_nested_reduction_axis_from_loop_body(self):
+        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
+        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
+            "grouped_x0 grouped_x1 grouped_r"
+        )
+
+        def make_body(index, iter_vars, reduce_vars):
+            body = Mock()
+            body.iter_vars = iter_vars
+            body.reduce_vars = reduce_vars
+            body.indexing_exprs = {"load": index}
+            body.memory_usage = {
+                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
+            }
+            return body
+
+        def make_reduction(index, iter_vars, reduce_vars):
+            node = Mock()
+            node.is_reduction.return_value = True
+            node.get_ranges.return_value = ([16, 16], [16])
+            node._body = make_body(index, iter_vars, reduce_vars)
+            return node
+
+        def classify(outer_index, grouped_index):
+            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
+            grouped = make_reduction(
+                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            )
+            outer_node = Mock()
+            outer_node.get_nodes.return_value = [outer]
+            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
+
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + 256 * outer_r,
+                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.X,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + outer_r,
+                grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            None,
+        )
+
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
