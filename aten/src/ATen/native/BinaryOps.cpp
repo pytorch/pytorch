@@ -42,6 +42,7 @@
 #include <ATen/ops/div_ops.h>
 #include <ATen/ops/divide_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
@@ -1003,20 +1004,40 @@ Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
 }
 
 static Device correct_out_device(const Tensor& self, const Tensor& other) {
-  if (self.device() == at::kCPU){
-      return other.device();
-  } else {
+  const auto self_is_zero = self._is_zerotensor();
+  const auto other_is_zero = other._is_zerotensor();
+  // CPU and meta ZeroTensors are device-neutral in binary ZeroTensor kernels.
+  if (self_is_zero && self.device().is_meta() && !other.device().is_meta()) {
+    return other.device();
+  } else if (
+      other_is_zero && other.device().is_meta() && !self.device().is_meta()) {
+    return self.device();
+  } else if (
+      self_is_zero && !other_is_zero && self.device().is_cpu()) {
+    return other.device();
+  } else if (
+      other_is_zero && !self_is_zero && other.device().is_cpu()) {
     return self.device();
   }
+  if (self.device() == at::kCPU) {
+    return other.device();
+  }
+  return self.device();
 }
 
 static Tensor send_to_meta(const Tensor& self, const Device& device) {
   Tensor out_meta;
-  if (self._is_zerotensor() && self.unsafeGetTensorImpl()->is_wrapped_number()) {
-    out_meta = at::_efficientzerotensor(self.sizes(), self.options().device(device));
-    out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
+  auto options = self.options().device(device);
+  // These tensors are only used by meta kernels to compute result metadata.
+  // Calling to(meta) here can redispatch efficient ZeroTensors through AD.
+  if (self.layout() == kStrided) {
+    out_meta = at::empty_strided_symint(
+        self.sym_sizes(), self.sym_strides(), options);
   } else {
-    out_meta = self.to(device);
+    out_meta = at::empty_symint(self.sym_sizes(), options);
+  }
+  if (self.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out_meta;
 }
@@ -1105,10 +1126,12 @@ Tensor linalg_cross_zerotensor(
   // hack to use the TensorIterator to get the correct broadcasting and type
   // promotion logic (see add_zerotensor)
   auto device = Device(DeviceType::Meta);
+  auto input_meta = send_to_meta(input, device);
+  auto other_meta = send_to_meta(other, device);
   auto meta_out = at::_ops::linalg_cross::redispatch(
     c10::DispatchKeySet(at::DispatchKey::Meta),
-    input.to(device),
-    other.to(device),
+    input_meta,
+    other_meta,
     dim);
 
   return at::_efficientzerotensor(
