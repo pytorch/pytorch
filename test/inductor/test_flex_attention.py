@@ -6156,9 +6156,7 @@ class GraphModule(torch.nn.Module):
         def mask_mod(b, h, q_idx, kv_idx):
             return kv_idx >= (KV_S - tail)
 
-        block_mask = create_block_mask(
-            mask_mod, 1, 1, Q_S, KV_S, device=device
-        )
+        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S, device=device)
 
         compiled = torch.compile(flex_attention, fullgraph=True)
         out = compiled(q, k, v, block_mask=block_mask)
@@ -6167,7 +6165,7 @@ class GraphModule(torch.nn.Module):
         k_tail = k[:, :, -tail:, :].to(torch.float32)
         v_tail = v[:, :, -tail:, :].to(torch.float32)
         q_f32 = q.to(torch.float32)
-        scale = D ** -0.5
+        scale = D**-0.5
         scores = (q_f32 @ k_tail.transpose(-1, -2)) * scale
         ref = (torch.softmax(scores, dim=-1) @ v_tail).to(dtype)
 
