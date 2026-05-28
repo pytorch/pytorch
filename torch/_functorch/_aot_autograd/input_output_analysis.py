@@ -11,14 +11,15 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageOverlap
+from torch._guards import Source, StorageAliasing, StorageOffset, StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -330,10 +331,8 @@ def compute_overlapping_inputs(
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
             maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
 
-    # Check whether there are any symbolic values being used.
-    # We do this for 2 reasons:
-    #   1. StorageOverlap guard is only issued whenever dynamic shapes is turned on
-    #   2. Triggers the fast-path for computing storage overlapping
+    # Check whether there are any symbolic values being used. This triggers the
+    # fast-path for computing storage overlapping.
     symbolic = any(
         isinstance(x, torch.SymInt)
         for i in aliased_input_indices
@@ -367,30 +366,79 @@ def compute_overlapping_inputs(
         }
 
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
-    # dynamo sources inside AOTAutograd.
+    # dynamo sources inside AOTAutograd.  The synthetic-base calling convention is
+    # specialized on which aliased inputs overlap, even when all sizes/strides are
+    # static, so the overlap relation must be guarded whenever sources are
+    # available.
     if (
         tracing_context is not None
-        # Make sure dynamic shapes is currently being used.
-        and symbolic
         # We check that we have more than 1 aliased tensor, which should be true at
         # this point, anyway.
         and num_aliases > 1
         and aot_config.aot_autograd_arg_pos_to_source
     ):
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if any(i >= len(sources) or sources[i] is None for i in aliased_input_indices):
+            return actual_aliased_indices
+
         no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
 
-        overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
-        ]
-        non_overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
-        ]
+        overlapping_sources: list[Source] = []
+        for i in actual_aliased_indices:
+            source = cast(Source, sources[i])
+            overlapping_sources.append(source)
+        non_overlapping_sources: list[Source] = []
+        for i in no_overlap_indices:
+            source = cast(Source, sources[i])
+            non_overlapping_sources.append(source)
 
         tracing_context.guards_context.aotautograd_guards.append(
             StorageOverlap(overlapping_sources, non_overlapping_sources)
         )
+        for i in aliased_input_indices if len(actual_aliased_indices) > 1 else ():
+            storage_offset = fwd_inputs[i].storage_offset()
+            if not isinstance(storage_offset, torch.SymInt):
+                source = cast(Source, sources[i])
+                tracing_context.guards_context.aotautograd_guards.append(
+                    StorageOffset(
+                        source,
+                        int(storage_offset),
+                    )
+                )
 
     return actual_aliased_indices
+
+
+def add_storage_aliasing_guard(
+    aot_config: AOTConfig,
+    aliased_input_groups: Sequence[Sequence[int]],
+) -> None:
+    tracing_context = torch._guards.TracingContext.try_get()
+    sources = aot_config.aot_autograd_arg_pos_to_source
+    if tracing_context is None or not sources:
+        return
+
+    source_groups: list[tuple[Source, ...]] = []
+    for group in aliased_input_groups:
+        source_group: list[Source] = []
+        for i in group:
+            if i >= len(sources):
+                source_group = []
+                break
+            source = sources[i]
+            if source is None:
+                source_group = []
+                break
+            source_group.append(source)
+        if source_group:
+            source_groups.append(tuple(source_group))
+
+    if not source_groups:
+        return
+
+    tracing_context.guards_context.aotautograd_guards.append(
+        StorageAliasing(tuple(source_groups))
+    )
 
 
 def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
