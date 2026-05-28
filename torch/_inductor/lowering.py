@@ -87,6 +87,7 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
@@ -2576,6 +2577,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_sparse:
+        return True
+
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
