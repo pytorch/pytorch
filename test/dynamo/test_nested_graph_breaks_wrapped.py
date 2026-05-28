@@ -99,13 +99,15 @@ for test in tests:
 del test
 
 xfails = [
-    # variable naming issues
+    # variable naming issues (debug_force_nested_calls changes L['x'] to L['args'][0])
     NestedGraphBreaksMiscTests.test_flat_name_to_original_fqn_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_compare_shapes_with_constant_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_failure_fn2_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_failure_fn_shape_control_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_filter_fn_by_name_and_value_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_sym_node_fstring_when_used_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksMiscTests.test_replay_side_effects_config_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksMiscTests.test_replay_side_effects_model_attr_nested_graph_breaks,  # noqa: F821
     # doesn't work due to debug_force_nested_calls wrapping the top frame
     NestedGraphBreaksMiscTests.test_dynamo_cache_move_to_front_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_dynamo_reset_clears_cache_nested_graph_breaks,  # noqa: F821
