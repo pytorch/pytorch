@@ -147,6 +147,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
@@ -156,6 +157,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(modernize-use-constraints)
   std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
@@ -193,6 +195,7 @@ ArrayRef(const std::array<T, N>&) -> ArrayRef<T>;
 
 // C array constructor
 template <typename T, size_t N>
+// NOLINTNEXTLINE(*c-arrays*)
 ArrayRef(const T (&)[N]) -> ArrayRef<T>;
 
 // std::initializer_list constructor
@@ -278,10 +281,18 @@ ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }
 
+// These ArrayRef-specific overloads cannot be removed in favor of the
+// HeaderOnlyArrayRef hidden friends: comparing two ArrayRefs through those
+// friends requires a derived-to-base conversion on *both* arguments, which
+// per-argument ties against the C++20-reversed candidate of
+// operator==(IntArrayRef, OptionalIntArrayRef) in OptionalArrayRef.h (exact
+// match on one arg, user-defined conversion on the other) and produces an
+// ambiguity. Keeping ArrayRef-typed overloads gives an exact match on both
+// args, which wins unambiguously.
+//
 // WARNING: Template instantiation will NOT be willing to do an implicit
 // conversions to get you to an c10::ArrayRef, which is why we need so
 // many overloads.
-
 template <typename T>
 bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
   return a1.equals(a2);
