@@ -50,7 +50,7 @@ A human has fully classified the issue only when it has **BOTH**:
 2. One of the sub-oncall labels: `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`.
 
 If both are present:
-- Add `ptd-bot-triaged` label
+- Add `bot-triaged` label
 - **STOP** — a human already classified this issue.
 
 If only one is present (a module label without a sub-oncall, or a sub-oncall without a module label), triage is **incomplete** — proceed to Step 1. The PT-level triage bot can apply distributed module labels alongside `oncall: distributed`, but it does not pick the sub-oncall; that is your job.
@@ -68,14 +68,14 @@ Read the issue title, description, and comments. Determine whether the issue is 
 - Issue about a domain library (vision, text, audio) that happens to mention "distributed"
 
 **If NOT a distributed issue:**
-1. Add `triage review` + `ptd-bot-triaged` labels
+1. Add `triage review` + `bot-triaged` labels
 2. Post a comment using the `not_distributed` template from [templates.json](templates.json)
 3. Do **NOT** remove `oncall: distributed` — let the human oncall re-route
 4. **STOP**
 
 ### 2) Route to Distributed Sub-Oncall
 
-Each issue carries **exactly ONE** sub-oncall label. If the issue already has one of the three sub-oncall labels (`oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`), keep it as-is — do NOT add a second sub-oncall, even if your own classification would have picked a different one. Use the existing sub-oncall to decide the next step (continue to Step 3 if it's `oncall: distributed parallelisms`; otherwise add `ptd-bot-triaged` and STOP per the rules below).
+Each issue carries **exactly ONE** sub-oncall label. If the issue already has one of the three sub-oncall labels (`oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`), keep it as-is — do NOT add a second sub-oncall, even if your own classification would have picked a different one. Use the existing sub-oncall to decide the next step (continue to Step 3 if it's `oncall: distributed parallelisms`; otherwise add `bot-triaged` and STOP per the rules below).
 
 If no sub-oncall is present, apply exactly one based on the routing rules in [distributed-rubric.md](distributed-rubric.md):
 
@@ -88,7 +88,7 @@ If no sub-oncall is present, apply exactly one based on the routing rules in [di
 Use the routing decision tree and edge cases in [distributed-rubric.md](distributed-rubric.md) Section 1 to determine the correct sub-oncall.
 
 **After routing to `oncall: distributed infra` or `oncall: distributed checkpointing`:**
-- Add `ptd-bot-triaged`
+- Add `bot-triaged`
 - **STOP** — the sub-oncall team owns further triage
 
 **After routing to `oncall: distributed parallelisms`:**
@@ -102,13 +102,13 @@ From the issue description, comments, code snippets, and stack traces, classify 
 
 | Confidence | Criteria | Action |
 |-----------|---------|--------|
-| **HIGH or MEDIUM** | Explicit module mention, obvious API usage, or probable module based on context | Add `module:` label(s) + `ptd-bot-triaged` |
-| **LOW** | Cannot determine module — vague description, no code, no stack trace | Add `triage review` + `ptd-bot-triaged` |
+| **HIGH or MEDIUM** | Explicit module mention, obvious API usage, or probable module based on context | Add `module:` label(s) + `bot-triaged` |
+| **LOW** | Cannot determine module — vague description, no code, no stack trace | Add `triage review` + `bot-triaged` |
 
 **Rules:**
 - You can apply multiple module labels when the issue spans modules (e.g., `module: fsdp` + `module: dtensor` for FSDP2 issues that hit DTensor bugs).
 - When an issue has `oncall: pt2` already applied, do NOT remove it. Add distributed module labels alongside it.
-- When the module is unclear, add `triage review` + `ptd-bot-triaged` — do NOT guess a module label.
+- When the module is unclear, add `triage review` + `bot-triaged` — do NOT guess a module label.
 
 ### 4) Type Labels
 
@@ -121,7 +121,7 @@ Most distributed issues are bug reports — do not add a type label for bugs. If
 ### 5) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
-1. Add `triage review` label and do NOT add `ptd-bot-triaged`
+1. Add `triage review` label and do NOT add `bot-triaged`
 
 Do NOT directly add `high priority` without human confirmation.
 
@@ -138,7 +138,7 @@ High priority criteria for distributed issues:
 
 If the issue lacks a minimal reproduction script:
 
-1. Add `needs reproduction` + `ptd-bot-triaged` labels
+1. Add `needs reproduction` + `bot-triaged` labels
 2. Post a comment using the `needs_distributed_reproduction` template from [templates.json](templates.json)
 
 **Do NOT request reproduction when:**
@@ -163,9 +163,7 @@ If the issue lacks a minimal reproduction script:
 
 **DO:**
 - Be conservative — when in doubt, add `triage review` for human attention
-- Add `ptd-bot-triaged` whenever the bot has processed the issue, regardless of confidence. Pair with `triage review` for LOW-confidence or uncertain cases so the cron sweep won't re-pick it. (Exception: §5 high-priority flow intentionally omits `ptd-bot-triaged`.)
+- Add `bot-triaged` whenever the bot has processed the issue, regardless of confidence. Pair with `triage review` for LOW-confidence or uncertain cases so the cron sweep won't re-pick it. (Exception: §5 high-priority flow intentionally omits `bot-triaged`.)
 - Always add a sub-oncall label (Step 2) before module labels (Step 3)
 - Read the full issue including comments before classifying
 - Check the rubric's "Common Mislabel Traps" section before finalizing
-
-**Note:** `bot-triaged` is automatically applied by the parent skill's post-hook after any issue mutation. You do not need to add it manually.
