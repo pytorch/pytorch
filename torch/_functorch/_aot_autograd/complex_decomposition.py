@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.complex_tensor import ComplexTensor, WrapComplexMode
@@ -101,23 +102,34 @@ def _collect_storage_aliases(node: fx.Node) -> set[fx.Node]:
 
 
 def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
-    # view_as_real decomposes to torch.stack (a copy) under complex_wrapper,
-    # so the result no longer aliases its input. If any storage that aliases
-    # a view_as_real input is also mutated (aten.copy_.default epilogue, the
-    # only mutating op post-functionalization), the compiled graph would
-    # silently diverge from eager. Fail loudly instead.
+    """
+    In this function, we check that the compiled graph respects aliasing semantics.
+
+    There are three cases in which this check fires:
+        1. A complex tensor is mutated in place via an incorrect alias.
+           The ops that produce incorrect aliases are listed in `INCORRECT_ALIASING_OPS`.
+        2. A complex input is mutated in place. This is not allowed because complex inputs
+           decompose to real and imaginary parts, which are made contiguous for performance.
+           Therefore, any complex input passed in does not alias the original tensor.
+        3. A complex input aliases an output. This is not allowed as the input and output
+           tensors can't alias each other because of 2.
+
+    In all three cases, we raise an error if possible incorrectness is detected.
+    """
     from torch._subclasses.complex_tensor._ops.common import INCORRECT_ALIASING_OPS
 
+    mutated: set[fx.Node] = set()
     # Output nodes always have an iterable `.args[0]`
-    mutated: set[fx.Node] = {*gm.graph.output_node().args[0]}  # type: ignore[not-iterable]
+    outputs: set[fx.Node] = set(gm.graph.output_node().args[0])  # type: ignore[not-iterable]
+    complex_inputs: set[fx.Node] = set()
     for n in gm.graph.nodes:
-        if n.op == "placeholder":
-            mutated.add(n)
+        if n.op == "placeholder" and n.meta["val"].dtype.is_complex:
+            complex_inputs.add(n)
         if (
             isinstance(n.target, torch._ops.OpOverload)
             and n.target.overloadpacket == torch.ops.aten.copy_
         ):
-            mutated.add(n.arg[0])
+            mutated.add(n.args[0])
 
     poisoned: set[fx.Node] = set()
     for n in gm.graph.nodes:
@@ -131,6 +143,20 @@ def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
             "torch.view_as_real or torch.view_as_complex was called on a complex tensor, and its storage is also mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
         )
 
+    complex_input_aliases: set[fx.Node] = set()
+    for n in complex_inputs:
+        complex_input_aliases.update(_collect_storage_aliases(n))
+
+    if not mutated.isdisjoint(complex_input_aliases):
+        raise RuntimeError(
+            "Complex input nodes are mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
+        )
+
+    if not outputs.isdisjoint(complex_input_aliases):
+        raise RuntimeError(
+            "Output nodes aliases of complex input nodes in this compiled region. Please clone the input tensor so the output does not alias the input."
+        )
+
 
 def decompose_complex_in_graph(
     gm: fx.GraphModule,
@@ -139,6 +165,7 @@ def decompose_complex_in_graph(
 ) -> fx.GraphModule:
     if not _has_complex(gm, flat_args):
         return gm
+
     _assert_no_incorrect_aliasing_mutation(gm)
 
     def wrapper(*args: Any) -> Any:
@@ -147,4 +174,5 @@ def decompose_complex_in_graph(
             result = fx.Interpreter(gm).run(*wrapped)
         return pytree.tree_map(_maybe_unwrap, result)
 
-    return make_fx(wrapper, decomposition_table=decompositions)(*flat_args)
+    with fx_traceback.preserve_node_meta():
+        return make_fx(wrapper, decomposition_table=decompositions)(*flat_args)

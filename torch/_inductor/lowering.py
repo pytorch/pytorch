@@ -2576,7 +2576,7 @@ def _warn_bare_complex_not_supported():
 @functools.cache
 def _warn_experimental_complex_wrapper():
     warnings.warn(
-        "torch._functorch.config.enable_complex_wrapper is experimental. Performance may be worse than eager."
+        "torch._functorch.config.enable_complex_wrapper is experimental. Some ops may not be supported."
     )
 
 

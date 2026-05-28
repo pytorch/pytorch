@@ -42,6 +42,9 @@ class ComplexTensor(Tensor):
         # Or, in words:
         # 1. The negative flag affects both the real and imaginary parts
         # 2. The conjugate flag affects the only the imaginary part
+        #
+        # This is necessary to preserve aliasing semantics for `aten.conj` and `aten._neg_view`.
+        # See `test/test_dynamo/test_complex.py::{test_conj_alias, test_neg_alias}`.
         neg_flag = real.is_neg()
         conj_flag = neg_flag != imag.is_neg()
 

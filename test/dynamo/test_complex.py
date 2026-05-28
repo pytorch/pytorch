@@ -76,18 +76,57 @@ class ComplexTests(ComplexDynamoTestCase):
         fn_c = torch.compile(f, fullgraph=True)
         self.assertRaises(RuntimeError, fn_c, a)
 
-    def test_aliasing_semantics(self):
+    def test_conj_alias(self):
+        def f():
+            a = torch.zeros(2, 2, dtype=torch.complex64)
+            b = a.conj()
+            b[...] = torch.ones_like(b)
+            return a
+
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(f(), fn_c())
+
+    def test_neg_alias(self):
+        def f():
+            a = torch.zeros(2, 2, dtype=torch.complex64)
+            b = a._neg_view()
+            b[...] = torch.ones_like(b)
+            return a
+
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertEqual(f(), fn_c())
+
+    def test_complex_output_aliases_input_raises(self):
+        # Complex output aliases input decomposes to a real/imaginary and aten.complex,
+        # so mutation of the original complex tensor outside the compiled block
+        # does not propagate through the view.
         def f(a):
             return a
 
-        def mutate(fn):
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertRaises(RuntimeError, fn_c, a)
+
+    def test_complex_input_mutation_raises(self):
+        def f(a, b):
+            a.mul_(b)
+            return a.abs()
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        b = torch.randn(2, 2, dtype=torch.complex64)
+
+        fn_c = torch.compile(f, fullgraph=True)
+        self.assertRaises(RuntimeError, fn_c, a, b)
+
+    def test_aliasing_semantics(self):
+        def mutate():
             a = torch.ones(2, 2, dtype=torch.complex64)
-            out = fn(a)
+            out = a[...]
             a[...] = torch.zeros_like(a)
             return out
 
-        fn_c = torch.compile(f, fullgraph=True)
-        self.assertEqual(mutate(f), mutate(fn_c))
+        mutate_c = torch.compile(mutate, fullgraph=True)
+        self.assertEqual(mutate(), mutate_c())
 
     def test_view_as_real(self):
         def f():
@@ -123,16 +162,11 @@ class ComplexTests(ComplexDynamoTestCase):
             xk: torch.Tensor,
             freqs_cis: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor]:
-            # Clone to avoid aliasing errors
-            xq_ = torch.view_as_complex(
-                xq.clone().float().reshape(*xq.shape[:-1], -1, 2)
-            )
-            xk_ = torch.view_as_complex(
-                xk.clone().float().reshape(*xk.shape[:-1], -1, 2)
-            )
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
             freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-            xq_out = torch.view_as_real(xq_ * freqs_cis).clone().flatten(3)
-            xk_out = torch.view_as_real(xk_ * freqs_cis).clone().flatten(3)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+            xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
             return xq_out.type_as(xq), xk_out.type_as(xk)
 
         def f(xq: torch.Tensor, xk: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
