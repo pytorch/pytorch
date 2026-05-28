@@ -19,7 +19,6 @@ import functools
 import logging
 import operator
 import textwrap
-import traceback
 import types
 from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
@@ -49,6 +48,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    format_user_stack,
     ObservedAttributeError,
     raise_observed_exception,
     TorchRuntimeError,
@@ -1695,7 +1695,7 @@ class TensorVariable(VariableTracker):
     @functools.cache
     def _warn_capture_scalar_outputs() -> None:
         user_stack = torch._guards.TracingContext.extract_stack()
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_formatted = format_user_stack(user_stack)
         log.warning(
             textwrap.dedent(
                 """\
