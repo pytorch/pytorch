@@ -10072,6 +10072,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(assume_static_by_default=True)
     @torch.compiler.config.patch(dynamic_values="1111")
     def test_dynamic_values_no_match_specializes(self):
         builder._DYNAMIC_VALUES = None

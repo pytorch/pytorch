@@ -155,6 +155,11 @@ Example::
 
     TORCH_COMPILE_DYNAMIC_VALUES="1111,2222"
 
+Pick sentinel values unlikely to occur as legitimate shapes/ints in your
+workload (e.g. 1111, 2222) — matching is purely by value, so any int source
+or tensor dim equal to a listed value anywhere in the program will be
+marked dynamic.
+
 unlike ``dynamic_sources``, ``dynamic_values`` does NOT override
 ``force_parameter_static_shapes`` or ``force_nn_module_property_static_shapes``.
 """

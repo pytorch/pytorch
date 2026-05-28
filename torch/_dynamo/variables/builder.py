@@ -4230,10 +4230,10 @@ def is_dynamic_value(value: int) -> bool:
     dynamic_values = get_dynamic_values()
     if not dynamic_values:
         return False
-    # bool is a subclass of int; treat True/False as not-an-int-value to avoid
-    # accidentally marking 0/1 dynamic when users include them in the list.
     if isinstance(value, bool):
-        return False
+        raise TypeError(
+            f"is_dynamic_value got a bool ({value}); callers must pass an int"
+        )
     return value in dynamic_values
 
 
