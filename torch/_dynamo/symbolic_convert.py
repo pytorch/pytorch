@@ -2098,10 +2098,11 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
-        var = self.symbolic_locals.get(inst.argval)
+        name = inst.argval
+        var = self.symbolic_locals.get(name)
         if isinstance(var, TensorVariable):
             self._maybe_emit_sync_dealloc(var)
-        del self.symbolic_locals[inst.argval]
+        del self.symbolic_locals[name]
 
     def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
         from .variables.streams import get_current_stream, new_event
@@ -3694,7 +3695,8 @@ class InstructionTranslatorBase(
         #         frame N stack + locals,
         #         ...,
         #         frame 2 stack + locals,
-        #     ], *(frame 1 stack + locals)
+        #     ],
+        #     [frame 1 stack + locals],
         # ]
         cg.extend_output(
             [
@@ -3712,17 +3714,24 @@ class InstructionTranslatorBase(
         )
 
         # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
-        cg.extend_output(
-            [
-                *create_rot_n(3),
-                create_instruction("BUILD_LIST", arg=2),
-                *create_swap(2),
-                # [resumes, frames (popped)], frame 1 stack + locals
-                create_instruction("LIST_EXTEND", arg=1),
-            ]
-        )
+        if ContinueExecutionCache.uses_boxed_call(resume_codes[-1]):
+            cg.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=3),
+                ]
+            )
+        else:
+            cg.extend_output(
+                [
+                    *create_rot_n(3),
+                    create_instruction("BUILD_LIST", arg=2),
+                    *create_swap(2),
+                    # [resumes, frames (popped)], frame 1 stack + locals
+                    create_instruction("LIST_EXTEND", arg=1),
+                ]
+            )
 
-        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
+        # TOS: resume 1, [remaining resumes, frames, frame 1 stack + locals]
         cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
