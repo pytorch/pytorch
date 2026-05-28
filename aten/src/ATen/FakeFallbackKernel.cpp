@@ -455,8 +455,13 @@ void fakeFallback(
             return std::nullopt;
           auto fake = real_tensor_to_fake(t, mode);
           if (may_turn_const(t)) {
-            set_constant_on_mode(
-                fake, std::make_shared<at::Tensor>(t.clone()), mode);
+            std::shared_ptr<at::Tensor> cloned;
+            {
+              c10::impl::ExcludeDispatchKeyGuard clone_guard{
+                  c10::DispatchKeySet(c10::DispatchKey::Fake)};
+              cloned = std::make_shared<at::Tensor>(t.clone());
+            }
+            set_constant_on_mode(fake, std::move(cloned), mode);
           }
           return fake;
         });
