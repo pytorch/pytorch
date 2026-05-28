@@ -66,9 +66,10 @@ class HeaderOnlyArrayRef {
 
   template <
       typename Container,
-      typename U = decltype(std::declval<Container>().data())>
-  requires(std::is_same_v<U, T*> || std::is_same_v<U, T const*>)
-      /* implicit */ HeaderOnlyArrayRef(const Container& container)
+      typename U = decltype(std::declval<Container>().data()),
+      typename = std::enable_if_t<
+          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
+  /* implicit */ HeaderOnlyArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::vector.
@@ -217,16 +218,16 @@ class HeaderOnlyArrayRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T>
+  std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-      HeaderOnlyArrayRef<T>& operator=(U&& Temporary) = delete;
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T> HeaderOnlyArrayRef<T>& operator=(
+  std::enable_if_t<std::is_same_v<U, T>, HeaderOnlyArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
   /// @}
@@ -236,20 +237,6 @@ class HeaderOnlyArrayRef {
     return std::vector<T>(this->Data, this->Data + this->Length);
   }
 
-  /// @}
-  /// @name Equality operators
-  /// @{
-  ///
-  /// When migrating these over from ArrayRef.h, we changed these from
-  /// free functions outside the class to be hidden friends which is the
-  /// modern C++ recommendation for various reasons including being more
-  /// precisely scoped and being non-templates after class instantiation.
-  friend bool operator==(HeaderOnlyArrayRef a1, HeaderOnlyArrayRef a2) {
-    return a1.equals(a2);
-  }
-  friend bool operator!=(HeaderOnlyArrayRef a1, HeaderOnlyArrayRef a2) {
-    return !a1.equals(a2);
-  }
   /// @}
 };
 
