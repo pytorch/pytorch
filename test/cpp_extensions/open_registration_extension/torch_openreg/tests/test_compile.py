@@ -222,5 +222,81 @@ class TestDeviceInterface(TestCase):
         self.assertGreater(iface.device_count(), 0)
 
 
+class TestInductorRegistration(TestCase):
+    def test_scheduling_registered(self):
+        import torch_openreg.inductor_backend  # noqa: F401
+        from torch._inductor.codegen.common import get_scheduling_for_device
+        from torch._inductor.codegen.cpp import CppScheduling
+
+        self.assertIs(get_scheduling_for_device("openreg"), CppScheduling)
+
+    def test_wrapper_codegen_registered(self):
+        from torch._inductor.codegen.common import get_wrapper_codegen_for_device
+        from torch_openreg.inductor_backend import OpenRegWrapperCodegen
+
+        self.assertIs(get_wrapper_codegen_for_device("openreg"), OpenRegWrapperCodegen)
+
+    def test_device_op_overrides_registered(self):
+        from torch._inductor.codegen.common import get_device_op_overrides
+        from torch_openreg.inductor_backend import OpenRegDeviceOpOverrides
+
+        overrides = get_device_op_overrides("openreg")
+        self.assertIsInstance(overrides, OpenRegDeviceOpOverrides)
+
+    def test_device_op_overrides_methods(self):
+        from torch._inductor.codegen.common import get_device_op_overrides
+
+        overrides = get_device_op_overrides("openreg")
+        self.assertIn(
+            "get_raw_stream", overrides.import_get_raw_stream_as("get_raw_stream")
+        )
+        self.assertIn("_set_device", overrides.set_device(0))
+        self.assertEqual(overrides.synchronize(), "pass")
+
+
+class TestInductorCompile(TestCase):
+    def test_inductor_simple_add(self):
+        import torch_openreg.inductor_backend  # noqa: F401
+
+        @torch.compile(backend="inductor")
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, device="openreg")
+        y = torch.randn(4, device="openreg")
+        self.assertEqual(fn(x, y), x + y)
+
+    def test_inductor_multiple_ops(self):
+        import torch_openreg.inductor_backend  # noqa: F401
+
+        def fn(x):
+            return torch.relu(x * 2 + 1)
+
+        x = torch.randn(4, device="openreg")
+        compiled = torch.compile(fn, backend="inductor")
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_inductor_matches_eager(self):
+        import torch_openreg.inductor_backend  # noqa: F401
+
+        def fn(x):
+            return x * 2 + x
+
+        x = torch.randn(4, device="openreg")
+        compiled = torch.compile(fn, backend="inductor")
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_inductor_output_device(self):
+        import torch_openreg.inductor_backend  # noqa: F401
+
+        @torch.compile(backend="inductor")
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(4, device="openreg")
+        result = fn(x)
+        self.assertEqual(result.device.type, "openreg")
+
+
 if __name__ == "__main__":
     run_tests()
