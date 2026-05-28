@@ -1548,6 +1548,15 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/76962
+            DecorateInfo(
+                unittest.skip("Flaky on Linux CUDA"),
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -2696,8 +2705,9 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # The test is flaky on AMX with Inductor
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip,
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cpu",
@@ -2752,8 +2762,9 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # The test is flaky on AMX with Inductor
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip,
                 "TestCommon",
                 "test_numpy_ref",
                 device_type="cpu",
