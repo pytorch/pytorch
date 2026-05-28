@@ -16,11 +16,9 @@ from functorch_additional_op_db import additional_op_db
 import torch
 import torch.utils._pytree as pytree
 from functorch import vmap
-from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
-from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
 
 
@@ -503,41 +501,6 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
         device_type=device_type,
         dtypes=dtypes,
     )
-
-
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db + additional_op_db + autograd_function_db + custom_op_db
-    for decorate_meta in to_skip:
-        matching_opinfos = [
-            o
-            for o in all_opinfos
-            if o.name == decorate_meta.op_name
-            and o.variant_test_name == decorate_meta.variant_name
-        ]
-        if len(matching_opinfos) == 0:
-            raise AssertionError(f"Couldn't find OpInfo for {decorate_meta}")
-        if len(matching_opinfos) != 1:
-            raise AssertionError(
-                "OpInfos should be uniquely determined by their (name, variant_name). "
-                f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
-            )
-        opinfo = matching_opinfos[0]
-        decorators = list(opinfo.decorators)
-        new_decorator = DecorateInfo(
-            decorate_meta.decorator,
-            test_case_name,
-            base_test_name,
-            device_type=decorate_meta.device_type,
-            dtypes=decorate_meta.dtypes,
-        )
-        decorators.append(new_decorator)
-        opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-
-    return wrapped
 
 
 def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):

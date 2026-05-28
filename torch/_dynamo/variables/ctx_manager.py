@@ -75,6 +75,11 @@ class ContextWrappingVariable(VariableTracker):
         self.target_values = target_values
         self.initial_values = initial_values
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         if hasattr(self, "_call_func"):
             self._call_func(tx, self.target_values)
@@ -121,7 +126,7 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) != 1:
@@ -340,7 +345,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a jvp
     # call from eager that calls the compiled function, as the jvp levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
@@ -425,7 +430,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 class DualLevelContextManager(ContextWrappingVariable):
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)  # type: ignore[arg-type]
 
     @staticmethod
     def create(tx: "InstructionTranslator", **kwargs: Any) -> "DualLevelContextManager":
@@ -473,7 +478,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a grad
     # call from eager that calls the compiled function, as the grad levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
@@ -565,12 +570,12 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a vmap
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
         tx: "InstructionTranslator",
-        target_values: Sequence[VariableTracker],
+        target_values: list[VariableTracker],
         **kwargs: Any,
     ) -> "VmapIncrementNestingCtxManagerVariable":
         var = VmapIncrementNestingCtxManagerVariable(
@@ -616,7 +621,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
@@ -659,7 +664,7 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self._call_func(tx, self.initial_values)  # undo eager initialization
@@ -887,7 +892,7 @@ def get_device_context_manager(
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
@@ -1197,7 +1202,7 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(
         func: Any,
-        record_args: Sequence[VariableTracker],
+        record_args: list[VariableTracker],
         record_kwargs: "dict[str, VariableTracker]",
         **kwargs: Any,
     ) -> "ProfilerRecordFunctionContextVariable":
@@ -1376,7 +1381,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
 
 class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)  # type: ignore[arg-type]
 
     @staticmethod
     def create(
@@ -1419,7 +1424,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # undo eager initialization
@@ -1729,13 +1734,18 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return types.MethodType
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if args:
@@ -1776,6 +1786,11 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def __init__(
         self,
         ctx: ContextWrappingVariable | GenericContextWrappingVariable,
@@ -1798,7 +1813,7 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if kwargs:

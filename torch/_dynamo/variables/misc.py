@@ -529,6 +529,13 @@ class TracebackVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -536,10 +543,7 @@ class TracebackVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            # Two traceback variables are only equal if they are the same object
-            return VariableTracker.build(tx, self is args[0])
-        elif name == "__setattr__":
+        if name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
 
@@ -611,6 +615,13 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
@@ -739,7 +750,7 @@ class DelayGraphBreakVariable(UnknownVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = "" if self.source is None else self.source.name
@@ -774,7 +785,7 @@ class ComptimeVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..comptime import ComptimeContext
@@ -1077,7 +1088,7 @@ class AutogradFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "AutogradFunctionVariable":
         return AutogradFunctionVariable(self.fn_cls)
@@ -1175,6 +1186,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         needs_input_grad: tuple[bool, ...] | None = None,
         non_differentiable: Any | None = None,
+        dirty_tensors: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1182,11 +1194,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
+        self.dirty_tensors = dirty_tensors
 
     @staticmethod
     def create(
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker] | None = None,
+        args: list[VariableTracker] | None = None,
         kwargs: dict[str, VariableTracker] | None = None,
     ) -> VariableTracker:
         needs_input_grad = None
@@ -1233,6 +1246,19 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
+        elif name == "mark_dirty":
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            if getattr(self, "proxy", None) is None:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function context `mark_dirty`",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo only supports tracing ctx.mark_dirty "
+                    "inside autograd.Function.apply.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self.dirty_tensors = args
+            return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
             unimplemented(
@@ -1240,8 +1266,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 context=f"call_method {self} {name}",
                 explanation="Dynamo does not support calling the method "
                 f"`{name}` on `autograd.Function` context objects. Supported "
-                "methods are `__setattr__`, `save_for_backward` and "
-                "`mark_non_differentiable`.",
+                "methods are `__setattr__`, `save_for_backward`, "
+                "`mark_dirty` and `mark_non_differentiable`.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self.saved_tensors is None:
@@ -1276,10 +1302,14 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in ["save_for_backward", "mark_non_differentiable"]:
+        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
+        if name == "dirty_tensors":
+            if self.dirty_tensors is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.dirty_tensors))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
         if name == "needs_input_grad":
@@ -1359,7 +1389,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.fn(*args, **kwargs)
@@ -1443,13 +1473,36 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import generic_richcompare
+
+        try:
+            resolved = self.obj.var_getattr(tx, self.name)
+        except NotImplementedError:
+            resolved = None
+        if resolved is None or isinstance(resolved, GetAttrVariable):
+            if self.obj.is_python_constant():
+                val = getattr(self.obj.as_python_constant(), self.name)
+                resolved = VariableTracker.build(tx, val)
+            else:
+                unimplemented(
+                    gb_type="Unresolved GetAttrVariable comparison",
+                    context=f"richcompare_impl {self} {op}",
+                    explanation=f"Cannot compare {self} because the attribute "
+                    f"could not be resolved to a concrete value.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        return generic_richcompare(tx, resolved, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.name, list(args), kwargs)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def mp_subscript_impl(
         self,
@@ -1510,6 +1563,13 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
 
 class TypingVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -1532,6 +1592,18 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        if op in ("__eq__", "__ne__"):
+            if istype(other, TypingVariable):
+                result = self.value == other.value
+                if op == "__ne__":
+                    result = not result
+                return ConstantVariable.create(result)
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(NotImplemented)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1539,10 +1611,6 @@ class TypingVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            if len(args) == 1 and not kwargs:
-                result = istype(args[0], TypingVariable) and self.value == args[0].value
-                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
@@ -1706,7 +1774,7 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not config.trace_numpy:
@@ -1881,50 +1949,13 @@ class StringFormatVariable(VariableTracker):
     def create(
         cls,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        all_args = list(itertools.chain(sym_args, sym_kwargs.values()))
-
-        has_lazy_constant = any(
-            isinstance(x, (LazyConstantVariable, ComputedLazyConstantVariable))
-            for x in all_args
-        )
-
-        if has_lazy_constant and not sym_kwargs:
-            # All args must be simple constants or lazy constants (not
-            # containers like TupleVariable which may hold SymNodeVariables
-            # under dynamic shapes).
-            all_simple_constants = all(
-                isinstance(
-                    x,
-                    (
-                        variables.ConstantVariable,
-                        LazyConstantVariable,
-                        ComputedLazyConstantVariable,
-                    ),
-                )
-                for x in all_args
-            )
-            if all_simple_constants:
-                # Use str.format as the op with format_string as the first arg.
-                # _make_binary_op_reconstruct_fn already has a str.format handler.
-                from .base import AsPythonConstantNotImplementedError
-                from .builtin import _make_binary_op_reconstruct_fn
-
-                reconstruct_fn = _make_binary_op_reconstruct_fn(str.format)
-                fmt_str_var = variables.ConstantVariable.create(format_string)
-                try:
-                    return ComputedLazyConstantVariable.create(
-                        str.format,
-                        [fmt_str_var] + list(sym_args),
-                        reconstruct_fn,  # pyrefly: ignore[bad-argument-type]
-                    )
-                except (TypeError, ValueError, AsPythonConstantNotImplementedError):
-                    pass
-        elif all(x.is_python_constant() for x in all_args):
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
             return variables.ConstantVariable.create(
                 format_string.format(
                     *[v.as_python_constant() for v in sym_args],
@@ -1936,7 +1967,7 @@ class StringFormatVariable(VariableTracker):
     def __init__(
         self,
         format_string: str,
-        sym_args: Sequence[VariableTracker],
+        sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
         **kwargs: Any,
     ) -> None:
@@ -1989,112 +2020,6 @@ class StringFormatVariable(VariableTracker):
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
 
-    def _try_get_format_value(self) -> tuple[bool, str]:
-        """Try to get the formatted string value without realizing lazy constants.
-
-        Returns (success, value). If any argument cannot be peeked, returns (False, "").
-        """
-        arg_values = []
-        for arg in self.sym_args:
-            can_peek, _is_unrealized, value = arg.try_peek_constant()
-            if not can_peek:
-                return (False, "")
-            arg_values.append(value)
-
-        kwarg_values = {}
-        for k, v in self.sym_kwargs.items():
-            can_peek, _is_unrealized, value = v.try_peek_constant()
-            if not can_peek:
-                return (False, "")
-            kwarg_values[k] = value
-
-        return (True, self.format_string.format(*arg_values, **kwarg_values))
-
-    def is_python_constant(self) -> bool:
-        """Return True if this StringFormatVariable can be converted to a constant.
-
-        Returns False if any argument is an unrealized lazy constant, since those
-        should be reconstructed at runtime rather than loaded as a constant (to
-        avoid unnecessary guard installation and recompilation).
-        """
-        for x in itertools.chain(self.sym_args, self.sym_kwargs.values()):
-            can_peek, is_unrealized, _value = x.try_peek_constant()
-            if not can_peek or is_unrealized:
-                # Can't peek or has unrealized lazy constant - don't treat as constant
-                return False
-        return True
-
-    def as_python_constant(self) -> str:
-        """Return the formatted string value, realizing any lazy constants."""
-        self._realize_lazy_args()
-        return self.format_string.format(
-            *[v.as_python_constant() for v in self.sym_args],
-            **{k: v.as_python_constant() for k, v in self.sym_kwargs.items()},
-        )
-
-    def is_python_hashable(self) -> bool:
-        # Strings are always hashable, and we can peek at all values
-        success, _ = self._try_get_format_value()
-        return success
-
-    def get_python_hash(self) -> int:
-        success, value = self._try_get_format_value()
-        if not success:
-            raise RuntimeError(
-                "StringFormatVariable hash failed: could not peek all args"
-            )
-        return hash(value)
-
-    def _realize_lazy_args(self) -> None:
-        """Realize any lazy constant arguments to install guards."""
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        for arg in itertools.chain(self.sym_args, self.sym_kwargs.values()):
-            if isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable)):
-                arg.realize()
-
-    def is_python_equal(self, other: object) -> bool:
-        success, value = self._try_get_format_value()
-        if not success:
-            return False
-        if isinstance(other, StringFormatVariable):
-            other_success, other_value = other._try_get_format_value()
-            if not other_success:
-                return False
-            if value == other_value:
-                # Match found - realize lazy args to install guards
-                self._realize_lazy_args()
-                other._realize_lazy_args()
-                return True
-            return False
-        if not isinstance(other, VariableTracker):
-            return False
-        if other.is_python_constant():
-            if value == other.as_python_constant():
-                # Match found - realize lazy args to install guards
-                self._realize_lazy_args()
-                return True
-            return False
-        return False
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Peek at the formatted string value without triggering realization.
-
-        Returns (can_peek, is_unrealized, value).
-        """
-        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
-
-        success, value = self._try_get_format_value()
-        if not success:
-            return (False, False, None)
-        # Check if any arg is unrealized lazy constant
-        any_unrealized = any(
-            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
-            and not arg.is_realized()
-            for arg in itertools.chain(self.sym_args, self.sym_kwargs.values())
-        )
-        return (True, any_unrealized, value)
-
 
 class ObjectVariable(VariableTracker):
     # PyBaseObject_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
@@ -2138,7 +2063,7 @@ class DebuggingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if tx.export:
@@ -2205,7 +2130,7 @@ class IgnoredFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return variables.ConstantVariable.create(None)
@@ -2291,6 +2216,13 @@ class ConstantLikeVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def call_method(
         self,
@@ -2384,7 +2316,7 @@ class RandomClassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "RandomVariable":
         if len(args) > 1 or kwargs:
@@ -2594,7 +2526,7 @@ class WeakRefVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.referent_vt
@@ -2611,6 +2543,13 @@ class WeakRefVariable(VariableTracker):
         from .object_protocol import generic_hash_impl
 
         return generic_hash_impl(tx, self.referent_vt)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):

@@ -105,8 +105,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             numel = buf.get_numel()
             writer.writeline(f"assert_numel({name}, {numel});")
 
-    def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
@@ -535,7 +540,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
-                            V.graph.graph_inputs[input_key]
+                            V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
                         assert dtype is not None, (
                             "Fails to get the dtype of the sympy.Expr"
