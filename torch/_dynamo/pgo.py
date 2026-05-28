@@ -290,6 +290,8 @@ class FrameStateSizeEntry:
         elif self.scalar is auto_dynamic:
             if isinstance(self.size, tuple) and isinstance(self.stride, tuple):
                 return f"tensor size={render_tuple(self.size)} stride={render_tuple(self.stride)}"
+            elif isinstance(self.size, tuple) and self.stride is auto_unset:
+                return f"tensor size={render_tuple(self.size)} stride=auto unset"
 
         # Fallback
         return f"unusual {repr(self)}"
@@ -337,10 +339,12 @@ class FrameStateSizeEntry:
             return True
         if self.stride is auto_unset:
             return False
+        if dim >= len(self.stride):
+            return False
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def _munge_symint(xs: tuple[int, ...]) -> tuple[AutoDynamic | int, ...]:
+    def _munge_symint(xs: tuple[_T, ...]) -> tuple[AutoDynamic | _T, ...]:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
@@ -349,12 +353,20 @@ class FrameStateSizeEntry:
 
     @classmethod
     def make_tensor(
-        cls, size: tuple[int, ...], stride: tuple[int, ...]
+        cls, size: tuple[int, ...], stride: tuple[int | InferStride, ...]
     ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_dynamic,
             size=cls._munge_symint(size),
             stride=cls._munge_symint(stride),
+        )
+
+    @classmethod
+    def make_tensor_without_stride(cls, size: tuple[int, ...]) -> FrameStateSizeEntry:
+        return FrameStateSizeEntry(
+            scalar=auto_dynamic,
+            size=cls._munge_symint(size),
+            stride=auto_unset,
         )
 
     @classmethod
