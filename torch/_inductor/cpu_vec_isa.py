@@ -115,6 +115,56 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
+    @staticmethod
+    def _build_probe_env() -> dict[str, str]:
+        """Construct the child env for the dlopen probe.
+
+        Make libtorch_cpu (and other torch shlibs) findable by the dynamic
+        linker on Linux/macOS so the probe child does not need to ``import
+        torch`` to bring them into its address space. Prepend rather than
+        append so a successful probe is guaranteed to bind against the torch
+        we are currently running, not an older install on the user's loader
+        path. On Windows the equivalent registration happens inside the child
+        via ``os.add_dll_directory`` (see ``_avx_py_load``).
+        """
+        lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+        env = python_subprocess_env()
+        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+            existing = env.get(var, "")
+            env[var] = os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        return env
+
+    def _probe_load(self, output_path: str) -> bool:
+        """Spawn a child Python that ``dlopen``s ``output_path``.
+
+        Bound the dlopen probe so a stuck child cannot hang the parent for
+        the whole 30-minute outer timeout (observed in CI). ``subprocess.run``
+        kills the child on ``TimeoutExpired`` (``check_call`` leaks it).
+        Returns ``False`` on timeout or load failure, ``True`` on success.
+        """
+        probe_cmd = [
+            sys.executable,
+            "-c",
+            VecISA._avx_py_load.replace("__lib_path__", output_path),
+        ]
+        try:
+            subprocess.run(
+                probe_cmd,
+                stderr=subprocess.DEVNULL,
+                env=self._build_probe_env(),
+                timeout=60,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            warnings.warn(
+                f"VecISA dlopen probe for {self} hung after 60s",
+                stacklevel=2,
+            )
+            return False
+        except subprocess.CalledProcessError:
+            return False
+        return True
+
     def check_build(self, code: str) -> bool:
         """Dry-compile ``code`` with this ISA's flags and verify the resulting
         shared library can be loaded.
@@ -156,50 +206,10 @@ cdll.LoadLibrary("__lib_path__")
                 )
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
-
-                # Make libtorch_cpu (and other torch shlibs) findable by
-                # the dynamic linker on Linux/macOS so the probe child does
-                # not need to `import torch` to bring them into its address
-                # space. Prepend rather than append so a successful probe is
-                # guaranteed to bind against the torch we are currently
-                # running, not an older install on the user's loader path. On
-                # Windows the equivalent registration happens inside the child
-                # via os.add_dll_directory (see _avx_py_load).
-                lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
-                env = python_subprocess_env()
-                for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-                    existing = env.get(var, "")
-                    env[var] = (
-                        os.pathsep.join([lib_dir, existing]) if existing else lib_dir
-                    )
-
-                # Bound the dlopen probe so a stuck child cannot hang the
-                # parent for the whole 30-minute outer timeout (observed in
-                # CI). subprocess.run kills the child on TimeoutExpired
-                # (check_call leaks it).
-                probe_cmd = [
-                    sys.executable,
-                    "-c",
-                    VecISA._avx_py_load.replace("__lib_path__", output_path),
-                ]
-                try:
-                    subprocess.run(
-                        probe_cmd,
-                        stderr=subprocess.DEVNULL,
-                        env=env,
-                        timeout=60,
-                        check=True,
-                    )
-                except subprocess.TimeoutExpired:
-                    warnings.warn(
-                        f"VecISA dlopen probe for {self} hung after 60s",
-                        stacklevel=2,
-                    )
-                    return False
             except Exception:
                 return False
 
-            return True
+            return self._probe_load(output_path)
 
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)

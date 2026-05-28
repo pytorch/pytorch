@@ -4378,24 +4378,22 @@ class TestVecISACheckBuild(TestCase):
     # False if it expires, and (2) make libtorch findable in the
     # child's loader path so the child can dlopen the probe .so
     # without importing torch.
+    #
+    # These target the small helpers (_probe_load, _build_probe_env)
+    # directly so they don't depend on CppBuilder / CppTorchOptions
+    # succeeding on the host, which would otherwise make the tests
+    # platform-specific (the production path is fine; only the
+    # CppTorchOptions construction is brittle to host compiler probes
+    # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
 
-    def _patched_check_build(self, fake_run):
+    def test_probe_load_returns_false_on_timeout(self):
         from torch._inductor import cpu_vec_isa
 
-        # Swap only cpu_vec_isa's reference to the subprocess module so
-        # our fake_run does not intercept the unrelated compiler
-        # --version check that runs deeper in cpp_builder. Stub the
-        # fingerprint (its compiler version call would otherwise need a
-        # real g++). Make os.path.isfile claim the compiled .so already
-        # exists so build() is skipped and the probe runs, calling
-        # fake_run.
-        real_isfile = os.path.isfile
+        calls: list[Any] = []
 
-        def fake_isfile(path):
-            path_str = str(path)
-            if "torchinductor" in path_str:
-                return True
-            return real_isfile(path_str)
+        def fake_run(*args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
 
         fake_subprocess = types.SimpleNamespace(
             run=fake_run,
@@ -4405,43 +4403,43 @@ class TestVecISACheckBuild(TestCase):
         )
 
         instance = cpu_vec_isa.VecAVX2()
-        with mock.patch.object(
-            cpu_vec_isa, "_get_isa_dry_compile_fingerprint", return_value="test-fp"
-        ):
-            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
-                with mock.patch("os.path.isfile", side_effect=fake_isfile):
-                    return instance.check_build(cpu_vec_isa.VecISA._avx_code)
-
-    def test_check_build_returns_false_on_probe_timeout(self):
-        calls: list[Any] = []
-
-        def fake_run(*args, **kwargs):
-            calls.append(kwargs.get("timeout"))
-            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
-
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = self._patched_check_build(fake_run)
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                result = instance._probe_load("/nonexistent/probe.so")
 
         self.assertFalse(result)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
             msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
         )
 
-    def test_check_build_prepends_torch_lib_dir_to_loader_path(self):
-        captured: dict[str, Any] = {}
+    def test_probe_load_returns_false_on_called_process_error(self):
+        from torch._inductor import cpu_vec_isa
 
         def fake_run(*args, **kwargs):
-            captured["env"] = kwargs["env"]
-            return subprocess.CompletedProcess(args=args[0], returncode=0)
+            raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
 
-        result = self._patched_check_build(fake_run)
-        self.assertTrue(result)
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+            result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+
+    def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
+        from torch._inductor import cpu_vec_isa
+
+        env = cpu_vec_isa.VecISA._build_probe_env()
 
         torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        env = captured["env"]
         for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
             value = env.get(var, "")
             self.assertEqual(
