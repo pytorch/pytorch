@@ -1375,6 +1375,7 @@ def _use_uvm(device: "Device" = None):
 
     Example::
 
+        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
         >>> with torch.cuda._use_uvm():
         ...     x = torch.randn(1024, 1024, device="cuda")
         ...     y = x @ x.T  # computed on GPU, pages in/out as needed
@@ -1389,10 +1390,11 @@ def _use_uvm(device: "Device" = None):
     .. note::
         Requires the ``cuda-python`` package (``cuda.bindings``).
     """
+    import logging
+    import traceback
+
     try:
-        from cuda.bindings import (  # pyrefly: ignore[missing-import]
-            runtime as cuda_runtime,
-        )
+        from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
     except ImportError:
         raise ImportError(
             "torch.cuda._use_uvm() requires the 'cuda-python' package "
@@ -1400,52 +1402,76 @@ def _use_uvm(device: "Device" = None):
             "and cudaFree."
         ) from None
 
-    ALLOC_FN = ctypes.CFUNCTYPE(
+    log = logging.getLogger(__name__)
+
+    _ALLOC_FN = ctypes.CFUNCTYPE(
         ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
     )
-    FREE_FN = ctypes.CFUNCTYPE(
+    _FREE_FN = ctypes.CFUNCTYPE(
         None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
     )
 
-    def _check_err(result):
+    def _check(result, msg: str = ""):
         err = result if not isinstance(result, tuple) else result[0]
-        if err != cuda_runtime.cudaError_t.cudaSuccess:
-            warnings.warn(f"UVM allocator: CUDA error {err}")
+        if err != _rt.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"CUDA error: {err}. {msg}")
 
-    def _uvm_alloc(size, device, stream):
-        err, ptr = cuda_runtime.cudaMallocManaged(
-            size, cuda_runtime.cudaMemAttachGlobal
-        )
-        if err != cuda_runtime.cudaError_t.cudaSuccess:
+    def _uvm_alloc(size, device, stream, _runtime=_rt):
+        try:
+            err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
+            _check(err, f"cudaMallocManaged({size})")
+            if device >= 0:
+                location = _runtime.cudaMemLocation()
+                location.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+                location.id = device
+                _check(
+                    _runtime.cudaMemAdvise(
+                        ptr,
+                        size,
+                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                        location,
+                    ),
+                    "cudaMemAdvise(SetPreferredLocation)",
+                )
+                _check(
+                    _runtime.cudaMemAdvise(
+                        ptr,
+                        size,
+                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                        location,
+                    ),
+                    "cudaMemAdvise(SetAccessedBy)",
+                )
+            return ptr
+        except Exception:
+            log.error(
+                "[_use_uvm] FAILED to allocate %d bytes (%.2f GiB) via UVM."
+                " CUDACachingAllocator will raise an OOM error as a result."
+                " You can ignore free-memory numbers reported by PyTorch"
+                " as they are irrelevant for UVM.\nException:\n%s",
+                size,
+                size / (1024**3),
+                traceback.format_exc(),
+            )
             return 0
-        if device >= 0:
-            location = cuda_runtime.cudaMemLocation()
-            location.type = cuda_runtime.cudaMemLocationType.cudaMemLocationTypeDevice
-            location.id = device
-            _check_err(
-                cuda_runtime.cudaMemAdvise(
-                    ptr,
-                    size,
-                    cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                    location,
-                )
-            )
-            _check_err(
-                cuda_runtime.cudaMemAdvise(
-                    ptr,
-                    size,
-                    cuda_runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                    location,
-                )
-            )
-        return ptr
 
-    def _uvm_free(ptr, size, device, stream):
-        if ptr:
-            _check_err(cuda_runtime.cudaFree(ptr))
+    def _uvm_free(ptr, size, device, stream, _runtime=_rt):
+        """Best-effort free; guards against interpreter shutdown."""
+        try:
+            if ptr:
+                _check(_runtime.cudaFree(ptr))
+        except Exception:
+            if log is not None and traceback is not None:
+                try:
+                    log.error(
+                        "[_use_uvm] exception in free:\n%s",
+                        traceback.format_exc(),
+                    )
+                except Exception:
+                    pass
 
-    c_alloc = ALLOC_FN(_uvm_alloc)
-    c_free = FREE_FN(_uvm_free)
+    c_alloc = _ALLOC_FN(_uvm_alloc)
+    c_free = _FREE_FN(_uvm_free)
     alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
     free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
 
