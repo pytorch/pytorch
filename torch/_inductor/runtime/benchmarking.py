@@ -616,10 +616,12 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
         self._in_cudagraph_benchmark = True
-        result = super().benchmark_gpu_with_cuda_graph(
-            _callable, grad_to_none=grad_to_none, **kwargs
-        )
-        self._in_cudagraph_benchmark = False
+        try:
+            result = super().benchmark_gpu_with_cuda_graph(
+                _callable, grad_to_none=grad_to_none, **kwargs
+            )
+        finally:
+            self._in_cudagraph_benchmark = False
         return result
 
     @may_distort_benchmarking_result
@@ -690,7 +692,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                     device_type=device_type,
                 )
             except RuntimeError:
-                logger.debug(
+                logger.warning(
                     "CUDA graph capture failed during benchmarking, "
                     "falling back to eager benchmarking",
                     exc_info=True,
