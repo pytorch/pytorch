@@ -620,7 +620,9 @@ TORCH_LIBRARY(_c10d_functional, m) {
                 get_process_group(group, "all_gather_into_tensor_out"),
                 output);
           }),
-      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+      {at::Tag::pt2_compliant_tag,
+       at::Tag::needs_contiguous_strides,
+       at::Tag::out});
 
   m.def(
       "all_gather_into_tensor(Tensor input, int group_size, Any group_name) -> Tensor",
@@ -682,7 +684,9 @@ TORCH_LIBRARY(_c10d_functional, m) {
                 get_process_group(group, "reduce_scatter_tensor_out"),
                 output);
           }),
-      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+      {at::Tag::pt2_compliant_tag,
+       at::Tag::needs_contiguous_strides,
+       at::Tag::out});
 
   m.def(
       "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, Any group_name) -> Tensor[]",

@@ -14,9 +14,10 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
 )
 from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, serialTest, TestCase
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -185,6 +186,21 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         )
         self.assertNotIn("streams.fork", bw_code)
         self.assertNotIn("streams.join", bw_code)
+
+        # Verify keepalive: ao.wait_tensor for reload should reference the CPU
+        # placeholder as its 2nd arg so its storage is freed after the H2D copy
+        for node in bw_graph.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.ao.wait_tensor.default
+                and isinstance(node.args[0], torch.fx.Node)
+                and node.args[0].target == torch.ops.ao.reload.default
+            ):
+                self.assertEqual(len(node.args), 2)
+                reload_node = node.args[0]
+                keepalive_node = node.args[1]
+                # keepalive should be the CPU placeholder that was reloaded
+                self.assertIs(keepalive_node, reload_node.args[0])
 
     def test_partitioner_offload_sep_stream_accuracy(self):
         # Run without compilation to get reference gradients

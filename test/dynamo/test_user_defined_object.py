@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class SlotsOnly:
@@ -296,6 +297,148 @@ class TestSlotsAttrAssignment(TestCase):
             return t + obj.x  # calls getter: returns _x = 10
 
         dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_direct_dict_write_does_not_shadow_data_descriptor(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(t, obj):
+            obj.__dict__["x"] = 99
+            return t + obj.x + obj.__dict__["x"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, Foo()))
+
+    def test_readonly_property_assignment_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            obj.x = 99
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no setter", compiled_fn, Foo())
+
+    def test_delattr_instance_dict_exposes_non_data_descriptor(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                return 5
+
+        class Foo:
+            x = Descriptor()
+
+            def __init__(self):
+                self.x = 7
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertNotIn("x", compiled_obj.__dict__)
+
+    def test_property_deleter(self):
+        class Foo:
+            def __init__(self):
+                self.deleted = False
+                self._x = 4
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.deleter
+            def x(self):
+                self.deleted = True
+                self._x = 0
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x + obj.deleted
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertTrue(compiled_obj.deleted)
+        self.assertEqual(compiled_obj._x, 0)
+
+    def test_property_without_deleter_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no deleter", compiled_fn, Foo())
+
+    def test_slot_and_dict_mutation_same_object(self):
+        class Foo:
+            __slots__ = ("x", "__dict__")
+
+        def fn(t, obj):
+            obj.x = 2
+            obj.__dict__["y"] = 3
+            return t + obj.x + obj.__dict__["y"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.x, 2)
+        self.assertEqual(compiled_obj.__dict__["y"], 3)
+
+    def test_dunder_dict_assignment_updates_attribute_lookup(self):
+        class Foo:
+            __slots__ = ("__dict__",)
+
+        def fn(t):
+            obj = Foo()
+            obj.__dict__ = {"y": 2}
+            return t + obj.y + obj.__dict__["y"]
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_custom_descriptor_shadows_base_slot(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                if obj is None:
+                    return self
+                return obj.y * 2
+
+            def __set__(self, obj, value):
+                obj.y = value + 1
+
+        class Base:
+            __slots__ = ("x", "__dict__")
+
+        class Foo(Base):
+            x = Descriptor()
+
+        def fn(t, obj):
+            obj.x = 4
+            return t + obj.x + obj.y
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.y, 5)
 
     def test_slot_assignment_no_recompile_same_type(self):
         # Calling compiled fn repeatedly with the same slotted object type
@@ -689,6 +832,385 @@ class TestUserDefinedClassDict(TestCase):
         self.assertEqual(result2, torch.tensor([0.0]))
         # Should have recompiled
         self.assertEqual(cnt.frame_count, 2)
+
+
+class TestClassSetattr(TestCase):
+    def test_setattr_class_attribute(self):
+        class MyModule:
+            x = 10
+
+        def fn():
+            MyModule.x = 20
+            return MyModule.x
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, 20)
+
+        MyModule.x = 10
+
+
+# ---------------------------------------------------------------------------
+# __setitem__ on user-defined classes / metaclasses
+# ---------------------------------------------------------------------------
+
+
+# Metaclasses kept at module level — Dynamo's traced LOAD_BUILD_CLASS does
+# not currently propagate the `metaclass=` kwarg.
+
+
+class _SetitemMetaBasic(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+
+class _ClassWithBasicMeta(metaclass=_SetitemMetaBasic):
+    _store: dict = {}
+
+
+class _SetitemMetaPerClass(type):
+    def __setitem__(cls, key, value):
+        cls.entries[key] = value
+
+    def __getitem__(cls, key):
+        return cls.entries[key]
+
+
+class _PerClassEntries(metaclass=_SetitemMetaPerClass):
+    entries: dict = {}
+
+
+class _SetitemMetaValidating(type):
+    def __setitem__(cls, key, value):
+        if not isinstance(key, str):
+            raise TypeError("class registry expects string keys")
+        cls.registry[key] = value
+
+
+class _ValidatingClass(metaclass=_SetitemMetaValidating):
+    registry: dict = {}
+
+
+class _SetitemDelitemMeta(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+    def __delitem__(cls, key):
+        del cls._store[key]
+
+
+class _DelClassMeta(metaclass=_SetitemDelitemMeta):
+    _store: dict = {}
+
+
+class TestUserDefinedSetitem(TestCase):
+    """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV).
+
+    enable_trace_load_build_class lets us define helper classes inside the
+    test body — keeps the helper next to the assertion that exercises it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        self._b_prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_unittest = True
+        torch._dynamo.config.enable_trace_load_build_class = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+        torch._dynamo.config.enable_trace_load_build_class = self._b_prev
+
+    # -- instance __setitem__ --
+
+    @make_dynamo_test
+    def test_validating_ok(self):
+        class V:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                if not isinstance(key, str):
+                    raise TypeError("only string keys allowed")
+                if value < 0:
+                    raise ValueError("negative values forbidden")
+                self.data[key] = value
+
+        obj = V()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+        with self.assertRaises(TypeError):
+            obj[1] = 5
+        with self.assertRaises(ValueError):
+            obj["a"] = -1
+
+    @make_dynamo_test
+    def test_transforming_value(self):
+        class T:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value * 2
+
+        obj = T()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 10)
+
+    @make_dynamo_test
+    def test_inherited_method(self):
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Derived(Base):
+            pass
+
+        obj = Derived()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_overriding_method(self):
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Override(Base):
+            def __setitem__(self, key, value):
+                self.data[key] = value + 100
+
+        obj = Override()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 105)
+
+    @make_dynamo_test
+    def test_return_value_ignored(self):
+        class R:
+            def __init__(self):
+                self.data = {}
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+                return "ignored"
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = R()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_side_effects_in_method(self):
+        class S:
+            def __init__(self):
+                self.data = {}
+                self.last_key = None
+                self.last_value = None
+                self.call_count = 0
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.last_key = key
+                self.last_value = value
+                self.call_count += 1
+                self.data[key] = value
+
+        obj = S()
+        obj["a"] = 1
+        obj["b"] = 2
+        self.assertEqual(obj.call_count, 2)
+        self.assertEqual(obj.last_key, "b")
+        self.assertEqual(obj.last_value, 2)
+        self.assertEqual(obj["a"], 1)
+        self.assertEqual(obj["b"], 2)
+
+    @make_dynamo_test
+    def test_explicit_method_call(self):
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
+        obj.__setitem__("a", 5)
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_multiple_keys(self):
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
+        for i in range(5):
+            obj[i] = i * 10
+        for i in range(5):
+            self.assertEqual(obj[i], i * 10)
+
+    @make_dynamo_test
+    def test_no_setitem_raises_typeerror(self):
+        class N:
+            def __init__(self, data):
+                self.data = data
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = N([1, 2, 3])
+        with self.assertRaises(TypeError):
+            obj[0] = 100
+
+    # -- metaclass __setitem__: Cls[k] = v --
+
+    @make_dynamo_test
+    def test_metaclass_basic(self):
+        _ClassWithBasicMeta["a"] = 1
+        self.assertEqual(_ClassWithBasicMeta["a"], 1)
+
+    @make_dynamo_test
+    def test_metaclass_multiple(self):
+        _PerClassEntries["x"] = 10
+        _PerClassEntries["y"] = 20
+        self.assertEqual(_PerClassEntries["x"], 10)
+        self.assertEqual(_PerClassEntries["y"], 20)
+
+    @make_dynamo_test
+    def test_metaclass_validating(self):
+        _ValidatingClass["k"] = 99
+        self.assertEqual(_ValidatingClass.registry["k"], 99)
+        with self.assertRaises(TypeError):
+            _ValidatingClass[123] = 99
+
+    # -- __delitem__ on user-defined classes --
+
+    @make_dynamo_test
+    def test_delitem_basic(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        self.assertNotIn("a", obj.data)
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_tracks(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2, "c": 3}
+                self.deleted = []
+
+            def __delitem__(self, key):
+                self.deleted.append(key)
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        del obj["c"]
+        self.assertEqual(obj.deleted, ["a", "c"])
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_validating(self):
+        class D:
+            def __init__(self):
+                self.data = {1: "a"}
+
+            def __delitem__(self, key):
+                if not isinstance(key, int):
+                    raise TypeError("only int keys")
+                del self.data[key]
+
+        obj = D()
+        del obj[1]
+        self.assertEqual(obj.data, {})
+
+        obj2 = D()
+        with self.assertRaises(TypeError):
+            del obj2["nope"]
+
+    @make_dynamo_test
+    def test_delitem_explicit_method_call(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1}
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        obj.__delitem__("a")
+        self.assertEqual(obj.data, {})
+
+    @make_dynamo_test
+    def test_delitem_no_method_typeerror(self):
+        class D:
+            def __init__(self):
+                self.data = [1, 2, 3]
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = D()
+        with self.assertRaises(TypeError):
+            del obj[0]
+
+    # -- metaclass __delitem__: del Cls[k] --
+
+    @make_dynamo_test
+    def test_metaclass_delitem(self):
+        _DelClassMeta["x"] = 1
+        _DelClassMeta["y"] = 2
+        del _DelClassMeta["x"]
+        self.assertNotIn("x", _DelClassMeta._store)
+        self.assertEqual(_DelClassMeta["y"], 2)
 
 
 if __name__ == "__main__":

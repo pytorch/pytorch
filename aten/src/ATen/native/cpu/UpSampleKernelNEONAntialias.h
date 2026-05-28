@@ -323,9 +323,9 @@ void upsample_neon_bilinear_bicubic_uint8(const at::Tensor& input_,
   auto need_horizontal = xout != xin;
   auto need_vertical = yout != yin;
 
-  int ksize_horiz, ksize_vert;
+  int ksize_horiz = 0, ksize_vert = 0;
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
-  unsigned int horiz_weights_precision, vert_weights_precision;
+  unsigned int horiz_weights_precision = 0, vert_weights_precision = 0;
 
   if (need_horizontal) {
     int interp_dim = 3;

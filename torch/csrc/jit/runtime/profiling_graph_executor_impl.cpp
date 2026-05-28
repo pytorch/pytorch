@@ -71,7 +71,7 @@ C10_DEFINE_bool(
 C10_DEFINE_int32(
     torch_jit_release_profiling_graph_delay_in_seconds,
     60,
-    "How long to wait before releasing the profiling graph after optimizaiton is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.")
+    "How long to wait before releasing the profiling graph after optimization is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.")
 
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;

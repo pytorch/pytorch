@@ -167,7 +167,7 @@ def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Gene
             # These libraries will then be destroyed after the contextmanager,
             # which will automatically restore the previously registered fake
             # impls.
-            newlib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
+            newlib = torch.library.Library(namespace, "FRAGMENT")
             torch.library.register_fake(
                 op_str, fake_kernel, lib=newlib, allow_override=True
             )

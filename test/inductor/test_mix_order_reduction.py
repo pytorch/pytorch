@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -209,6 +210,7 @@ class MixOrderReductionTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167324")
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
@@ -1073,6 +1075,27 @@ class MixOrderReductionTest(TestBase):
             "Mix order reduction should be triggered",
         )
 
+    def test_multi_dim_reduction_output_shape(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/178080:
+        two reductions over different dims in the same compiled function must
+        produce correctly-shaped outputs.
+
+        x.sum(dim=(1, 2)) over [32768, 512, 2] -> [32768]
+        x.sum(dim=0)      over [32768, 512, 2] -> [512, 2]
+        """
+
+        def f(x):
+            return x.sum(dim=(1, 2)), x.sum(dim=0)
+
+        x = torch.randn(32768, 512, 2, device=GPU_TYPE)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertEqual(list(act[0].shape), list(ref[0].shape))
+        self.assertEqual(list(act[1].shape), list(ref[1].shape))
+        self.assertTrue(same(ref, act, tol=1e-3))
+
 
 class OverFusionTest(TestBase):
     """
@@ -1083,6 +1106,7 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181699")
     @inductor_config.patch(
         {
             "triton.mix_order_reduction": True,
