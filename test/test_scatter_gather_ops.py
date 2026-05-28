@@ -63,11 +63,10 @@ class TestScatterGather(TestCase):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        # Guarded because torch.max isn't defined for complex, bool, or
-        # barebones unsigned tensors.
+        # Guarded because torch.max isn't defined for complex or barebones
+        # unsigned tensors.
         max_unsupported = (
             dtype.is_complex
-            or dtype is torch.bool
             or dtype in (torch.uint16, torch.uint32, torch.uint64)
         )
         if not max_unsupported:

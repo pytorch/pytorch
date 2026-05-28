@@ -161,19 +161,16 @@ def all_types_complex_float8_and(*dtypes):
 _barebones_unsigned_types = _dispatch_dtypes((torch.uint16, torch.uint32, torch.uint64))
 
 
-def barebones_unsigned_types():
-    return _barebones_unsigned_types
-
-
 # Passthru ops (copy, fill, index, gather, scatter, flip, take, put, where, eq, ne)
 # move or select data without dtype-specific arithmetic, so they support the
 # largest common set of dtypes across CPU and CUDA. Mirrors
 # AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kBool, kHalf, kBFloat16,
 # AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES) on the C++ side. complex32 (chalf) is
-# not included because CPU scatter/gather/flip stores values through opmath_t,
-# which for complex<Half> is complex<Float> (twice the storage width). Callers
-# that need chalf coverage should add it explicitly with
-# all_passthru_types_and(torch.chalf), typically under @dtypesIfCUDA.
+# not included because the CPU dispatch for these ops does not list
+# kComplexHalf (scatter/gather additionally can't add it trivially because the
+# kernel reinterprets the destination through opmath_t = complex<float>, which
+# is twice the storage width). Callers that need chalf coverage on CUDA
+# should opt in with all_passthru_types_and(torch.chalf) under @dtypesIfCUDA.
 _all_passthru_types = (
     _all_types_and_complex
     + _dispatch_dtypes((torch.bool, torch.half, torch.bfloat16))

@@ -6157,9 +6157,9 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_fill_barebones_unsigned(self, device, dtype):
-        # FillKernel.cu dispatches over barebones unsigned via
-        # AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES) but the fill OpInfo
-        # does not enumerate them. Cover that dispatch directly.
+        # Both FillKernel.cpp and FillKernel.cu dispatch over barebones
+        # unsigned via AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), but the fill
+        # OpInfo does not enumerate them. Cover that dispatch directly.
         for shape in ((5,), (4, 5), (2, 3, 4)):
             t = torch.empty(shape, dtype=dtype, device=device).fill_(7)
             self.assertEqual(t.cpu(), torch.full(shape, 7, dtype=dtype))
@@ -6210,11 +6210,10 @@ class TestTorchDeviceType(TestCase):
             a = make_tensor(shape, dtype=dtype, device=device)
             b = a.clone()
             # Differ exactly one element so eq/ne both have True and False
-            # to report. Compute the perturbed value on the CPU to avoid
-            # invoking integer arithmetic ufuncs on the barebones types.
+            # to report. XOR with 1 toggles the low bit, so the perturbed
+            # value is always in range and differs from old.
             old = int(a.view(-1)[0].item())
-            new = (old + 1) % torch.iinfo(dtype).max
-            b.view(-1)[0] = new
+            b.view(-1)[0] = old ^ 1
             self.assertEqual(torch.eq(a, b), (a.cpu() == b.cpu()).to(device))
             self.assertEqual(torch.ne(a, b), (a.cpu() != b.cpu()).to(device))
             self.assertEqual(torch.eq(a, a), torch.ones_like(a, dtype=torch.bool))
@@ -6301,17 +6300,17 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*all_passthru_types_and(torch.chalf))
     def test_copy_(self, device, dtype):
         def can_cast(src_dtype, dst_dtype):
-            # torch.can_cast(torch.int16, torch.uint8) returns True
-            # which isn't actually safe-cast.
-            # This function returns False in this case. For unsigned
-            # destinations we require an unsigned source no wider than
-            # the destination so widening (uint8 -> uint16) round-trips
-            # losslessly but narrowing (uint16 -> uint8) is rejected.
+            # torch.can_cast(torch.int16, torch.uint8) returns True which
+            # isn't actually safe-cast. Override for unsigned destinations:
+            # only a bool source, or an unsigned source no wider than the
+            # destination, round-trips losslessly. Narrowing (uint16 ->
+            # uint8) is rejected.
             unsigned = {torch.uint8, torch.uint16, torch.uint32, torch.uint64}
 
             if dst_dtype in unsigned:
-                return (src_dtype in unsigned
-                        and src_dtype.itemsize <= dst_dtype.itemsize)
+                return (src_dtype is torch.bool
+                        or (src_dtype in unsigned
+                            and src_dtype.itemsize <= dst_dtype.itemsize))
             return torch.can_cast(src_dtype, dst_dtype)
 
         def make_tensor_wrapper(shape, dtype):
