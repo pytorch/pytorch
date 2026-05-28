@@ -462,6 +462,7 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
+
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
@@ -479,6 +480,7 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
 
     return config.patch(post_grad_custom_pre_pass=Pass())
+
 
 def try_patch_inductor_backend_config(device: str, key: str,
                                       value: Any) -> contextlib.ContextDecorator:
@@ -504,10 +506,7 @@ def try_patch_inductor_backend_config(device: str, key: str,
     contexts: list[contextlib.ContextDecorator] = []
 
     for mod in config_modules:
-        if (
-                hasattr(mod, f"{device_backend}")
-                and hasattr(mod, f"{device_backend}.{key}")
-        ):
+        if hasattr(mod, f"{device_backend}.{key}"):
             contexts.append(mod.patch(f"{device_backend}.{key}", value))
 
     if len(contexts) == 0:
@@ -517,13 +516,21 @@ def try_patch_inductor_backend_config(device: str, key: str,
     class ContextStack(contextlib.ContextDecorator):
         def __init__(self, contexts: list[contextlib.ContextDecorator]) -> None:
             self.contexts: list[contextlib.ContextDecorator] = contexts
+            self.es = None
 
         def __enter__(self) -> None:
-            for cd in self.contexts:
-                cd.__enter__()
+            es = contextlib.ExitStack()
+            try:
+                es.__enter__()
+                for context in self.contexts:
+                    es.enter_context(context)
+                self.es = es
+            except Exception:
+                es.close()
+                raise
 
         def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-            for cd in self.contexts:
-                cd.__exit__(exc_type, exc_val, exc_tb)
+            if self.es:
+                self.es.__exit__(exc_type, exc_val, exc_tb)
 
     return ContextStack(contexts)
