@@ -172,10 +172,6 @@ class TorchComm : public std::enable_shared_from_this<TorchComm> {
   // Equivalent to `get_mem_allocator(getBackend())`.
   std::shared_ptr<c10::Allocator> getMemAllocator() const;
 
-  // Device Transport API — returns device pointer as int64 for Triton kernels.
-  // Throws if not supported by the backend.
-  int64_t get_device_transport();
-
   // Memory Registration API
   void tensor_register(const at::Tensor& tensor);
   void tensor_deregister(const at::Tensor& tensor);

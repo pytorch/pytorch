@@ -351,16 +351,6 @@ class TorchCommBackend {
         std::string(getCommName()));
   }
 
-  // Device Transport API
-  // Returns a device pointer (as int64) to a transport handle for use in
-  // Triton/CUDA kernels. Only supported by backends with pipes transport.
-  virtual int64_t get_device_transport() {
-    throw std::runtime_error(
-        "[TorchCommBackend]: get_device_transport not implemented for "
-        "communicator:" +
-        std::string(getCommName()));
-  }
-
   /**
    * Register a tensor's memory with the backend for optimized data transfer.
    *

@@ -8,10 +8,10 @@
 #include <cuda_runtime.h> // @manual=third-party//cuda:cuda-lazy
 #include <torch/csrc/distributed/c10d/Store.hpp> // @manual=//caffe2:torch-cpp
 
+#include <nccl.h> // @manual
 #include <torch/csrc/comms/TorchCommOptions.hpp>
 #include <torch/csrc/comms/device/cuda/CudaApi.hpp>
 #include <torch/csrc/comms/nccl/NcclApi.hpp>
-#include "nccl.h" // @manual
 
 namespace torch::comms {
 

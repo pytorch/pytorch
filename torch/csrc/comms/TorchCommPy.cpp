@@ -660,19 +660,13 @@ Example (CUDA graph capture with owning=False for memory reuse):
     with torch.cuda.graph(graph):
         buf = torch.empty([size], dtype=dtype, device=device)
         h_win.tensor_register(buf, owning=False)
-        d_win = h_win.get_device_window()
 
-        # Launch kernels using d_win
-        kernel1(d_win)
-        kernel2(d_win)
+        # ... use h_win for RMA operations (e.g. window.put) ...
 
-        # Now done using d_win and buf, delete it
-        del buf  # Physical memory can be reused within graph
+        # owning=False lets the physical memory be reused within the graph
+        del buf
 
-        # NOTE: d_win cannot be used for RMA ops after del buf in this capture,
-        # but it WILL work during graph replay (CUDA replays captured addresses)
-
-    # During replay, d_win uses the captured buffer address
+    # During replay, the window uses the captured buffer address
     graph.replay()
 
     # NOTE: tensor_register() currently doesn't work inside graph capture as it
@@ -968,75 +962,7 @@ Example:
 
       )",
           py::arg("rank"),
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_device_window",
-          [](TorchCommWindow& self, int sc, int cc, int bc) {
-            return reinterpret_cast<int64_t>(
-                self.get_device_window(sc, cc, bc));
-          },
-          R"(
-Get a device-side window handle for GPU-initiated operations.
-
-Returns a pointer (as int64) that can be passed to Triton kernels via
-the torchcomms_* extern functions (put_block, signal_block, etc.).
-
-The window is lazily created on first call and cached. Requires NCCL
-backend with device API support (NCCL 2.28+).
-
-Args:
-    signal_count: Number of signal slots to allocate (-1 for default).
-    counter_count: Number of counter slots to allocate (-1 for default).
-    barrier_count: Number of barrier slots to allocate (default 1).
-
-Returns:
-    int: Device window pointer as int64.
-
-Raises:
-    RuntimeError: If this backend does not yet support the device API.
-)",
-          py::arg("signal_count") = -1,
-          py::arg("counter_count") = -1,
-          py::arg("barrier_count") = 1,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "register_local_buffer",
-          [](TorchCommWindow& self, const at::Tensor& tensor) -> int64_t {
-            py::gil_scoped_release release;
-            return self.register_local_buffer_handle(tensor);
-          },
-          R"(
-Register a local buffer for use as source in device-side put operations.
-
-NON-COLLECTIVE. Must call tensor_register() then get_device_window() first.
-
-Args:
-    tensor: Source tensor to register as a local buffer.
-
-Returns:
-    int: Opaque device handle for use in Triton put_block() calls.
-         Pass this handle to deregister_local_buffer() when done.
-
-Raises:
-    RuntimeError: If this backend does not yet support the device API.
-)",
-          py::arg("tensor"))
-      .def(
-          "deregister_local_buffer",
-          [](TorchCommWindow& self, int64_t handle) {
-            py::gil_scoped_release release;
-            self.deregister_local_buffer_handle(handle);
-          },
-          R"(
-Deregister a previously registered local buffer. NON-COLLECTIVE.
-
-Args:
-    handle: Device handle returned by register_local_buffer().
-
-Raises:
-    RuntimeError: If this backend does not yet support the device API.
-)",
-          py::arg("handle"));
+          py::call_guard<py::gil_scoped_release>());
 
   // Bind BatchSendRecv::P2POp class
   py::class_<BatchSendRecv::P2POp>(
@@ -1425,26 +1351,6 @@ detect failures.
 Returns:
     bool: True if the communicator has been aborted.
           )",
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_device_transport",
-          &TorchComm::get_device_transport,
-          R"(
-Get a device-allocated transport handle for pipes transport operations.
-
-Returns a device pointer (as int64) to a MultiPeerDeviceHandle that can be
-passed to Triton transport extern functions (transport.send, transport.recv,
-transport.signal, etc.).
-
-The handle is lazily created on first call and cached. The returned pointer
-is valid until the communicator is destroyed.
-
-Returns:
-    int: Device transport pointer as int64, suitable for passing to Triton kernels.
-
-Raises:
-    RuntimeError: If the backend does not support device transport.
-)",
           py::call_guard<py::gil_scoped_release>())
       .def(
           "tensor_register",

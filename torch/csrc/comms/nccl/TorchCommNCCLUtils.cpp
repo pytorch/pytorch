@@ -3,10 +3,10 @@
 #include <torch/csrc/comms/nccl/TorchCommNCCL.hpp>
 #include <torch/csrc/comms/nccl/TorchCommNCCLCCA.hpp>
 
+#include <nccl.h> // @manual
 #include <torch/csrc/comms/utils/Logging.hpp>
 #include <stdexcept>
 #include <string>
-#include "nccl.h" // @manual
 
 namespace torch::comms {
 

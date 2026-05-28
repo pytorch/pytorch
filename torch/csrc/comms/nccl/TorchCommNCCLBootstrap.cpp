@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <fmt/core.h>
+#include <nccl.h> // @manual
 #include <torch/csrc/comms/nccl/TorchCommNCCL.hpp>
 #include <torch/csrc/comms/nccl/TorchCommNCCLBootstrap.hpp>
 #include <torch/csrc/comms/utils/Logging.hpp>
@@ -9,7 +10,6 @@
 #include <torch/csrc/comms/utils/Utils.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp> // @manual
 #include <set>
-#include "nccl.h" // @manual
 
 namespace torch::comms {
 

@@ -516,10 +516,6 @@ bool TorchComm::isAborted() const {
   return impl_->isAborted();
 }
 
-int64_t TorchComm::get_device_transport() {
-  return impl_->get_device_transport();
-}
-
 void TorchComm::tensor_register(const at::Tensor& tensor) {
   impl_->tensor_register(tensor);
 }

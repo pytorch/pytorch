@@ -819,9 +819,6 @@ libtorch_cuda_comms_sources = [
     "torch/csrc/comms/nccl/TorchWorkNCCL.cpp",
     "torch/csrc/comms/nccl/TorchWorkNCCLQueue.cpp",
     "torch/csrc/comms/device/cuda/CudaApi.cpp",
-    "torch/csrc/comms/device/cuda/DeviceCounter.cpp",
-    "torch/csrc/comms/device/cuda/AtomicAddKernel.cu",
-    "torch/csrc/comms/utils/CudaRAII.cc",
 ]
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [

@@ -3,7 +3,6 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Device.h>
-#include <torch/csrc/comms/RegisteredBuffer.hpp>
 #include <torch/csrc/comms/TorchCommOptions.hpp>
 #include <torch/csrc/comms/TorchCommTypes.hpp>
 namespace torch::comms {
@@ -23,9 +22,6 @@ class TorchCommWindowAttr {
 
 class TorchCommWindow {
  public:
-  // Backward-compat alias — prefer RegisteredBuffer directly.
-  using DeviceBuffer = RegisteredBuffer;
-
   TorchCommWindow() = default;
   virtual ~TorchCommWindow() = default;
 
@@ -70,46 +66,6 @@ class TorchCommWindow {
       const WaitSignalOptions& options = {}) = 0;
 
   virtual std::shared_ptr<TorchCommWindowAttr> get_attr(int peerRank) = 0;
-
-  // ==========================================================================
-  // Device API — virtual methods for GPU-initiated communication.
-  //
-  // Default implementations throw so that existing backends (NCCL, Gloo, RCCL)
-  // continue to build and fail loudly at runtime until they add support.
-  // When all backends implement these, the defaults can be made pure virtual.
-  // ==========================================================================
-
-  virtual void* get_device_window(
-      int /*signal_count*/ = -1,
-      int /*counter_count*/ = -1,
-      int /*barrier_count*/ = 1) {
-    throw std::runtime_error(
-        "get_device_window is not yet supported by this backend");
-  }
-
-  virtual RegisteredBuffer register_local_buffer(const at::Tensor&) {
-    throw std::runtime_error(
-        "register_local_buffer is not yet supported by this backend");
-  }
-
-  virtual void deregister_local_buffer(RegisteredBuffer&) {
-    throw std::runtime_error(
-        "deregister_local_buffer is not yet supported by this backend");
-  }
-
-  // Device-handle variants of register/deregister_local_buffer.
-  // Returns an opaque int64_t handle (device pointer to RegisteredBuffer)
-  // for use in Triton put_block() calls. The backend owns the device memory.
-  // NOT thread-safe — concurrent calls require external synchronization.
-  virtual int64_t register_local_buffer_handle(const at::Tensor&) {
-    throw std::runtime_error(
-        "register_local_buffer_handle is not yet supported by this backend");
-  }
-
-  virtual void deregister_local_buffer_handle(int64_t /*handle*/) {
-    throw std::runtime_error(
-        "deregister_local_buffer_handle is not yet supported by this backend");
-  }
 
   // Get the registered buffer's dtype (for torch.compile meta kernel)
   at::ScalarType getDtype() const {
