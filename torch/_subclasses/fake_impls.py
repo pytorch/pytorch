@@ -1014,33 +1014,6 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
-cuda_tensoriterator_binary_pointwise_ops = ordered_set(
-    aten.add.Tensor,
-    aten.atan2.default,
-    aten.copysign.Tensor,
-    aten.div.Tensor,
-    aten.eq.Tensor,
-    aten.fmax.default,
-    aten.fmin.default,
-    aten.fmod.Tensor,
-    aten.ge.Tensor,
-    aten.gt.Tensor,
-    aten.hypot.default,
-    aten.le.Tensor,
-    aten.logaddexp.default,
-    aten.logaddexp2.default,
-    aten.lt.Tensor,
-    aten.maximum.default,
-    aten.minimum.default,
-    aten.mul.Tensor,
-    aten.ne.Tensor,
-    aten.nextafter.default,
-    aten.pow.Tensor_Tensor,
-    aten.remainder.Tensor,
-    aten.sub.Tensor,
-)
-
-
 def _compute_cuda_elementwise_output_strides(
     fake_mode: FakeTensorMode, *args: Any
 ) -> tuple[int, ...] | None:
@@ -1060,56 +1033,6 @@ def _compute_cuda_elementwise_output_strides(
         return utils.compute_elementwise_output_strides(*broadcasted_args)
     except ValueError:
         return None
-
-
-# This callable registration runs after direct op_implementations_dict entries.
-# That keeps explicit fake implementations authoritative if any of these ops
-# grow special handling later.
-@register_op_impl(cuda_tensoriterator_binary_pointwise_ops.__contains__)
-def binary_tensor_pointwise(
-    fake_mode: FakeTensorMode,
-    func: OpOverload,
-    self: FakeTensor,
-    other: FakeTensor,
-    *args: Any,
-    **kwargs: Any,
-) -> FakeTensor:
-    flat_args, _ = pytree.tree_flatten(((self, other, *args), kwargs))
-    common_device, _ = FakeTensor._find_common_device(func, flat_args)
-
-    with in_kernel_invocation_manager(fake_mode):
-        meta_out = func(self, other, *args, **kwargs)
-
-    if common_device.type != "cuda" or meta_out.layout != torch.strided:
-        return typing_cast(
-            FakeTensor,
-            fake_mode.wrap_meta_outputs_with_default_device_logic(
-                meta_out, func, flat_args, device=common_device
-            ),
-        )
-
-    strides = _compute_cuda_elementwise_output_strides(fake_mode, self, other)
-    if strides is None:
-        return typing_cast(
-            FakeTensor,
-            fake_mode.wrap_meta_outputs_with_default_device_logic(
-                meta_out, func, flat_args, device=common_device
-            ),
-        )
-
-    meta_out = torch.empty_strided(
-        meta_out.shape,
-        strides,
-        dtype=meta_out.dtype,
-        layout=meta_out.layout,
-        device="meta",
-    )
-    return typing_cast(
-        FakeTensor,
-        fake_mode.wrap_meta_outputs_with_default_device_logic(
-            meta_out, func, flat_args, device=common_device
-        ),
-    )
 
 
 @register_op_impl(torch.ops.aten.item.default)

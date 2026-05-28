@@ -1598,7 +1598,7 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
@@ -1648,7 +1648,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
@@ -5871,7 +5871,9 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     min = -dim_post_expr
     max = dim_post_expr - 1
     if dim < min or dim > max:
-        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [{min}, {max}], but got {dim})"
+        )
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -9113,6 +9115,60 @@ import torch._refs.nn.functional
 import torch._refs.special
 
 
+_cpp_tensoriterator_meta = {
+    aten.add.Tensor,
+    aten.atan2.default,
+    aten.bitwise_and.Tensor,
+    aten.bitwise_left_shift.Tensor,
+    aten.bitwise_or.Tensor,
+    aten.bitwise_right_shift.Tensor,
+    aten.bitwise_xor.Tensor,
+    aten.copysign.Tensor,
+    aten.div.Tensor,
+    aten.div.Tensor_mode,
+    aten.eq.Tensor,
+    aten.fmax.default,
+    aten.fmin.default,
+    aten.fmod.Tensor,
+    aten.gcd.default,
+    aten.ge.Tensor,
+    aten.gt.Tensor,
+    aten.heaviside.default,
+    aten.hypot.default,
+    aten.igamma.default,
+    aten.igammac.default,
+    aten.le.Tensor,
+    aten.lcm.default,
+    aten.logaddexp.default,
+    aten.logaddexp2.default,
+    aten.lt.Tensor,
+    aten.maximum.default,
+    aten.minimum.default,
+    aten.mul.Tensor,
+    aten.ne.Tensor,
+    aten.nextafter.default,
+    aten.pow.Tensor_Tensor,
+    aten.remainder.Tensor,
+    aten.sgn.default,
+    aten.special_chebyshev_polynomial_t.default,
+    aten.special_chebyshev_polynomial_u.default,
+    aten.special_chebyshev_polynomial_v.default,
+    aten.special_chebyshev_polynomial_w.default,
+    aten.special_hermite_polynomial_h.default,
+    aten.special_hermite_polynomial_he.default,
+    aten.special_laguerre_polynomial_l.default,
+    aten.special_legendre_polynomial_p.default,
+    aten.special_shifted_chebyshev_polynomial_t.default,
+    aten.special_shifted_chebyshev_polynomial_u.default,
+    aten.special_shifted_chebyshev_polynomial_v.default,
+    aten.special_shifted_chebyshev_polynomial_w.default,
+    aten.special_xlog1py.default,
+    aten.special_zeta.default,
+    aten.sub.Tensor,
+    aten.xlogy.Tensor,
+}
+
+
 def activate_meta():
     activate_meta_table = {}
 
@@ -9136,6 +9192,12 @@ def activate_meta():
             raise AssertionError(
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
+
+        # These ops already have structured C++ TensorIterator meta kernels.
+        # Keep the C++ kernels active so they can follow backend-specific
+        # TensorIterator stride rules for FakeTensor devices.
+        if op_overload in _cpp_tensoriterator_meta:
+            continue
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 

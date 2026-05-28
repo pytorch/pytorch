@@ -21,6 +21,7 @@
 #include <ATen/ops/empty_strided.h>
 #endif
 
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
 
@@ -56,6 +57,22 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
+std::optional<Device> fake_device_from_meta_tensor(const TensorBase& tensor) {
+  if (!tensor.defined()) {
+    return std::nullopt;
+  }
+  // Python FakeTensor enters meta kernels as a meta tensor, but its key set
+  // still carries the fake backend. Use that backend for TensorIterator device
+  // checks and promotion rules so fake tensors follow the real-device path.
+  if (tensor.key_set().has_backend(c10::BackendComponent::CUDABit)) {
+    return Device(kCUDA);
+  }
+  if (tensor.key_set().has_backend(c10::BackendComponent::CPUBit)) {
+    return Device(kCPU);
+  }
+  return std::nullopt;
+}
+
 OptionalTensorRef make_otr(const TensorBase &tensor) {
   if (tensor.defined()) {
     return OptionalTensorRef(tensor);
@@ -84,11 +101,13 @@ const Tensor& OpaqueOptionalTensorRef::getTensor() const {
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   tensor_base_ = std::move(tensor);
   *tensor_storage_ = make_otr(*tensor_base_);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 void OperandInfo::exchange_tensor(c10::MaybeOwned<TensorBase> &&new_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!original_tensor_base_->defined());
   original_tensor_base_ = std::exchange(tensor_base_, std::move(new_tensor));
@@ -392,9 +411,16 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
+    if (is_meta_) {
+      if (auto fake_device = fake_device_from_meta_tensor(op.tensor_base())) {
+        op.device = *fake_device;
+      }
+    }
+
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor_base().is_cpu()) {
-      common_device = op.tensor_base().device();
+    TORCH_INTERNAL_ASSERT(op.device.has_value());
+    if (common_device == kCPU && !op.device->is_cpu()) {
+      common_device = *op.device;
     }
 
     if (!op.is_output) {
@@ -493,7 +519,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       // Handles CPU scalars on CUDA kernels that support them
       if (!common_device.is_cpu() &&
           config.allow_cpu_scalars_ && !op.is_output && op.tensor_base().dim() == 0 &&
-          op.tensor_base().is_cpu()) {
+          op.device->is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
@@ -609,12 +635,13 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
 }
 
 void TensorIteratorBase::compute_names(const TensorIteratorConfig& config) {
-  bool should_infer_names = std::any_of(
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  const bool should_infer_names{std::any_of(
       operands_.begin(),
       operands_.end(),
       [](const OperandInfo& op) {
         return op.tensor_base().defined() && op.tensor_base().has_names();
-      });
+      })};
   if (!should_infer_names) {
     return;
   }
@@ -1160,13 +1187,15 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
+  const bool meta_in_tls =
+      c10::impl::tls_is_dispatch_key_included(DispatchKey::Meta);
   for (const auto idx : c10::irange(config.tensors_.size())) {
     auto& tensor = config.tensors_[idx];
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
     // our multiple dispatch semantics.
-    if (tensor->is_meta()) {
+    if (tensor->is_meta() || meta_in_tls) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
@@ -1335,7 +1364,8 @@ int TensorIteratorBase::get_dim_to_split() const {
   int64_t max_extent = -1;
   int dim_to_split = -1;
   for (int dim = ndim() - 1; dim >= 0; dim--) {
-    const int64_t size = shape_[dim];
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    const int64_t size{shape_[dim]};
     if (size == 0) {
       continue;
     }
@@ -1365,24 +1395,18 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
   // allocate memory for output, memory format depends on setup_type
   switch (setup_type) {
     case FastSetupType::CONTIGUOUS:
-      {
-        for (const auto i : c10::irange(num_outputs_)) {
-          auto& op = operands_[i];
-          if (!op.tensor_base().defined()) {
-            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-          }
-          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous), names_);
-        }
-        break;
-      }
     case FastSetupType::CHANNELS_LAST:
       {
+        const auto memory_format =
+            setup_type == FastSetupType::CONTIGUOUS
+            ? MemoryFormat::Contiguous
+            : MemoryFormat::ChannelsLast;
         for (const auto i : c10::irange(num_outputs_)) {
           auto& op = operands_[i];
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(memory_format), names_);
         }
         break;
       }
@@ -1642,11 +1666,8 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   if (!op.tensor_base().defined()) {
-      if (strides.empty()) {
-        op.tensor(c10::MaybeOwned<TensorBase>::owned(at::empty(sizes, options)));
-      } else {
-        op.tensor(c10::MaybeOwned<TensorBase>::owned(at::empty_strided(sizes, strides, options)));
-      }
+      op.tensor(c10::MaybeOwned<TensorBase>::owned(
+          strides.empty() ? at::empty(sizes, options) : at::empty_strided(sizes, strides, options)));
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
       at::native::resize_output(op.tensor(), sizes);
@@ -1681,7 +1702,8 @@ SplitUntil32Bit TensorIteratorBase::with_32bit_indexing() const {
 /// SplitUntil32Bit. Recursively splits an iterator into sub-iterators that
 /// can use 32-bit indexing.
 
-SplitUntil32Bit::iterator::iterator(const TensorIteratorBase& iter) {
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+SplitUntil32Bit::iterator::iterator(const TensorIteratorBase& iter) : vec() {
   vec.emplace_back(new TensorIterator(iter));
   vec.emplace_back(nullptr); // ++ first pops the last element
   ++(*this);
@@ -1738,7 +1760,8 @@ bool DimCounter::is_done() const {
 void DimCounter::increment(const std::array<int64_t, 2>& step) {
   offset += step[0] * step[1];
   auto ndim = values.size();
-  int64_t overflow = step[0];
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t overflow{step[0]};
   size_t i = 0;
   if (step[1] != 1) {
     TORCH_INTERNAL_ASSERT(step[0] == shape[0] && values[0] == 0);
@@ -1762,7 +1785,8 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
 }
 
 std::array<int64_t, 2> DimCounter::max_2d_step() const {
-  int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t step0{std::min(shape[0] - values[0], range.end - offset)};
   int64_t step1 = 1;
   if (!shape.empty() && step0 == shape[0]) {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);

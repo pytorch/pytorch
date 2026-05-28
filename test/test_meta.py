@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1748,10 +1749,14 @@ class TestMeta(TestCase):
         double_input = torch.randn(
             1, 9, 17, device=device, dtype=torch.float64
         ).permute(0, 2, 1).squeeze(0)
+        long_input = torch.randint(
+            1, 8, (1, 9, 17), device=device, dtype=torch.int64
+        ).permute(0, 2, 1).squeeze(0)
 
         cases = [
             (
                 complex_input,
+                torch.float32,
                 (
                     torch.ops.aten.add.Tensor,
                     torch.ops.aten.sub.Tensor,
@@ -1764,13 +1769,15 @@ class TestMeta(TestCase):
             ),
             (
                 double_input,
+                torch.float32,
                 (
+                    torch.ops.aten.div.Tensor_mode,
                     torch.ops.aten.pow.Tensor_Tensor,
                     torch.ops.aten.atan2.default,
-                    torch.ops.aten.copysign.Tensor,
                     torch.ops.aten.remainder.Tensor,
                     torch.ops.aten.fmod.Tensor,
                     torch.ops.aten.hypot.default,
+                    torch.ops.aten.copysign.Tensor,
                     torch.ops.aten.maximum.default,
                     torch.ops.aten.minimum.default,
                     torch.ops.aten.fmax.default,
@@ -1778,6 +1785,23 @@ class TestMeta(TestCase):
                     torch.ops.aten.logaddexp.default,
                     torch.ops.aten.logaddexp2.default,
                     torch.ops.aten.nextafter.default,
+                    torch.ops.aten.xlogy.Tensor,
+                    torch.ops.aten.igamma.default,
+                    torch.ops.aten.igammac.default,
+                    torch.ops.aten.special_xlog1py.default,
+                    torch.ops.aten.special_zeta.default,
+                    torch.ops.aten.special_chebyshev_polynomial_t.default,
+                    torch.ops.aten.special_chebyshev_polynomial_u.default,
+                    torch.ops.aten.special_chebyshev_polynomial_v.default,
+                    torch.ops.aten.special_chebyshev_polynomial_w.default,
+                    torch.ops.aten.special_hermite_polynomial_h.default,
+                    torch.ops.aten.special_hermite_polynomial_he.default,
+                    torch.ops.aten.special_laguerre_polynomial_l.default,
+                    torch.ops.aten.special_legendre_polynomial_p.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_t.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_u.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_v.default,
+                    torch.ops.aten.special_shifted_chebyshev_polynomial_w.default,
                     torch.ops.aten.eq.Tensor,
                     torch.ops.aten.ne.Tensor,
                     torch.ops.aten.lt.Tensor,
@@ -1786,10 +1810,28 @@ class TestMeta(TestCase):
                     torch.ops.aten.ge.Tensor,
                 ),
             ),
+            (
+                double_input,
+                torch.float64,
+                (torch.ops.aten.heaviside.default,),
+            ),
+            (
+                long_input,
+                torch.int64,
+                (
+                    torch.ops.aten.bitwise_and.Tensor,
+                    torch.ops.aten.bitwise_or.Tensor,
+                    torch.ops.aten.bitwise_xor.Tensor,
+                    torch.ops.aten.bitwise_left_shift.Tensor,
+                    torch.ops.aten.bitwise_right_shift.Tensor,
+                    torch.ops.aten.gcd.default,
+                    torch.ops.aten.lcm.default,
+                ),
+            ),
         ]
 
-        for input_tensor, ops in cases:
-            scalar = torch.ones((), device=device, dtype=torch.float32).expand_as(
+        for input_tensor, scalar_dtype, ops in cases:
+            scalar = torch.ones((), device=device, dtype=scalar_dtype).expand_as(
                 input_tensor
             )
             for op in ops:
@@ -1798,6 +1840,8 @@ class TestMeta(TestCase):
                     if op in (torch.ops.aten.add.Tensor, torch.ops.aten.sub.Tensor)
                     else {}
                 )
+                if op is torch.ops.aten.div.Tensor_mode:
+                    kwargs["rounding_mode"] = None
                 with self.subTest(dtype=input_tensor.dtype, op=op):
                     ref_out = op(scalar, input_tensor, **kwargs)
 
@@ -1808,6 +1852,31 @@ class TestMeta(TestCase):
 
                     self.assertEqual(ref_out.size(), fake_out.size())
                     self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        cpu_scalar = torch.ones((), dtype=torch.float32)
+        for op in (torch.ops.aten.add.Tensor, torch.ops.aten.mul.Tensor):
+            kwargs = {"alpha": 1} if op is torch.ops.aten.add.Tensor else {}
+            with self.subTest(cpu_scalar=True, op=op):
+                ref_out = op(cpu_scalar, complex_input, **kwargs)
+
+                with FakeTensorMode() as mode:
+                    fake_scalar = mode.from_tensor(cpu_scalar)
+                    fake_input = mode.from_tensor(complex_input)
+                    fake_out = op(fake_scalar, fake_input, **kwargs)
+
+                self.assertEqual(fake_out.device.type, torch.device(device).type)
+                self.assertEqual(ref_out.size(), fake_out.size())
+                self.assertEqual(ref_out.stride(), fake_out.stride())
+
+        with self.subTest(op=torch.ops.aten.sgn.default):
+            ref_out = torch.ops.aten.sgn.default(complex_input)
+
+            with FakeTensorMode() as mode:
+                fake_input = mode.from_tensor(complex_input)
+                fake_out = torch.ops.aten.sgn.default(fake_input)
+
+            self.assertEqual(ref_out.size(), fake_out.size())
+            self.assertEqual(ref_out.stride(), fake_out.stride())
 
 
     def test_map_location_deserialize(self):
@@ -2128,6 +2197,7 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
