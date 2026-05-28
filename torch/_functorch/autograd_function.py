@@ -27,8 +27,8 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
-    from torch.autograd.function import FunctionCtx as _FunctionCtx
     from torch._functorch.pyfunctorch import FuncTorchInterpreter, VmapInterpreter
+    from torch.autograd.function import FunctionCtx as _FunctionCtx
 else:
     _FunctionCtx = Any
 
@@ -36,7 +36,9 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _TensorTree = torch.Tensor | tuple[object, ...] | list[object] | dict[object, object]
 _MaybeTensor = torch.Tensor | None
-_MaybeTensorTree = _MaybeTensor | tuple[object, ...] | list[object] | dict[object, object]
+_MaybeTensorTree = (
+    _MaybeTensor | tuple[object, ...] | list[object] | dict[object, object]
+)
 _InDims = int | None | tuple[Any, ...]
 
 
@@ -505,11 +507,15 @@ def vmapify_autograd_function(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
             if not hasattr(ctx_any, "_pt_input_shapes"):
-                ctx_any._pt_input_shapes = {}
+                ctx_any._pt_input_shapes = cast(
+                    dict[int, tuple[torch.Size | None, ...]], {}
+                )
             ctx_any._pt_input_shapes.update({key: input_shapes})
 
             if not hasattr(ctx_any, "_pt_saved_tensors_bdims_stack"):
-                ctx_any._pt_saved_tensors_bdims_stack = {}
+                ctx_any._pt_saved_tensors_bdims_stack = cast(
+                    dict[int, tuple[int | None, ...]], {}
+                )
             ctx_any._pt_saved_tensors_bdims_stack.update(
                 {key: (wrapped_ctx._pt_saved_tensors_bdims)}
             )
@@ -523,7 +529,7 @@ def vmapify_autograd_function(
         )(inputs, unwrapped_outputs)
 
         if not hasattr(ctx_any, "_pt_out_dims"):
-            ctx_any._pt_out_dims = {}
+            ctx_any._pt_out_dims = cast(dict[int, _InDims], {})
         ctx_any._pt_out_dims.update({key: out_dims})
 
     def jvp(ctx: _FunctionCtx, *tangents: _MaybeTensor) -> _MaybeTensorTree:
@@ -567,7 +573,7 @@ def vmapify_autograd_function(
         )
 
         def backward_no_context(
-            inputs: tuple[Sequence[torch.Tensor], tuple[_MaybeTensor, ...]]
+            inputs: tuple[Sequence[torch.Tensor], tuple[_MaybeTensor, ...]],
         ) -> _MaybeTensorTree:
             saved_tensors, grad_outputs = inputs
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
