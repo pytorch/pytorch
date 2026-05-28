@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
 )
 from torch.testing._internal.opinfo.core import (
@@ -2713,6 +2714,21 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
+            ),
         ),
     ),
     OpInfo(
@@ -2754,6 +2770,21 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # The test is flaky on AMX with Inductor
+            DecorateInfo(
+                unittest.skip,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
             ),
         ),
     ),
