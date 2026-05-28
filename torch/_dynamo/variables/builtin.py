@@ -101,7 +101,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    RangeVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -120,14 +119,14 @@ from .object_protocol import (
     generic_multiply,
     generic_neg,
     generic_pos,
+    generic_repr,
     vt_add,
     vt_getitem,
     vt_identity_compare,
     vt_inplace_add,
 )
-from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
+from .sets import FrozensetVariable, SetVariable
 from .tensor import (
-    DataPtrVariable,
     FakeItemVariable,
     supported_comparison_ops,
     SymNodeVariable,
@@ -178,14 +177,15 @@ _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
 _TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
-polyfill_fn_mapping = {
-    operator.eq: polyfills.cmp_eq,
-    operator.ne: polyfills.cmp_ne,
-    operator.lt: polyfills.cmp_lt,
-    operator.le: polyfills.cmp_le,
-    operator.gt: polyfills.cmp_gt,
-    operator.ge: polyfills.cmp_ge,
+_OPERATOR_TO_DUNDER: dict[Callable[..., Any], str] = {
+    operator.eq: "__eq__",
+    operator.ne: "__ne__",
+    operator.lt: "__lt__",
+    operator.le: "__le__",
+    operator.gt: "__gt__",
+    operator.ge: "__ge__",
 }
+
 
 bin_ops = (
     operator.pow,
@@ -372,10 +372,45 @@ class BaseBuiltinVariable(VariableTracker):
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, BaseBuiltinVariable) and (
             self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
         )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            if self.as_python_constant() is object and isinstance(
+                arg, variables.UserDefinedObjectVariable
+            ):
+                return VariableTracker.build(tx, object.__repr__(arg.value))
+            if self.as_python_constant() is type:
+                if isinstance(arg, variables.UserDefinedClassVariable):
+                    return VariableTracker.build(tx, type.__repr__(arg.value))
+                if arg.is_python_constant() and isinstance(
+                    arg.as_python_constant(), type
+                ):
+                    return VariableTracker.build(
+                        tx, type.__repr__(arg.as_python_constant())
+                    )
+            return generic_repr(tx, arg)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class BuiltinVariable(BaseBuiltinVariable):
@@ -706,10 +741,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ]
             ] = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
-            if op in polyfill_fn_mapping:
-                # For constants, speedup the comparison instead of using
-                # polyfill. Removing this line causes major regression for pr
-                # time benchmark - add_loop_eager.
+            if op in _OPERATOR_TO_DUNDER:
+                # For constants, speedup the comparison instead of going
+                # through generic_richcompare. Removing this line causes
+                # major regression for pr time benchmark - add_loop_eager.
                 result = [
                     ((ConstantVariable, ConstantVariable), compare_by_value),
                 ]
@@ -729,26 +764,19 @@ class BuiltinVariable(BaseBuiltinVariable):
                     ]
                 )
 
-                if op in (operator.eq, operator.ne):
-
-                    def compare_by_method(
-                        tx: "InstructionTranslator",
-                        a: VariableTracker,
-                        b: VariableTracker,
-                    ) -> VariableTracker:
-                        method_name = "__eq__" if op is operator.eq else "__ne__"
-                        return a.call_method(tx, method_name, [b], {})
-
-                    result.append(
-                        ((DataPtrVariable, VariableTracker), compare_by_method)
-                    )
+                # COMPARE_OP (a == b) dispatches through generic_richcompare,
+                # which implements do_richcompare via richcompare_impl slots.
+                # See object_protocol.py for details.
+                dunder = _OPERATOR_TO_DUNDER[op]
 
                 def handler(
-                    tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+                    tx: "InstructionTranslator",
+                    a: VariableTracker,
+                    b: VariableTracker,
                 ) -> VariableTracker:
-                    return tx.inline_user_function_return(
-                        VariableTracker.build(tx, polyfill_fn_mapping[op]), [a, b], {}
-                    )
+                    from .object_protocol import generic_richcompare
+
+                    return generic_richcompare(tx, a, b, dunder)
 
                 result.append(((VariableTracker, VariableTracker), handler))
                 return result
@@ -1664,6 +1692,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g. list.__len__(my_list) → len(my_list)
             return generic_len(tx, args[0])
 
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            return super().call_method(tx, name, args, kwargs)
+
         if name == "__iter__" and len(args) == 1 and not kwargs:
             # type.__iter__(instance) → iter(instance)
             # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
@@ -1713,66 +1744,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_repr(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
-        """Handle repr() on user defined objects."""
-        if isinstance(
-            arg,
-            (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
-        ):
-            try:
-                const_args = tuple(a.as_python_constant() for a in arg.args)
-            except NotImplementedError:
-                return None
-            if len(const_args) == 0:
-                value = f"{arg.exc_type.__name__}()"
-            elif len(const_args) == 1:
-                value = f"{arg.exc_type.__name__}({const_args[0]!r})"
-            else:
-                value = f"{arg.exc_type.__name__}{const_args!r}"
-            return VariableTracker.build(tx, value)
-        if isinstance(arg, variables.UserDefinedDictVariable):
-            if arg._base_vt is None:
-                raise AssertionError(
-                    "UserDefinedDictVariable._base_vt must not be None"
-                )
-            try:
-                return VariableTracker.build(
-                    tx, repr(arg._base_vt.as_python_constant())
-                )
-            except Exception:
-                pass
-        if isinstance(arg, variables.UserDefinedObjectVariable):
-            repr_method = arg.value.__repr__
-
-            if type(arg.value).__repr__ is object.__repr__:
-                # Default repr - build and trace it
-                fn_vt = VariableTracker.build(tx, repr_method)
-                return fn_vt.call_function(tx, [], {})
-            elif is_wrapper_or_member_descriptor(repr_method):
-                unimplemented(
-                    gb_type="Attempted to call repr() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
-                    hints=["Write the repr method in Python"],
-                )
-            else:
-                bound_method = repr_method.__func__
-                fn_vt = VariableTracker.build(tx, bound_method)
-                return fn_vt.call_function(tx, [arg], {})
-        if isinstance(arg, variables.UserDefinedClassVariable):
-            if type(arg.value).__repr__ is type.__repr__:
-                return VariableTracker.build(tx, repr(arg.value))
-        if isinstance(
-            arg,
-            (
-                RangeVariable,
-                ConstDictVariable,
-                variables.DefaultDictVariable,
-                OrderedSetClassVariable,
-                DictViewVariable,
-            ),
-        ):
-            return VariableTracker.build(tx, arg.debug_repr())
-        return None
+        return generic_repr(tx, arg)
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
