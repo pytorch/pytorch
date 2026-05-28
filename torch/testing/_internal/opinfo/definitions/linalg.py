@@ -1523,13 +1523,7 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
-            DecorateInfo(
-                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
-                device_type="cuda",
-                dtypes=(torch.complex64, torch.complex128),
-                active_if=TEST_WITH_ROCM,
-            ),
+            skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
     ),
     OpInfo(
@@ -2757,6 +2751,20 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=(
+                    TEST_WITH_TORCHINDUCTOR
+                    and isinstance(
+                        torch._inductor.cpu_vec_isa.pick_vec_isa(),
+                        torch._inductor.cpu_vec_isa.VecAMX,
+                    )
+                ),
             ),
         ),
     ),
