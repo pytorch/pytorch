@@ -3,6 +3,7 @@ import os
 import shlex
 import subprocess
 import sys
+import unittest
 from unittest import mock
 
 import torch
@@ -244,6 +245,7 @@ class TestStandaloneInductor(TestCase):
             if flag.startswith(("march=", "mcpu="))
         ]
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_aot_cpp_march_config(self):
         with (
             config.patch({"cpp.march": "x86-64"}),
@@ -255,6 +257,7 @@ class TestStandaloneInductor(TestCase):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, ["march=x86-64"])
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_aot_cpp_march_config_ppc64le(self):
         with (
             config.patch({"cpp.march": "power9"}),
@@ -266,6 +269,7 @@ class TestStandaloneInductor(TestCase):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, ["mcpu=power9"])
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_cpp_march_config_can_disable_arch_flag(self):
         with config.patch({"cpp.march": ""}):
             arch_flags = self._aot_cpp_arch_flags()
