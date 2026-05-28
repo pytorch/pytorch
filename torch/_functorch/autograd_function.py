@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from typing import Any, NamedTuple, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
@@ -805,6 +806,115 @@ def autograd_function_forward_rewritten(
     return new_forward
 
 
+_AUTOGRAD_FUNCTION_APPLY_STATE_UNSET = object()
+
+_AutogradFunctionApplyTemplateKey = tuple[
+    tuple[int, ...], tuple[int, ...], tuple[int, ...]
+]
+_AutogradFunctionApplyTemplateCache = dict[_AutogradFunctionApplyTemplateKey, type[Any]]
+_AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE: weakref.WeakKeyDictionary[
+    Any, weakref.WeakKeyDictionary[Any, _AutogradFunctionApplyTemplateCache]
+] = weakref.WeakKeyDictionary()
+
+
+class _AutogradFunctionApplyState:
+    def __init__(self, fwd: torch.fx.GraphModule, bwd: torch.fx.GraphModule) -> None:
+        self.fwd = fwd
+        self.bwd = bwd
+        self.saved_values: Any = _AUTOGRAD_FUNCTION_APPLY_STATE_UNSET
+
+
+def _get_autograd_function_apply_template(
+    fwd: torch.fx.GraphModule,
+    bwd: torch.fx.GraphModule,
+    dirty_idx: Iterable[int],
+    non_differentiable_idx: Iterable[int],
+    saved_for_backward_idx: Iterable[int],
+) -> type[torch.autograd.Function]:
+    dirty_idx = tuple(dirty_idx)
+    non_differentiable_idx = tuple(non_differentiable_idx)
+    saved_for_backward_idx = tuple(saved_for_backward_idx)
+
+    bwd_cache = _AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE.get(fwd)
+    if bwd_cache is None:
+        bwd_cache = weakref.WeakKeyDictionary()
+        _AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE[fwd] = bwd_cache
+
+    cache = bwd_cache.get(bwd)
+    if cache is None:
+        cache = {}
+        bwd_cache[bwd] = cache
+
+    cache_key = (dirty_idx, non_differentiable_idx, saved_for_backward_idx)
+    cached_template = cache.get(cache_key)
+    if cached_template is not None:
+        return cached_template
+
+    dirty_idx_set = set(dirty_idx)
+    saved_for_backward_idx_set = set(saved_for_backward_idx)
+
+    class ApplyTemplate(torch.autograd.Function):
+        @staticmethod
+        def forward(state: _AutogradFunctionApplyState, *args: Any) -> Any:
+            # The Interpreter here is required to propagate metadata
+            # from the dynamo graph body to the local_map graph body.
+            # This is required for fx_traceback.annotate for work.
+            output, saved_values = torch.fx.Interpreter(state.fwd).run(*args)
+            state.saved_values = saved_values
+
+            # See Note [Activations with no version counter checks in eager]
+            # Mark tensors that came from ctx.save_for_backward with metadata.
+            # This allows AOT autograd to distinguish between tensors saved via
+            # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).
+            from torch.fx.experimental.proxy_tensor import _get_proxies
+
+            for idx, t in enumerate(saved_values):
+                if idx not in saved_for_backward_idx_set:
+                    for proxy in _get_proxies(t):
+                        proxy.node.meta["saved_tensor_with_no_vc_check"] = True
+
+            return output
+
+        @staticmethod
+        def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+            state = inputs[0]
+            if state.saved_values is _AUTOGRAD_FUNCTION_APPLY_STATE_UNSET:
+                raise AssertionError("saved_values must be set")
+            ctx._autograd_function_apply_state = state
+
+            def selected_outputs(idx: Iterable[int]) -> list[Any]:
+                idx_set = set(idx)
+                if isinstance(output, (tuple, list)):
+                    return [x for i, x in enumerate(output) if i in idx_set]
+                return [output] if 0 in idx_set else []
+
+            # If users call ctx.mark_dirty() in the original fwd function.
+            if len(dirty_idx) > 0:
+                ctx.mark_dirty(*selected_outputs(dirty_idx_set))
+
+            # If users call ctx.mark_non_differentiable() in the original fwd function.
+            if len(non_differentiable_idx) > 0:
+                ctx.mark_non_differentiable(*selected_outputs(non_differentiable_idx))
+
+        @staticmethod
+        def backward(ctx: Any, *grad: Any) -> Any:
+            state = ctx._autograd_function_apply_state
+            saved_values = state.saved_values
+            if saved_values is _AUTOGRAD_FUNCTION_APPLY_STATE_UNSET:
+                raise AssertionError("saved_values must be set")
+
+            # The Interpreter here is required to propagate metadata
+            # from the dynamo graph body to the local_map graph body.
+            # This is required for fx_traceback.annotate for work.
+            grad_inputs = torch.fx.Interpreter(state.bwd).run(*grad, *saved_values)
+            if not isinstance(grad_inputs, tuple):
+                grad_inputs = (grad_inputs,)
+            return (None, *grad_inputs)
+
+    cache[cache_key] = ApplyTemplate
+    return ApplyTemplate
+
+
 class AutogradFunctionApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("autograd_function_apply")
@@ -816,64 +926,14 @@ class AutogradFunctionApply(HigherOrderOperator):
         *fwd_args: Any,
         **fwd_kwargs: Any,
     ) -> Any:
-        saved_values: Iterable[Any] | None = None
         dirty_idx = fwd_kwargs.get("dirty_idx", [])
-        dirty_idx_set = set(dirty_idx)
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
-
-        class ApplyTemplate(torch.autograd.Function):
-            @staticmethod
-            def forward(*args: Any, **kwargs: Any) -> Any:
-                nonlocal saved_values
-
-                # The Interpreter here is required to propagate metadata
-                # from the dynamo graph body to the local_map graph body.
-                # This is required for fx_traceback.annotate for work.
-                output, saved_values = torch.fx.Interpreter(fwd).run(*args)
-
-                # See Note [Activations with no version counter checks in eager]
-                # Mark tensors that came from ctx.save_for_backward with metadata.
-                # This allows AOT autograd to distinguish between tensors saved via
-                # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).
-                from torch.fx.experimental.proxy_tensor import _get_proxies
-
-                for idx, t in enumerate(saved_values):
-                    if idx not in saved_for_backward_idx:
-                        for proxy in _get_proxies(t):
-                            proxy.node.meta["saved_tensor_with_no_vc_check"] = True
-
-                return output
-
-            @staticmethod
-            def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
-                def selected_outputs(idx: Iterable[int]) -> list[Any]:
-                    idx_set = set(idx)
-                    if isinstance(output, (tuple, list)):
-                        return [x for i, x in enumerate(output) if i in idx_set]
-                    return [output] if 0 in idx_set else []
-
-                # If users call ctx.mark_dirty() in the original fwd function.
-                if len(dirty_idx) > 0:
-                    ctx.mark_dirty(*selected_outputs(dirty_idx_set))
-
-                # If users call ctx.mark_non_differentiable() in the original fwd function.
-                if len(non_differentiable_idx) > 0:
-                    ctx.mark_non_differentiable(
-                        *selected_outputs(non_differentiable_idx)
-                    )
-
-            @staticmethod
-            def backward(ctx: Any, *grad: Any) -> Any:
-                # The Interpreter here is required to propagate metadata
-                # from the dynamo graph body to the local_map graph body.
-                # This is required for fx_traceback.annotate for work.
-
-                if saved_values is None:
-                    raise AssertionError("saved_values must not be None")
-                return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
-
-        return ApplyTemplate.apply(*fwd_args)
+        ApplyTemplate = _get_autograd_function_apply_template(
+            fwd, bwd, dirty_idx, non_differentiable_idx, saved_for_backward_idx
+        )
+        state = _AutogradFunctionApplyState(fwd, bwd)
+        return ApplyTemplate.apply(state, *fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()
