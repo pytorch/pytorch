@@ -44,6 +44,14 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     if not _cuda.is_built():
         return (False, None)
 
+    # CuTeDSL kernels require genuine NVIDIA GPUs; on ROCm/HIP builds the
+    # CUDA compatibility layer reports is_built()=True but cuInit() will fail
+    # because no NVIDIA driver is present.
+    import torch
+
+    if torch.version.hip is not None:
+        return (False, None)
+
     deps = [
         ("nvidia_cutlass_dsl", "cutlass"),
         ("apache_tvm_ffi", "tvm_ffi"),
