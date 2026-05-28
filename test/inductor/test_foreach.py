@@ -157,6 +157,7 @@ un_ops_under_test = [
     torch._foreach_abs,
     torch._foreach_sqrt,
     torch._foreach_rsqrt,
+    torch._foreach_clone,
     *foreach_map_un_ops_under_test,
 ]
 
@@ -1416,6 +1417,20 @@ class ForeachTests(TestCase):
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
+
+    @requires_gpu
+    def test_foreach_sub(self):
+        def fn(a, b):
+            return torch._foreach_sub(a, b, alpha=2.0)
+
+        torch.manual_seed(42)
+        a = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+        b = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, fullgraph=True)(a, b)
+
+        self.assertEqual(eager, compiled)
 
     @requires_gpu
     def test_foreach_reorder_loops_with_nested_foreach_snodes(self):

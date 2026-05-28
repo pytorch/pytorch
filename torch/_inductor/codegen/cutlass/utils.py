@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from typing_extensions import TypeIs
 
@@ -22,6 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
+from ..xpu.xpu_env import get_xpu_arch, get_xpu_version
 
 
 log = logging.getLogger(__name__)
@@ -77,12 +79,12 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_cppgen  # type: ignore[import-not-found]
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
-            log.warning(  # noqa: G200
+            log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
-                str(e),
+                e,
             )
             return False
 
@@ -99,7 +101,12 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
+    cutlass_dir = (
+        config.xpu.cutlass_dir
+        if torch.xpu._is_compiled()
+        else config.cutlass.cutlass_dir
+    )
+    cutlass_python_path = path_join(cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -157,17 +164,17 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401, F811
-            import cutlass_library.generator  # noqa: F401
-            import cutlass_library.library  # noqa: F401
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_library.generator
+            import cutlass_library.library
             import cutlass_library.manifest  # noqa: F401
             import pycute  # type: ignore[import-not-found]  # noqa: F401
 
             return True
         except ImportError as e:
-            log.debug(  # noqa: G200
+            log.debug(
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
-                str(e),
+                e,
             )
     else:
         log.debug(
@@ -177,7 +184,15 @@ def try_import_cutlass() -> bool:
     return False
 
 
-@functools.lru_cache(8)
+def _normalize_xpu_arch(arch: str) -> str:
+    if arch.startswith("Xe"):
+        return arch[2:]
+    if 12 <= int(arch) and int(arch) <= 50:
+        return arch
+    else:
+        raise NotImplementedError(f"Unsupported xpu arch: {arch}")
+
+
 def _normalize_cuda_arch(arch: str) -> str:
     arch_num = arch
     if isinstance(arch, str):
@@ -206,6 +221,24 @@ def _normalize_cuda_arch(arch: str) -> str:
     raise NotImplementedError(f"Unsupported cuda arch: {arch}")
 
 
+@functools.lru_cache(8)
+def cutlass_arch(device_type: str) -> str:
+    if device_type == "xpu":
+        arch = get_xpu_arch()
+        return _normalize_xpu_arch(arch)
+    else:
+        arch = get_cuda_arch()
+        return _normalize_cuda_arch(arch)
+
+
+@functools.lru_cache(1)
+def toolkit_version(device_type: str) -> str:
+    if device_type == "xpu":
+        return get_xpu_version()
+    else:
+        return get_cuda_version()
+
+
 @dataclass
 class CUTLASSArgs:
     """
@@ -213,7 +246,7 @@ class CUTLASSArgs:
     """
 
     architectures: str | None = None
-    cuda_version: str | None = None
+    toolkit_version: str | None = None
     instantiation_level: str | None = None
     operations: str | None = None
 
@@ -229,18 +262,18 @@ class CUTLASSArgs:
     interface_dir: None = None
     filter_by_cc = True
     disable_full_archs_compilation = False
+    device_type: str = "cuda"
 
     def __post_init__(self):
-        if self.architectures is None or self.cuda_version is None:
+        if self.architectures is None or self.toolkit_version is None:
             raise RuntimeError(
-                f"{self.architectures=} or {self.cuda_version=} is None!"
+                f"{self.architectures=} or {self.toolkit_version=} is None!"
             )
-        self.architectures = _normalize_cuda_arch(self.architectures)
 
 
 @clear_on_fresh_cache
 @functools.cache
-def _gen_ops_cached(arch, version) -> dict[Any, Any]:
+def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -250,35 +283,46 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
 
     if arch is None or version is None:
         log.error(
-            "Cannot detect cuda arch %s or cuda version %s. "
+            "Cannot detect cuda arch %s or version %s. "
             "Will discard all cutlass ops. "
             "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
             arch,
             version,
         )
         return {}
-    arch = _normalize_cuda_arch(arch)
+
     gen_arch = (
         "100" if arch == "103" else arch
     )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=gen_arch,
-        cuda_version=version,
+        toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
+        device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if gen_arch == "100":
+    if device_type == "xpu":
+        if hasattr(cutlass_generator, "GenerateIntelXe"):
+            cutlass_generator.GenerateIntelXe(
+                manifest, args.toolkit_version, arch=int(arch)
+            )
+        else:
+            raise NotImplementedError(
+                "Arch " + arch + " is not supported by current cutlass lib."
+            )
+
+    elif arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
-            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+            cutlass_generator.GenerateSM100(manifest, args.toolkit_version)
+        cutlass_generator.GenerateSM90(manifest, args.toolkit_version)
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + gen_arch)
-            func(manifest, args.cuda_version)
+            func(manifest, args.toolkit_version)
         except AttributeError as e:
             raise NotImplementedError(
                 "Arch " + gen_arch + " is not supported by current cutlass lib."
@@ -292,26 +336,35 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     return manifest.operations
 
 
-def gen_ops() -> dict[Any, Any]:
+def gen_ops(device_type: str) -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
     with dynamo_timed("cutlass_utils.gen_ops"):
-        arch = get_cuda_arch()
-        version = get_cuda_version()
-        return _gen_ops_cached(arch, version)
+        arch = cutlass_arch(device_type)
+        version = toolkit_version(device_type)
+        return _gen_ops_cached(arch, version, device_type)
 
 
 from ..cpp_utils import DTYPE_TO_CPP
 
 
-DTYPE_TO_CUTLASS_TYPE = {
-    **DTYPE_TO_CPP,
-    torch.float16: "__half",
-    torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "__nv_fp8_e4m3",
-    torch.float8_e5m2: "__nv_fp8_e5m2",
-}
+if torch.xpu._is_compiled():
+    DTYPE_TO_CUTLASS_TYPE = {
+        **DTYPE_TO_CPP,
+        torch.float16: "uint16_t",
+        torch.bfloat16: "uint16_t",
+        torch.float8_e4m3fn: "uint8_t",
+        torch.float8_e5m2: "uint8_t",
+    }
+else:
+    DTYPE_TO_CUTLASS_TYPE = {
+        **DTYPE_TO_CPP,
+        torch.float16: "__half",
+        torch.bfloat16: "__nv_bfloat16",
+        torch.float8_e4m3fn: "__nv_fp8_e4m3",
+        torch.float8_e5m2: "__nv_fp8_e5m2",
+    }
 
 
 @functools.lru_cache(32)
@@ -328,6 +381,10 @@ def torch_dtype_to_cutlass_type(
         return cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
         return cutlass_library.library.DataType.bf16
+    elif torch_dtype == torch.float8_e4m3fn:
+        return cutlass_library.library.DataType.e4m3
+    elif torch_dtype == torch.float8_e5m2:
+        return cutlass_library.library.DataType.e5m2
     else:
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
@@ -478,3 +535,59 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         ):
             return alignment
     return 1
+
+
+class CUTLASSCompileSourceCapturingContext:
+    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
+    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+
+    def __init__(self, device_type: str):
+        self.sources = []
+        self._compile_patch = None
+        self.device_type = device_type
+
+    def __enter__(self, *args, **kwargs):
+        import unittest.mock as mock
+
+        import torch._inductor.codecache
+
+        codecache_cls = (
+            torch._inductor.codecache.XPUCodeCache
+            if self.device_type == "xpu"
+            else torch._inductor.codecache.CUDACodeCache
+        )
+        _compile_method_orig = codecache_cls.compile
+
+        def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
+            self.sources.append(source_code)
+            return _compile_method_orig(source_code, dst_file_ext)
+
+        # pyrefly: ignore [bad-assignment]
+        self._compile_patch = mock.patch(
+            f"torch._inductor.codecache.{codecache_cls.__name__}.compile", my_compile
+        )
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+
+
+def cutlass_standalone_runner_compile_command(
+    device_type: str, srcpath: Path, exepath: Path
+):
+    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
+    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
+
+    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
+    if device_type != "xpu":
+        extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
+    cutlass_compile_command = (
+        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
+        if device_type == "xpu"
+        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
+    )
+    compile_command = cutlass_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    )
+    return compile_command

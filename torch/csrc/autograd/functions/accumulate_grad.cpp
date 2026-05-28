@@ -61,7 +61,7 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
   // Functional Tensors insert an Error node to assert that backward is never
   // called
   if (variable.grad_fn() &&
-      std::dynamic_pointer_cast<Error>(variable.grad_fn()) == nullptr) {
+      dynamic_cast<Error*>(variable.grad_fn().get()) == nullptr) {
     throw std::logic_error(
         "leaf variable has been moved into the graph interior");
   }

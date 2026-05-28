@@ -43,7 +43,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,  # NOQA: B950
+    """,
         )
 
         _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
@@ -58,7 +58,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,  # NOQA: B950
+    """,
         )
 
     @patch.dict(
@@ -68,6 +68,8 @@ def forward(self, x_1):
             "TEST_ENV": "1",
             "TORCHINDUCTOR_ENV_SINGLE_QUOTES": "inductor_'env'",
             "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
+            "TORCHDYNAMO_REPRO_AFTER": "aot",
+            "TORCHDYNAMO_REPRO_LEVEL": "4",
         },
     )
     def test_generate_env_vars_string(self):
@@ -97,6 +99,10 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_AFTER']", env_strings)
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_LEVEL']", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
 
 
 class TestDebugUtilsDevice(TestCase):
@@ -190,7 +196,7 @@ class TestDebugUtilsDevice(TestCase):
     def test_sym_aot_graph_parser(self, device):
         def forward(
             self,
-            primals_1: "f32[1001, 6]",  # noqa: F821
+            primals_1: "f32[1001, 6]",
             primals_2: "f32[s0]",  # noqa: F821
             primals_3: "Sym(s0)",  # noqa: F821,
             primals_4: "f32[s1]",  # noqa: F821,
@@ -211,8 +217,7 @@ class TestDebugUtilsDevice(TestCase):
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), except_for="mps")
 
 
 class TestBackendOverrideIntegration(TestCase):
@@ -325,9 +330,12 @@ class TestBackendOverrideIntegration(TestCase):
         result = self._run_with_override(device, "0:aot_eager;1:inductor;3:eager")
         self.assertEqual(result, ["aot_eager", "inductor", "eager"])
 
-    def test_first_rule_wins(self, device):
-        result = self._run_with_override(device, ">=0:aot_eager;>=1:inductor")
-        self.assertEqual(result, ["aot_eager", "aot_eager", "aot_eager", "aot_eager"])
+    def test_conflicting_rules_raise(self, device):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Conflicting backend override",
+        ):
+            self._run_with_override(device, ">=0:aot_eager;>=1:inductor")
 
     def test_complex_config(self, device):
         result = self._run_with_override(device, "0:aot_eager;>=2:inductor")
@@ -373,7 +381,7 @@ class TestBackendOverrideIntegration(TestCase):
 
 
 instantiate_device_type_tests(
-    TestBackendOverrideIntegration, globals(), only_for=["cpu", "cuda"]
+    TestBackendOverrideIntegration, globals(), except_for="mps"
 )
 
 
@@ -467,6 +475,18 @@ class TestInductorConfigOverrideIntegration(TestCase):
         self.assertEqual(router.get_value_for_graph(0), {"a": 1, "c": 3})
         self.assertEqual(router.get_value_for_graph(1), {"b": 2, "c": 3})
         self.assertEqual(router.get_value_for_graph(2), {"c": 3})
+
+    def test_backend_router_conflict_raises(self, device):
+        from torch._dynamo.graph_id_filter import GraphBackendRouter
+
+        with self.assertRaisesRegex(ValueError, "Conflicting backend override"):
+            GraphBackendRouter("0-5:eager;3-10:inductor")
+
+    def test_backend_router_same_backend_no_conflict(self, device):
+        from torch._dynamo.graph_id_filter import GraphBackendRouter
+
+        router = GraphBackendRouter("0:eager;>=0:eager")
+        self.assertIsNotNone(router.get_value_for_graph(0))
 
     def test_get_inductor_config_override_empty(self, device):
         from torch._dynamo.graph_id_filter import (

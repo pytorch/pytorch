@@ -314,6 +314,10 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
+    def rand_eager(seed, offset, threads_per_round, tid, vec) -> torch.dtype:
+        return torch.float
+
+    @staticmethod
     def store_reduction(name: str, index, value: DTypeArg) -> None:
         return None
 
@@ -444,7 +448,13 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def inline_asm_elementwise(
-        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+        *inputs,
+        asm,
+        constraints=None,
+        dtype=torch.float32,
+        is_pure=True,
+        pack=1,
+        input_dtypes=None,
     ):
         return dtype
 

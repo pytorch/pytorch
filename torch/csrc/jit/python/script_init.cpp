@@ -85,6 +85,153 @@ using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
 namespace {
 
+std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
+  std::unordered_set<TypePtr> types;
+  std::unordered_set<TypePtr> duplicate_types;
+
+  for (auto module : mod.modules()) {
+    auto module_type = module.type();
+    if (types.count(module_type) > 0) {
+      duplicate_types.insert(module_type);
+    }
+    types.insert(module_type);
+  }
+
+  return duplicate_types;
+}
+
+Module cloneSubmoduleToCompilationUnit(
+    const Module& source,
+    const std::shared_ptr<CompilationUnit>& target_cu) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::unordered_map<c10::ivalue::Object*, Module> module_remap;
+
+  std::function<Module(const Module&)> clone_module =
+      [&](const Module& current) -> Module {
+    auto* current_obj = current._ivalue().get();
+    auto existing = module_remap.find(current_obj);
+    if (existing != module_remap.end()) {
+      return existing->second;
+    }
+
+    const bool type_already_cloned =
+        type_remap.find(current.type()) != type_remap.end();
+    if (!type_already_cloned) {
+      TORCH_CHECK(
+          current.type()->name().has_value(),
+          "cloneSubmoduleToCompilationUnit requires module types to have a qualified name; got an unnamed type ",
+          current.type()->repr_str());
+    }
+    Module cloned = type_already_cloned
+        ? Module(target_cu, type_remap.at(current.type())->cast<ClassType>())
+        : Module(*current.type()->name(), target_cu, true);
+
+    if (!type_already_cloned) {
+      type_remap[current.type()] = cloned.type();
+    }
+    module_remap.emplace(current_obj, cloned);
+
+    const auto num_attrs = current.type()->numAttributes();
+    for (const auto i : c10::irange(num_attrs)) {
+      const auto& attr_name = current.type()->getAttributeName(i);
+      IValue attr = current._ivalue()->getSlot(i);
+      TypePtr attr_type = current.type()->getAttribute(i);
+      if (attr_type->is_module()) {
+        Module cloned_child = clone_module(attr.toModule());
+        cloned.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned_child.type() : attr_type,
+            current.type()->is_parameter(i),
+            current.type()->is_buffer(i));
+        cloned._ivalue()->setAttr(attr_name, cloned_child._ivalue());
+      } else {
+        cloned.register_attribute(
+            attr_name,
+            attr_type,
+            attr.deepcopy(),
+            current.type()->is_parameter(i),
+            current.type()->is_buffer(i));
+      }
+    }
+
+    if (!type_already_cloned) {
+      for (size_t i = 0; i < current.type()->numConstants(); ++i) {
+        cloned.type()->addConstant(
+            current.type()->getConstantName(i), current.type()->getConstant(i));
+      }
+      for (Function* fn : current.type()->methods()) {
+        cloned.clone_method(current, fn->name());
+      }
+    }
+
+    return cloned;
+  };
+
+  return clone_module(source);
+}
+
+std::pair<Module, std::string> lookupParentModuleAndAttribute(
+    Module root,
+    const std::string& qualified_name) {
+  TORCH_CHECK(
+      !qualified_name.empty(),
+      "_jit_replace_submodule requires a non-empty qualified_name");
+
+  std::vector<std::string> atoms;
+  std::stringstream qualified_name_stream(qualified_name);
+  std::string atom;
+  while (std::getline(qualified_name_stream, atom, '.')) {
+    TORCH_CHECK(
+        !atom.empty(),
+        "_jit_replace_submodule does not support empty path segments in qualified_name: ",
+        qualified_name);
+    atoms.push_back(atom);
+  }
+
+  TORCH_CHECK(
+      !atoms.empty(),
+      "_jit_replace_submodule requires a non-empty qualified_name");
+
+  Module parent = root;
+  for (const auto i : c10::irange(atoms.size() - 1)) {
+    const auto& child_name = atoms[i];
+    TORCH_CHECK(
+        parent.hasattr(child_name),
+        "_jit_replace_submodule could not find submodule path segment '",
+        child_name,
+        "' in qualified_name '",
+        qualified_name,
+        "'");
+    auto child = parent.attr(child_name);
+    TORCH_CHECK(
+        child.isModule(),
+        "_jit_replace_submodule path segment '",
+        child_name,
+        "' in qualified_name '",
+        qualified_name,
+        "' is not a submodule");
+    parent = child.toModule();
+  }
+
+  const auto& attr_name = atoms.back();
+  TORCH_CHECK(
+      parent.hasattr(attr_name),
+      "_jit_replace_submodule could not find submodule path segment '",
+      attr_name,
+      "' in qualified_name '",
+      qualified_name,
+      "'");
+  TORCH_CHECK(
+      parent.attr(attr_name).isModule(),
+      "_jit_replace_submodule path segment '",
+      attr_name,
+      "' in qualified_name '",
+      qualified_name,
+      "' is not a submodule");
+
+  return {parent, attr_name};
+}
+
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
   explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
@@ -2439,6 +2586,75 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  // Replace a submodule in a ScriptModule with type-safe ClassType update
+  // and graph type remapping.  Modelled after the backend-lowering pass in
+  // backend_init.cpp which does unsafeChangeAttributeType + remapTypes.
+  //
+  // Returns a cloned root module with the replacement applied. This avoids
+  // mutating a live module hierarchy after methods may already have created
+  // optimized executors.
+  //
+  // Args:
+  //   root   – top-level ScriptModule to clone and update.
+  //   qualified_name – fully qualified path to the submodule to replace.
+  //   new_submodule – the replacement ScriptModule.
+  m.def(
+      "_jit_replace_submodule",
+      [](Module& root,
+         const std::string& qualified_name,
+         Module& new_submodule) {
+        auto cloned_root = root.clone();
+        auto parent_and_attr =
+            lookupParentModuleAndAttribute(cloned_root, qualified_name);
+        auto parent = parent_and_attr.first;
+        const auto& attr_name = parent_and_attr.second;
+        auto old_submodule = parent.attr(attr_name).toModule();
+        auto old_type = old_submodule.type();
+        auto duplicate_types = getSharedModuleTypes(cloned_root);
+
+        if (duplicate_types.count(parent.type()) > 0) {
+          throw py::cast_error(c10::str(
+              "_jit_replace_submodule only supports module hierarchies with unique parent types; ",
+              parent.type()->repr_str(),
+              " is shared"));
+        }
+
+        auto remapped_submodule = cloneSubmoduleToCompilationUnit(
+            new_submodule, cloned_root._ivalue()->compilation_unit());
+        auto new_type = remapped_submodule.type();
+
+        // 1. Update the parent's ClassType to accept the new submodule type.
+        parent.type()->unsafeChangeAttributeType(attr_name, new_type);
+
+        // 2. Set the new submodule value (now passes the subtype check).
+        parent.setattr(attr_name, remapped_submodule._ivalue());
+
+        // 3. Remap the old type to the new type in all graphs reachable
+        //    from the root so that compiled code references the correct
+        //    type.
+        std::unordered_map<TypePtr, TypePtr> type_remap;
+        type_remap[old_type] = new_type;
+        auto type_remap_fn = [&type_remap](TypePtr in) {
+          auto it = type_remap.find(in);
+          if (it == type_remap.end()) {
+            return in;
+          }
+          return it->second;
+        };
+        for (auto module : cloned_root.modules()) {
+          auto module_type = module.type();
+          for (auto& fn : module_type->methods()) {
+            auto method = module.get_method(fn->name());
+            auto graph = method.graph();
+            graph->remapTypes(type_remap_fn);
+            auto new_schema =
+                fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+            fn->setSchema(new_schema);
+          }
+        }
+        return cloned_root;
+      });
 
   m.def("_get_file_format", [](const std::string& path) {
     switch (getFileFormat(path)) {

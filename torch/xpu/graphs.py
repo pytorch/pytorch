@@ -136,14 +136,14 @@ class XPUGraph(_XPUGraph):
         r"""Returns the underlying xpuGraph_t. ``keep_graph`` must be True.
 
         XPU doesn't provide APIs to manipulate this object.
-        """  # noqa: B950
+        """
         return super().raw_xpu_graph()
 
     def raw_xpu_graph_exec(self) -> int:
         r"""Returns the underlying xpuGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_xpu_graph_exec()``, the previously returned xpuGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
 
         XPU doesn't provide APIs to manipulate this object.
-        """  # noqa: B950
+        """
         return super().raw_xpu_graph_exec()
 
 
@@ -162,7 +162,7 @@ class graph:
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
 
-    """  # noqa: B950
+    """
 
     default_capture_stream: torch.xpu.Stream | None = None
 

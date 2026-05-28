@@ -34,6 +34,7 @@ To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
+import os
 import sys
 import unittest
 
@@ -55,6 +56,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
@@ -241,6 +243,7 @@ INDUCTOR_NUMERICS_OPTIONS = {
     "emulate_precision_casts": True,
     "eager_numerics.division_rounding": True,
     "eager_numerics.disable_ftz": True,
+    "eager_numerics.use_pytorch_libdevice": True,
 }
 
 
@@ -436,29 +439,78 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
-# Additional expected failures that only apply on ROCm.
-# Same structure as the main xfail dicts: test_type -> backend -> op_name -> dtypes.
-ROCM_XFAILS = {
-    "batch_invariance": {
-        "inductor_default": {
-            "log1p": {fp32},
-        },
+ROCM_EAGER_EQUIV_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.rms_norm": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
     },
+    "inductor_default": {
+        "sigmoid": {fp32},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.silu": {fp16, fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+    "inductor_numerics": {
+        "sigmoid": {fp32},
+        "sub": {ALL},
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+    },
+}
+
+ROCM_DETERMINISM_XFAILS = {}
+
+ROCM_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "nn.functional.linear": {ALL},
+        "log1p": {fp32},
+    },
+    "inductor_numerics": {
+        "nn.functional.linear": {ALL},
+    },
+}
+
+ROCM_UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "log1p": {fp32},
+        "rsqrt": {bf16, fp32},
+        "sigmoid": {fp32},
+        "sin": {fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
+    },
+    "inductor_numerics": {
+        "log10": {fp16, fp32},
+        "sigmoid": {fp32},
+    },
+}
+
+ROCM_BINARY_NUMERICAL_XFAILS = {}
+
+ROCM_XFAIL_DICTS = {
+    "eager_equivalence": ROCM_EAGER_EQUIV_XFAILS,
+    "determinism": ROCM_DETERMINISM_XFAILS,
+    "batch_invariance": ROCM_BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": ROCM_UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": ROCM_BINARY_NUMERICAL_XFAILS,
 }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
-    xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
-    is_xfail = dtype in xfails or ALL in xfails
-
-    if not is_xfail and torch.version.hip is not None:
-        rocm_xfails = (
-            ROCM_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
-        )
-        is_xfail = dtype in rocm_xfails or ALL in rocm_xfails
-
-    return is_xfail
+    xfail_dicts = ROCM_XFAIL_DICTS if torch.version.hip is not None else XFAIL_DICTS
+    xfails = xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set())
+    return dtype in xfails or ALL in xfails
 
 
 def compile_fn(fn, backend):
@@ -507,9 +559,10 @@ class TestOpInfoProperties(TestCase):
     ):
         """Run a test with expected failure handling.
 
-        Uses pytest.xfail for clear test output:
+        Uses pytest.xfail when running under pytest for clear test output:
         - If test is expected to fail and does fail: XFAIL (pytest.xfail called)
         - If test is expected to fail but passes: FAILED (strict xpass behavior)
+        - If test is expected to fail and does fail outside pytest: SKIPPED
         - If test is not expected to fail: runs normally (PASSED or FAILED)
 
         Args:
@@ -521,7 +574,10 @@ class TestOpInfoProperties(TestCase):
             try:
                 test_fn()
             except (AssertionError, RuntimeError):
-                pytest.xfail(f"Known failure: {op_name}/{backend}/{dtype}")
+                reason = f"Known failure: {op_name}/{backend}/{dtype}"
+                if "PYTEST_CURRENT_TEST" in os.environ:
+                    pytest.xfail(reason)
+                self.skipTest(reason)
             else:
                 self.fail(
                     f"XPASS: {op_name}/{backend}/{dtype} - remove from {test_type} xfails"
@@ -669,6 +725,7 @@ class TestOpInfoProperties(TestCase):
     # Run-to-Run Determinism Tests
     # =========================================================================
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180040")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
@@ -741,6 +798,14 @@ class TestOpInfoProperties(TestCase):
     # Bitwise Equivalence with Eager Mode Tests
     # =========================================================================
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180057")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180056")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180055")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180045")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180044")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180043")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180042")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180041")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
@@ -779,6 +844,14 @@ class TestOpInfoProperties(TestCase):
     # Exhaustive/Sampled Unary Ufunc Tests
     # =========================================================================
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179940")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180071")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179942")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180067")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180066")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180419")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180061")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180058")
     @onlyCUDA
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_unary_ops, allowed_dtypes=DTYPES)

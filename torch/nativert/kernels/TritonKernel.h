@@ -27,7 +27,6 @@ class TritonKernel : public OpKernel {
   // Storage for float attributes that were serialized as doubles
   std::vector<float> float_attrs_;
   std::vector<int64_t> output_indices_;
-  std::unique_ptr<LaunchParams> launch_params_;
   KernelInputParams kernel_input_params_;
 };
 

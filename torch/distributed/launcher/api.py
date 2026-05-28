@@ -15,10 +15,18 @@ from typing import Any
 
 import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
-from torch._utils_internal import get_default_numa_options
+from torch._utils_internal import get_default_numa_options, justknobs_check
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.agent.server.health_check_server import (
+    create_healthcheck_server,
+    HealthCheckServer,
+)
+from torch.distributed.elastic.agent.server.local_elastic_agent import (
+    _AliveCallbackProxy,
+    LocalElasticAgent,
+    TORCHELASTIC_HEALTH_CHECK_PORT,
+)
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs,
     LogsSpecs,
@@ -176,12 +184,19 @@ class elastic_launch:
         self,
         config: LaunchConfig,
         entrypoint: Callable | str | None,
+        health_check_server: HealthCheckServer | None = None,
     ):
         self._config = config
         self._entrypoint = entrypoint
+        self._health_check_server = health_check_server
 
     def __call__(self, *args):
-        return launch_agent(self._config, self._entrypoint, list(args))
+        return launch_agent(
+            self._config,
+            self._entrypoint,
+            list(args),
+            health_check_server=self._health_check_server,
+        )
 
 
 def _get_entrypoint_name(entrypoint: Callable | str | None, args: list[Any]) -> str:
@@ -227,6 +242,7 @@ def launch_agent(
     config: LaunchConfig,
     entrypoint: Callable | str | None,
     args: list[Any],
+    health_check_server: HealthCheckServer | None = None,
 ) -> dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
@@ -290,6 +306,35 @@ def launch_agent(
     # Set the signals to handle in the environment variable
     os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
 
+    # Start health check server before rendezvous so TW sees a healthy
+    # thrift port during the potentially long MAST rendezvous store barrier
+    # (10-22+ min for large jobs).  The _AliveCallbackProxy returns
+    # time.time() until wired to the agent after construction.
+    # Skip if a server was already provided by the caller (e.g. started
+    # before remote_pre_launch in the APF executor).
+    if health_check_server is None:
+        healthcheck_port = os.getenv(TORCHELASTIC_HEALTH_CHECK_PORT)
+        if healthcheck_port is not None and justknobs_check(
+            "ai_infra/pytorch_distributed:torchelastic_enable_healthcheck_before_rendezvous",
+            default=False,
+        ):
+            try:
+                health_check_server = create_healthcheck_server(
+                    alive_callback=_AliveCallbackProxy(),
+                    port=int(healthcheck_port),
+                    timeout=60,
+                )
+                health_check_server.start()
+                logger.info(
+                    "Started early health check server on port %s before rendezvous",
+                    healthcheck_port,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to start early health check server", exc_info=True
+                )
+                health_check_server = None
+
     spec = WorkerSpec(
         role=config.role,
         local_world_size=config.nproc_per_node,
@@ -314,7 +359,13 @@ def launch_agent(
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
         shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
+        health_check_server=health_check_server,
     )
+
+    if health_check_server is not None:
+        cb = health_check_server.alive_callback
+        if isinstance(cb, _AliveCallbackProxy):
+            cb.set_delegate(agent._get_alive_time)
 
     shutdown_rdzv = True
     try:

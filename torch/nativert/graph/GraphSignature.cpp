@@ -259,6 +259,8 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
                 torch::_export::Argument::Tag::AS_SYM_FLOATS ||
             userInputArg.tag() == torch::_export::Argument::Tag::AS_INT_LISTS ||
             userInputArg.tag() ==
+                torch::_export::Argument::Tag::AS_FLOAT_LISTS ||
+            userInputArg.tag() ==
                 torch::_export::Argument::Tag::AS_SCALAR_TYPE ||
             userInputArg.tag() ==
                 torch::_export::Argument::Tag::AS_MEMORY_FORMAT ||

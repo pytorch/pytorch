@@ -51,7 +51,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(_log_handler)
 
 
-# Retryable failure exception means the we were too late to make
+# Retryable failure exception means we were too late to make
 # a desired state transition (e.g. because of a race condition),
 # and should now restart from the beginning.
 # A small delay is recommended to avoid spamming Etcd.
@@ -207,7 +207,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
         try:
             self.set_closed()
             return True
-        except BaseException:  # noqa: B036
+        except BaseException:
             logger.warning("Shutdown failed", exc_info=True)
             return False
 
@@ -332,7 +332,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)  # noqa: G200
+                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)
                 time.sleep(1)
 
     def init_phase(self):

@@ -4,6 +4,17 @@ from typing import Any
 
 import torch
 
+
+try:
+    from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        runtime as _cuda_bindings_runtime,
+    )
+
+    _HAS_CUDA_BINDINGS = True
+except ImportError:
+    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _HAS_CUDA_BINDINGS = False
+
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
@@ -57,6 +68,35 @@ def _check_cuda(result: int) -> None:
         err_str.value.decode() if err_str.value is not None else "Unknown CUDA error"
     )
     raise RuntimeError(f"CUDA error: {error_message}")
+
+
+def _check_cuda_bindings(result: Any) -> Any:
+    """Check a cuda.bindings (cuda-python) call result for errors.
+
+    All cuda.bindings runtime calls return ``(error, *outputs)``.  This
+    helper unpacks the tuple, raises on non-success, and returns the
+    outputs (``None`` for zero outputs, scalar for one, tuple otherwise).
+    """
+    if not _HAS_CUDA_BINDINGS:
+        raise RuntimeError("cuda.bindings is not available")
+    err, *out = result
+    if (
+        err
+        != _cuda_bindings_runtime.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
+    ):
+        _, err_str = (
+            _cuda_bindings_runtime.cudaGetErrorString(  # pyrefly: ignore[missing-attribute]
+                err
+            )
+        )
+        if isinstance(err_str, bytes):
+            err_str = err_str.decode()
+        raise RuntimeError(f"CUDA error: {err} ({err_str})")
+    if len(out) == 0:
+        return None
+    if len(out) == 1:
+        return out[0]
+    return out
 
 
 def _get_hiprtc_library() -> ctypes.CDLL:

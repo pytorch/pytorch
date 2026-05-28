@@ -126,9 +126,14 @@ class TestCheckCapability(TestCase):
 
     @patch("torch.cuda.get_arch_list", return_value=["sm_60"])
     @patch("torch.cuda.get_device_capability", return_value=(7, 0))
+    @patch("torch.cuda._host_arch_key", return_value="x86_64")
     @patch(
         "torch.cuda.PYTORCH_RELEASES_CODE_CC",
-        {"12.6": {50, 60, 70}, "12.8": {70}, "13.0": {75}},
+        {
+            "12.6": {"x86_64": {50, 60, 70}, "aarch64": {50, 60, 70}},
+            "12.8": {"x86_64": {70}, "aarch64": {70}},
+            "13.2": {"x86_64": {75}, "aarch64": {75}},
+        },
     )
     def test_warning_suggests_compatible_pytorch_release(self, *args):
         with warnings.catch_warnings(record=True) as w:
@@ -138,7 +143,7 @@ class TestCheckCapability(TestCase):
             msg = str(w[0].message)
             self.assertIn("12.6", msg)
             self.assertIn("12.8", msg)
-            self.assertNotIn("13.0", msg)
+            self.assertNotIn("13.2", msg)
 
     @patch("torch.cuda.get_arch_list", return_value=["sm_80"])
     @patch("torch.cuda.get_device_capability", return_value=(5, 3))
@@ -148,10 +153,9 @@ class TestCheckCapability(TestCase):
             torch.cuda._check_capability()
             self.assertEqual(len(w), 1)
             msg = str(w[0].message)
-            self.assertNotIn(
-                "install a PyTorch release that supports one of these CUDA versions",
-                msg,
-            )
+            self.assertNotIn("pip install torch==", msg)
+            self.assertIn("No published PyTorch CUDA builds for release", msg)
+            self.assertIn("https://pytorch.org/get-started/locally/", msg)
 
 
 if __name__ == "__main__":

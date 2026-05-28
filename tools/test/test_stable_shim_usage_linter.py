@@ -42,35 +42,44 @@ class TestStableShimUsageLinter(unittest.TestCase):
 
         expected = {
             # Simple versioned function (2.10)
-            "simple_versioned_func": (2, 10),
+            "simple_versioned_func": (2, 10, 0),
             # Multiple functions with version 2.9
-            "old_function_1": (2, 9),
-            "old_function_2": (2, 9),
+            "old_function_1": (2, 9, 0),
+            "old_function_2": (2, 9, 0),
             # Typedef function pointer (2.10)
-            "callback_function_ptr": (2, 10),
+            "callback_function_ptr": (2, 10, 0),
             # Nested version blocks (2.11)
-            "platform_specific_func": (2, 11),
-            "always_available_func": (2, 11),
+            "platform_specific_func": (2, 11, 0),
+            "always_available_func": (2, 11, 0),
             # Function in #if branch (2.10), NOT legacy_fallback which is in #else
-            "modern_implementation": (2, 10),
+            "modern_implementation": (2, 10, 0),
             # Actual function (2.10), NOT commented_out_func
-            "actual_function": (2, 10),
+            "actual_function": (2, 10, 0),
             # Complex nested (2.12)
-            "deeply_nested_func": (2, 12),
-            "outer_block_func": (2, 12),
+            "deeply_nested_func": (2, 12, 0),
+            "outer_block_func": (2, 12, 0),
             # Multiple typedefs
-            "legacy_callback": (2, 9),
-            "modern_callback": (2, 10),
+            "legacy_callback": (2, 9, 0),
+            "modern_callback": (2, 10, 0),
             # Using declarations and struct/class (2.10)
-            "OpaqueHandle": (2, 10),
-            "HandleType": (2, 10),
+            "OpaqueHandle": (2, 10, 0),
+            "HandleType": (2, 10, 0),
             # Using declarations and struct/class (2.11)
-            "NewOpaqueStruct": (2, 11),
-            "NewOpaqueClass": (2, 11),
-            "NewHandleType": (2, 11),
+            "NewOpaqueStruct": (2, 11, 0),
+            "NewOpaqueClass": (2, 11, 0),
+            "NewHandleType": (2, 11, 0),
             # Primary path (2.10) and secondary path (2.9) from #if/#elif
-            "primary_path": (2, 10),
-            "secondary_path": (2, 9),
+            "primary_path": (2, 10, 0),
+            "secondary_path": (2, 9, 0),
+            # Function with a return type made up of two words.
+            "function_that_returns_constchar": (2, 12, 0),
+            # Function that has its declaration over two lines.
+            "this_is_a_very_long_function": (2, 12, 0),
+            "this_is_a_very_long_function2": (2, 12, 0),
+            # Functions with version in their name, and check patch works.
+            "function_2_11_0": (2, 11, 0),
+            "function_2_12_1": (2, 12, 1),
+            "function_2_13_2": (2, 13, 2),
         }
 
         self.assertEqual(result, expected)
@@ -78,10 +87,10 @@ class TestStableShimUsageLinter(unittest.TestCase):
     def test_write_shim_function_versions(self):
         """Test that write_shim_function_versions creates the expected output file."""
         functions = {
-            "func_a": (2, 9),
-            "func_b": (2, 10),
-            "func_c": (2, 9),
-            "func_d": (2, 11),
+            "func_a": (2, 9, 0),
+            "func_b": (2, 10, 0),
+            "func_c": (2, 9, 0),
+            "func_d": (2, 11, 0),
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as tmp:

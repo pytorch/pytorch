@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-import typing
 
 import torch
 from torch._refs import _unsqueeze_multiple
@@ -31,13 +30,13 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
 
     if quant_min < quant_min_lower_bound:
         raise AssertionError(
-            "quant_min out of bound for dtype, "
+            "quant_min out of bounds for dtype, "
             f"quant_min_lower_bound: {quant_min_lower_bound} quant_min: {quant_min}"
         )
 
     if quant_max > quant_max_upper_bound:
         raise AssertionError(
-            "quant_max out of bound for dtype, "
+            "quant_max out of bounds for dtype, "
             f"quant_max_upper_bound: {quant_max_upper_bound} quant_max: {quant_max}"
         )
 
@@ -136,7 +135,7 @@ def quantize_per_tensor_tensor(
         )
     return quantize_per_tensor(
         input,
-        typing.cast(float, scale.item()),
+        scale.item(),
         zero_point.item(),  # type: ignore[arg-type]
         quant_min,  # type: ignore[arg-type]
         quant_max,  # type: ignore[arg-type]
@@ -203,7 +202,7 @@ def quantize_per_tensor_tensor2(
         )
     return quantize_per_tensor(
         input,
-        typing.cast(float, scale.item()),
+        scale.item(),
         zero_point.item(),  # type: ignore[arg-type]
         quant_min.item(),  # type: ignore[arg-type]
         quant_max.item(),  # type: ignore[arg-type]
@@ -344,7 +343,7 @@ def dequantize_per_tensor_tensor(
         )
     return dequantize_per_tensor(
         input,
-        typing.cast(float, scale.item()),
+        scale.item(),
         zero_point.item(),  # type: ignore[arg-type]
         quant_min,
         quant_max,
@@ -421,7 +420,7 @@ def dequantize_per_tensor_tensor2(
         )
     return dequantize_per_tensor(
         input,
-        typing.cast(float, scale.item()),
+        scale.item(),
         zero_point.item(),  # type: ignore[arg-type]
         quant_min.item(),  # type: ignore[arg-type]
         quant_max.item(),  # type: ignore[arg-type]

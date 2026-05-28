@@ -1,6 +1,7 @@
 # Owner(s): ["module: complex"]
 from __future__ import annotations
 
+import unittest
 from typing import TYPE_CHECKING
 
 import torch
@@ -32,7 +33,11 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_ASAN,
+    unMarkDynamoStrictTest,
+)
 
 
 if TYPE_CHECKING:
@@ -142,11 +147,27 @@ class TestComplexTensor(TestCase):
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    def test_get_set_components(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = ComplexTensor.from_interleaved(
+            torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        )
+        self.assertEqual(c.real, torch.tensor([1, 3], dtype=torch.float32))
+        self.assertEqual(c.imag, torch.tensor([2, 4], dtype=torch.float32))
+
+        c.real = torch.tensor([5, 6])
+        c.imag = torch.tensor([7, 8])
+        self.assertEqual(c.real, torch.tensor([5, 6], dtype=torch.float32))
+        self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
+        self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
     _default_dtype_check_enabled = True
 
+    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/168169")
     @ops(
         implemented_op_db,
         dtypes=OpDTypes.supported_backward,

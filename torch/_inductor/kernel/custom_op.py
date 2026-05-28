@@ -497,7 +497,7 @@ def autotune_custom_op(
     choices = template.generate_custom_op_choices(
         name=name,
         decompositions=decompositions,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
         input_gen_fns=input_gen_fns if input_gen_fns else None,

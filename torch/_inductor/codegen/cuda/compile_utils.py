@@ -2,7 +2,6 @@
 import logging
 import os
 import shutil
-from pathlib import Path
 
 import torch
 from torch._inductor import config
@@ -30,13 +29,15 @@ def use_re_build() -> bool:
     return False
 
 
-def _cutlass_path() -> str:
+def _cutlass_path() -> str | None:
     if config.is_fbcode():
         from libfb.py import parutil
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cutlass.cutlass_dir
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        return config.cutlass.cutlass_dir if try_import_cutlass() else None
 
 
 def _cutlass_paths() -> list[str]:
@@ -49,20 +50,25 @@ def _cutlass_paths() -> list[str]:
 
 
 def _clone_cutlass_paths(build_root: str) -> list[str]:
-    paths = _cutlass_paths()
     cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
+    paths = []
     for path in _cutlass_paths():
         old_path = os.path.join(cutlass_root, path)
         new_path = os.path.join(build_root, path)
         shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+        paths.append(new_path)
     return paths
 
 
 def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
+    cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
+        os.path.realpath(os.path.join(cutlass_root, path))
         for path in _cutlass_paths()
     ]
 
@@ -156,7 +162,7 @@ def _nvcc_compiler_options() -> list[str]:
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cutlass.compile_opt_level,
-        "-std=c++17",
+        "-std=c++20",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
@@ -228,44 +234,3 @@ def cuda_compile_command(
     else:
         autotuning_log.debug("CUDA command: %s", res)
     return res
-
-
-class CUDACompileSourceCapturingContext:
-    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
-
-    def __init__(self):
-        self.sources = []
-        self._compile_patch = None
-
-    def __enter__(self, *args, **kwargs):
-        import unittest.mock as mock
-
-        import torch._inductor.codecache
-
-        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
-
-        def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
-            self.sources.append(source_code)
-            return _compile_method_orig(source_code, dst_file_ext)
-
-        # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
-        )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
-
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command

@@ -95,7 +95,7 @@ void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f, bool check_cas
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_kernel_nocast(sub_iter, f);
+      gpu_kernel_nocast(sub_iter, f, check_cast);
     }
     return;
   }

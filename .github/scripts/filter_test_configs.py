@@ -30,19 +30,31 @@ PREFIX = "test-config/"
 logging.basicConfig(level=logging.INFO)
 
 
-def is_cuda_or_rocm_job(job_name: str | None) -> bool:
-    if not job_name:
-        return False
+def is_cuda_or_rocm_job(
+    job_name: str | None, config: dict[str, Any] | None = None
+) -> bool:
+    if job_name and ("cuda" in job_name or "rocm" in job_name):
+        return True
 
-    return "cuda" in job_name or "rocm" in job_name
+    # Also check the runner name in the config, since some workflows (e.g.
+    # inductor-unittest) use job names that don't include "cuda" even though
+    # they target CUDA runners.
+    if config:
+        runner = config.get("runner", "")
+        if "nvidia.gpu" in runner or "rocm.gpu" in runner:
+            return True
+
+    return False
 
 
 # Supported modes when running periodically. Only applying the mode when
-# its lambda condition returns true
-SUPPORTED_PERIODICAL_MODES: dict[str, Callable[[str | None], bool]] = {
+# its lambda condition returns true. Each callable receives (job_name, config).
+SUPPORTED_PERIODICAL_MODES: dict[
+    str, Callable[[str | None, dict[str, Any] | None], bool]
+] = {
     # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
     "mem_leak_check": is_cuda_or_rocm_job,
-    "rerun_disabled_tests": lambda job_name: True,
+    "rerun_disabled_tests": lambda job_name, config=None: True,
 }
 
 # The link to the published list of disabled jobs
@@ -225,7 +237,7 @@ def set_periodic_modes(
 
     for config in test_matrix.get("include", []):
         for mode, cond in SUPPORTED_PERIODICAL_MODES.items():
-            if not cond(job_name):
+            if not cond(job_name, config):
                 continue
 
             cfg = config.copy()

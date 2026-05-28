@@ -413,6 +413,16 @@ static void index_func_meta_impl(
       self.sizes(),
       " source.shape = ",
       source.sizes());
+  TORCH_CHECK(
+      self.device() == source.device() && self.device() == index.device(),
+      func,
+      "_(): self, index and source expected to be in the same device, "
+      "but got (self) ",
+      self.device(),
+      ", (index) ",
+      index.device(),
+      ", and (source) ",
+      source.device());
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
@@ -988,7 +998,8 @@ Tensor& _index_put_impl_(
     }
   }
   if ((self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU) &&
+       self.device().type() == DeviceType::XPU ||
+       self.device().type() == DeviceType::PrivateUse1) &&
       (accumulate ||
        (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
@@ -2585,7 +2596,7 @@ static Tensor& masked_select_out_impl_cpu(
   auto mask_long =
       at::empty(shape, self.options().dtype(at::kLong)).copy_(*_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
-  auto mask_long_data = mask_long.data_ptr<int64_t>();
+  auto mask_long_data = mask_long.const_data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
   // use std::exclusive_scan when PyTorch upgrades to C++17, which have better
@@ -2844,9 +2855,8 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims) {
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
-      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2899,9 +2909,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
-      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2937,9 +2946,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   auto out_accessor = result.accessor<int64_t, 2>();
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
-      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,

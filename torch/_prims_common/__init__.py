@@ -51,7 +51,9 @@ DimsType: TypeAlias = int | list[int] | tuple[int, ...]
 DimsSequenceType: TypeAlias = list[int] | tuple[int, ...]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType: TypeAlias = type[bool] | type[int] | type[float] | type[complex]
-NumberType: TypeAlias = bool | int | float | complex | torch.SymInt | torch.SymFloat
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
+NumberType: TypeAlias = bool | int | float | complex
 RealNumberType: TypeAlias = bool | int | float
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)
@@ -183,7 +185,7 @@ def compare_tensor_meta(
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
+            a, b, only_cuda=False, allow_rhs_unbacked=allow_rhs_unbacked
         )
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
@@ -213,13 +215,16 @@ def _check_strides_helper(
     significant_only=True,
     allow_rhs_unbacked=False,
 ) -> tuple[bool, int | None]:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
-    # and for tensors with more than one element
+    # and for tensors with more than one element. Use guard_or_false on the
+    # numel gate so unbacked shapes don't trigger a data-dependent guard.
     if (
         not only_cuda or a.device.type == "cuda" or b.device.type == "cuda"
-    ) and a.numel() > 0:
+    ) and guard_or_false(a.numel() > 0):
         for idx in range(a.ndim):
             check = not significant_only or a.shape[idx] > 1
             # TODO: Check the symbols are consistent with each other
@@ -1121,13 +1126,8 @@ _integer_dtypes = (
     torch.int32,
     torch.int64,
 )
-_low_precision_dtypes = (
-    torch.float16,
-    torch.bfloat16,
-    torch.complex32,
-    torch.bcomplex32,
-)
-_complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
+_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
+_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -1171,12 +1171,11 @@ _complex_to_real_dtype_map = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
     torch.complex32: torch.float16,
-    torch.bcomplex32: torch.bfloat16,
 }
 
 _real_to_complex_dtype_map = {
     torch.float16: torch.complex32,
-    torch.bfloat16: torch.bcomplex32,
+    torch.bfloat16: torch.complex64,
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
@@ -1365,7 +1364,7 @@ def get_higher_dtype(
         (torch.float16, torch.bfloat16),
         (torch.float32,),
         (torch.float64,),
-        (torch.complex32, torch.bcomplex32),
+        (torch.complex32,),
         (torch.complex64,),
         (torch.complex128,),
     )
@@ -1495,7 +1494,6 @@ _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
     torch.complex32: torch.complex64,
-    torch.bcomplex32: torch.complex64,
 }
 
 
@@ -1542,7 +1540,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 #   - VIEW, a view of an input tensor is returned
 #   - INPLACE, one or more input tensors is modified
 #
-# these descriptors are mututally exclusive and exhaustive.
+# these descriptors are mutually exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
@@ -1603,7 +1601,7 @@ def elementwise_dtypes(
     partially ordered as follows:
 
     bool -> uint8, int8 -> int16 -> int32 -> int64 ->
-      float16, bfloat16 -> float32 -> float64 -> complex32, bcomplex32 -> complex64 -> complex128
+      float16, bfloat16 -> float32 -> float64 -> complex32 -> complex64 -> complex128
 
     The result dtype is selected by:
       - if no tensor's dtype has the same corresponding type as the one selected,
@@ -1623,7 +1621,7 @@ def elementwise_dtypes(
 
     The "corresponding complex dtypes" are:
       float16    -> complex32
-      bfloat16   -> bcomplex32
+      bfloat16   -> complex64
       float32    -> complex64
       float64    -> complex128
       complex32  -> complex32
@@ -1634,7 +1632,7 @@ def elementwise_dtypes(
     dtype by mapping low precision floating point and complex dtypes as follows:
 
       float16   -> float32
-      bfloat16  -> bcomplex32
+      bfloat16  -> float32
       complex32 -> complex64
 
     This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the

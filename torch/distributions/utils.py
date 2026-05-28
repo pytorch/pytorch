@@ -1,4 +1,3 @@
-import typing
 from collections.abc import Callable, Sequence
 from functools import update_wrapper
 from typing import Any, Final, Generic, overload, TypeVar
@@ -29,10 +28,11 @@ def broadcast_all(*values: Tensor | Number) -> tuple[Tensor, ...]:
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
-      - Number instances (scalars) are upcast to tensors having
-        the same size and type as the first tensor passed to `values`.  If all the
-        values are scalars, then they are upcasted to scalar Tensors.
+
+    - `torch.*Tensor` instances are broadcasted as per :ref:`broadcasting-semantics`.
+    - Number instances (scalars) are upcast to tensors having
+      the same size and type as the first tensor passed to `values`.  If all the
+      values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
         values (list of `Number`, `torch.*Tensor` or objects implementing __torch_function__)
@@ -214,7 +214,7 @@ def vec_to_tril_matrix(vec: Tensor, diag: int = 0) -> Tensor:
             f"The size of last dimension is {vec.shape[-1]} which cannot be expressed as "
             + "the lower triangular part of a square D x D matrix."
         )
-    n = round(typing.cast(float, n.item())) if isinstance(n, torch.Tensor) else round(n)
+    n = round(n.item()) if isinstance(n, torch.Tensor) else round(n)
     mat = vec.new_zeros(vec.shape[:-1] + torch.Size((n, n)))
     arange = torch.arange(n, device=vec.device)
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)

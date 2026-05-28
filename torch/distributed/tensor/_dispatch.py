@@ -7,7 +7,6 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-import torch.distributed.config as dist_config
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
@@ -372,10 +371,6 @@ class OpDispatcher:
                             )
                     else:
                         # CUDA device without user generator, use HOP for traceability
-                        if dist_config.compile_on_one_rank:
-                            raise NotImplementedError(
-                                "run_dtensor_rng_op is not yet compatible with compile_on_one_rank"
-                            )
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):
@@ -395,7 +390,17 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    local_results = output_sharding.redistribute_schema.op(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -486,31 +491,17 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
-                    # update the spec to handle tensor meta changes
-                    args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
-                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
-                else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
-                    if args[0]._spec.placements != output_spec.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require placement changes "
-                            f"are not supported. The operation would change placement from "
-                            f"{args[0]._spec.placements} to {output_spec.placements}, "
-                            f"which requires redistribution and breaks aliasing semantics. "
-                            f"Please use the out-of-place version of this operation instead."
-                        )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                # Fast path: placements unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec.placements == output_spec.placements:
                     return args[0]
+
+                # Placement reindexed (e.g. squeeze_ removing a non-sharded
+                # dim: Shard(1) → Shard(0)). No redistribution — the local
+                # tensor data is unchanged, only dim indices shift.
+                # strict_view=True in sharding prop prevents the illegal
+                # case (squeezing a sharded dim) from reaching here.
+                args[0]._spec = output_spec
+                return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
                 return None
         elif is_out_variant_op:
@@ -597,6 +588,13 @@ class OpDispatcher:
                     new_local_args.append(reshard_arg_spec)
                 else:
                     new_local_args.append(arg_spec)
+
+        # Append extra non-tensor args from rewritten schema (e.g., dims tuple).
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)
 
