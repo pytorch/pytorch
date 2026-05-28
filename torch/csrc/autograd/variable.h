@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/node.h>
 
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
