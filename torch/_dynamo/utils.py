@@ -4786,6 +4786,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     return compile_supported
 
 
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
+
+
 # The following 3.11 source code functions are adapted from
 # https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
 # in order to output source code corresponding to bytecode in 3.11+.
