@@ -3570,16 +3570,20 @@ def _upsample_nearest(
     indices = [None, None] + spatial_indices
     result = aten._unsafe_index(input, indices)
 
-    if result.ndim == 4:
-        # convert output to correct memory format, if necessary
-        memory_format = utils.suggest_memory_format(input)
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
 
-        # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    if result.ndim == 4:
+        # On CUDA with fewer than 4 channels, channels_last is slower than
+        # contiguous because 128-bit vector loads can't be fully utilized and
+        # memory coalescing suffers. Force contiguous in that case.
+        # Only applied for 4D (channels_last); the eager kernel doesn't do
+        # this for 5D (channels_last_3d), so we don't either.
         n_channels = input.shape[1]
         if input.device.type == "cuda" and n_channels < 4:
             memory_format = torch.contiguous_format
 
-        result = result.contiguous(memory_format=memory_format)
+    result = result.contiguous(memory_format=memory_format)
     return result
 
 

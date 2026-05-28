@@ -8960,6 +8960,94 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
+    def test_upsample_nearest3d_non_contiguous(self):
+        def fn(a):
+            return (aten.upsample_nearest3d(a, [6, 7, 8], None),)
+
+        # Permuted 5D input: stride order should be preserved in compiled output
+        self.common(
+            fn,
+            (torch.randn([2, 4, 2, 2, 3]).permute(0, 4, 1, 2, 3),),
+            exact_stride=True,
+        )
+
+    def test_upsample_nearest1d_non_contiguous(self):
+        def fn(a):
+            return (aten.upsample_nearest1d(a, [8], None),)
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 3]).permute(0, 2, 1),),
+            exact_stride=True,
+        )
+
+    def test_upsample_nearest2d_non_contiguous(self):
+        def fn(a):
+            return (aten.upsample_nearest2d(a, [6, 8]),)
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 3, 5]).permute(0, 3, 1, 2),),
+            exact_stride=True,
+        )
+
+    def test_upsample_nearest_exact1d(self):
+        def fn(a):
+            return (
+                aten._upsample_nearest_exact1d(a, [74]),
+                aten._upsample_nearest_exact1d(a, [45]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37]),))
+
+    def test_upsample_nearest_exact2d(self):
+        def fn(a):
+            return (
+                aten._upsample_nearest_exact2d(a, [74, 76]),
+                aten._upsample_nearest_exact2d(a, [45, 74]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_nearest_exact3d(self):
+        def fn(a):
+            return (
+                aten._upsample_nearest_exact3d(a, [74, 76, 78]),
+                aten._upsample_nearest_exact3d(a, [45, 74, 103]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
+
+    def test_upsample_nearest_exact1d_non_contiguous(self):
+        def fn(a):
+            return (aten._upsample_nearest_exact1d(a, [8]),)
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 3]).permute(0, 2, 1),),
+            exact_stride=True,
+        )
+
+    def test_upsample_nearest_exact2d_non_contiguous(self):
+        def fn(a):
+            return (aten._upsample_nearest_exact2d(a, [6, 8]),)
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 3, 5]).permute(0, 3, 1, 2),),
+            exact_stride=True,
+        )
+
+    def test_upsample_nearest_exact3d_non_contiguous(self):
+        def fn(a):
+            return (aten._upsample_nearest_exact3d(a, [6, 7, 8]),)
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 2, 2, 3]).permute(0, 4, 1, 2, 3),),
+            exact_stride=True,
+        )
+
     def test_upsample_nearest2d_backward(self):
         func = torch.ops.aten.upsample_nearest2d_backward
 

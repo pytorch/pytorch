@@ -238,8 +238,12 @@ add_needs_realized_inputs(
         aten.max_pool3d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
+        aten.upsample_nearest1d,
+        aten._upsample_nearest_exact1d,
         aten.upsample_nearest2d,
         aten._upsample_nearest_exact2d,
+        aten.upsample_nearest3d,
+        aten._upsample_nearest_exact3d,
         aten._int_mm,
     ]
 )
