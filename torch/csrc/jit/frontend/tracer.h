@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/Dimname.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -326,6 +327,10 @@ TORCH_API void addInputs(
     const char* name,
     const std::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::optional<at::DimnameList> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
