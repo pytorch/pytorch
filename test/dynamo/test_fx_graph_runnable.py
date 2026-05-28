@@ -203,6 +203,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_user_defined_triton_kernel_autotune(self):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
