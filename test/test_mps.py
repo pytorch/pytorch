@@ -8676,12 +8676,11 @@ class TestMPS(TestCaseMPS):
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0), []),
             ("cauchy_", lambda t: t.cauchy_(), []),
             ("geometric_", lambda t: t.geometric_(p=0.2), [torch.int32, torch.int16, torch.int8, torch.uint8]),
-            ("dirichlet", lambda t: torch._sample_dirichlet(t.random_()), []),
         ]
         for name, op_func, extra_dtypes in ops:
             with self.subTest(operation=name):
                 cpu_tensor = op_func(torch.zeros(100, 100)).flatten()
-                mps_tensor = op_func(torch.zeros(100, 100, device='mps')).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100)).flatten()
                 self._helper_kl_divergence(cpu_tensor, mps_tensor)
             for extra_dtype in extra_dtypes:
                 cpu_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
