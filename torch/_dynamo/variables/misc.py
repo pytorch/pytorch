@@ -2063,6 +2063,26 @@ class DebuggingVariable(VariableTracker):
         return True
 
 
+_LOGGING_METHOD_NAMES = (
+    "debug",
+    "info",
+    "warning",
+    "warn",
+    "error",
+    "exception",
+    "critical",
+    "fatal",
+    "log",
+)
+
+
+def _get_logging_root_method(value: Any) -> Callable[..., Any] | None:
+    for name in _LOGGING_METHOD_NAMES:
+        if value is getattr(logging, name, None):
+            return getattr(logging.root, name, None)
+    return None
+
+
 class IgnoredFunctionVariable(VariableTracker):
     """
     Represents a call to an arbitrary function that should be ignored.
@@ -2077,6 +2097,19 @@ class IgnoredFunctionVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
+
+    @staticmethod
+    def is_ignored(value: Any) -> bool:
+        ignore_set = torch._dynamo.config.ignore_logging_functions
+        if any(value is fn for fn in ignore_set):
+            return True
+
+        root_method = _get_logging_root_method(value)
+        if root_method is not None:
+            root_function = getattr(root_method, "__func__", None)
+            return root_method in ignore_set or root_function in ignore_set
+
+        return False
 
     def call_function(
         self,
@@ -2101,6 +2134,12 @@ class LoggingLoggerVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> logging.Logger:
         return self.value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "handlers":
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, self.value.handlers, source)
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,

@@ -69,6 +69,54 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertIn("moo", printed_output)
             self.assertGreater(len(counters["graph_break"]), 0)
 
+    @parametrize(
+        "ignore_method",
+        [
+            logging.info,
+            logging.Logger.info,
+            logging.root.info,
+        ],
+    )
+    def test_ignore_module_level_logger(self, ignore_method):
+        counters.clear()
+        root = logging.getLogger()
+        orig_handlers = root.handlers[:]
+        root.handlers[:] = []
+
+        def f(x):
+            logging.info("moo")  # noqa: LOG015
+            return x + 1
+
+        try:
+            x = torch.randn(3, 3)
+            with torch._dynamo.config.patch(ignore_logging_functions={ignore_method}):
+                opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+                opt_out = opt_f(x)
+
+            self.assertTrue(same(opt_out, x + 1))
+            self.assertEqual(len(counters["graph_break"]), 0)
+            self.assertEqual(root.handlers, [])
+        finally:
+            root.handlers[:] = orig_handlers
+
+    def test_module_level_logger_handlers_len(self):
+        root = logging.getLogger()
+        orig_handlers = root.handlers[:]
+        root.handlers[:] = [logging.NullHandler()]
+
+        def f(x):
+            logging.info("moo")  # noqa: LOG015
+            return x + 1
+
+        try:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "logging.Logger method not supported",
+            ):
+                torch.compile(backend="eager", fullgraph=True)(f)(torch.randn(3, 3))
+        finally:
+            root.handlers[:] = orig_handlers
+
     def test_ignore_arbitrary_function_noop(self):
         counters.clear()
         calls = []
