@@ -229,9 +229,19 @@ AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerUpdateConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
     bool use_inactive,
     bool validate_full_update);
 
