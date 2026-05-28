@@ -18,6 +18,7 @@ namespace c10 {
   _(namespaces, scope)               \
   _(namespaces, user)                \
   _(namespaces, _caffe2)             \
+  _(namespaces, dimname)             \
   _(namespaces, namespaces)          \
   _(prim, Assign)                    \
   _(prim, BroadcastingChunk)         \
