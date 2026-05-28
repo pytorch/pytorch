@@ -2,8 +2,8 @@
 
 import ctypes
 
-import numpy as np
 from cuda.bindings.runtime import cudaDataType  # pyrefly: ignore[missing-import]
+
 from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
 from nvmath.bindings.cublas import (  # pyrefly: ignore[missing-import]
     ComputeType,
@@ -18,15 +18,7 @@ import torch
 # for large shapes; 32 MB matches the PyTorch C++ cublasLt path.
 CUBLASLT_WORKSPACE_BYTES = 32 * 1024 * 1024
 
-_cublaslt_handle = None
 _cublaslt_workspace = None
-
-
-def _get_cublaslt_handle():
-    global _cublaslt_handle
-    if _cublaslt_handle is None:
-        _cublaslt_handle = cublasLt.create()
-    return _cublaslt_handle
 
 
 def _get_cublaslt_workspace(device="cuda"):
@@ -109,7 +101,8 @@ class ForeachMMCublasLt:
         self._dims = dims  # prevent GC
 
         # cublasLt matmul descriptor
-        handle = _get_cublaslt_handle()
+        # Reuse PyTorch's cuBLAS handle (cublasHandle_t is valid as cublasLtHandle_t)
+        handle = torch.cuda.current_blas_handle()
         self._handle = handle
         desc = cublasLt.matmul_desc_create(
             ComputeType.COMPUTE_32F, cudaDataType.CUDA_R_32F
@@ -162,7 +155,8 @@ class ForeachMMCublasLt:
                 ctypes.c_int64,
             )
 
-        heur = np.zeros(1, dtype=cublasLt.matmul_heuristic_result_dtype)
+        # cublasLtMatmulHeuristicResult_t is 96 bytes; algo field is at offset 0
+        heur_buf = (ctypes.c_byte * 96)()
         ret = (ctypes.c_int32 * 1)(0)
         cublasLt.matmul_algo_get_heuristic(
             handle,
@@ -173,15 +167,15 @@ class ForeachMMCublasLt:
             self._Dd,
             pref,
             1,
-            heur.ctypes.data,
+            ctypes.addressof(heur_buf),
             ctypes.addressof(ret),
         )
         if ret[0] == 0:
             raise RuntimeError("cublasLt grouped GEMM: no algorithm found")
         cublasLt.matmul_preference_destroy(pref)
 
-        self._algo_ptr = heur["algo"].ctypes.data  # pyrefly: ignore[bad-index]
-        self._heur = heur  # prevent GC
+        self._algo_ptr = ctypes.addressof(heur_buf)
+        self._heur_buf = heur_buf  # prevent GC
 
         # Cached pointer offsets into _dev_ptrs
         base = self._dev_ptrs.data_ptr()

@@ -22,6 +22,7 @@ Dispatch:
 import torch
 
 from ... import registry
+from ...common_utils import _unavailable_reason
 
 
 # nvmath cublasLt grouped GEMM availability (requires cuBLAS >= 13.2 runtime).
@@ -30,19 +31,17 @@ from ... import registry
 # runtime library lacks the symbol. We cache the result after first attempt.
 _nvmath_available: "bool | None" = None
 
+_NVMATH_DEPS = [
+    ("nvmath-python", "nvmath.bindings"),
+    ("cuda-python", "cuda.bindings.runtime"),
+]
+
 
 def _check_nvmath_cublaslt() -> bool:
     global _nvmath_available
     if _nvmath_available is not None:
         return _nvmath_available
-    try:
-        from nvmath.bindings import (  # noqa: F401  # pyrefly: ignore[missing-import]
-            cublasLt,
-        )
-
-        _nvmath_available = True
-    except ImportError:
-        _nvmath_available = False
+    _nvmath_available = _unavailable_reason(_NVMATH_DEPS) is None
     return _nvmath_available
 
 
