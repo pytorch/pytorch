@@ -2,8 +2,8 @@
 
 #include <pybind11/chrono.h>
 
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
@@ -86,9 +86,8 @@ make_dynamic_cudagraph_allocator() {
       CUmemGenericAllocationHandle handle = handle_for_device(device);
 
       CUdeviceptr ptr = 0;
-      C10_CUDA_DRIVER_CHECK(
-          c10::cuda::DriverAPI::get()->cuMemAddressReserve_(
-              &ptr, rounded_size, 0ULL, 0, 0ULL));
+      C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressReserve_(
+          &ptr, rounded_size, 0ULL, 0, 0ULL));
 
       size_t mapped_size = 0;
       try {

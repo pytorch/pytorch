@@ -756,8 +756,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       TORCH_CHECK(
           THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
           "mempool_id elements must be integers");
-      TORCH_CHECK(
-          PyBool_Check(traces), "include_traces must be a boolean");
+      TORCH_CHECK(PyBool_Check(traces), "include_traces must be a boolean");
       mempool_id = c10::cuda::MempoolId_t(
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
       include_traces = (Py_IsTrue(traces));

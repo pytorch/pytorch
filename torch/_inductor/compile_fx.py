@@ -1954,6 +1954,7 @@ def cudagraphify(
 
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        cudagraphify_impl_name = "torch._inductor.cudagraph_trees.cudagraphify_impl"
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -1966,6 +1967,7 @@ def cudagraphify(
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     elif config.triton.cudagraphs_elide_input_output_copies:
+        cudagraphify_impl_name = "torch._inductor.cudagraph_digraphs.cudagraphify_impl"
         from torch._inductor.cudagraph_digraphs import (
             cudagraphify_impl as params_cudagraphify_impl,
         )
@@ -1982,7 +1984,10 @@ def cudagraphify(
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
+        cudagraphify_impl_name = "torch._inductor.compile_fx.cudagraphify_impl"
         cudagraphify_fn = cudagraphify_impl
+
+    cudagraphs_log.info("using %s", cudagraphify_impl_name)
 
     thread_local = threading.local()
 
