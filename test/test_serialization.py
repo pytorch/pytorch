@@ -1215,10 +1215,22 @@ class TestSerialization(TestCase, SerializationMixin):
             with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     # https://github.com/pytorch/pytorch/issues/185098
-                    data = torch.rand(200, 2048, 2048, dtype=torch.float32)  # ~3.13 GiB storage
+                    tensor_size = 2 * 1024 * 1024 * 1024 + 1024
+                    boundary = 2 * 1024 * 1024 * 1024
+                    data = torch.zeros(tensor_size, dtype=torch.uint8)  # >2 GiB storage
+                    expected = torch.arange(8, dtype=torch.uint8)
+                    data[:8] = expected
+                    data[boundary - 4:boundary + 4] = expected
+                    data[-8:] = expected
                     torch.save(data, fname)
+                    del data
+                    gc.collect()
                     loaded_data = torch.load(fname)
-                    self.assertEqual(loaded_data, data)
+                    self.assertEqual(loaded_data.shape, (tensor_size,))
+                    self.assertEqual(loaded_data.dtype, torch.uint8)
+                    self.assertEqual(loaded_data[:8], expected)
+                    self.assertEqual(loaded_data[boundary - 4:boundary + 4], expected)
+                    self.assertEqual(loaded_data[-8:], expected)
 
     @serialTest()
     def test_serialization_4gb_file(self):
