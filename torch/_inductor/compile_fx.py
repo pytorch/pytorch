@@ -930,7 +930,7 @@ def _compile_fx_inner(
     ):
         use_cache = (
             not config.force_disable_caches
-            and not config.benchmark_harness_preserve_input_values
+            and not config.trace.save_real_tensors
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
@@ -1121,9 +1121,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -3032,7 +3033,7 @@ def _compile_fx_main(
                 V.set_fake_mode(fake_mode),
                 (
                     V.set_real_inputs(example_inputs_)
-                    if config.benchmark_harness_preserve_input_values
+                    if config.trace.save_real_tensors
                     else contextlib.nullcontext()
                 ),
                 compiled_autograd._disable(),
@@ -3044,7 +3045,7 @@ def _compile_fx_main(
             V.set_fake_mode(fake_mode),
             (
                 V.set_real_inputs(example_inputs_)
-                if config.benchmark_harness_preserve_input_values
+                if config.trace.save_real_tensors
                 else contextlib.nullcontext()
             ),
             torch._guards.tracing(tracing_context),

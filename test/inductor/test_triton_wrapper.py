@@ -138,7 +138,7 @@ class TestTritonWrapper(TestCase):
         self.assertEqual(len(args), 4)
 
     @functorch_config.patch({"enable_autograd_cache": False})
-    @inductor_config.patch({"benchmark_harness_preserve_input_values": False})
+    @inductor_config.patch({"trace.save_real_tensors": False})
     def test_benchmark_does_not_embed_integer_bool_values_by_default(self):
         @torch.compile
         def f(index, mask):
@@ -161,8 +161,10 @@ class TestTritonWrapper(TestCase):
         self.assertEqual(args[1], torch.zeros_like(mask))
 
     @functorch_config.patch({"enable_autograd_cache": False})
-    @inductor_config.patch({"benchmark_harness_preserve_input_values": True})
-    def test_benchmark_preserves_integer_and_bool_input_values_when_enabled(self):
+    @inductor_config.patch({"trace.save_real_tensors": True})
+    def test_benchmark_preserves_integer_and_bool_input_values_with_save_real(
+        self,
+    ):
         @torch.compile
         def f(values, index, mask):
             base = torch.zeros((4, values.shape[1]), device=values.device)
@@ -188,9 +190,7 @@ class TestTritonWrapper(TestCase):
         compiled_module.benchmark_compiled_module(args, times=1, repeat=1)
 
     @functorch_config.patch({"enable_autograd_cache": False})
-    @inductor_config.patch(
-        {"benchmark_harness_preserve_input_values": True, "fx_graph_cache": True}
-    )
+    @inductor_config.patch({"trace.save_real_tensors": True, "fx_graph_cache": True})
     def test_benchmark_preserved_input_values_bypass_fx_graph_cache(self):
         @torch.compile
         def f(index):
@@ -212,7 +212,7 @@ class TestTritonWrapper(TestCase):
         self.assertEqual(args[0], index2)
 
     @functorch_config.patch({"enable_autograd_cache": False})
-    @inductor_config.patch({"benchmark_harness_preserve_input_values": True})
+    @inductor_config.patch({"trace.save_real_tensors": True})
     def test_benchmark_preserved_cpu_view_is_compact(self):
         @torch.compile
         def f(index):
@@ -247,7 +247,7 @@ class TestTritonWrapper(TestCase):
         self.assertEqual(payload.untyped_storage().nbytes(), index.nbytes)
 
     @functorch_config.patch({"enable_autograd_cache": False})
-    @inductor_config.patch({"benchmark_harness_preserve_input_values": True})
+    @inductor_config.patch({"trace.save_real_tensors": True})
     def test_benchmark_skips_overlapping_integer_input_values(self):
         @torch.compile
         def f(index):

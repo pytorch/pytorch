@@ -40,6 +40,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -682,10 +683,6 @@ class ExternKernelMultiOutLine(WrapperLine):
 
         code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
 
-        for out_node in node.out_variant_output_nodes:
-            if isinstance(out_node.layout, ir.Layout):
-                out_node.codegen_size_asserts(self.wrapper)
-
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -786,7 +783,7 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
-    """Enter a CUDA device context and retrieve user stream objects.
+    """Enter a device context and retrieve user stream objects.
 
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
@@ -803,7 +800,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
             if self.num_streams > 1:
                 for i in range(1, self.num_streams):
@@ -816,7 +813,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
 @dataclasses.dataclass
 class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
-    """Exit a CUDA device context.
+    """Exit a device context.
 
     Attributes:
         num_streams: Number of streams that were allocated (must match Enter).
@@ -832,16 +829,16 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
 
 @dataclasses.dataclass
 class EnterCudaStreamContextLine(WrapperLine):
-    """Enter a context executed by respective CUDA Stream.
+    """Enter a context executed by the respective device stream.
 
     Attributes:
-        stream_idx: The index number corresponds to the entering CUDA Stream context.
+        stream_idx: The index number for the entering device stream context.
     """
 
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with torch.cuda.stream({get_stream_name(self.stream_idx)}):")
+        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
         code.do_indent()
 
 
@@ -1224,15 +1221,33 @@ class AssertSizeStrideLine(WrapperLine):
     name: str
     size: str
     stride: str
+    op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper.write_assert_size_stride(
-            self.name, self.size, self.stride, "input"
+        self.wrapper._codegen_assert_size_stride(
+            code, self.name, self.size, self.stride, self.op_name
         )
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
         return converter._generate_assert_size_stride
+
+
+@dataclasses.dataclass
+class AssertDivByZeroLine(WrapperLine):
+    """Deferred AOTI runtime check that a sizevar divisor is non-zero.
+
+    Queued from CppWrapperCpu.codegen_cpp_sizevar during the build phase
+    and replayed at the position of use so the check lands after the
+    declarations of any unbacked symbols it references.
+    """
+
+    wrapper: PythonWrapperCodegen
+    divisor: str
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_div_by_zero(code, self.divisor, self.op_name)
 
 
 BufferName = str
@@ -1698,12 +1713,48 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(self, name, size, stride))
+                self.write_assert_size_stride(name, size, stride, "input")
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        """Queue an assert_size_stride for emission during replay."""
+        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
+
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
+    ) -> None:
+        """Emit one assert_size_stride line to `code` (replay-phase target).
+
+        Subclasses override to change the emitted form (e.g., C++ assert with
+        an AOTI runtime env guard).
+        """
+        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+
+    def write_assert_div_by_zero(self, divisor_str: str, op_name: str) -> None:
+        """Queue a div-by-zero AOTI check for emission during replay.
+
+        codegen_cpp_sizevar is called in both build and replay phases;
+        set_writeline routes the WrapperLine appropriately in either case.
+        """
+        self.writeline(AssertDivByZeroLine(self, divisor_str, op_name))
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target).
+
+        Only emitted by C++ wrappers; the Python wrapper relies on Python's
+        native ZeroDivisionError instead of pre-checking divisors.
+        """
+        raise NotImplementedError(
+            "AOTI div-by-zero check is only emitted by C++ wrappers"
+        )
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1905,6 +1956,9 @@ class PythonWrapperCodegen(CodeGen):
         for out_node in node.out_variant_output_nodes:
             self.codegen_allocation(out_node)
         self.writeline(ExternKernelMultiOutLine(self, node))
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -2074,11 +2128,28 @@ class PythonWrapperCodegen(CodeGen):
             return 1
 
     @contextlib.contextmanager
-    def set_writeline(self, new: Callable[..., None]) -> Iterator[Callable[..., None]]:
+    def set_writeline(
+        self,
+        target: IndentedBuffer,
+        writeline: Callable[..., None],
+    ) -> Iterator[Callable[..., None]]:
+        """Temporarily redirect self.writeline to write into `target`.
+
+        Plain strings go through `writeline`.
+        WrapperLines are codegen'd into `target` directly.
+        """
         old = self.writeline
+
+        def dispatch(line: LineContext | DeferredLineBase | WrapperLine | str) -> None:
+            if isinstance(line, WrapperLine):
+                # pyrefly: ignore [missing-attribute]
+                line.codegen(target)
+            else:
+                writeline(line)
+
         try:
-            self.writeline = new  # type: ignore[method-assign]
-            yield new
+            self.writeline = dispatch  # type: ignore[method-assign]
+            yield dispatch
         finally:
             self.writeline = old  # type: ignore[method-assign]
 
@@ -2107,7 +2178,7 @@ class PythonWrapperCodegen(CodeGen):
 
             # At this point, we shouldn't generate any new memory planning lines.
             # Override writeline to point at the wrapper call, in case it gets called.
-            with self.set_writeline(self.wrapper_call.writeline):
+            with self.set_writeline(self.wrapper_call, self.wrapper_call.writeline):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
                         # pyrefly: ignore [missing-attribute]
@@ -2243,14 +2314,21 @@ class PythonWrapperCodegen(CodeGen):
         # codegen allocations in two passes
         planning_states = [MemoryPlanningState()]
         past_planning_states = []
+        peak_estimate_stack: list[EfficientPeakEstimate] = []
         for i in range(len(self.lines)):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
                 self.lines[i] = line.plan(planning_states[-1])
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
+                if config.allow_buffer_reuse:
+                    peak_estimate_stack.append(self.estimate_peak)
+                    with V.set_graph_handler(line.graph):
+                        self.estimate_peak = EfficientPeakEstimate()
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
+                if config.allow_buffer_reuse:
+                    self.estimate_peak = peak_estimate_stack.pop()
         past_planning_states.append(planning_states.pop())
         assert len(planning_states) == 0
 
@@ -2485,10 +2563,8 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_dynamic_slice_size(self, node):
         def clamp_index(x):
-            pos = self.codegen_sizevar(sympy.Max(0, sympy.Min(x, node.size)))
-            neg = self.codegen_sizevar(
-                sympy.Max(0, sympy.Min(x + node.size, node.size))
-            )
+            pos = self.codegen_sizevar(Max(0, Min(x, node.size)))
+            neg = self.codegen_sizevar(Max(0, Min(x + node.size, node.size)))
             x_cond = self.codegen_sizevar(x)
             return f"{pos} if {x_cond} >= 0 else {neg}"
 
@@ -2548,7 +2624,7 @@ class PythonWrapperCodegen(CodeGen):
         def should_preserve_tensor_value(value: Any) -> bool:
             return (
                 isinstance(value, torch.Tensor)
-                and config.benchmark_harness_preserve_input_values
+                and config.trace.save_real_tensors
                 and value.layout == torch.strided
                 and value.device.type != "meta"
                 and not isinstance(value, torch._subclasses.FakeTensor)
@@ -2598,7 +2674,7 @@ class PythonWrapperCodegen(CodeGen):
         example_input_values: dict[str, torch.Tensor] = {}
         example_inputs = V.graph.example_inputs
         benchmark_input_values = example_inputs
-        if config.benchmark_harness_preserve_input_values:
+        if config.trace.save_real_tensors:
             benchmark_input_values = (
                 example_inputs
                 if isinstance(V.real_inputs, NullHandler)
@@ -3010,6 +3086,7 @@ class PythonWrapperCodegen(CodeGen):
                 config_of(
                     signature,
                     indices=arg_indices,
+                    pointer_range_override=(),
                 )
             ],
         }
@@ -3134,6 +3211,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("\\", "\\\\")
         if config.cpp_wrapper:
             # With cpp_wrapper + autotune_at_compile_time=False, the source is
             # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
@@ -4483,7 +4561,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # pyre-fixme[16]: scheduler.current_stream_name added in scheduler commit
         if (current_stream_name := V.graph.scheduler.current_stream_name) is not None:
             name = f"{current_stream_name}_raw"
-            self.writeline(f"{name} = {current_stream_name}.cuda_stream")
+            self.writeline(
+                f"{name} = {V.graph.device_ops.stream_handle(current_stream_name)}"
+            )
         else:
             name = get_raw_stream_name(device_idx)
             self.writeline(f"{name} = get_raw_stream({device_idx})")
