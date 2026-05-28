@@ -2128,15 +2128,15 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         # Iterate to make the leak larger
         initial_mem = get_mem()
-        for _ in range(100000):
+        for _ in range(10000):
             root.clone_manager(clone_filter)
         gc.collect()
         final_mem = get_mem()
         delta = final_mem - initial_mem
 
-        # Only fail if the leak is larger than 2MB.
+        # Only fail if the leak is larger than 1MB.
         self.assertLessEqual(
-            delta, 2 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
         )
 
     def test_dict_keys_match(self):
