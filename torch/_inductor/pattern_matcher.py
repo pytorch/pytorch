@@ -2168,6 +2168,140 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
         nd.meta["mutation_region_id"] = mutation_region_id
 
 
+@dataclasses.dataclass(frozen=True)
+class _MutationRegionRefresh:
+    anchor: torch.fx.Node
+    stop: torch.fx.Node
+    mutation_region_id: int
+    mutation_count: int
+
+
+@dataclasses.dataclass
+class _GraphMutationTracker:
+    created_nodes: list[torch.fx.Node] = dataclasses.field(default_factory=list)
+    erased_mutation_node: bool = False
+
+    def changed_mutation_regions(self) -> bool:
+        return self.erased_mutation_node or _contains_mutation_op(self.created_nodes)
+
+
+@contextlib.contextmanager
+def _track_graph_mutation_ops(
+    graph: torch.fx.Graph,
+) -> Generator[_GraphMutationTracker, None, None]:
+    tracker = _GraphMutationTracker()
+    create_node = graph.create_node
+    erase_node = graph.erase_node
+    sentinel = object()
+    graph_dict = graph.__dict__
+    create_node_attr = graph_dict.get("create_node", sentinel)
+    erase_node_attr = graph_dict.get("erase_node", sentinel)
+
+    def tracked_create_node(*args: Any, **kwargs: Any) -> torch.fx.Node:
+        created_node = create_node(*args, **kwargs)
+        tracker.created_nodes.append(created_node)
+        return created_node
+
+    def tracked_erase_node(to_erase: torch.fx.Node) -> Any:
+        if not to_erase._erased and is_mutation_op(to_erase):
+            tracker.erased_mutation_node = True
+        return erase_node(to_erase)
+
+    graph_dict["create_node"] = tracked_create_node
+    graph_dict["erase_node"] = tracked_erase_node
+    try:
+        yield tracker
+    finally:
+        if create_node_attr is sentinel:
+            del graph_dict["create_node"]
+        else:
+            graph_dict["create_node"] = create_node_attr
+        if erase_node_attr is sentinel:
+            del graph_dict["erase_node"]
+        else:
+            graph_dict["erase_node"] = erase_node_attr
+
+
+def _count_mutation_ops_until(start: torch.fx.Node, stop: torch.fx.Node) -> int:
+    mutation_count = 0
+    nd = start
+    while nd is not stop:
+        assert nd.op != "root"
+        if is_mutation_op(nd):
+            mutation_count += 1
+        nd = nd.next
+    return mutation_count
+
+
+def _contains_mutation_op(nodes: Iterable[torch.fx.Node]) -> bool:
+    return any(is_mutation_op(nd) for nd in nodes)
+
+
+def _replacement_changes_mutation_regions(
+    entry: ReplacementPatternEntry, match: Match
+) -> bool:
+    assert match.replacement_graph is not None
+    return _contains_mutation_op(match.nodes) or _contains_mutation_op(
+        match.replacement_graph.graph.nodes
+    )
+
+
+def _mutation_region_refresh(
+    graph: torch.fx.Graph,
+    nodes: Sequence[torch.fx.Node],
+) -> _MutationRegionRefresh:
+    if nodes:
+        first_matched_node = min(nodes)
+        last_matched_node = max(nodes)
+        anchor = first_matched_node.prev
+        stop = last_matched_node.next
+    else:
+        first_node = next(iter(graph.nodes))
+        anchor = first_node.prev
+        stop = anchor
+
+    mutation_region_id = (
+        0 if anchor.op == "root" else get_mutation_region_id(graph, anchor)
+    )
+    return _MutationRegionRefresh(
+        anchor,
+        stop,
+        mutation_region_id,
+        _count_mutation_ops_until(anchor.next, stop),
+    )
+
+
+def _refresh_mutation_region_ids(
+    graph: torch.fx.Graph,
+    refresh: _MutationRegionRefresh,
+) -> None:
+    if refresh.anchor._erased or refresh.stop._erased:
+        compute_mutation_region_ids(graph)
+        return
+
+    nd = refresh.anchor.next
+    mutation_region_id = refresh.mutation_region_id
+    mutation_count = 0
+    while nd is not refresh.stop:
+        if nd.op == "root":
+            compute_mutation_region_ids(graph)
+            return
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+            mutation_count += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+        nd = nd.next
+
+    if mutation_count == refresh.mutation_count:
+        return
+
+    while nd.op != "root":
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+        nd = nd.next
+
+
 def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
     """
     Wrap a bound method to remove 'self' from its signature for FX tracing.
@@ -2283,7 +2417,28 @@ class PatternMatcherPass:
 
                     if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
-                        entry.apply(m, graph, node)
+                        if isinstance(entry, ReplacementPatternEntry):
+                            mutation_region_refresh = (
+                                _mutation_region_refresh(graph, m.nodes)
+                                if _replacement_changes_mutation_regions(entry, m)
+                                else None
+                            )
+                        elif isinstance(entry, GraphPatternEntry):
+                            mutation_region_refresh = None
+                        else:
+                            mutation_region_refresh = _mutation_region_refresh(
+                                graph, m.nodes
+                            )
+                        if isinstance(entry, GraphPatternEntry):
+                            with _track_graph_mutation_ops(graph) as mutation_tracker:
+                                entry.apply(m, graph, node)
+                            if mutation_tracker.changed_mutation_regions():
+                                compute_mutation_region_ids(graph)
+                        elif mutation_region_refresh is not None:
+                            entry.apply(m, graph, node)
+                            _refresh_mutation_region_ids(graph, mutation_region_refresh)
+                        else:
+                            entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
 
