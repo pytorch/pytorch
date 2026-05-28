@@ -4,7 +4,7 @@ from __future__ import annotations
 import inspect
 import itertools
 import re
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from io import StringIO
 from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
 from unittest.mock import patch
@@ -789,7 +789,7 @@ class DefaultHandler(OpsHandler[Any]):
             return self._default(name, args, kwargs)
 
         # would like to remove this function entirely, but it's used in MTIA backend
-        warnings.warn(f"undefined OpHandler.{name}, please add missing op schema")
+        _warn_torch(f"undefined OpHandler.{name}, please add missing op schema")
         return fallback
 
     @staticmethod

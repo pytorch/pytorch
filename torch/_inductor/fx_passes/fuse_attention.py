@@ -2,7 +2,7 @@
 import functools
 import inspect
 import logging
-import warnings
+from torch._warn_utils import warn as _warn_torch
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -867,7 +867,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        _warn_torch(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."

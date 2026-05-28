@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, TypeVar
@@ -997,13 +998,13 @@ def trace(
 
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
@@ -1136,13 +1137,13 @@ def trace_module(
 
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )

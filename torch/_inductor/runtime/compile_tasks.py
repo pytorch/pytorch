@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from pathlib import Path
 from types import ModuleType
 from typing import Any, TYPE_CHECKING
@@ -48,7 +49,7 @@ def _set_triton_ptxas_path() -> None:
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
         os.environ["TRITON_PTXAS_PATH"] = str(ptxas)
     else:
-        warnings.warn(f"{ptxas} exists but is not an executable")
+        _warn_torch(f"{ptxas} exists but is not an executable")
 
 
 def _set_triton_libdevice_path() -> None:

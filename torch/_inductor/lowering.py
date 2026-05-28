@@ -9,7 +9,7 @@ import math
 import operator
 import os
 import sys
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
@@ -2518,7 +2518,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 @functools.cache
 def _warn_complex_not_supported():
-    warnings.warn(
+    _warn_torch(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
     )
 

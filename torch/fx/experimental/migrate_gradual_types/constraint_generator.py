@@ -1,5 +1,5 @@
 import operator
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable, Iterable, Sequence
 from typing import TypeAlias, TypeVar
 from typing_extensions import ParamSpec
@@ -858,7 +858,7 @@ def gt_inference_rule(
         elif isinstance(e1, TVar) and isinstance(e2, int):
             # then we made the wrong assumption about the argument being a tensor
             # so we should fix the assumption
-            warnings.warn(
+            _warn_torch(
                 f"Made the wrong assumption for node {n}. Correctness not guaranteed."
             )
 

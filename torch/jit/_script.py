@@ -15,6 +15,7 @@ import inspect
 import pickle
 import sys
 import warnings
+from torch._warn_utils import warn as _warn_torch
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TypeVar
 from typing_extensions import deprecated, Self
@@ -356,13 +357,13 @@ class ScriptWarning(Warning):
 
 def script_method(fn):
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
@@ -1479,13 +1480,13 @@ def script(
             print(scripted_model([20]))
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.script` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
     else:
-        warnings.warn(
+        _warn_torch(
             "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             DeprecationWarning,
         )
@@ -1637,7 +1638,7 @@ def interface(obj: _T) -> _T:
         user_fn_jit(impls, 0, val)
         user_fn_jit(impls, 1, val)
     """
-    warnings.warn(
+    _warn_torch(
         "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
         DeprecationWarning,
     )

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-import warnings
+from torch._warn_utils import warn as _warn_torch
 
 import torch
 
@@ -166,7 +166,7 @@ def set_fusion_strategy(strategy: list[tuple[str, int]]):
     NB: in the future, if more as more fusion backends are added there may be more granular
     apis for specific fusers.
     """
-    warnings.warn(
+    _warn_torch(
         "`torch.jit.set_fusion_strategy` is deprecated. Please use `torch.compile` instead.",
         DeprecationWarning,
     )

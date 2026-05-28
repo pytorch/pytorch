@@ -9,7 +9,7 @@ For fp16/bf16: supports forward and backward pass.
 from __future__ import annotations
 
 import importlib
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from typing import TYPE_CHECKING
 
 
@@ -137,7 +137,7 @@ def _fa3_common_support_error(
     if query.dtype == torch.float8_e4m3fn and (
         q_descale is None or k_descale is None or v_descale is None
     ):
-        warnings.warn(
+        _warn_torch(
             "When using SDPA with fp8, descale tensor should always be used"
             " for accurate dequantization. Please use "
             "_scaled_dot_product_attention_quantized and "

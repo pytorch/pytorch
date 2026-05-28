@@ -4,7 +4,7 @@ This operator implements FP8 scaled dot product attention using Flash Attention 
 This operator is experimental and subject to change.
 """
 
-import warnings
+from torch._warn_utils import warn as _warn_torch
 from enum import IntEnum
 
 import torch
@@ -132,7 +132,7 @@ def _scaled_dot_product_attention_quantized(
     if torch.is_grad_enabled() and (
         query.requires_grad or key.requires_grad or value.requires_grad
     ):
-        warnings.warn(
+        _warn_torch(
             "_scaled_dot_product_attention_quantized does not support backward pass. "
             "Gradients will not be computed for query, key, or value.",
             UserWarning,
