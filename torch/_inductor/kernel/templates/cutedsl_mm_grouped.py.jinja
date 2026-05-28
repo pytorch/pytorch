@@ -54,13 +54,17 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
-def _to_fake_cute_tensor(shape, dtype, assumed_align=16, dynamic=True):
+def _to_fake_cute_tensor(shape, dtype, assumed_align=16, dynamic=True, stride_order=None):
     ndim = len(shape)
     if dynamic:
-        dyn_shape = tuple(cute.sym_int64() for _ in range(ndim))
+        dyn_shape = tuple(
+            s if isinstance(s, int) and s == 1 else cute.sym_int64()
+            for s in shape
+        )
     else:
         dyn_shape = tuple(int(s) for s in shape)
-    stride_order = tuple(range(ndim - 1, -1, -1))
+    if stride_order is None:
+        stride_order = tuple(range(ndim - 1, -1, -1))
     return cute.runtime.make_fake_compact_tensor(
         _TORCH_TO_CUTLASS_DTYPE[dtype], dyn_shape,
         stride_order=stride_order, assumed_align=assumed_align,
@@ -312,7 +316,7 @@ def launch_build_group_ptrs_from_bases(
         gemm_executor = cute.compile(
             grouped_gemm,
             _to_fake_cute_tensor(a_unsq.shape, a_unsq.dtype),
-            _to_fake_cute_tensor(b_unsq.shape, b_unsq.dtype),
+            _to_fake_cute_tensor(b_unsq.shape, b_unsq.dtype, stride_order=(2, 0, 1)),
             _to_fake_cute_tensor(c_unsq.shape, c_unsq.dtype),
             G,
             _to_fake_cute_tensor(probs_t.shape, probs_t.dtype, assumed_align=4, dynamic=False),
@@ -456,7 +460,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     gemm_executor = cute.compile(
         grouped_gemm,
         _to_fake_cute_tensor((sumM, K, 1), dtype_a),
-        _to_fake_cute_tensor((N, K, 1), dtype_b),
+        _to_fake_cute_tensor((N, K, 1), dtype_b, stride_order=(2, 0, 1)),
         _to_fake_cute_tensor((shape_out[0], shape_out[1], 1), dtype_out),
         G,
         _to_fake_cute_tensor((G, 4), torch.int32, assumed_align=4, dynamic=False),
