@@ -226,9 +226,9 @@ bool can_generate_trivial_fake_impl(const c10::FunctionSchema& schema) {
 }
 
 bool can_run_unsafe_fallback(const c10::FunctionSchema& schema) {
-  const auto& name = schema.name();
-  return name.rfind("aten::", 0) == 0 || name.rfind("prims::", 0) == 0 ||
-      name.rfind("quantized::", 0) == 0;
+  auto ns = schema.operator_name().getNamespace();
+  return ns.has_value() &&
+      (*ns == "aten" || *ns == "prims" || *ns == "quantized");
 }
 
 constexpr int64_t CONSTANT_NUMEL_LIMIT = 1;
@@ -664,7 +664,8 @@ void fakeFallback(
   // Python FakeTensorMode's `with self: func.prim_meta_impl(*args, **kwargs)`.
   // Sub-ops (e.g. torch.empty inside _iota_meta) still enter fakeFallback
   // because Fake remains in TLS.
-  if (schema.name().rfind("prims::", 0) == 0 && mode && interp) {
+  auto op_ns = op.operator_name().getNamespace();
+  if (op_ns.has_value() && *op_ns == "prims" && mode && interp) {
     // In Python, scalar args stay as Python floats/ints. In C++, the
     // dispatcher wraps them as tensors with default dtypes (float64 for
     // floats, int64 for ints), causing dtype mismatches in prim_meta_impl.
