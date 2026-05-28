@@ -58,6 +58,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
@@ -1904,6 +1905,8 @@ Tensor& index_fill_(
     int64_t dim,
     const Tensor& index,
     const Scalar& source) {
+  at::NoNamesGuard guard;
+
   TORCH_CHECK_INDEX(
       index.scalar_type() == ScalarType::Long,
       "index_fill_(): Expected dtype int64 for index.");
@@ -2440,6 +2443,7 @@ static Tensor& masked_fill_impl_cpu(
     Tensor& self,
     const Tensor& mask,
     const Scalar& value) {
+  NoNamesGuard guard;
   TORCH_CHECK(
       mask.dtype() == ScalarType::Bool,
       "masked_fill_ only supports boolean masks, but got mask "
@@ -2471,7 +2475,11 @@ Tensor& masked_fill__cpu(
     Tensor& self,
     const Tensor& mask,
     const Scalar& value) {
+  auto maybe_outnames =
+      namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
   masked_fill_impl_cpu(self, mask, value);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -2479,6 +2487,8 @@ Tensor& masked_fill__cpu(
     Tensor& self,
     const Tensor& mask,
     const Tensor& value) {
+  auto maybe_outnames =
+      namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   TORCH_CHECK(
       value.dim() == 0,
       "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
@@ -2487,6 +2497,7 @@ Tensor& masked_fill__cpu(
       " dimension(s).");
 
   masked_fill_impl_cpu(self, mask, value.item());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -2495,9 +2506,15 @@ Tensor masked_fill(
     const Tensor& mask,
     const Scalar& source) {
   Tensor result;
-  auto [_mask, _self] = expand_outplace(mask, self);
-  result = _self->clone(at::MemoryFormat::Contiguous);
-  result.masked_fill_(mask, source);
+  auto maybe_outnames =
+      namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+    auto [_mask, _self] = expand_outplace(mask, self);
+    result = _self->clone(at::MemoryFormat::Contiguous);
+    result.masked_fill_(mask, source);
+  }
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -2506,9 +2523,15 @@ Tensor masked_fill(
     const Tensor& mask,
     const Tensor& source) {
   Tensor result;
-  auto [_mask, _self] = expand_outplace(mask, self);
-  result = _self->clone(at::MemoryFormat::Contiguous);
-  result.masked_fill_(mask, source);
+  auto maybe_outnames =
+      namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+    auto [_mask, _self] = expand_outplace(mask, self);
+    result = _self->clone(at::MemoryFormat::Contiguous);
+    result.masked_fill_(mask, source);
+  }
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -2516,6 +2539,8 @@ static Tensor& masked_select_out_impl_cpu(
     Tensor& result,
     const Tensor& self,
     const Tensor& mask) {
+  NoNamesGuard guard;
+
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "masked_select: expected BoolTensor for mask");
@@ -2599,6 +2624,7 @@ Tensor& masked_select_out_cpu(
     const Tensor& self,
     const Tensor& mask,
     Tensor& result) {
+  namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_impl_cpu(result, self, mask);
 }
 

@@ -219,6 +219,11 @@ inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
       BoxedKernel::makeAmbiguousAutogradOther());
 }
 
+inline KernelFunction KernelFunction::makeNamedNotSupported() {
+  return KernelFunction::makeFromBoxedKernel(
+      BoxedKernel::makeNamedNotSupported());
+}
+
 template <bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor(
     std::unique_ptr<OperatorKernel> kernelFunctor) {

@@ -23,14 +23,15 @@ from torchgen.model import (
 #
 # - Function Schema (source of truth)
 #
-#      aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None,
-#                  Device? device=None, bool? pin_memory=None) -> Tensor
-#
+#      aten::empty.names(int[] size, *, Dimname[]? names,
+#                        ScalarType? dtype=None, Layout? layout=None,
+#                        Device? device=None, bool? pin_memory=None,
+#                        MemoryFormat? memory_format=None) -> Tensor
 # - Argument Conversion
 #       Generates C++ code to convert an ivalue (from stack) to its underlying C++ type.
 #    - int[] size
 #        ```cpp
-#           const c10::List<c10::IValue> size_list_in = (std::move(peek(stack, 0, 5))).toList();
+#           const c10::List<c10::IValue> size_list_in = (std::move(peek(stack, 0, 7))).toList();
 #
 #           std::vector<int64_t> size_vec;
 #           for (c10::IValue size_elem: size_list_in) {
@@ -41,12 +42,33 @@ from torchgen.model import (
 #                                 ~~~~~~~~~~~~~ <-- The converted argument from ivalues in the stack.
 #                                                   Will be passed to unboxed kernel.
 #       ```
-#    - ScalarType? dtype
+#    - Dimname[]? names
 #       ```cpp
-#           ::std::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 1, 5))).toOptional<c10::IValue>();
+#           ::std::optional<c10::IValue> names_opt = (std::move(peek(stack, 1, 7))).toOptional<c10::IValue>();
+#           ::std::optional<at::ArrayRef<at::Dimname>> names_opt_out;
+#           if (names_opt.has_value()) {
+#                         ~~~~~~~~~~~ <-- Unwrapping optional shell
+#               const c10::IValue names_opt_in = names_opt.value();
+#               const c10::List<c10::IValue> names_list_in = names_opt_in.toList();
+#
+#               std::vector<at::Dimname> names_vec;
+#               for (c10::IValue names_elem: names_list_in) {
+#                                ~~~~~~~~~~~~~~~~~~~~~~~~~ <-- Unrolling list, then convert elements one by one.
+#                   at::Dimname names_base = names_elem.to<at::Dimname>();
+#                   names_vec.push_back(names_base);
+#               }
+#               at::ArrayRef<at::Dimname> names_list_out(names_vec);
+#
+#               names_opt_out = ::std::optional<at::ArrayRef<at::Dimname>>(names_list_out);
+#           } else {
+#               names_opt_out = ::std::optional<at::ArrayRef<at::Dimname>>();
+#           }
+#       ```
+#    - ScalarType? dtype (similarly for the rest of the arguments)
+#       ```cpp
+#           ::std::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 2, 7))).toOptional<c10::IValue>();
 #           ::std::optional<at::ScalarType> dtype_opt_out;
 #           if (dtype_opt.has_value()) {
-#                         ~~~~~~~~~~~ <-- Unwrapping optional shell
 #               const c10::IValue dtype_opt_in = dtype_opt.value();
 #               at::ScalarType dtype_base = dtype_opt_in.to<at::ScalarType>();
 #                                                        ~~~~~~~~~~~~~~~~~~~~ <-- For base types, convert ivalue to it
@@ -59,15 +81,17 @@ from torchgen.model import (
 #
 # - Unboxed Kernel Call
 #   ```cpp
-#       auto result_ = torch::zeros(
+#       auto result_ = torch::empty(
 #           size_list_out,
-#           options
+#           names_opt_out,
+#           options,
+#           memory_format_opt_out
 #       );
 #   ```
 #
 # - Push Result Back to Stack
 #   ```cpp
-#       drop(stack, 5);
+#       drop(stack, 7);
 #       pack(stack, std::move(result_));
 #   ```
 connector = "\n\t"

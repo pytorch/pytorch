@@ -1,7 +1,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
-#include <algorithm>
 #include <regex>
 #include <unordered_map>
 
@@ -117,6 +116,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Functionalize:
       return "Functionalize";
+
+    case DispatchKey::Named:
+      return "Named";
 
     case DispatchKey::Conjugate:
       return "Conjugate";
@@ -286,6 +288,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Fake", c10::DispatchKey::Fake},
+      {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
@@ -394,8 +397,11 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
   auto it = key_map.find(k);
   if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
     std::string pu1_backend_name = c10::get_privateuse1_backend();
-    std::ranges::transform(
-        pu1_backend_name, pu1_backend_name.begin(), ::toupper);
+    std::transform(
+        pu1_backend_name.begin(),
+        pu1_backend_name.end(),
+        pu1_backend_name.begin(),
+        ::toupper);
     std::string processed_k =
         std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
     it = key_map.find(processed_k);

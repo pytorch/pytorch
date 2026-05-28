@@ -204,6 +204,18 @@ struct C10_API AutogradMetaFactoryRegisterer{
 
 } // namespace impl
 
+struct C10_API NamedTensorMetaInterface {
+  virtual ~NamedTensorMetaInterface() = default;
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
+    TORCH_INTERNAL_ASSERT(
+        false, "Not implemented: NamedTensorMetaInterface::clone");
+  }
+  virtual int64_t slow_dim() const {
+    TORCH_INTERNAL_ASSERT(
+        false, "Not implemented: NamedTensorMetaInterface::slow_dim");
+  }
+};
+
 // For ease of copy pasting
 #if 0
 is_contiguous
@@ -244,6 +256,7 @@ struct C10_API FakeTensorMode {
 
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
+  std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
@@ -256,6 +269,9 @@ struct C10_API ExtraMeta {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
           std::make_unique<c10::SymbolicShapeMeta>(*other.symbolic_shape_meta_);
+    }
+    if (other.named_tensor_meta_) {
+      named_tensor_meta_ = other.named_tensor_meta_->clone();
     }
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
@@ -271,10 +287,12 @@ struct C10_API ExtraMeta {
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
       std::optional<std::string> custom_data_ptr_error_msg = std::nullopt,
       std::optional<std::string> custom_storage_access_error_msg = std::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
+        named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(std::move(backend_meta)),
         custom_data_ptr_error_msg_(std::move(custom_data_ptr_error_msg)),
         custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
@@ -1996,6 +2014,31 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
+  /**
+   * Set the pointer to named tensor metadata.
+   */
+  void set_named_tensor_meta(
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+    TORCH_WARN_ONCE(
+        "Named tensors and all their associated APIs are an experimental feature ",
+        "and subject to change. Please do not use them for anything important ",
+        "until they are released as stable.");
+#ifdef DEBUG
+    if (named_tensor_meta) {
+      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
+    }
+#endif
+    if (named_tensor_meta) {
+      get_extra_meta().named_tensor_meta_ = std::move(named_tensor_meta);
+      key_set_ = key_set_.add(DispatchKey::Named);
+    } else {
+      if (extra_meta_) {
+        extra_meta_->named_tensor_meta_ = nullptr;
+      }
+      key_set_ = key_set_.remove(DispatchKey::Named);
+    }
+  }
+
   void set_python_dispatch(bool k) {
     if (k) {
       key_set_ = key_set_.add(c10::python_ks);
@@ -2006,6 +2049,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_python_dispatch() const {
     return key_set_.has_all(c10::python_ks);
+  }
+
+  /**
+   * Return the pointer to named tensor metadata.
+   */
+  const c10::NamedTensorMetaInterface* named_tensor_meta() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->named_tensor_meta_.get();
+  }
+
+  c10::NamedTensorMetaInterface* named_tensor_meta() {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->named_tensor_meta_.get();
+  }
+
+  bool has_named_tensor_meta() const {
+    if (!extra_meta_) {
+      return false;
+    }
+    return extra_meta_->named_tensor_meta_ != nullptr;
   }
 
   // NOTE [ TensorImpl Shallow-Copying ]
@@ -2511,8 +2578,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // handle both ArrayRefs of different types (there are some uses of
   // Resize in Caffe2 which pass in int, not int64_t.)
 
-  template <typename T>
-  requires std::is_integral_v<T> bool SetDimsTemplate(ArrayRef<T> src) {
+  template <
+      typename T,
+      typename = typename std::enable_if_t<std::is_integral_v<T>>>
+  bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "SetDims() called on tensor with symbolic shape")
@@ -3049,6 +3118,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
+  //
+  // INVARIANT: extra_meta_->named_tensor_meta_ != nullptr  <==>
+  // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
  private:
@@ -3109,6 +3181,7 @@ struct TargetTraits<
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    named tensor metadata pointer
 //    version counter pointer
 //    PyObjectSlot
 //    SizesAndStrides size/pointer

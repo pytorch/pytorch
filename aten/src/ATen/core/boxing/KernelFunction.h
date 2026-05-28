@@ -248,6 +248,7 @@ class TORCH_API KernelFunction final {
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
+  static KernelFunction makeNamedNotSupported();
 
   /**
    * Create a KernelFunction from an unboxed lambda.
