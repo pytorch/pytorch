@@ -676,7 +676,7 @@ class PyCodegen:
                 if current_source in seen_sources:
                     # This source is used at least twice, so it can be reused
                     codegen.mark_source_temp(current_source)
-                    # Dont trace source further. This prevents us from marking too
+                    # Don't trace source further. This prevents us from marking too
                     # many nodes as temp sources.
                     continue
                 seen_sources.add(current_source)

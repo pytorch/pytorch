@@ -8679,7 +8679,7 @@ def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
         input_lengths = torch.full((batch, ), input_length, dtype=torch.long, device=device)
         target_lengths = torch.randint(10, target_length, (batch, ), dtype=torch.long, device=device)
 
-        # Dont generate int[] types if reduction = "Mean" since this results in non composite compliant calls
+        # Don't generate int[] types if reduction = "Mean" since this results in non composite compliant calls
         # to ctc_loss.IntList since a tensor needs to be created from the target lengths.
         # Creating such a tensor requires the use of pointers to copy data from int[] -> torch.Tensor
         # e.g. via std::copy. Similarly symbolic/real tracing with fx will also not work
