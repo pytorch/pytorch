@@ -2810,11 +2810,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.randn(3, 2)
 
-        # Verify that fullgraph=True fails (confirms graph break occurs)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True, backend="eager")(x)
 
-        # Verify that it works without fullgraph
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         result = opt_fn(x)
         self.assertEqual(cnts.frame_count, 1)
