@@ -95,8 +95,6 @@ def _distance_decay(score, _b, _h, q_idx, kv_idx):
 
 @contextmanager
 def force_flex_flash_score_mod_vec_size(vec_size: int):
-    original = flex_flash_attention_module.get_flex_flash_fwd_configs
-
     def configs(
         has_score_mod,
         has_aux_tensors,
@@ -114,17 +112,14 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
-    flex_flash_attention_module.get_flex_flash_fwd_configs = configs
-    try:
+    with mock.patch.object(
+        flex_flash_attention_module, "get_flex_flash_fwd_configs", configs
+    ):
         yield
-    finally:
-        flex_flash_attention_module.get_flex_flash_fwd_configs = original
 
 
 @contextmanager
 def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
-    original = flex_flash_attention_module.get_flex_flash_fwd_configs
-
     def configs(
         has_score_mod,
         has_aux_tensors,
@@ -145,11 +140,10 @@ def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
-    flex_flash_attention_module.get_flex_flash_fwd_configs = configs
-    try:
+    with mock.patch.object(
+        flex_flash_attention_module, "get_flex_flash_fwd_configs", configs
+    ):
         yield
-    finally:
-        flex_flash_attention_module.get_flex_flash_fwd_configs = original
 
 
 def _sm100_bias(*shape):
@@ -236,11 +230,15 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
         with V.set_graph_handler(MockGraphHandler()):
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind([kv_idx], buffer, q_idx, kv_idx),
-                AuxLoadVecInfo(8, True),
+                AuxLoadVecInfo(8, False),
             )
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind([kv_mod_4], buffer, q_idx, kv_idx),
-                AuxLoadVecInfo(4, True),
+                AuxLoadVecInfo(4, False),
+            )
+            self.assertEqual(
+                direct_aux_load_vec_size_and_kind([q_idx], buffer, q_idx, kv_idx),
+                AuxLoadVecInfo(None, True),
             )
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind(
@@ -278,7 +276,7 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                     q_idx,
                     kv_idx,
                 ),
-                AuxLoadVecInfo(8, True),
+                AuxLoadVecInfo(8, False),
             )
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind(
@@ -288,7 +286,7 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
                     kv_idx,
                     max_vec_size=32,
                 ),
-                AuxLoadVecInfo(16, True),
+                AuxLoadVecInfo(16, False),
             )
             self.assertEqual(
                 direct_aux_load_vec_size_and_kind(
@@ -445,37 +443,41 @@ class TestFlexFlashAuxVecSelection(InductorTestCase):
             if cuda_major in (10, 11)
             else flex_flash_attention_module.FlexFlashConfig()
         )
-        with mock.patch.object(torch.cuda, "is_available", return_value=True):
-            with mock.patch.object(
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
                 torch.cuda, "get_device_capability", return_value=(cuda_major, 0)
-            ):
-                self.assertEqual(
-                    flex_flash_attention_module.get_flex_flash_fwd_configs(
-                        False, False, has_mask_mod=True
-                    ),
-                    [expected_config],
-                )
+            ),
+        ):
+            self.assertEqual(
+                flex_flash_attention_module.get_flex_flash_fwd_configs(
+                    False, False, has_mask_mod=True
+                ),
+                [expected_config],
+            )
 
     @torch._inductor.config.patch(
         {"max_autotune": True, "test_configs.max_flex_configs": None}
     )
     def test_mask_mod_vec_config_combines_with_max_autotune_score_sizes(self):
-        with mock.patch.object(torch.cuda, "is_available", return_value=True):
-            with mock.patch.object(
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
                 torch.cuda, "get_device_capability", return_value=(10, 0)
-            ):
-                self.assertEqual(
-                    flex_flash_attention_module.get_flex_flash_fwd_configs(
-                        True, False, has_mask_mod=True
-                    ),
-                    [
-                        flex_flash_attention_module.FlexFlashConfig(
-                            score_mod_vec_size=vec_size,
-                            mask_mod_vec_size=32,
-                        )
-                        for vec_size in (1, 2, 4, 8, 16, 32, 64, 128)
-                    ],
-                )
+            ),
+        ):
+            self.assertEqual(
+                flex_flash_attention_module.get_flex_flash_fwd_configs(
+                    True, False, has_mask_mod=True
+                ),
+                [
+                    flex_flash_attention_module.FlexFlashConfig(
+                        score_mod_vec_size=vec_size,
+                        mask_mod_vec_size=32,
+                    )
+                    for vec_size in (1, 2, 4, 8, 16, 32, 64, 128)
+                ],
+            )
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):

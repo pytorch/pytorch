@@ -33,10 +33,6 @@ from .common import (
 DEFAULT_MASK_MOD_VEC_SIZE = 32
 
 
-def is_mask_mod_vec_supported(cuda_major: int | None) -> bool:
-    return cuda_major in (10, 11)
-
-
 @dataclasses.dataclass
 class FlexFlashConfig:
     """Autotuning configuration for CuteDSL flex flash attention kernels.
@@ -60,14 +56,13 @@ class AuxLoadVecInfo(NamedTuple):
     """Vectorization result for a captured aux tensor load.
 
     Args:
-        vec_size: Safe KV-lane vector width, or ``None`` when the load cannot be
-            vectorized.
-        is_direct_contiguous: Whether the load is a contiguous vector load rather
-            than a lane-uniform scalar load.
+        contiguous_vec_size: Largest finite KV-lane vector width for adjacent
+            memory loads, or ``None`` when this is not a contiguous vector load.
+        is_lane_uniform: Whether one scalar value can be reused for every KV lane.
     """
 
-    vec_size: int | None
-    is_direct_contiguous: bool
+    contiguous_vec_size: int | None
+    is_lane_uniform: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,6 +72,8 @@ class AuxIndexedTensor:
     Args:
         buffer: The original captured tensor being indexed.
         indices: Prefix indices already applied by earlier partial index ops.
+            For ``x[b][h][q, kv]``, the intermediate ``x[b][h]`` stores
+            ``(b, h)`` until the final index completes the load.
     """
 
     buffer: TensorBox
@@ -88,6 +85,12 @@ def _make_fx_index_symbols(
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node] = (),
 ) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
+    """Map FX index placeholders to SymPy expressions for lane analysis.
+
+    q and kv get stable base symbols because vectorization is analyzed across
+    KV lanes. Batch/head placeholders are only needed when they appear in aux
+    indices, so callers pass those through ``non_lane_index_nodes``.
+    """
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
     kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
     index_symbols = {
@@ -119,7 +122,7 @@ def get_flex_flash_fwd_configs(
     mask_mod_vec_size = select_mask_mod_vec_size(
         has_mask_mod=has_mask_mod,
         has_mask_aux_tensors=has_mask_aux_tensors,
-        supports_mask_mod_vec=is_mask_mod_vec_supported(cuda_major),
+        supports_mask_mod_vec=cuda_major in (10, 11),
         graph_module=mask_mod_graph_module,
         other_buffers=mask_mod_other_buffers,
     )
@@ -136,17 +139,15 @@ def get_flex_flash_fwd_configs(
         and score_mod_vec_size is None
         and torch._inductor.config.max_autotune
     ):
-        configs = [
-            FlexFlashConfig(score_mod_vec_size=v, mask_mod_vec_size=mask_mod_vec_size)
-            for v in (1, 2, 4, 8, 16, 32, 64, 128)
-        ]
+        # No captured score_mod tensors means any kernel-supported power-of-two
+        # vector width is legal, so autotune the full CuTe score_mod range.
+        score_mod_vec_sizes = (1, 2, 4, 8, 16, 32, 64, 128)
     else:
-        configs = [
-            FlexFlashConfig(
-                score_mod_vec_size=score_mod_vec_size,
-                mask_mod_vec_size=mask_mod_vec_size,
-            )
-        ]
+        score_mod_vec_sizes = (score_mod_vec_size,)
+    configs = [
+        FlexFlashConfig(score_mod_vec_size=v, mask_mod_vec_size=mask_mod_vec_size)
+        for v in score_mod_vec_sizes
+    ]
     max_configs = torch._inductor.config.test_configs.max_flex_configs
     if max_configs is not None and len(configs) > max_configs:
         configs = configs[:max_configs]
@@ -282,15 +283,18 @@ def _select_aux_mod_vec_size(
             max_vec_size=max_vec_size,
             min_index_rank_for_contiguous_load=min_index_rank_for_contiguous_load,
         )
-        if aux_load_vec_info.vec_size is None:
+        if aux_load_vec_info.is_lane_uniform:
+            found_vectorizable_load = True
+            continue
+        if aux_load_vec_info.contiguous_vec_size is None:
             if allow_gather_loads:
                 continue
             return 1
-        selected_vec_size = min(selected_vec_size, aux_load_vec_info.vec_size)
-        found_vectorizable_load = True
-        found_contiguous_load = (
-            found_contiguous_load or aux_load_vec_info.is_direct_contiguous
+        selected_vec_size = min(
+            selected_vec_size, aux_load_vec_info.contiguous_vec_size
         )
+        found_vectorizable_load = True
+        found_contiguous_load = True
 
     if require_contiguous_load and not found_contiguous_load:
         return 1
@@ -324,13 +328,13 @@ def direct_aux_load_vec_size_and_kind(
 ) -> AuxLoadVecInfo:
     """Return vector-load information for a captured aux load.
 
-    vec_size is the largest safe KV-lane vector width, or None if the load cannot
-    use a direct vector/scalar load. is_direct_contiguous is True only when the
-    vector lanes map to consecutive memory locations; lane-uniform scalar loads
-    return False. non_lane_index_nodes are placeholders such as batch/head that
-    may appear in non-KV prefix dimensions. min_index_rank_for_contiguous_load
-    excludes lower-rank loads from contiguous-vector consideration while still
-    allowing uniform loads.
+    contiguous_vec_size is the largest safe finite KV-lane vector width for an
+    adjacent-memory load. Lane-uniform scalar loads are represented separately
+    with is_lane_uniform=True because they do not have a natural finite width.
+    non_lane_index_nodes are placeholders such as batch/head that may appear in
+    non-KV prefix dimensions. min_index_rank_for_contiguous_load excludes
+    lower-rank loads from contiguous-vector consideration while still allowing
+    uniform loads.
     """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo(None, False)
@@ -343,7 +347,7 @@ def direct_aux_load_vec_size_and_kind(
     if any(expr is None for expr in index_exprs):
         return AuxLoadVecInfo(None, False)
     if all(kv_idx not in expr.free_symbols for expr in index_exprs):
-        return AuxLoadVecInfo(max_vec_size, False)
+        return AuxLoadVecInfo(None, True)
 
     last_expr = index_exprs[-1]
     if kv_idx not in last_expr.free_symbols:
@@ -374,7 +378,7 @@ def direct_aux_load_vec_size_and_kind(
             )
             and lane_info.is_contiguous
         ):
-            return AuxLoadVecInfo(vec_size, True)
+            return AuxLoadVecInfo(vec_size, False)
         vec_size //= 2
     return AuxLoadVecInfo(None, False)
 
