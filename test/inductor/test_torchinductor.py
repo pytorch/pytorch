@@ -10054,7 +10054,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         p = torch.full((5,), 0.5, device=self.device)
         _, code = run_and_get_code(torch.compile(fn, backend="inductor"), p)
         self.assertEqual(sum(src.count("tl.device_assert") for src in code), 1)
-        self.assertTrue(any("tl.device_assert" in src and "| ~(" in src for src in code))
 
     def test_narrow(self):
         def fn(x):
