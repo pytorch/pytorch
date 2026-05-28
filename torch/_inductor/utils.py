@@ -115,7 +115,7 @@ def get_gpu_type() -> str:
 def get_triton_type() -> str | None:
     from torch.utils._triton import devices_supporting_triton
 
-    candidates: list[str] = devices_supporting_triton()
+    candidates: list[str] = list(devices_supporting_triton())
 
     if len(candidates) == 0:
         return None
