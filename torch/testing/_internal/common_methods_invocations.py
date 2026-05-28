@@ -15870,7 +15870,6 @@ op_db: list[OpInfo] = [
             # dataclass; any sample with options=... fails inferred_arg_type.
             # Benign -- the wrapper unpacks options before any JIT-visible op.
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
->>>>>>> 960800de7f9 (Add linear_cross_entropy implementation with chunking along batch dimension (2))
         )
     ),
     OpInfo('nn.functional.normalize',
