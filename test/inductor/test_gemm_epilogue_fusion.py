@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import mock
+
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
@@ -1032,6 +1034,7 @@ class GemmEpilogueFusionTests(TestCase):
         FileCheck().check("triton_").check_not("extern_kernels.baddbmm").run(code)
 
     @requires_cuda_and_triton
+    @inductor_config.patch(max_autotune_gemm_search_space="DEFAULT")
     def test_cuda_inductor_scaled_mm_epilogue_fuses(self):
         if not PLATFORM_SUPPORTS_FP8:
             self.skipTest("FP8 is not supported")
@@ -1050,13 +1053,31 @@ class GemmEpilogueFusionTests(TestCase):
         w_fp8, scale_b = _quantize_tensorwise(w, torch.float8_e4m3fn)
         b = w_fp8.t()
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            scale_a,
-            scale_b,
+        from torch._inductor.template_heuristics.triton import (
+            CUDAScaledMMTemplateConfigHeuristic,
+            GemmConfig,
         )
+
+        original_init = CUDAScaledMMTemplateConfigHeuristic.__init__
+
+        def init_with_single_config(self):
+            original_init(self)
+            self.mm_configs = [GemmConfig(64, 32, 32, 3, 4)]
+
+        with mock.patch.object(
+            CUDAScaledMMTemplateConfigHeuristic, "__init__", init_with_single_config
+        ), mock.patch.object(
+            CUDAScaledMMTemplateConfigHeuristic,
+            "_get_acc_type",
+            lambda self, dtype: "tl.float32",
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True),
+                a,
+                b,
+                scale_a,
+                scale_b,
+            )
 
         torch.testing.assert_close(
             actual, fn(a, b, scale_a, scale_b), atol=0.05, rtol=1e-2
@@ -1553,6 +1574,27 @@ class GemmEpilogueFusionTests(TestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_large_n_group_tuple_aux(self):
+        M = 128
+        N = 512
+        K = 128
+        group = 256
+
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: (acc.relu(), acc.float().view(M, -1, group).sum(-1)),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(M, K, device="cuda", dtype=torch.float16)
+        b = torch.rand(K, N, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, "divisible by group, got group=256"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_tuple_epilogue_row_groups_fuse(self):
         M = 128
         N = 64
@@ -1732,7 +1774,7 @@ class GemmEpilogueFusionTests(TestCase):
         N = 512
         K = 128
 
-        for group in (32, 64, 128, 256):
+        for group in (32, 64, 128):
             with self.subTest(group=group):
 
                 def fn(a, b):
