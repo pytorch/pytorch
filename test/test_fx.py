@@ -4876,11 +4876,10 @@ graph():
         self.assertEqual(sym_size_nodes[0].args[1], 0)
 
     def test_materialize_symints_unbacked_via_divide_by_key(self):
-        """``DivideByKey(divisor)`` in an unbacked-binding keypath is lowered
-        to ``operator.floordiv(producer, divisor_node)``. When the divisor is
-        itself a SymInt (a backed shape symbol), the pre-scan adds its free
-        symbols to ``needed_symbols`` so Passes 1/2 produce a node for it,
-        and the lowering callback wires that node in as the floordiv arg."""
+        """When an unbacked-binding keypath ends in ``DivideByKey(s_backed)``,
+        ``materialize_symints`` emits ``producer // s_backed_node`` -- where
+        ``s_backed_node`` is the lowered backed shape symbol, not a raw SymInt.
+        """
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.experimental.symbolic_shapes import DivideByKey
 
@@ -4917,13 +4916,31 @@ graph():
         }
         u_symint = nonzero_node.meta["val"].shape[0]
 
-        result = gm.graph.materialize_symints([u_symint + 1])
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints([u_symint + 1])
+        output_node.args = ((output_node.args[0],) + tuple(result),)
+
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], torch.fx.Node)
 
         # A floordiv node was emitted whose divisor is the lowered backed
         # shape symbol (a ``sym_size.int(%tensor_ph, 0)`` node) -- not a raw
         # SymInt object.
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %x_1 : [num_users=1] = placeholder[target=x_1]
+    %y_1 : [num_users=1] = placeholder[target=y_1]
+    %nonzero : [num_users=2] = call_function[target=torch.ops.aten.nonzero.default](args = (%y_1,), kwargs = {})
+    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
+    %sym_size_int_1 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%nonzero, 0), kwargs = {})
+    %floordiv : [num_users=1] = call_function[target=operator.floordiv](args = (%sym_size_int_1, %sym_size_int), kwargs = {})
+    %add : [num_users=1] = call_function[target=operator.add](args = (1, %floordiv), kwargs = {})
+    return (nonzero, add)""",
+        )
+
         floordiv_nodes = [
             n for n in gm.graph.nodes if n.target is operator.floordiv
         ]
