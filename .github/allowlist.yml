@@ -36,7 +36,9 @@
 #   - org4/downstream-repo4: @oncall1,oncall2
 
 L1:
-  # Canonical test repo for CRCR.
-  - pytorch/crcr-test
   - Ascend/pytorch
   - riseproject-dev/pytorch-ci
+
+L2:
+  # Canonical test repo for CRCR.
+  - pytorch/crcr-test
