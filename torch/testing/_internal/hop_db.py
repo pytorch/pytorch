@@ -17,6 +17,7 @@ from torch.testing import make_tensor
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
@@ -721,5 +722,11 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
         decorators=[onlyCUDA],
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/178177
+            DecorateInfo(skipIfRocm, "TestHOP", "test_retrace_export"),
+            # https://github.com/pytorch/pytorch/issues/178077
+            DecorateInfo(skipIfRocm, "TestHOP", "test_serialize_export"),
+        )
     ),
 ]

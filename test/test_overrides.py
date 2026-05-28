@@ -16,8 +16,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
-    IS_LINUX,
-    TEST_WITH_SLOW,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
@@ -2029,8 +2027,6 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
 
 class TestTorchFunctionRedispatchOps(TestCase):
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/182819")
-    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182869")
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
         if op.has_nondeterministic_output:
