@@ -5,7 +5,7 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
@@ -257,7 +257,6 @@ class TestControlDeps(InductorTestCase):
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181701")
     @requires_gpu()
     def test_control_deps_orders_void_op_across_nested_calls(self):
         """record_event's void op must be named as an additional_buffer_dep

@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -226,8 +225,117 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184491")
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184470")
+    def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with (
+            patch.object(
+                _bench.inductor_config, "use_torch_profiler_benchmarker", True
+            ),
+            patch.object(_bench.inductor_config, "use_experimental_benchmarker", False),
+            patch.object(
+                _bench.torch.cuda,
+                "is_available",
+                side_effect=AssertionError("should not query CUDA availability"),
+            ),
+            patch.object(
+                _bench.torch.xpu,
+                "is_available",
+                side_effect=AssertionError("should not query XPU availability"),
+            ),
+            patch.object(
+                _bench.torch.mtia,
+                "is_available",
+                side_effect=AssertionError("should not query MTIA availability"),
+            ),
+        ):
+            self.assertIsInstance(
+                _bench._make_default_benchmarker(), TorchProfilerBenchmarker
+            )
+
+    def test_profiler_benchmarker_fallback_uses_correlated_device_events(self):
+        from torch._inductor.runtime import benchmarking as _bench
+        from torch.autograd import DeviceType
+
+        class FakeProfilerEvent:
+            def __init__(self, name, device_type, event_id, cpu_children=()):
+                self.name = name
+                self.device_type = device_type
+                self.id = event_id
+                self.cpu_children = list(cpu_children)
+
+        class FakeKinetoEvent:
+            def __init__(
+                self,
+                name,
+                device_type,
+                linked_correlation_id,
+                correlation_id,
+                activity_type,
+                start_ns,
+                end_ns,
+            ):
+                self._name = name
+                self._device_type = device_type
+                self._linked_correlation_id = linked_correlation_id
+                self._correlation_id = correlation_id
+                self._activity_type = activity_type
+                self._start_ns = start_ns
+                self._end_ns = end_ns
+
+            def name(self):
+                return self._name
+
+            def device_type(self):
+                return self._device_type
+
+            def linked_correlation_id(self):
+                return self._linked_correlation_id
+
+            def correlation_id(self):
+                return self._correlation_id
+
+            def activity_type(self):
+                return self._activity_type
+
+            def start_ns(self):
+                return self._start_ns
+
+            def end_ns(self):
+                return self._end_ns
+
+        child_event = FakeProfilerEvent("aten::sum", DeviceType.CPU, 11)
+        profiler_events = [
+            FakeProfilerEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.CPU,
+                7,
+                (child_event,),
+            )
+        ]
+        kineto_events = [
+            FakeKinetoEvent("unrelated", DeviceType.XPU, 0, 99, "kernel", 0, 1000),
+            FakeKinetoEvent(
+                "xpu_kernel", DeviceType.XPU, 11, 101, "kernel", 1000, 6000
+            ),
+            FakeKinetoEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.XPU,
+                7,
+                7,
+                "gpu_user_annotation",
+                1000,
+                9000,
+            ),
+        ]
+
+        self.assertEqual(
+            _bench._get_callable_device_kernel_time_us(
+                kineto_events, profiler_events, 1, DeviceType.XPU
+            ),
+            5.0,
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",
@@ -241,10 +349,12 @@ class TestBenchmarker(TestCase):
         _, _callable = self.make_params(device, size=16)
 
         captured_buffer_lengths = []
+        captured_buffer_devices = []
         original_empty = torch.empty
 
         def empty_spy(*args, **kwargs):
             captured_buffer_lengths.append(args[0])
+            captured_buffer_devices.append(kwargs["device"])
             return original_empty(*args, **kwargs)
 
         with patch.object(
@@ -265,9 +375,10 @@ class TestBenchmarker(TestCase):
                     )
 
         self.assertGreater(timing, 0)
-        mock_get_event_pairs.assert_called_once_with(1)
+        mock_get_event_pairs.assert_called_once_with(1, device_type=device)
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
+        self.assertEqual(captured_buffer_devices[0], device)
 
 
 if __name__ == "__main__":
