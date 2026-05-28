@@ -10027,6 +10027,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=0.06,
         )
 
+    def test_bernoulli_invalid_probability(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("requires CPU")
+
+        def fn(a):
+            return aten.bernoulli(a)
+
+        opt_fn = torch.compile(fn, backend="inductor")
+        a = torch.full((4,), 2.0, device=self.device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected p_in >= 0 && p_in <= 1 to be true, but got false",
+        ):
+            opt_fn(a)
+
     def test_narrow(self):
         def fn(x):
             return (
