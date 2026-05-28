@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -2040,6 +2041,24 @@ class TestMetaKernelRegistrations(TestCase):
         expected = torch.tensor([[1, 0], [2, 4], [3, 5]])
         self.assertEqual(result, expected)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_pad_sequence_decomp_mixed_dtype_padding_value(self):
+        from torch._decomp import decompositions
+
+        for first_sequence in (
+            torch.tensor([0, 0.4]),
+            torch.tensor([0, 0.4 + 0j]),
+        ):
+            sequences = [first_sequence, torch.tensor([0], dtype=torch.int32)]
+            result = decompositions.pad_sequence(
+                sequences, batch_first=False, padding_value=-0.7
+            )
+            expected = torch.ops.aten.pad_sequence.default(
+                sequences, False, -0.7, "right"
+            )
+            self.assertEqual(result, expected)
+
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode

@@ -2929,8 +2929,7 @@ static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
       // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
       // -
       // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      Py_INCREF(Py_None);
-      str = Py_None;
+      str = Py_NewRef(Py_None);
     } else {
       str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str)

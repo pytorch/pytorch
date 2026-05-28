@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import tempfile
+from pathlib import Path
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
@@ -182,7 +183,7 @@ class Repro(torch.nn.Module):
 
 
 class ReproGenerationTests(torch._dynamo.test_case.TestCase):
-    def test_after_dynamo_repro_serializes_module_with_child_repr(self):
+    def test_after_dynamo_repro_uses_constructor_for_fake_quant_with_child_repr(self):
         from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
         from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
 
@@ -190,9 +191,14 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
         x = graph.placeholder("x")
         y = graph.call_module("fake_quant", (x,))
         graph.output((y,))
-        gm = torch.fx.GraphModule(
-            {"fake_quant": FusedMovingAvgObsFakeQuantize()}, graph
+        fake_quant = torch.ao.quantization.get_default_qat_qconfig(
+            "fbgemm"
+        ).activation()
+        fake_quant.register_parameter(
+            "secret_weight", torch.nn.Parameter(torch.full((8,), 123456.0))
         )
+        fake_quant.register_buffer("secret_buffer", torch.full((8,), 654321.0))
+        gm = torch.fx.GraphModule({"fake_quant": fake_quant}, graph)
 
         with tempfile.TemporaryDirectory() as save_dir:
             for module_save_dir in (save_dir, None):
@@ -201,7 +207,20 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
                         gm, [torch.randn(2)], "eager", save_dir=module_save_dir
                     )
 
+                    self.assertIn(
+                        "self.fake_quant = "
+                        "torch.ao.quantization.fake_quantize."
+                        "FusedMovingAvgObsFakeQuantize(",
+                        code,
+                    )
                     self.assertNotIn("(activation_post_process):", code)
+                    self.assertNotIn("base64", code)
+                    self.assertNotIn("weights_only=False", code)
+                    self.assertNotIn("nn_module_", code)
+                    if module_save_dir is not None:
+                        self.assertEqual(
+                            list(Path(module_save_dir).glob("nn_module_*.pt")), []
+                        )
                     compile(code, "<generated minifier repro>", "exec")
 
                     namespace = {"__name__": "not_main"}
@@ -209,7 +228,91 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
                     mod = namespace["mod"]
 
                     self.assertIsInstance(mod.fake_quant, FusedMovingAvgObsFakeQuantize)
+                    self.assertEqual(mod.fake_quant.quant_min, fake_quant.quant_min)
+                    self.assertEqual(mod.fake_quant.quant_max, fake_quant.quant_max)
+                    self.assertEqual(
+                        mod.fake_quant.activation_post_process.reduce_range,
+                        fake_quant.activation_post_process.reduce_range,
+                    )
+                    self.assertFalse(hasattr(mod.fake_quant, "secret_weight"))
+                    self.assertFalse(hasattr(mod.fake_quant, "secret_buffer"))
                     self.assertEqual(mod(torch.randn(2))[0].shape, (2,))
+
+    def test_after_dynamo_repro_uses_constructor_for_qat_fused_module(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        for backend, expected_backend in (
+            ("fbgemm", "fbgemm"),
+            ("x86", "fbgemm"),
+            ("qnnpack", "qnnpack"),
+        ):
+            with self.subTest(backend=backend):
+                qconfig = torch.ao.quantization.get_default_qat_qconfig(backend)
+                conv = torch.ao.nn.intrinsic.qat.ConvBnReLU2d(
+                    3,
+                    4,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    bias=False,
+                    qconfig=qconfig,
+                )
+
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                y = graph.call_module("conv", (x,))
+                graph.output((y,))
+                gm = torch.fx.GraphModule({"conv": conv}, graph)
+
+                code = generate_dynamo_fx_repro_string(
+                    gm, [torch.randn(2, 3, 8, 8)], "eager"
+                )
+
+                self.assertIn(
+                    "self.conv = "
+                    "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU2d(",
+                    code,
+                )
+                self.assertIn(
+                    "qconfig=torch.ao.quantization.get_default_qat_qconfig"
+                    f"('{expected_backend}')",
+                    code,
+                )
+                self.assertNotIn("(weight_fake_quant):", code)
+                self.assertNotIn("(activation_post_process):", code)
+                self.assertNotIn("base64", code)
+                self.assertNotIn("weights_only=False", code)
+                compile(code, "<generated minifier repro>", "exec")
+
+                namespace = {"__name__": "not_main"}
+                exec(code, namespace)
+                mod = namespace["mod"]
+
+                self.assertIsInstance(mod.conv, torch.ao.nn.intrinsic.qat.ConvBnReLU2d)
+                self.assertEqual(mod(torch.randn(2, 3, 8, 8))[0].shape, (2, 4, 4, 4))
+
+    def test_after_dynamo_repro_rejects_custom_qat_qconfig(self):
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        qconfig = torch.ao.quantization.QConfig(
+            activation=torch.ao.quantization.default_fake_quant,
+            weight=torch.ao.quantization.default_weight_fake_quant,
+        )
+        conv = torch.ao.nn.intrinsic.qat.ConvBnReLU2d(
+            3,
+            4,
+            kernel_size=3,
+            qconfig=qconfig,
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("conv", (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({"conv": conv}, graph)
+
+        with self.assertRaisesRegex(AssertionError, "Cannot convert module"):
+            generate_dynamo_fx_repro_string(gm, [torch.randn(2, 3, 8, 8)], "eager")
 
 
 instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)
