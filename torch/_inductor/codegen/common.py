@@ -26,6 +26,7 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -203,7 +204,7 @@ class WorkspaceArg(CodegenSymbol):
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
         return WorkspaceArg(
-            count=sympy.Max(a.count, b.count),
+            count=Max(a.count, b.count),
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
@@ -326,6 +327,12 @@ class DeviceOpOverrides:
 
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
+
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
 
     def cpp_device_guard(self) -> str:
         raise NotImplementedError

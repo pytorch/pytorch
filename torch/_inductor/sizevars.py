@@ -23,7 +23,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Max, Min, Mod, ModularIndexing
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -186,7 +186,8 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    index = sympy.simplify(index)
+    if not index.has(sympy.Rel):
+        index = sympy.simplify(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
@@ -936,10 +937,10 @@ class SizeVarAllocator:
                 return self.guard_or_false(sympy.Le(a, rhs))
 
             # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
-            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Min, Min)) and any(le_rhs(a) for a in lhs.args):
                 return lhs
             # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
-            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Max, Max)) and all(le_rhs(a) for a in lhs.args):
                 return lhs
 
         raise TypeError(
