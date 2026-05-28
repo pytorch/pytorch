@@ -1462,10 +1462,10 @@ def _compute_slice_index(index, size, default=None):
         return 0
     elif guard_or_false(sympy.Ge(index, 0)):
         # If index >= 0, the resolved index is at most min(index, size).
-        return sympy.Min(index, size)
+        return Min(index, size)
     elif guard_or_false(sympy.Lt(index, 0)):
         # If index < 0, wrap and clamp: the resolved index is at least 0.
-        return sympy.Max(index + size, 0)
+        return Max(index + size, 0)
     return None
 
 
@@ -1474,7 +1474,7 @@ def _clamp_slice_end_to_start(end, start):
         return end
     if V.graph.sizevars.statically_known_leq(end, start):
         return start
-    return sympy.Max(end, start)
+    return Max(end, start)
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
@@ -6914,7 +6914,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
