@@ -56,13 +56,13 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     @onlyAccelerator
-    def test_stream_weakref(self):
-        s = torch.Stream()
+    def test_stream_weakref(self, device):
+        s = torch.Stream(device=device)
         weakref.ref(s)
 
     @onlyAccelerator
-    def test_event_weakref(self):
-        e = torch.Event()
+    def test_event_weakref(self, device):
+        e = torch.Event(device=device)
         weakref.ref(e)
 
     def _assert_weakref_callback_fires(self, factory):
@@ -125,7 +125,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         reset_user_object_tracking()
 
         def fn(x):
-            return torch.accelerator.current_stream().stream_id
+            return torch.accelerator.current_stream(device).stream_id
 
         x = torch.zeros(1, device=device)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
@@ -157,7 +157,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         )
 
     @onlyAccelerator
-    def test_stream_enter_exit(self):
+    def test_stream_enter_exit(self, device):
         def fn(x, y, s1, s2):
             with s1:
                 z1 = torch.add(x, y)
@@ -167,7 +167,12 @@ class TestStreams(torch._dynamo.test_case.TestCase):
 
             return y
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(), torch.Stream())
+        inp = (
+            torch.ones(2, 2) + 1,
+            torch.ones(2, 2),
+            torch.Stream(device=device),
+            torch.Stream(device=device),
+        )
         expected = fn(*inp)
         (
             actual,
@@ -197,10 +202,10 @@ class <lambda>(torch.nn.Module):
 
     @onlyAccelerator
     @unittest.skip("Needs graph break support with annotation context")
-    def test_stream_context_graph_break(self):
+    def test_stream_context_graph_break(self, device):
         def fn(x, y):
-            s2 = torch.Stream()
-            s1 = torch.Stream()
+            s2 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
             with s1:
                 z1 = torch.add(x, y)
             with s2:
@@ -211,7 +216,7 @@ class <lambda>(torch.nn.Module):
 
             return y
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
         expected = fn(*inp)
         (
             actual,
@@ -238,14 +243,14 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(expected, actual)
 
     @onlyAccelerator
-    def test_local_stream_return(self):
+    def test_local_stream_return(self, device):
         def fn(x, y):
-            s = torch.Stream()
+            s = torch.Stream(device=device)
             z = torch.add(x, y)
             y = z + 2
             return y, s
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
         fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         _, s0 = fn_opt(*inp)
         _, s1 = fn_opt(*inp)
@@ -269,7 +274,7 @@ class <lambda>(torch.nn.Module):
     def test_get_current_stream_return(self, device):
         def fn(x, s):
             with s:
-                s0 = torch.accelerator.current_stream()
+                s0 = torch.accelerator.current_stream(device)
             return x, s0
 
         s_inp = torch.Stream(device=device)
@@ -286,7 +291,7 @@ class <lambda>(torch.nn.Module):
         under torch.compile and match eager behavior."""
 
         def fn_stream(x):
-            return torch.accelerator.current_stream().stream_id
+            return torch.accelerator.current_stream(device).stream_id
 
         x = torch.zeros(1, device=device)
         compiled = torch.compile(fn_stream, backend="eager", fullgraph=True)
@@ -299,7 +304,7 @@ class <lambda>(torch.nn.Module):
 
         def fn(x, s):
             with s:
-                return torch.accelerator.current_stream().stream_id
+                return torch.accelerator.current_stream(device).stream_id
 
         s = torch.Stream(device=device)
         x = torch.zeros(1, device=device)
@@ -307,7 +312,7 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(compiled(x, s), fn(x, s))
 
     @onlyAccelerator
-    def test_nested_stream_enter_exit(self):
+    def test_nested_stream_enter_exit(self, device):
         def fn(x, y, s0, s1, s2):
             with s1:
                 with s2:
@@ -322,9 +327,9 @@ class <lambda>(torch.nn.Module):
         inp = (
             torch.ones(2, 2) + 1,
             torch.ones(2, 2),
-            torch.Stream(),
-            torch.Stream(),
-            torch.Stream(),
+            torch.Stream(device=device),
+            torch.Stream(device=device),
+            torch.Stream(device=device),
         )
         expected = fn(*inp)
         (
@@ -361,7 +366,7 @@ class <lambda>(torch.nn.Module):
         pass
 
     @onlyAccelerator
-    def test_local_stream_enter_exit(self):
+    def test_local_stream_enter_exit(self, device):
         def fn(x, y):
             s2 = torch.Stream()
             s1 = torch.Stream()
@@ -402,7 +407,7 @@ class <lambda>(torch.nn.Module):
         )
 
     @onlyAccelerator
-    def test_local_stream_nested_enter_exit(self):
+    def test_local_stream_nested_enter_exit(self, device):
         def fn(x, y):
             s2 = torch.Stream()
             s1 = torch.Stream()
@@ -474,7 +479,7 @@ class <lambda>(torch.nn.Module):
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._dynamo.variables.streams import get_current_stream
 
-        cur_stream = torch.accelerator.current_stream()
+        cur_stream = torch.accelerator.current_stream(device)
         s0 = None
 
         def stream_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -501,7 +506,7 @@ class <lambda>(torch.nn.Module):
         fn(torch.ones(2, 2, device=device))
 
     @onlyAccelerator
-    def test_stream_with_mutation(self):
+    def test_stream_with_mutation(self, device):
         def fn(x, y):
             s2 = torch.Stream()
             s1 = torch.Stream()
@@ -551,7 +556,7 @@ class <lambda>(torch.nn.Module):
         )
 
     @onlyAccelerator
-    def test_stream_backward_simple(self) -> None:
+    def test_stream_backward_simple(self, device) -> None:
         def fn(x, y):
             s2 = torch.Stream()
             s0 = torch.Stream()
@@ -755,7 +760,7 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_tracing(self, device):
         def fn(x) -> None:
-            e = torch.Event()
+            e = torch.Event(device=device)
             e.record()
             x.add_(1)
             return x
@@ -819,10 +824,10 @@ class <lambda>(torch.nn.Module):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
-        original_stream = torch.accelerator.current_stream()
+        original_stream = torch.accelerator.current_stream(device)
         try:
-            s0 = torch.Stream()
-            s1 = torch.Stream()
+            s0 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
             store_user_object_weakrefs(s0, s1)
 
             sample_inputs = [
@@ -837,16 +842,16 @@ class <lambda>(torch.nn.Module):
             reset_user_object_tracking()
 
     @onlyAccelerator
-    def test_run_opcheck_wait_record(self):
+    def test_run_opcheck_wait_record(self, device):
         from torch._dynamo.variables.streams import record_event, wait_event
         from torch.library import opcheck
 
-        original_stream = torch.accelerator.current_stream()
+        original_stream = torch.accelerator.current_stream(device)
         try:
-            s0 = torch.Stream()
-            s1 = torch.Stream()
-            e0 = torch.Event()
-            e1 = torch.Event()
+            s0 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
+            e0 = torch.Event(device=device)
+            e1 = torch.Event(device=device)
             store_user_object_weakrefs(s0, s1, e0, e1)
 
             sample_inputs = [
@@ -861,14 +866,14 @@ class <lambda>(torch.nn.Module):
             reset_user_object_tracking()
 
     @onlyAccelerator
-    def test_run_opcheck_wait_record_stream(self):
+    def test_run_opcheck_wait_record_stream(self, device):
         from torch._dynamo.variables.streams import wait_stream
         from torch.library import opcheck
 
         try:
-            s0 = torch.Stream()
-            s1 = torch.Stream()
-            s2 = torch.Stream()
+            s0 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
             store_user_object_weakrefs(s0, s1, s2)
 
             sample_inputs = [
@@ -887,7 +892,7 @@ class <lambda>(torch.nn.Module):
         # We expect there to be a sync_dealloc op added to the graph for y
         # synchronizing the first stream w/ the second stream after the second stream is finished
         def fn(x):
-            e = torch.Event()
+            e = torch.Event(device=device)
             with torch.Stream(device=device):
                 y = torch.ones(2, 2, device=device)
                 e.record()
@@ -982,7 +987,7 @@ class GraphModule(torch.nn.Module):
         # first allocated on the first stream used on the second stream
         # used on the first stream again then finally used on the last stream
         def fn(x):
-            e = torch.Event()
+            e = torch.Event(device=device)
             with torch.Stream(device=device):
                 y = torch.ones(2, 2, device=device)
                 z = y * x
@@ -1290,7 +1295,7 @@ class <lambda>(torch.nn.Module):
         def fn(x) -> torch.Tensor:
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
-            e = torch.Event()
+            e = torch.Event(device=device)
 
             with s1:
                 y = x + 1
@@ -1356,7 +1361,7 @@ class <lambda>(torch.nn.Module):
         def fn(x) -> torch.Tensor:
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
-            e = torch.Event()
+            e = torch.Event(device=device)
 
             with s1:
                 y = x + 1
@@ -1408,7 +1413,7 @@ class <lambda>(torch.nn.Module):
         def fn(x) -> torch.Tensor:
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
-            e = torch.Event()
+            e = torch.Event(device=device)
 
             with s1:
                 y = x + 1
@@ -1489,8 +1494,8 @@ class <lambda>(torch.nn.Module):
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
             s3 = torch.Stream(device=device)
-            e1 = torch.Event()
-            e2 = torch.Event()
+            e1 = torch.Event(device=device)
+            e2 = torch.Event(device=device)
 
             with s1:
                 y = x + 1
@@ -1581,7 +1586,7 @@ class <lambda>(torch.nn.Module):
         def fn(x) -> torch.Tensor:
             s1 = torch.Stream(device=device)
             s2 = torch.Stream(device=device)
-            e = torch.Event()
+            e = torch.Event(device=device)
 
             with s1:
                 y = x + 1
@@ -2161,7 +2166,7 @@ class GraphModule(torch.nn.Module):
 
             @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
-                e = torch.Event()
+                e = torch.Event(device=device)
                 x += x + 1
                 e.record()
                 return x
@@ -2202,8 +2207,8 @@ class GraphModule(torch.nn.Module):
         from torch._inductor.fx_passes.control_dependencies import control_deps
 
         def fn(x, y):
-            s0 = torch.Stream()
-            s1 = torch.Stream()
+            s0 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
             with s0:
                 z0 = 2 * x + y
             with s1:
@@ -2267,7 +2272,7 @@ class GraphModule(torch.nn.Module):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         def fn(x):
-            s = torch.Stream()
+            s = torch.Stream(device=device)
             x.record_stream(s)
             return x
 
@@ -2284,8 +2289,8 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_after_input_mutation_errors(self, device):
         def fn(x):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s:
                 x.add_(1)
                 e.record()
@@ -2299,8 +2304,8 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_after_input_mutation_stack_traces(self, device):
         def fn(x):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s:
                 x.add_(1)
                 e.record()
@@ -2321,7 +2326,7 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_after_input_mutation_record_event(self, device):
         def fn(x):
-            s = torch.Stream()
+            s = torch.Stream(device=device)
             with s:
                 x.add_(1)
                 e = s.record_event()
@@ -2335,8 +2340,8 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_after_input_mutation_through_view(self, device):
         def fn(x):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             v = x.view(-1)
             with s:
                 v.add_(1)
@@ -2351,7 +2356,7 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_after_input_mutation_input_event(self, device):
         def fn(x, e):
-            s = torch.Stream()
+            s = torch.Stream(device=device)
             with s:
                 x.add_(1)
                 e.record()
@@ -2360,14 +2365,14 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(
                 torch.ones(2, 2, device=device),
-                torch.Event(),
+                torch.Event(device=device),
             )
 
     @onlyAccelerator
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s:
                 e.record()
                 x.add_(1)
@@ -2380,9 +2385,9 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_record_on_different_stream_no_error(self, device):
         def fn(x):
-            s0 = torch.Stream()
-            s1 = torch.Stream()
-            e = torch.Event()
+            s0 = torch.Stream(device=device)
+            s1 = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s0:
                 x.add_(1)
             with s1:
@@ -2396,8 +2401,8 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_not_returned_no_error(self, device):
         def fn(x):
-            s = torch.Stream()
-            e = torch.Event()
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
             with s:
                 x.add_(1)
                 e.record()
@@ -2426,7 +2431,7 @@ class GraphModule(torch.nn.Module):
     @onlyAccelerator
     def test_event_synchronize_tracing(self, device):
         def fn(x):
-            e = torch.Event()
+            e = torch.Event(device=device)
             e.record()
             x = x + 1
             e.synchronize()
@@ -2470,7 +2475,7 @@ class <lambda>(torch.nn.Module):
 
             @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
-                e = torch.Event()
+                e = torch.Event(device=device)
                 x = x + 1
                 e.record()
                 e.synchronize()
@@ -2489,7 +2494,7 @@ class <lambda>(torch.nn.Module):
         """
 
         def fn(x) -> torch.Tensor:
-            e = torch.Event()
+            e = torch.Event(device=device)
             y = x + 1
             e.record()
             e.synchronize()
@@ -2602,7 +2607,7 @@ class <lambda>(torch.nn.Module):
         """When the event was recorded externally, synchronize threads graph inputs through."""
 
         def fn(x):
-            e = torch.Event()
+            e = torch.Event(device=device)
             y = x + 1
             e.record()
             e.synchronize()
@@ -2668,7 +2673,7 @@ class <lambda>(torch.nn.Module):
         """E2E: compute → record → synchronize → use result through torch.compile."""
 
         def f(x):
-            e = torch.Event()
+            e = torch.Event(device=device)
             y = x + 1
             e.record()
             e.synchronize()
@@ -2687,7 +2692,7 @@ class <lambda>(torch.nn.Module):
             a_to_cpu_event_list = []
             for a in a_list:
                 a_cpu = a.to(device="cpu", non_blocking=True)
-                e = torch.Event()
+                e = torch.Event(device=device)
                 e.record()
                 a_cpu_list.append(a_cpu)
                 a_to_cpu_event_list.append(e)
