@@ -127,6 +127,33 @@ class TestUpgraders(JitTestCase):
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 
+    def test_aten_full_other_variants(self):
+        def test_func():
+            a = torch.full([4, 5, 6], 4, names=["a", "b", "c"], dtype=torch.int64)
+            return a
+
+        scripted_func = torch.jit.script(test_func)
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_func, buffer)
+
+        current_flag_value = torch._C._get_version_calculator_flag()
+        # calculate based on old version
+        torch._C._calculate_package_version_based_on_upgraders(False)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+        # calculate based on new version
+        torch._C._calculate_package_version_based_on_upgraders(True)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+        # make sure we preserve old behaviour
+        torch._C._calculate_package_version_based_on_upgraders(current_flag_value)
+
     def test_aten_linspace(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_v7.ptl"
         loaded_model = torch.jit.load(model_path)
