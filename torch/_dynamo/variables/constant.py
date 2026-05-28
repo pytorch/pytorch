@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import enum
 import operator
+from collections.abc import Iterable
 from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
 
@@ -267,13 +268,11 @@ class ConstantVariable(VariableTracker):
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
 
-        try:
+        if isinstance(self.value, Iterable):
             return ListIteratorVariable(
                 [ConstantVariable.create(c) for c in self.value],
                 mutation_type=ValueMutationNew(),
             )
-        except NotImplementedError:
-            pass
         return super().tp_iter_impl(tx)
 
     def call_method(
