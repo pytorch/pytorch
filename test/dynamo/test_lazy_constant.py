@@ -150,6 +150,41 @@ class LazyConstantVariableTests(TestCase):
         dims = [[2, 64], [3, 32]]
         self.assertEqual(opt_fn(x, dims), fn(x, dims))
 
+    def test_dict_attr_swap_restore_in_hop(self):
+        """Swapping and restoring a dict attribute inside a HOP must not
+        graph-break.
+
+        The original dict has lazy constant values, so is_python_constant()
+        returns False.  snapshot_attr_mutation must use try_peek_constant()
+        to read the original value without realizing the lazy entries.
+        """
+
+        class Config:
+            def __init__(self):
+                self.options = {"mode": "fast", "level": 3}
+
+        cfg = Config()
+
+        class SwapRestore(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                old = cfg.options
+                cfg.options = {"mode": "slow", "level": 1}
+                cfg.options = old
+                return grad.clone()
+
+        def fn(x):
+            return SwapRestore.apply(x).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        out.backward()
+        self.assertEqual(x.grad.shape, x.shape)
+
     def test_slice_indices_unspecialized_ints(self):
         """Test that slice indices work with unspecialized ints.
 
@@ -1218,6 +1253,154 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(compiled2[3], True)  # 30 > 20 is True
             self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_returning_lazy_constant_plus_one_no_recompile(self):
+        """Test that returning LazyConstantVariable + 1 does not recompile.
+
+        Tests the reconstruct() functionality of ComputedLazyConstantVariable.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            return t + 1, a + 10
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        eager1 = fn(tensor_input, 5)
+        compiled1 = opt_fn(tensor_input, 5)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])  # 15
+        self.assertEqual(counter.frame_count, 1)
+
+        # Different value - should NOT recompile
+        eager2 = fn(tensor_input, 100)
+        compiled2 = opt_fn(tensor_input, 100)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(compiled2[1], 110)
+        self.assertEqual(counter.frame_count, 1)
+
+        eager3 = fn(tensor_input, 999)
+        compiled3 = opt_fn(tensor_input, 999)
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(compiled3[1], 1009)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_returning_chained_lazy_operations_no_recompile(self):
+        """Test that chained lazy constant operations don't recompile."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            result = a + 1
+            result = result * 2
+            result = result - 5
+            return t + 1, result
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # (10 + 1) * 2 - 5 = 17
+        eager1 = fn(tensor_input, 10)
+        compiled1 = opt_fn(tensor_input, 10)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])
+        self.assertEqual(counter.frame_count, 1)
+
+        # (20 + 1) * 2 - 5 = 37
+        eager2 = fn(tensor_input, 20)
+        compiled2 = opt_fn(tensor_input, 20)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(compiled2[1], 37)
+        self.assertEqual(counter.frame_count, 1)
+
+        # (100 + 1) * 2 - 5 = 197
+        eager3 = fn(tensor_input, 100)
+        compiled3 = opt_fn(tensor_input, 100)
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(compiled3[1], 197)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_returning_two_lazy_constant_operations_no_recompile(self):
+        """Test that operations between two LazyConstantVariables don't recompile."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, a, b):
+            return t + 1, a + b
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        eager1 = fn(tensor_input, 5, 10)
+        compiled1 = opt_fn(tensor_input, 5, 10)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])  # 15
+        self.assertEqual(counter.frame_count, 1)
+
+        eager2 = fn(tensor_input, 100, 200)
+        compiled2 = opt_fn(tensor_input, 100, 200)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(compiled2[1], 300)
+        self.assertEqual(counter.frame_count, 1)
+
+        eager3 = fn(tensor_input, 1, 2)
+        compiled3 = opt_fn(tensor_input, 1, 2)
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(compiled3[1], 3)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_lazy_constant_arithmetic_both_specialize_modes(self):
+        """Test lazy constant arithmetic works with both specialize_int=True and False."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, a, b):
+            return t + 1, a + b
+
+        # Test with specialize_int=True
+        counter1 = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn1 = torch.compile(fn, backend=counter1)
+
+            eager1 = fn(tensor_input, 10, 20)
+            compiled1 = opt_fn1(tensor_input, 10, 20)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 30)
+            self.assertEqual(counter1.frame_count, 1)
+
+            eager2 = fn(tensor_input, 100, 200)
+            compiled2 = opt_fn1(tensor_input, 100, 200)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 300)
+            self.assertEqual(counter1.frame_count, 1)
+
+            compiled3 = opt_fn1(tensor_input, 1, 2)
+            self.assertEqual(compiled3[1], 3)
+            self.assertEqual(counter1.frame_count, 1)
+
+        # Test with specialize_int=False (default)
+        counter2 = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=False):
+            opt_fn2 = torch.compile(fn, backend=counter2)
+
+            eager4 = fn(tensor_input, 10, 20)
+            compiled4 = opt_fn2(tensor_input, 10, 20)
+            self.assertTrue(same(eager4[0], compiled4[0]))
+            self.assertEqual(compiled4[1], 30)
+            self.assertEqual(counter2.frame_count, 1)
+
+            # May trigger one recompile due to automatic_dynamic_shapes
+            eager5 = fn(tensor_input, 100, 200)
+            compiled5 = opt_fn2(tensor_input, 100, 200)
+            self.assertTrue(same(eager5[0], compiled5[0]))
+            self.assertEqual(compiled5[1], 300)
+            frame_count_after_second = counter2.frame_count
+
+            # Should NOT trigger additional recompile
+            compiled6 = opt_fn2(tensor_input, 1, 2)
+            self.assertEqual(compiled6[1], 3)
+            self.assertEqual(counter2.frame_count, frame_count_after_second)
+
     @torch._dynamo.config.patch(rewrite_assert_with_torch_assert=True)
     def test_rewrite_assert(self):
         # This failure was triggered during LazyConstant implementation
@@ -1341,10 +1524,104 @@ class LazyConstantVariableTests(TestCase):
             return arr[index,].shape != (1,)
 
         opt_fn = torch.compile(fn, backend="eager")
-        # Without the fix, this raises InternalTorchDynamoError from
-        # get_construct_fn() on the plain tuple subclass during codegen
         self.assertTrue(opt_fn())
         self.assertEqual(opt_fn(), fn())
+
+    def test_dict_mutation_no_recompile_on_unused_key_change(self):
+        """Test that mutating a dict doesn't guard on unused keys.
+
+        When a dict is mutated with a constant key (e.g., d['new_key'] = value),
+        no guard is needed since __setitem__ works the same whether the key
+        exists or not. This ensures that changing any keys (used or unused)
+        doesn't cause unnecessary recompilation.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d):
+            d["new_key"] = 123  # Mutate dict - no guard needed for constant key
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with dict {'a': 1, 'b': 2}
+        d1 = {"a": 1, "b": 2}
+        eager1 = fn(tensor_input, d1.copy())
+        d1_copy = {"a": 1, "b": 2}
+        compiled1 = opt_fn(tensor_input, d1_copy)
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(d1_copy["new_key"], 123)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with completely different keys - should NOT recompile
+        d2 = {"x": 100, "y": 200}
+        eager2 = fn(tensor_input, d2.copy())
+        d2_copy = {"x": 100, "y": 200}
+        compiled2 = opt_fn(tensor_input, d2_copy)
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(d2_copy, {"x": 100, "y": 200, "new_key": 123})
+        self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+        # Third call with 'new_key' already present - should also NOT recompile
+        # since __setitem__ works the same whether key exists or not
+        d3 = {"a": 1, "new_key": 999}
+        eager3 = fn(tensor_input, d3.copy())
+        d3_copy = {"a": 1, "new_key": 999}
+        compiled3 = opt_fn(tensor_input, d3_copy)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(d3_copy["new_key"], 123)  # Overwritten
+        self.assertEqual(counter.frame_count, 1)  # Still no recompile!
+
+    def test_dict_read_then_write_same_key(self):
+        """Test reading and writing the same dict key (e.g., increment).
+
+        When we read a dict key with a constant key, the value is treated as
+        a LazyConstantVariable. When we add to it (d["x"] + 1), it creates a
+        ComputedLazyConstantVariable which doesn't guard on the value.
+        This allows changing the value without recompilation.
+
+        Note: This requires specialize_int=True for the value to stay lazy.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d):
+            d["counter"] = d["counter"] + 1  # Read then write same key
+            return t + 1
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call
+            d1 = {"counter": 10, "other": "unchanged"}
+            eager1 = fn(tensor_input, d1.copy())
+            d1_copy = {"counter": 10, "other": "unchanged"}
+            compiled1 = opt_fn(tensor_input, d1_copy)
+            self.assertTrue(same(eager1, compiled1))
+            self.assertEqual(d1_copy["counter"], 11)
+            self.assertEqual(d1_copy["other"], "unchanged")  # Other key preserved
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call with different counter value - should NOT recompile
+            # because the value is lazy and d["counter"] + 1 creates a
+            # ComputedLazyConstantVariable that recomputes at runtime
+            d2 = {"counter": 100, "different": "keys"}
+            eager2 = fn(tensor_input, d2.copy())
+            d2_copy = {"counter": 100, "different": "keys"}
+            compiled2 = opt_fn(tensor_input, d2_copy)
+            self.assertTrue(same(eager2, compiled2))
+            self.assertEqual(d2_copy["counter"], 101)  # 100 + 1 = 101
+            self.assertEqual(d2_copy["different"], "keys")  # Other key preserved
+            self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+            # Third call with yet another counter value - still no recompile
+            d3 = {"counter": 500}
+            eager3 = fn(tensor_input, d3.copy())
+            d3_copy = {"counter": 500}
+            compiled3 = opt_fn(tensor_input, d3_copy)
+            self.assertTrue(same(eager3, compiled3))
+            self.assertEqual(d3_copy["counter"], 501)  # 500 + 1 = 501
+            self.assertEqual(counter.frame_count, 1)  # Still no recompile!
 
     def test_namedtuple_with_lazy_constant_no_recompile(self):
         """Returning a namedtuple with lazy constants should not recompile on value change."""
