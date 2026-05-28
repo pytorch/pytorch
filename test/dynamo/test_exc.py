@@ -143,15 +143,7 @@ from user code:
    File "test_exc.py", line N, in fn001
     comptime(f)
 
-
-========== The above exception occurred while processing the following code ==========
-
-  File "test_exc.py", line N, in test_internal_error_suppress_errors
-    torch.compile(fn001, backend="eager")(torch.randn(1))
-  File "test_exc.py", line N, in fn001
-    comptime(f)
-
-==========""",
+""",
         )
 
     @make_logging_test()

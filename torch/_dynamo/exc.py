@@ -90,6 +90,14 @@ class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
+class _UserAssertionError(AssertionError):
+    pass
+
+
+def raise_user_assertion_error(msg: str = "") -> NoReturn:
+    raise _UserAssertionError(msg)
+
+
 class ResumePrologueTracingError(TorchDynamoException):
     pass
 

@@ -47,7 +47,12 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    _UserAssertionError,
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -758,6 +763,15 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
+    @staticmethod
+    def _call_user_fn(func: Callable[..., Any], ctx: Any) -> None:
+        try:
+            func(ctx)
+        except AssertionError as e:
+            if isinstance(e, _UserAssertionError):
+                raise
+            raise _UserAssertionError(*e.args).with_traceback(e.__traceback__) from None
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 
@@ -789,8 +803,9 @@ class ComptimeVariable(VariableTracker):
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         fn = args[0]
+        ctx = ComptimeContext(tx)
         if isinstance(fn, UserFunctionVariable):
-            fn.get_function()(ComptimeContext(tx))
+            self._call_user_fn(fn.get_function(), ctx)
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
@@ -812,7 +827,7 @@ class ComptimeVariable(VariableTracker):
                 # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
                 (),
             )
-            func(ComptimeContext(tx))
+            self._call_user_fn(func, ctx)
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
