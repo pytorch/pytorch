@@ -430,7 +430,7 @@
   result: auto_element_wise
 
 - name: clamp_min(Tensor self, Scalar min) -> Tensor
-  self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
+  self: where(self > min, grad, at::scalar_tensor(0., grad.options()))
   result: auto_element_wise
 
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
@@ -439,7 +439,7 @@
   result: where(self_p >= min_p, self_t, min_t)
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
-  self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
+  self: where(self < max, grad, at::scalar_tensor(0., grad.options()))
   result: auto_element_wise
 
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor

@@ -1238,17 +1238,17 @@ Tensor clamp_backward(
     const Tensor& self,
     const std::optional<Scalar>& min,
     const std::optional<Scalar>& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
+  // clamp: at a saturation boundary the subgradient is [0, 1]
+  // we return 0 to match hardtanh by using strict inequalities
   if (max && min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self >= *min).logical_and_(self <= *max), grad, zero);
+    return where((self > *min).logical_and_(self < *max), grad, zero);
   } else if (min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= *min, grad, zero);
+    return where(self > *min, grad, zero);
   } else if (max) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= *max, grad, zero);
+    return where(self < *max, grad, zero);
   } else {
     return grad;
   }
