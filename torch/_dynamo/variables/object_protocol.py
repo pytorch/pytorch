@@ -8,6 +8,7 @@ live in their respective VT files.
 """
 
 import abc
+import collections
 import enum
 import sys
 import types
@@ -71,12 +72,15 @@ def vt_identity_compare(
     if left_known != right_known:
         return ConstantVariable.create(False)
 
-    # Mutable containers created during tracing: VT identity = Python identity.
+    # Objects created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .misc import TracebackVariable
     from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
+    if isinstance(
+        left, (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
+    ):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
@@ -221,6 +225,12 @@ def type_implements_tp_iternext(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
+def type_implements_tp_repr(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_repr slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_REPR)
+
+
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
@@ -353,6 +363,39 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
         handle_observed_exception(tx)
 
     return ConstantVariable.create(True)
+
+
+_repr_running: set[int] = set()
+
+
+def generic_repr(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyObject_Repr with Py_ReprEnter/Py_ReprLeave cycle detection.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
+
+    Resolution order: tp_repr -> TypeError if the result is not str.
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_tp_repr(obj_type):
+        obj_id = id(obj)
+        if obj_id in _repr_running:
+            sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
+            return ConstantVariable.create(sentinel.get(obj_type, "..."))
+        _repr_running.add(obj_id)
+        try:
+            result = obj.repr_impl(tx)
+        finally:
+            _repr_running.discard(obj_id)
+        result_type = maybe_get_python_type(result)
+        if not issubclass(result_type, str):
+            raise_type_error(
+                tx,
+                f"__repr__ returned non-string (type {result_type.__name__})",
+            )
+        return result
+
+    raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
 
 
 def vt_getitem(
@@ -1148,6 +1191,201 @@ def slot_wrapper_imul(
     return slot_wrapper_mul(tx, self, other)
 
 
+# ---------------------------------------------------------------------------
+# tp_richcompare -- comparison dispatch
+#
+# CPython comparison architecture (Objects/object.c, Objects/typeobject.c):
+#
+#   a == b  (COMPARE_OP bytecode)
+#     -> PyObject_RichCompare(a, b, Py_EQ)
+#       -> do_richcompare(a, b, Py_EQ)            # the 4-step algorithm
+#         -> type(a)->tp_richcompare(a, b, Py_EQ)  # per-type slot
+#
+#   a.__eq__(b)  (attribute access)
+#     -> type(a)->tp_getattro(a, "__eq__")          # descriptor protocol
+#     -> returns wrapper bound to tp_richcompare
+#     -> calling wrapper invokes tp_richcompare(a, b, Py_EQ) directly
+#
+# do_richcompare algorithm (Objects/object.c#L901-L955):
+#   1. Subclass priority: if type(b) is a proper subclass of type(a),
+#      try type(b)->tp_richcompare(b, a, swapped_op) first
+#   2. Forward: type(a)->tp_richcompare(a, b, op)
+#   3. Reflected: type(b)->tp_richcompare(b, a, swapped_op)
+#   4. Fallback: identity for eq/ne, TypeError for ordering
+#
+# Dynamo implementation:
+#
+#   richcompare_impl(self, tx, other, op) -- per-VT slot, analogous to
+#     tp_richcompare.  Returns ConstantVariable(NotImplemented) when the
+#     type does not handle the comparison.
+#
+#   generic_richcompare(tx, lhs, rhs, op) -- analogous to do_richcompare.
+#     Implements the 4-step algorithm directly using richcompare_impl
+#     slots.  If a user comparison method graph-breaks, the Unsupported
+#     exception propagates to COMPARE_OP (which has
+#     @break_graph_if_unsupported) and runs the comparison eagerly.
+#     UDOV.richcompare_impl disables nested graph breaks on the resolved
+#     funcvar so the InliningInstructionTranslator does not try to split
+#     the inlined user method mid-function.
+#
+# Two entry points converge on richcompare_impl:
+#
+#   COMPARE_OP (a == b):
+#     -> BuiltinVariable dispatch -> generic_richcompare
+#       -> richcompare_impl (4-step: subclass priority, forward, reflected, fallback)
+#
+#   call_method("__eq__") (a.__eq__(b) in user code):
+#     -> base.py call_method -> richcompare_impl directly
+#
+# The call_method path calls richcompare_impl directly (not
+# generic_richcompare) to match CPython semantics: a.__eq__(b) invokes
+# the type's tp_richcompare slot without do_richcompare's reflected-
+# operand protocol, and may return NotImplemented.
+# ---------------------------------------------------------------------------
+
+
+def is_richcompare_not_implemented(result: VariableTracker) -> bool:
+    return result.is_constant_match(NotImplemented)
+
+
+def object_richcompare(
+    self: VariableTracker,
+    tx: "InstructionTranslator",
+    other: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """object's tp_richcompare.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
+    - __eq__: identity check, else NotImplemented
+    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
+    - ordering
+    """
+    if op == "__eq__":
+        identity = vt_identity_compare(self, other)
+        if identity is not None and identity.as_python_constant():
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(NotImplemented)
+    elif op == "__ne__":
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
+        eq_result = self.richcompare_impl(tx, other, "__eq__")
+        if is_richcompare_not_implemented(eq_result):
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(not eq_result.as_python_constant())
+    else:
+        return ConstantVariable.create(NotImplemented)
+
+
+def python_constant_richcompare_impl(
+    self: VariableTracker,
+    tx: "InstructionTranslator",
+    other: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Constant-fold comparison for types with as_python_constant()."""
+    if not self.is_python_constant() or not other.is_python_constant():
+        return ConstantVariable.create(NotImplemented)
+    self_val = self.as_python_constant()
+    other_val = other.as_python_constant()
+    try:
+        result = getattr(type(self_val), op)(self_val, other_val)
+    except TypeError as e:
+        raise_observed_exception(TypeError, tx, args=list(e.args))
+    return ConstantVariable.create(result)
+
+
+# _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
+_REFLECTED_OP: dict[str, str] = {
+    "__lt__": "__gt__",
+    "__gt__": "__lt__",
+    "__le__": "__ge__",
+    "__ge__": "__le__",
+    "__eq__": "__eq__",
+    "__ne__": "__ne__",
+}
+
+_OP_STR: dict[str, str] = {
+    "__lt__": "<",
+    "__le__": "<=",
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
+def generic_richcompare(
+    tx: "InstructionTranslator",
+    lhs: VariableTracker,
+    rhs: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Dynamo's do_richcompare.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L994-L1039
+
+    Implements the 4-step algorithm directly using richcompare_impl slots.
+    Graph breaks inside user comparison methods propagate to COMPARE_OP
+    (which runs eagerly) because UDOV.richcompare_impl disables nested
+    graph breaks on the resolved funcvar.
+    """
+    reflected = _REFLECTED_OP[op]
+
+    try:
+        lhs_type = lhs.python_type()
+    except NotImplementedError:
+        lhs_type = None
+    try:
+        rhs_type = rhs.python_type()
+    except NotImplementedError:
+        rhs_type = None
+
+    checked_reverse = False
+
+    # Step 1: subclass priority
+    if (
+        lhs_type is not None
+        and rhs_type is not None
+        and lhs_type is not rhs_type
+        and issubclass(rhs_type, lhs_type)
+    ):
+        checked_reverse = True
+        result = rhs.richcompare_impl(tx, lhs, reflected)
+        if not is_richcompare_not_implemented(result):
+            return result
+
+    # Step 2: forward
+    result = lhs.richcompare_impl(tx, rhs, op)
+    if not is_richcompare_not_implemented(result):
+        return result
+
+    # Step 3: reflected (if not already tried)
+    if not checked_reverse:
+        result = rhs.richcompare_impl(tx, lhs, reflected)
+        if not is_richcompare_not_implemented(result):
+            return result
+
+    # Step 4: fallback
+    if op in ("__eq__", "__ne__"):
+        identity = vt_identity_compare(lhs, rhs)
+        if identity is not None:
+            if op == "__ne__":
+                return ConstantVariable.create(not identity.as_python_constant())
+            return identity
+        unimplemented(
+            gb_type="richcompare identity fallback undetermined",
+            context=f"generic_richcompare({lhs}, {rhs}, {op})",
+            explanation="Cannot determine object identity for comparison fallback.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    else:
+        raise_type_error(
+            tx,
+            f"'{_OP_STR[op]}' not supported between instances of "
+            f"'{lhs.python_type_name()}' and '{rhs.python_type_name()}'",
+        )
+
+
 def generic_hash_impl(
     tx: "InstructionTranslator", obj: VariableTracker
 ) -> tuple[int, bool]:
@@ -1168,11 +1406,11 @@ def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     Wraps the result in ConstantVariable or FakeIdVariable depending on
     whether the hash depends on a sourceless object's identity.
     """
-    from .constant import ConstantVariable, FakeIdVariable
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 
     h, is_fake = generic_hash_impl(tx, obj)
     if is_fake:
-        return FakeIdVariable(h)
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 

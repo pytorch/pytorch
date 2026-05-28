@@ -2290,6 +2290,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -4697,6 +4702,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.fwd_fn = fwd_fn
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
         return types.BuiltinMethodType
