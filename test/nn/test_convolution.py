@@ -974,10 +974,19 @@ class TestConvolutionNN(NNTestCase):
                 atol=dtype2prec_DONTUSE[dtype],
                 rtol=0,
             )
+            tf32_conv = (
+                device == "cuda"
+                and dtype == torch.float
+                and torch.cuda.is_tf32_supported()
+                and torch.backends.cudnn.conv.fp32_precision == "tf32"
+            )
+            weight_grad_atol = 0.01 if tf32_conv else dtype2prec_DONTUSE[dtype]
+            if dtype == torch.half:
+                weight_grad_atol = 1e-1
             self.assertEqual(
                 m.weight.grad.data,
                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                atol=1e-1 if dtype == torch.half else dtype2prec_DONTUSE[dtype],
+                atol=weight_grad_atol,
                 rtol=0,
             )
 
@@ -1021,10 +1030,19 @@ class TestConvolutionNN(NNTestCase):
                 atol=dtype2prec_DONTUSE[dtype],
                 rtol=0,
             )
+            tf32_conv = (
+                device == "cuda"
+                and dtype == torch.float
+                and torch.cuda.is_tf32_supported()
+                and torch.backends.cudnn.conv.fp32_precision == "tf32"
+            )
+            weight_grad_atol = 0.01 if tf32_conv else dtype2prec_DONTUSE[dtype]
+            if dtype == torch.half:
+                weight_grad_atol = 1e-1
             self.assertEqual(
                 m.weight.grad.data,
                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                atol=1e-1 if dtype == torch.half else dtype2prec_DONTUSE[dtype],
+                atol=weight_grad_atol,
                 rtol=0,
             )
 
@@ -1656,9 +1674,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
-    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
-    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
+    @torch.backends.cudnn.flags(
+        enabled=True, deterministic=True, benchmark=False, allow_tf32=None
+    )
+    @torch.backends.miopen.flags(immediate=True)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(
