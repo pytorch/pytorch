@@ -835,7 +835,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, device):
         if format == "mxfp8" and not _has_cutedsl_runtime():
             raise unittest.SkipTest(cutedsl_skip_msg)
 
