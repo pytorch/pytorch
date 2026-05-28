@@ -328,6 +328,12 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
+
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
@@ -693,9 +699,7 @@ def deduce_output_dtype_by_name(
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "rand",
-        "rand4x",
         "randn",
-        "randn4x",
     ):
         return torch.float
     elif op_name in (
