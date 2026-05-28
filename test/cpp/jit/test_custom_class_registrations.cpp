@@ -769,6 +769,11 @@ TORCH_LIBRARY_IMPL(_TorchScriptTesting, CUDA, m) {
   m.impl("queue_pop", queue_pop);
 }
 
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, XPU, m) {
+  m.impl("queue_push", queue_push);
+  m.impl("queue_pop", queue_pop);
+}
+
 TORCH_LIBRARY_IMPL(_TorchScriptTesting, Meta, m) {
   m.impl("takes_foo", &takes_foo);
   m.impl("takes_foo_list_return", takes_foo_list_return);
