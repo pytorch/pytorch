@@ -5217,18 +5217,20 @@ class InstructionTranslatorBase(
 
         self.package = package
 
-        if sys.version_info < (3, 11):
-            from .resume_execution import (
-                CO_ASYNC_GENERATOR,
-                CO_COROUTINE,
-                CO_GENERATOR,
-                CO_ITERABLE_COROUTINE,
-            )
+        from .resume_execution import (
+            CO_ASYNC_GENERATOR,
+            CO_COROUTINE,
+            CO_GENERATOR,
+            CO_ITERABLE_COROUTINE,
+        )
 
-            if f_code.co_flags & (
-                CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
-            ):
-                self.push(BuiltinVariable(None))
+        # Probably we shouldn't actually push None until the frame actually starts executing, but some tests (and
+        # possibly user code) depends on it.  Generators are handled properly in 3.11+, so we can skip them
+        push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        if sys.version_info < (3, 11):
+            push_types |= CO_GENERATOR
+        if f_code.co_flags & (push_types):
+            self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
@@ -6181,6 +6183,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
+        self.generator_just_started = True
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
@@ -6211,6 +6214,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.push(res)
 
     def RETURN_GENERATOR(self, inst: Instruction):
+        self.generator_just_started = False
         self.symbolic_result = self.funcvar
         raise ReturnValueOp
 

@@ -1259,7 +1259,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer.exception_handler(e)
 
     def _is_generator_just_started(self) -> bool:
-        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
+        if sys.version_info < (3, 11):
+            first_inst = 0
+        else:
+            first_inst = 1
+        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == first_inst
 
     def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)
