@@ -64,6 +64,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -72,6 +73,8 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -222,6 +225,22 @@ class FakeTensorTest(TestCase):
                         static_shapes=True,
                     )
                     self.assertIsNone(scalar.item_memo)
+
+    def test_backed_scalar_tensor_item_memo_survives_epoch(self):
+        shape_env = ShapeEnv()
+        scalar = torch.tensor(2, dtype=torch.int64)
+        with FakeTensorMode(shape_env=shape_env) as mode:
+            scalar = mode.from_tensor(scalar, source=LocalSource("scalar"))
+            item_memo = scalar.item_memo
+            self.assertIsInstance(item_memo, torch.SymInt)
+            self.assertEqual(int(item_memo), 2)
+
+            mode.epoch += 1
+
+            self.assertIs(scalar.item_memo, item_memo)
+
+            scalar.add_(1)
+            self.assertIsNone(scalar.item_memo)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
@@ -2250,6 +2269,10 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
