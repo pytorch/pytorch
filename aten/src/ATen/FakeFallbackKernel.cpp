@@ -104,7 +104,7 @@ bool has_symbolic_sizes(
 }
 
 std::optional<c10::Device> _find_common_device(
-    torch::jit::Stack const* const stack,
+    torch::jit::Stack* stack,
     size_t begin,
     size_t num_arguments) {
   std::optional<c10::Device> common_device;
@@ -154,27 +154,30 @@ bool is_device_type_arg(const c10::Argument& arg) {
   return false;
 }
 
-std::optional<c10::Device> rewrite_device_args_to_meta(
+std::optional<c10::Device> find_and_rewrite_device_args(
     torch::jit::Stack* stack,
     size_t arguments_begin,
     size_t num_arguments,
-    const c10::FunctionSchema& schema) {
+    const c10::FunctionSchema& schema,
+    bool rewrite_to_meta) {
   std::optional<c10::Device> original_device;
   for (const auto idx : c10::irange(num_arguments)) {
     auto& ivalue = (*stack)[arguments_begin + idx];
     if (ivalue.isDevice()) {
       auto dev = ivalue.toDevice();
-      TORCH_CHECK(
-          dev.type() != c10::DeviceType::Meta,
-          "FakeTensor does not support meta device inputs");
+      if (rewrite_to_meta) {
+        TORCH_CHECK(
+            dev.type() != c10::DeviceType::Meta,
+            "FakeTensor does not support meta device inputs");
+        ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
+      }
       if (!original_device.has_value())
         original_device = dev;
-      ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
     } else if (ivalue.isNone() && is_device_type_arg(schema.arguments()[idx])) {
-      if (!original_device.has_value()) {
+      if (rewrite_to_meta)
+        ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
+      if (!original_device.has_value())
         original_device = c10::Device(c10::DeviceType::CPU);
-      }
-      ivalue = c10::IValue(c10::Device(c10::DeviceType::Meta));
     }
   }
   return original_device;
@@ -724,6 +727,11 @@ void fakeFallback(
 
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
+  if (!common_device.has_value()) {
+    common_device = find_and_rewrite_device_args(
+        stack, arguments_begin, num_arguments, schema, /*rewrite_to_meta=*/false);
+  }
+
   if (mode && interp) {
     if ((*interp)->fake_try_op_impl(
             op,
@@ -733,8 +741,8 @@ void fakeFallback(
     }
   }
 
-  auto device_from_args = rewrite_device_args_to_meta(
-      stack, arguments_begin, num_arguments, schema);
+  auto device_from_args = find_and_rewrite_device_args(
+      stack, arguments_begin, num_arguments, schema, /*rewrite_to_meta=*/true);
   if (!common_device.has_value()) {
     common_device = device_from_args;
   }
