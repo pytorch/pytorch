@@ -4319,11 +4319,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182790")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/182666")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
@@ -8546,7 +8548,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertFalse(torch.allclose(running_means[1], running_means[2]),
                          "Running stats should continue changing across passes")
 
-    @skipIfMPS  # MPS batch_norm doesn't support mixed dtypes, crashes with LLVM error
+    @skipIfMPS  # MPS doesn't enforce InstanceNorm mixed-dtype rejection; the test's assertRaisesRegex would not fire
     def test_instancenorm_mixed_dtype_backward(self, device):
         """test backward pass with mixed dtypes for InstanceNorm2d
 

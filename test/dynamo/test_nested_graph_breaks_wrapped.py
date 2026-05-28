@@ -117,45 +117,36 @@ del test
 
 xfails = [
     # multiple exit due to nested graph break in decorator
-    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_nested_graph_breaks_strong,  # noqa: F821
+    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_nested_graph_breaks_strong,
     # graph break in context manager __init__
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_CustomizedCtxManager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_customized_ctx_manager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_with_graph_break_CustomizedCtxManager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_with_graph_break_customized_ctx_manager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_ctx_manager_with_graph_break_CustomizedCtxManagerWithGraphBreak_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_generic_ctx_manager_with_graph_break_customized_ctx_manager_with_graph_break_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_CustomizedCtxManager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_customized_ctx_manager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_with_graph_break_CustomizedCtxManager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_with_graph_break_customized_ctx_manager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_return_context_manager_nested_graph_breaks_strong,  # noqa: F821
-    # NestedGraphBreaksStrongCtxManagerTests.test_return_context_manager_with_graph_break_nested_graph_breaks_strong,  # noqa: F821
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_CustomizedCtxManager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_customized_ctx_manager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_with_graph_break_CustomizedCtxManager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_context_manager_with_graph_break_customized_ctx_manager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_ctx_manager_with_graph_break_CustomizedCtxManagerWithGraphBreak_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_generic_ctx_manager_with_graph_break_customized_ctx_manager_with_graph_break_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_CustomizedCtxManager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_customized_ctx_manager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_with_graph_break_CustomizedCtxManager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_nested_generic_context_manager_with_graph_break_customized_ctx_manager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_return_context_manager_nested_graph_breaks_strong,
+    # NestedGraphBreaksStrongCtxManagerTests.test_return_context_manager_with_graph_break_nested_graph_breaks_strong,
     # recursion limit exceeded
-    # NestedGraphBreaksStrongCtxManagerTests.test_cuda_stream_compared_with_constant_nested_graph_breaks_strong,  # noqa: F821
+    # NestedGraphBreaksStrongCtxManagerTests.test_cuda_stream_compared_with_constant_nested_graph_breaks_strong,
     # variable naming issues
     NestedGraphBreaksMiscTests.test_flat_name_to_original_fqn_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_compare_shapes_with_constant_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_failure_fn2_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_failure_fn_shape_control_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksMiscTests.test_guard_failure_fn_tensor_iter_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_filter_fn_by_name_and_value_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_guard_sym_node_fstring_when_used_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksMiscTests.test_symint_as_device_kwarg_multi_gpu_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksMiscTests.test_sys_modules_nested_graph_breaks,  # noqa: F821
-    # counters["graph_breaks"] issues
-    NestedGraphBreaksMiscTests.test_data_ptr_graph_break_aten_nested_graph_breaks,  # noqa: F821
-    # nested graph break removes duplicate graph break
-    NestedGraphBreaksMiscTests.test_duplicate_graph_break_log_nested_graph_breaks,  # noqa: F821
     # doesn't work due to debug_force_nested_calls wrapping the top frame
-    NestedGraphBreaksMiscTests.test_dynamo_cache_invalidate_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_dynamo_cache_move_to_front_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_dynamo_reset_clears_cache_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_fail_on_recompile_error_message_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_get_cache_entry_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksMiscTests.test_getattrvariable_as_python_constant_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_entries_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_entry_hit_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_fail_on_recompile_nested_graph_breaks,  # noqa: F821
@@ -163,9 +154,6 @@ xfails = [
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_nested_graph_breaks,  # noqa: F821
     # differing op_count
     NestedGraphBreaksMiscTests.test_nested_closure_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksMiscTests.test_return_nested_function_nested_graph_breaks,  # noqa: F821
-    # unknown
-    NestedGraphBreaksMiscTests.test_inspect_signature_bind_non_user_function_nested_graph_breaks,  # noqa: F821
 ]
 
 case = None
