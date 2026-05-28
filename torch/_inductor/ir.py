@@ -6630,20 +6630,17 @@ class ExternKernel(InputsKernel):
     def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
-        def add_nested_ir_reads(value: Any) -> None:
+        def add_ir_read(value: Any) -> None:
             if isinstance(value, IRNode):
                 name = value.maybe_get_name()
                 if name is not None:
                     read_writes.reads.add(dependencies.StarDep(name))
-            elif isinstance(value, dict):
-                for nested_value in value.values():
-                    add_nested_ir_reads(nested_value)
-            elif isinstance(value, (list, tuple)):
-                for nested_value in value:
-                    add_nested_ir_reads(nested_value)
 
-        add_nested_ir_reads(self.constant_args)
-        add_nested_ir_reads(self.kwargs)
+        pytree.tree_map_(
+            add_ir_read,
+            (self.constant_args, self.kwargs),
+            is_leaf=lambda value: isinstance(value, IRNode),
+        )
         return read_writes
 
     def collect_arg_kwarg_properties(self) -> None:
