@@ -2656,7 +2656,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             conditional.true_subgraph.graph,
             conditional.false_subgraph.graph,
         )
-        jit_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._preserve_codegen_state(graphs),
             self._target_buf("wrapper_call", jit_code),
@@ -2681,7 +2681,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline(ExitSubgraphLine(self))
             self.writeline("}")
 
-        aot_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._target_buf("wrapper_call", aot_code),
             self.set_writeline(aot_code, aot_code.writeline_aot),
@@ -2785,7 +2785,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             while_loop.cond_subgraph.graph,
             while_loop.body_subgraph.graph,
         )
-        jit_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._preserve_codegen_state(graphs),
             self._target_buf("wrapper_call", jit_code),
@@ -2805,7 +2805,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline(ExitSubgraphLine(self))
             self.writeline("}")
 
-        aot_code = DualIndentedBuffer(initial_indent=self.wrapper_call._indent)
+        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._target_buf("wrapper_call", aot_code),
             self.set_writeline(aot_code, aot_code.writeline_aot),
