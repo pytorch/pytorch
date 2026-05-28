@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
-    skipIfXpu,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
@@ -201,9 +200,6 @@ class TestFP8Types(TestCase):
         self.assertEqual(actual.dtype, dst_dtype)
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
-    @skipIfXpu(
-        msg="Conversions between float8_e5m2 and float8_e4m3fn is not supported, torch-xpu-ops: 2888"
-    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
@@ -212,7 +208,7 @@ class TestFP8Types(TestCase):
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
         x_shape = (16, 16, 16)
 
-        if "cuda" in device:
+        if "cuda" in device or "xpu" in device:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
                 "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
