@@ -756,8 +756,6 @@ def slice_forward(
     end: int | None = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -771,23 +769,76 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
-        start_val += sizes[dim]
+    def is_symint(x):
+        return isinstance(x, torch.SymInt)
 
-    if end_val < 0:
-        end_val += sizes[dim]
+    if not (is_symint(sizes[dim]) or is_symint(start_val) or is_symint(end_val)):
+        if start_val < 0:
+            start_val += sizes[dim]
 
-    if start_val < 0:
-        start_val = 0
-    elif start_val > sizes[dim]:
-        start_val = sizes[dim]
+        if end_val < 0:
+            end_val += sizes[dim]
 
-    if statically_known_true(end_val == sys.maxsize):
-        end_val = sizes[dim]
-    elif end_val < start_val:
-        end_val = start_val
-    elif end_val > sizes[dim]:
-        end_val = sizes[dim]
+        if start_val < 0:
+            start_val = 0
+        elif start_val > sizes[dim]:
+            start_val = sizes[dim]
+
+        if end_val == sys.maxsize:
+            end_val = sizes[dim]
+        elif end_val < start_val:
+            end_val = start_val
+        elif end_val > sizes[dim]:
+            end_val = sizes[dim]
+    else:
+        from torch.fx.experimental.symbolic_shapes import (
+            statically_known_false,
+            statically_known_true,
+        )
+
+        def sym_max(a, b):
+            if statically_known_true(a >= b):
+                return a
+            if statically_known_true(a <= b):
+                return b
+            return torch.sym_max(a, b)
+
+        def sym_min(a, b):
+            if statically_known_true(a <= b):
+                return a
+            if statically_known_true(a >= b):
+                return b
+            return torch.sym_min(a, b)
+
+        def sym_ite(pred, true_val, false_val):
+            if statically_known_true(pred):
+                return true_val
+            if statically_known_false(pred):
+                return false_val
+            if is_symint(true_val) and not is_symint(false_val):
+                false_val = true_val * 0 + false_val
+            elif is_symint(false_val) and not is_symint(true_val):
+                true_val = false_val * 0 + true_val
+            return torch.sym_ite(pred, true_val, false_val)
+
+        def clamp_min(val, lower):
+            return sym_max(val, lower)
+
+        def clamp_max(val, upper):
+            return sym_min(val, upper)
+
+        def adjust_negative(val):
+            return sym_ite(val < 0, val + sizes[dim], val)
+
+        start_val = adjust_negative(start_val)
+
+        start_val = clamp_max(clamp_min(start_val, 0), sizes[dim])
+
+        if statically_known_true(end_val == sys.maxsize):
+            end_val = sizes[dim]
+        else:
+            end_val = adjust_negative(end_val)
+            end_val = clamp_max(clamp_min(end_val, start_val), sizes[dim])
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
