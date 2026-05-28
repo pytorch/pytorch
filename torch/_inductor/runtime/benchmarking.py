@@ -675,6 +675,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         device_type = _normalize_gpu_device_type(device_type)
         device_interface = get_interface_for_device(device_type)
+
         if (
             device_type == "cuda"
             and inductor_config.autotune_cudagraph_benchmarking
