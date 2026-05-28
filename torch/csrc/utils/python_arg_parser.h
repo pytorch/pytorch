@@ -144,13 +144,13 @@ struct FunctionParameter {
       PyObject* obj,
       std::vector<PyObject*>& overloaded_args,
       int argnum,
-      int64_t* failed_idx = nullptr);
+      py::object* failed_item = nullptr);
 
   bool _check(
       PyObject* obj,
       std::vector<PyObject*>& overloaded_args,
       int argnum,
-      int64_t* failed_idx = nullptr);
+      py::object* failed_item = nullptr);
 
   void set_default_str(const std::string& str);
   TORCH_PYTHON_API std::string type_name() const;
