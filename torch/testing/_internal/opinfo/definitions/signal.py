@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-from torch.testing._internal.common_utils import TEST_WITH_TORCHINDUCTOR
 import unittest
 from collections.abc import Callable
 from functools import partial
@@ -10,7 +9,7 @@ import numpy
 
 import torch
 from torch.testing._internal.common_dtype import floating_types
-from torch.testing._internal.common_utils import TEST_SCIPY
+from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_TORCHINDUCTOR
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
@@ -375,9 +374,27 @@ op_db: list[OpInfo] = [
         error_inputs_func=error_inputs_window,
         skips=(
             # https://github.com/pytorch/pytorch/issues/129947
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="cpu", active_if=TEST_WITH_TORCHINDUCTOR),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="cuda", active_if=TEST_WITH_TORCHINDUCTOR),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="xpu", active_if=TEST_WITH_TORCHINDUCTOR),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cuda",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -408,9 +425,27 @@ op_db: list[OpInfo] = [
         error_inputs_func=error_inputs_exponential_window,
         skips=(
             # https://github.com/pytorch/pytorch/issues/129947
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="cpu", active_if=TEST_WITH_TORCHINDUCTOR),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="cuda", active_if=TEST_WITH_TORCHINDUCTOR),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_numpy_ref", device_type="xpu", active_if=TEST_WITH_TORCHINDUCTOR),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cpu",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="cuda",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                active_if=TEST_WITH_TORCHINDUCTOR,
+            ),
         ),
     ),
     make_signal_windows_opinfo(
