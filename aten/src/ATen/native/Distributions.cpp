@@ -12,6 +12,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/DistributionTemplates.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
