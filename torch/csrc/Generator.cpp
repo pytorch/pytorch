@@ -387,11 +387,8 @@ static PyMethodDef THPGenerator_moduleMethods[] = {
 
 bool THPGenerator_init(PyObject* module) {
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
-  if (PyType_Ready(&THPGeneratorType) < 0)
+  if (PyModule_AddType(module, &THPGeneratorType) < 0)
     return false;
-  Py_INCREF(&THPGeneratorType);
-  PyModule_AddObject(
-      module, "Generator", reinterpret_cast<PyObject*>(&THPGeneratorType));
   // Register _set_generator_metaclass on torch._C so Python code can
   // late-bind OpaqueBaseMeta as Generator's metaclass (see rng_prims.py).
   if (PyModule_AddFunctions(module, THPGenerator_moduleMethods) < 0)
