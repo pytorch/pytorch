@@ -8741,10 +8741,16 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         """
         from torch._guards import detect_fake_mode
 
-        result = super().run_node(n)
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
+
+        # Each old unbacked binding site must allocate a fresh symbol during
+        # retracing so rebind_unbacked can connect it to the old symbol.
+        if n.meta.get("unbacked_bindings"):
+            fake_mode.epoch += 1
+
+        result = super().run_node(n)
         rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
