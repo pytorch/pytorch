@@ -3,9 +3,12 @@
 import ctypes
 
 import numpy as np
-from cuda.bindings.runtime import cudaDataType
-from nvmath.bindings import cublasLt
-from nvmath.bindings.cublas import ComputeType, Operation
+from cuda.bindings.runtime import cudaDataType  # pyrefly: ignore[missing-import]
+from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
+from nvmath.bindings.cublas import (  # pyrefly: ignore[missing-import]
+    ComputeType,
+    Operation,
+)
 
 import torch
 
@@ -177,7 +180,7 @@ class ForeachMMCublasLt:
             raise RuntimeError("cublasLt grouped GEMM: no algorithm found")
         cublasLt.matmul_preference_destroy(pref)
 
-        self._algo_ptr = heur["algo"].ctypes.data
+        self._algo_ptr = heur["algo"].ctypes.data  # pyrefly: ignore[bad-index]
         self._heur = heur  # prevent GC
 
         # Cached pointer offsets into _dev_ptrs

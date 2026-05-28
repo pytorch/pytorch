@@ -36,7 +36,9 @@ def _check_nvmath_cublaslt() -> bool:
     if _nvmath_available is not None:
         return _nvmath_available
     try:
-        from nvmath.bindings import cublasLt  # noqa: F401
+        from nvmath.bindings import (  # noqa: F401  # pyrefly: ignore[missing-import]
+            cublasLt,
+        )
 
         _nvmath_available = True
     except ImportError:
@@ -124,7 +126,7 @@ def _foreach_mm_impl_nvmath(
         _nvmath_cache[key] = _get_nvmath_cls()(
             M, N, K, G, a_row_major=a_row_major, b_row_major=b_row_major
         )
-    return _nvmath_cache[key](self, mat2)
+    return _nvmath_cache[key](self, mat2)  # pyrefly: ignore[not-callable]
 
 
 def _foreach_mm_impl(
