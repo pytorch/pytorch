@@ -930,6 +930,7 @@ def _compile_fx_inner(
     ):
         use_cache = (
             not config.force_disable_caches
+            and not config.trace.save_real_tensors
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
@@ -3028,11 +3029,25 @@ def _compile_fx_main(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
+            with (
+                V.set_fake_mode(fake_mode),
+                (
+                    V.set_real_inputs(example_inputs_)
+                    if config.trace.save_real_tensors
+                    else contextlib.nullcontext()
+                ),
+                compiled_autograd._disable(),
+                context(),
+            ):
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with (
             V.set_fake_mode(fake_mode),
+            (
+                V.set_real_inputs(example_inputs_)
+                if config.trace.save_real_tensors
+                else contextlib.nullcontext()
+            ),
             torch._guards.tracing(tracing_context),
             compiled_autograd._disable(),
             functorch_config.patch(
