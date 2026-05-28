@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -8,6 +9,18 @@ import torch._dynamo.testing
 
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
+
+
+class CustomizedCtxManager:
+    def __init__(self, x):
+        self.x = x
+        torch._dynamo.graph_break()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
@@ -1357,6 +1370,168 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 6)
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_graph_break_during_module_init(self):
+        """Graph break during nn.Module.__init__ should not prevent the caller
+        from compiling the rest of the function."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch._dynamo.graph_break()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            m = MyModule()
+            return m(x)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_init(self):
+        """Graph break during user class __init__ via instantiate_user_defined_class_object.
+
+        The polyfill does cls.__new__ then obj.__init__. If nested graph breaks
+        were allowed in the polyfill, the resume would have a half-initialized
+        object (created by __new__ but __init__ not yet complete), and accessing
+        attributes set after the graph break would fail with AttributeError.
+        """
+
+        class Config:
+            def __init__(self, scale):
+                torch._dynamo.graph_break()
+                self.scale = scale
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            cfg = Config(2)
+            return x * cfg.scale
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x * 2)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_during_user_class_new(self):
+        """Graph break during __new__ via instantiate_user_defined_class_object.
+
+        The polyfill calls cls.__new__ first. If nested graph breaks were
+        allowed, the resume would not yet have the object on the stack at all
+        (since __new__ creates it), so the subsequent __init__ call and any
+        attribute access would operate on garbage.
+        """
+
+        class Wrapper:
+            def __new__(cls, val):
+                torch._dynamo.graph_break()
+                obj = super().__new__(cls)
+                obj.val = val
+                return obj
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            w = Wrapper(3)
+            return x + w.val
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result, x + 3)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_graph_break_in_copy_deepcopy(self):
+        """copy.deepcopy is a BUILTIN_INLINE_WHEN_CALLED function that contains
+        loops and graph-breaks internally. If nested graph breaks were allowed,
+        deepcopy's internal loop would trigger raise_loop_graph_break which
+        poisons the parent frame, and deepcopy's graph-breaks would produce
+        unusable resume functions for stdlib frames."""
+        import copy
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def f(x):
+            y = x + 1
+            m = torch.nn.Linear(10, 10)
+            m2 = copy.deepcopy(m)
+            return m2(y)
+
+        x = torch.randn(10)
+        result = f(x)
+        self.assertEqual(result.shape, torch.Size([10]))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_inlined_function_globals_across_graph_break(self):
+        """Module-level globals in inlined functions survive graph breaks.
+
+        When a function from another module is inlined and hits a graph break,
+        the resume function must use that module's globals (not the caller's).
+        This is handled by install_resume_function_global().
+        """
+        from _test_nested_graph_breaks_helper import fn_with_module_global
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return fn_with_module_global(x)
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @unittest.expectedFailure
+    def test_nested_decorated_function(self):
+        # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
+        def f(x):
+            @torch.autocast("cpu")
+            def inner(y):
+                y = y + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+            return inner(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
+    @unittest.expectedFailure
+    def test_nested_graph_break_in_custom_ctx_manager_init(self):
+        def f(x):
+            with CustomizedCtxManager(x):
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
 
 if __name__ == "__main__":
