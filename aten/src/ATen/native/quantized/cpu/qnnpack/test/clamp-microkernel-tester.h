@@ -90,7 +90,7 @@ class ClampMicrokernelTester {
 
       /* Compute reference results */
       for (size_t i = 0; i < n(); i++) {
-        yRef[i] = std::max(std::min(xData[i], qmax()), qmin());
+        yRef[i] = std::clamp(xData[i], qmin(), qmax());
       }
 
       /* Call optimized micro-kernel */
