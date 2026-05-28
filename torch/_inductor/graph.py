@@ -2091,9 +2091,9 @@ class GraphLowering(torch.fx.Interpreter):
                             if (
                                 config.delay_realize_cheap_outputs
                                 # pyrefly: ignore [missing-attribute]
-                                and result.data.num_reads() == 0
-                                # pyrefly: ignore [missing-attribute]
                                 and not result.data.has_large_inner_fn()
+                                # pyrefly: ignore [missing-attribute]
+                                and result.data.num_reads() == 0
                             ):
                                 continue
                             result.realize()
