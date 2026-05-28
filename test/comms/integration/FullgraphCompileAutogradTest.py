@@ -8,7 +8,7 @@ import unittest
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
 
-from helpers.test_helpers import skip_if_torch_compile_not_supported_or_enabled
+from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 from integration.helpers.TorchCommTestHelpers import skip_backend, TorchCommTestWrapper
 
 import torch

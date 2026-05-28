@@ -228,8 +228,7 @@ class SplitTest(unittest.TestCase):
 
         if rank_in_group:
             # Only fill ranks if current rank is in the group
-            for i in range(split_size):
-                ranks.append(i)
+            ranks.extend(range(split_size))
         # Otherwise, ranks remains empty
 
         # Call split function
@@ -272,8 +271,7 @@ class SplitTest(unittest.TestCase):
 
         if rank_in_group:
             # Only fill ranks if current rank is in the group (even ranks)
-            for i in range(0, self.num_ranks, 2):
-                ranks.append(i)
+            ranks.extend(range(0, self.num_ranks, 2))
         # Otherwise, ranks remains empty
 
         # Call split function
@@ -349,8 +347,7 @@ class SplitTest(unittest.TestCase):
 
         if rank_in_first_level:
             # Only fill ranks if current rank is in the first level
-            for i in range(first_split_size):
-                first_level_ranks.append(i)
+            first_level_ranks.extend(range(first_split_size))
         # Otherwise, first_level_ranks remains empty
 
         # Call split function to create first-level child communicator
@@ -394,8 +391,7 @@ class SplitTest(unittest.TestCase):
 
         if rank_in_second_level:
             # Only fill ranks if current rank is in the second level
-            for i in range(second_split_size):
-                second_level_ranks.append(i)
+            second_level_ranks.extend(range(second_split_size))
         # Otherwise, second_level_ranks remains empty
 
         # Call split function to create second-level child communicator

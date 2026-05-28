@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import run_tests
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
 
-from helpers.test_helpers import skip_if_torch_compile_not_supported_or_enabled
+from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 
 import torch
 import torch._dynamo

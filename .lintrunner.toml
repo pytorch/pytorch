@@ -543,6 +543,7 @@ exclude_patterns = [
     'torch/csrc/*.h',
     'torch/csrc/api/**',
     'torch/csrc/autograd/**',
+    'torch/csrc/comms/**',
     'torch/csrc/cuda/**',
     'torch/csrc/distributed/**',
     'torch/csrc/dynamo/**',

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from torch.comms.hooks.clog._clog import clog
+    from torch.comms.hooks.clog._clog import clog  # pyrefly: ignore[missing-import]
 else:
     import torch._C._comms as _comms_mod
 

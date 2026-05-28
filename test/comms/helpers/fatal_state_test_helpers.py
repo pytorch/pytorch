@@ -44,7 +44,7 @@ class FatalStateTestMixin:
                 f"Subprocess timed out after {timeout}s.\n"
                 f"stdout: {(e.stdout or b'').decode(errors='replace')}\n"
                 f"stderr: {(e.stderr or b'').decode(errors='replace')}"
-            )
+            ) from e
 
     def assert_subprocess_aborted(
         self,

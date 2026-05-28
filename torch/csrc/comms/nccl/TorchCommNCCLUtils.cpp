@@ -249,12 +249,12 @@ void TorchCommNCCL::timeoutWatchdog() noexcept {
       ::abort();
     }
 
-    // Check communicator for async error
+    // Check communicator for async error. This runs on a noexcept watchdog
+    // thread, so log (don't throw) if the query itself fails.
     if (comm_state_ == CommState::NORMAL) {
-      ncclResult_t asyncErr;
-      NCCL_CHECK(
+      ncclResult_t asyncErr = ncclSuccess;
+      NCCL_CHECK_IGNORE(
           nccl_api_,
-          nccl_comm_,
           nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
           "failed to get async error");
       if (asyncErr != ncclSuccess) {

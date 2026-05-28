@@ -5,7 +5,7 @@
 import os
 import unittest
 
-from helpers.test_helpers import skip_if_torch_compile_not_supported_or_enabled
+from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 
 from torch.testing._internal.common_utils import run_tests
 

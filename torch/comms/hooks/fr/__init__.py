@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    # pyrefly: ignore[missing-import]
     from torch.comms.hooks.fr._fr import FlightRecorderHook
 else:
     import torch._C._comms as _comms_mod

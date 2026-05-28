@@ -120,6 +120,10 @@ class TorchCommsAsyncTensor(torch.Tensor):
     wrapped elem tensor so gradients flow through correctly.
     """
 
+    elem: torch.Tensor
+    work: Union[TorchWork, "_OnceWaitWork", None]
+    completed: bool
+
     __slots__ = ["elem", "work", "completed"]
 
     @staticmethod
@@ -142,17 +146,17 @@ class TorchCommsAsyncTensor(torch.Tensor):
         return r
 
     @property
-    def grad_fn(self):
+    def grad_fn(self):  # pyrefly: ignore[bad-override]
         """Delegate grad_fn to the wrapped elem tensor for autograd transparency."""
         return self.elem.grad_fn if self.elem is not None else None
 
     @property
-    def is_leaf(self):
+    def is_leaf(self):  # pyrefly: ignore[bad-override]
         """Delegate is_leaf to the wrapped elem tensor."""
         return self.elem.is_leaf if self.elem is not None else True
 
     @property
-    def grad(self):
+    def grad(self):  # pyrefly: ignore[bad-override]
         """Delegate grad to the wrapped elem tensor."""
         return self.elem.grad if self.elem is not None else None
 
@@ -190,7 +194,7 @@ class TorchCommsAsyncTensor(torch.Tensor):
         self,
     ) -> tuple[list[str], tuple[Union[TorchWork, "_OnceWaitWork"], bool]]:
         """Flatten for dynamo tracing."""
-        return ["elem"], (self.work, self.completed)
+        return ["elem"], (self.work, self.completed)  # pyrefly: ignore[bad-return]
 
     @staticmethod
     def __tensor_unflatten__(

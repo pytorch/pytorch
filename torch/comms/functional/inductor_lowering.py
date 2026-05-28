@@ -37,7 +37,7 @@ try:
 
             logger.info("Registered torchcomms lowerings for torch.compile")
         except AttributeError as e:
-            logger.warning(f"Failed to register torchcomms lowerings: {e}")
+            logger.warning("Failed to register torchcomms lowerings: %s", e)
 
     def _register_with_reinplace_pass(base_op_name: str, schema) -> None:
         """Register functional/inplace op pair with the reinplace pass.
@@ -79,8 +79,10 @@ try:
                 ),
             )
             logger.info(
-                f"Registered reinplace: {base_op_name} -> {base_op_name}_ "
-                f"(mutated_args={mutable_tensor_indices[0]})"
+                "Registered reinplace: %s -> %s_ (mutated_args=%s)",
+                base_op_name,
+                base_op_name,
+                mutable_tensor_indices[0],
             )
         except ImportError:
             logger.debug("reinplace pass not available")
@@ -104,7 +106,7 @@ try:
                 mutable_indices.append(i + 1)
 
         def _inplace_lowering(*args):
-            logger.debug(f"Lowering inplace {base_op_name}_")
+            logger.debug("Lowering inplace %s_", base_op_name)
 
             # Get the mutable tensors from args
             mutable_tensors = []
@@ -119,7 +121,7 @@ try:
                         )
 
             if not mutable_tensors:
-                logger.warning(f"No mutable tensors for {base_op_name}_")
+                logger.warning("No mutable tensors for %s_", base_op_name)
                 return None
 
             # Realize and mark tensors as mutated
@@ -165,7 +167,7 @@ try:
             return mutable_tensors
 
         register_lowering(inplace_op.default)(_inplace_lowering)
-        logger.info(f"Registered inplace lowering: {base_op_name}_")
+        logger.info("Registered inplace lowering: %s_", base_op_name)
 
     def _register_functional_lowering(base_op_name: str, schema) -> None:
         """Register lowering for the functional op.
@@ -181,7 +183,7 @@ try:
             return
 
         def _functional_lowering(*args):
-            logger.debug(f"Lowering functional {base_op_name} with {len(args)} args")
+            logger.debug("Lowering functional %s with %s args", base_op_name, len(args))
 
             # Use FallbackKernel with the functional op
             # The functional op returns new tensors, so it's not mutable
@@ -196,7 +198,7 @@ try:
             return result
 
         register_lowering(functional_op.default)(_functional_lowering)
-        logger.info(f"Registered functional lowering: {base_op_name}")
+        logger.info("Registered functional lowering: %s", base_op_name)
 
     def _register_wait_tensors_lowering() -> None:
         """Register lowerings for both functional and inplace wait_tensors."""
@@ -232,7 +234,8 @@ try:
             import torch.utils._pytree as pytree
 
             logger.debug(
-                f"Lowering functional torch.comms.torchcomm_wait_tensors with {len(args)} args"
+                "Lowering functional torch.comms.torchcomm_wait_tensors with %s args",
+                len(args),
             )
 
             # The op takes a list of tensors as the first argument
@@ -256,7 +259,7 @@ try:
             if not flat_inputs:
                 return []
 
-            logger.info(f"  - Processing {len(flat_inputs)} TensorBox inputs")
+            logger.info("  - Processing %s TensorBox inputs", len(flat_inputs))
 
             # Use FallbackKernel to create new output tensors
             # Pass flat_inputs as a list since the op signature is Tensor[] -> Tensor[]
@@ -271,7 +274,7 @@ try:
                 ),
             )
 
-            logger.debug(f"  - Created FallbackKernel result: {type(result)}")
+            logger.debug("  - Created FallbackKernel result: %s", type(result))
             return result
 
         register_lowering(torch.ops.torchcomms.torchcomm_wait_tensors.default)(
@@ -292,7 +295,8 @@ try:
                 inputs = list(args)
 
             logger.debug(
-                f"Lowering inplace torch.comms.torchcomm_wait_tensors_ with {len(inputs)} tensors"
+                "Lowering inplace torch.comms.torchcomm_wait_tensors_ with %s tensors",
+                len(inputs),
             )
 
             if not inputs:

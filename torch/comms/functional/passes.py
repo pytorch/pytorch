@@ -65,6 +65,7 @@ def reinplacement_pass(
     # TODO: remove this check after https://github.com/pytorch/pytorch/pull/159523 is in
     # a PyTorch release.
     if "gm" in signature(FakeTensorUpdater).parameters:
+        # pyrefly: ignore[bad-argument-type]
         fake_tensor_updater = FakeTensorUpdater(gm)
     else:
         fake_tensor_updater = FakeTensorUpdater(gm.graph)
@@ -196,14 +197,17 @@ def strip_with_effects_pass(
         if not made_progress:
             for node in remaining:
                 logger.warning(
-                    f"Could not erase node {node}, still has users: {list(node.users)}"
+                    "Could not erase node %s, still has users: %s",
+                    node,
+                    list(node.users),
                 )
             break
 
     gm.recompile()
 
     logger.debug(
-        f"finished strip_with_effects pass: removed {replacements_made} with_effects wrappers"
+        "finished strip_with_effects pass: removed %s with_effects wrappers",
+        replacements_made,
     )
     logger.debug("graph after strip_with_effects pass: %s", gm.graph)
 

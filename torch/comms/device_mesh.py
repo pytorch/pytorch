@@ -73,12 +73,15 @@ def _create_torchcomm_process_group(
     # Register backend
     # pyre-fixme[6]: BackendWrapper implements dist.Backend but types isn't aware
     pg._register_backend(comm.get_device(), backend_type, wrapper)
-    pg._set_group_name(group_name)
+    pg._set_group_name(group_name)  # pyrefly: ignore[bad-argument-type]
 
     # Update global state
     dist.distributed_c10d._world.pg_map[pg] = (backend_str, dummy_store)
-    dist.distributed_c10d._world.pg_names[pg] = group_name
+    dist.distributed_c10d._world.pg_names[pg] = (
+        group_name  # pyrefly: ignore[unsupported-operation]
+    )
     dist.distributed_c10d._world.pg_backend_config[pg] = str(backend_config)
+    # pyrefly: ignore[bad-argument-type]
     dist.distributed_c10d._register_process_group(group_name, pg)
 
     # Set up rank mapping
@@ -135,8 +138,7 @@ def init_device_mesh(
         )
 
     group_names = []
-    idx = 0
-    for comm, name in zip(mesh_dim_comms, mesh_dim_names):
+    for idx, (comm, name) in enumerate(zip(mesh_dim_comms, mesh_dim_names)):
         group_name = name
 
         # Calculate global ranks mapping for this mesh dimension
@@ -157,7 +159,6 @@ def init_device_mesh(
             global_pg = pg
 
         group_names.append(group_name)
-        idx += 1
 
     # Set as the default world process group
     dist.distributed_c10d.GroupMember.WORLD = global_pg
@@ -169,7 +170,7 @@ def init_device_mesh(
         _init_backend=False,
         _rank=global_rank,
     )
-    device_mesh._dim_group_names = group_names
+    device_mesh._dim_group_names = group_names  # pyrefly: ignore[bad-assignment]
 
     return device_mesh
 
@@ -223,6 +224,7 @@ def _flatten_with_comm(
             _rank=comm.get_rank(),
             _layout=coalesced_layout,
         )
+    # pyrefly: ignore[bad-assignment]
     flattened_device_mesh._dim_group_names = [mesh_dim_name]
 
     try:
@@ -234,7 +236,7 @@ def _flatten_with_comm(
         if hasattr(_mesh_resources, "flatten_name_to_root_dims"):
             raise NotImplementedError(
                 "Flattening with torchcomm is not supported for device mesh without mesh layout."
-            )
+            ) from None
         root_mesh = _mesh_resources.get_root_mesh(mesh)
         _mesh_resources.child_to_root_mapping[  # pyre-ignore[16]
             flattened_device_mesh

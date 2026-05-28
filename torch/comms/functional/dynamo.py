@@ -81,10 +81,10 @@ class TorchCommMethodVariable(VariableTracker):
         if has_mutable_inputs:
             inplace_op_name = f"{op_name}_"
             torch_op = getattr(torch.ops.torchcomms, inplace_op_name).default
-            logger.info(f"Using inplace op {inplace_op_name}")
+            logger.info("Using inplace op %s", inplace_op_name)
         else:
             torch_op = getattr(torch.ops.torchcomms, op_name).default
-            logger.info(f"Using op {op_name}")
+            logger.info("Using op %s", op_name)
 
         # Convert kwargs to positional args based on param order
         all_params = input_params + extra_params
@@ -177,8 +177,11 @@ class TorchCommMethodVariable(VariableTracker):
                 result_tensors = [result_var]
 
             logger.debug(
-                f"Functional op {op_name}: mutable_arg_indices={mutable_arg_indices}, "
-                f"len(args)={len(args)}, len(result_tensors)={len(result_tensors)}"
+                "Functional op %s: mutable_arg_indices=%s, len(args)=%s, len(result_tensors)=%s",
+                op_name,
+                mutable_arg_indices,
+                len(args),
+                len(result_tensors),
             )
 
             # Helper to unwrap LazyVariableTracker and get the actual variable
@@ -239,7 +242,9 @@ class TorchCommMethodVariable(VariableTracker):
                             result_tensor = result_tensors[i]
                             if isinstance(result_tensor, TensorVariable):
                                 logger.debug(
-                                    f"Updating tensor proxy: {mutable_var.proxy} -> {result_tensor.proxy}"
+                                    "Updating tensor proxy: %s -> %s",
+                                    mutable_var.proxy,
+                                    result_tensor.proxy,
                                 )
                                 mutable_var.proxy = result_tensor.proxy
 
@@ -251,7 +256,8 @@ class TorchCommMethodVariable(VariableTracker):
                                 )
                                 if parent_list is not None and index is not None:
                                     logger.debug(
-                                        f"Found parent list, updating item at index {index}"
+                                        "Found parent list, updating item at index %s",
+                                        index,
                                     )
                                     # Replace the item in the parent list
                                     if index < len(parent_list.items):
@@ -361,7 +367,9 @@ class AsyncWorkVariable(VariableTracker):
         from torch._dynamo.variables.lists import BaseListVariable
 
         logger.debug(
-            f"_do_wait called: tensor_vars={len(self.tensor_vars)}, mutable_vars={len(self.mutable_vars)}"
+            "_do_wait called: tensor_vars=%s, mutable_vars=%s",
+            len(self.tensor_vars),
+            len(self.mutable_vars),
         )
 
         # Generate wait_tensors call with all tensors (mutable inputs or dummy)
@@ -377,14 +385,14 @@ class AsyncWorkVariable(VariableTracker):
         result_var = wrap_fx_proxy(tx=tx, proxy=proxy)
 
         logger.debug(
-            f"wrap_fx_proxy returned: {result_var}, type={type(result_var).__name__}"
+            "wrap_fx_proxy returned: %s, type=%s", result_var, type(result_var).__name__
         )
 
         # Extract result tensors
         if isinstance(result_var, BaseListVariable):
             result_tensors = list(result_var.items)
             logger.debug(
-                f"result_var is BaseListVariable with {len(result_tensors)} items"
+                "result_var is BaseListVariable with %s items", len(result_tensors)
             )
         else:
             result_tensors = [result_var]
@@ -414,7 +422,9 @@ class AsyncWorkVariable(VariableTracker):
                     result_tensor, TensorVariable
                 ):
                     logger.debug(
-                        f"Updating mutable_var proxy after wait: {mutable_var.proxy} -> {result_tensor.proxy}"
+                        "Updating mutable_var proxy after wait: %s -> %s",
+                        mutable_var.proxy,
+                        result_tensor.proxy,
                     )
                     mutable_var.proxy = result_tensor.proxy
                     # mark as mutated so dynamo regenerates from new proxy
@@ -433,7 +443,9 @@ class AsyncWorkVariable(VariableTracker):
                     ):
                         source = mutable_var.source
                         logger.debug(
-                            f"mutable_var source type: {type(source).__name__}, source: {source}"
+                            "mutable_var source type: %s, source: %s",
+                            type(source).__name__,
+                            source,
                         )
                         local_name = None
                         # LocalSource (function parameters)
@@ -445,12 +457,15 @@ class AsyncWorkVariable(VariableTracker):
 
                         if local_name and local_name in tx.symbolic_locals:
                             logger.debug(
-                                f"Replacing symbolic_locals[{local_name}] with result_tensor"
+                                "Replacing symbolic_locals[%s] with result_tensor",
+                                local_name,
                             )
                             tx.symbolic_locals[local_name] = result_tensor
                         elif local_name:
                             logger.debug(
-                                f"local_name={local_name} not in symbolic_locals. Keys: {list(tx.symbolic_locals.keys())}"
+                                "local_name=%s not in symbolic_locals. Keys: %s",
+                                local_name,
+                                list(tx.symbolic_locals.keys()),
                             )
                     else:
                         logger.debug("mutable_var has no source or source is None")
@@ -554,13 +569,16 @@ def _patch_dynamo_for_opaque_methods(
             **info,
         }
         logger.info(
-            f"Registered method mapping: ({target_class.__name__}, {method_name}) -> {op_name}"
+            "Registered method mapping: (%s, %s) -> %s",
+            target_class.__name__,
+            method_name,
+            op_name,
         )
 
     if not _METHOD_TO_OP:
         return
 
-    logger.info(f"_TYPE_NAME_TO_CLASS = {_TYPE_NAME_TO_CLASS}")
+    logger.info("_TYPE_NAME_TO_CLASS = %s", _TYPE_NAME_TO_CLASS)
 
     from torch._library.fake_class_registry import FakeScriptObject
 
@@ -612,7 +630,7 @@ def _patch_dynamo_for_opaque_methods(
     # which handles collective methods (constant methods are now handled by
     # register_opaque_type with members=MemberType.USE_REAL)
     logger.info(
-        f"Registered {len(_METHOD_TO_OP)} collective methods for dynamo patching"
+        "Registered %s collective methods for dynamo patching", len(_METHOD_TO_OP)
     )
 
 
@@ -656,7 +674,9 @@ def _patch_var_getattr() -> None:
                 source = AttrSource(self.source, name) if self.source else None  # type: ignore[call-arg]
                 op_info = _METHOD_TO_OP[key]
                 logger.info(
-                    f"Returning TorchCommMethodVariable for {target_class.__name__}.{name}"
+                    "Returning TorchCommMethodVariable for %s.%s",
+                    target_class.__name__,
+                    name,
                 )
                 return TorchCommMethodVariable(
                     obj_var=self,
@@ -672,7 +692,8 @@ def _patch_var_getattr() -> None:
     TorchScriptObjectVariable.var_getattr = patched_var_getattr  # type: ignore[method-assign]
 
     logger.info(
-        f"Patched TorchScriptObjectVariable.var_getattr for {len(_METHOD_TO_OP)} collective methods"
+        "Patched TorchScriptObjectVariable.var_getattr for %s collective methods",
+        len(_METHOD_TO_OP),
     )
 
 

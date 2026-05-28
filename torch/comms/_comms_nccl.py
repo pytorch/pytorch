@@ -9,4 +9,4 @@ factory in ``torch.comms`` initialization. This module exists so the
 ``torch.comms`` (its parent) is what performs registration.
 """
 
-from torch._C._comms._comms_nccl import *  # noqa: F403
+from torch._C._comms._comms_nccl import *  # noqa: F403  # pyrefly: ignore[missing-import]

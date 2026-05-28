@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import run_tests
 
 logger = logging.getLogger(__name__)
 
-_test_lib = Library("torchcomms", "FRAGMENT")
+_test_lib = Library("torchcomms", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 
 
 def _register_mock_op():

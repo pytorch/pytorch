@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Owner(s): ["oncall: distributed"]
 # pyre-unsafe
 
 import os

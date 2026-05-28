@@ -47,7 +47,11 @@ def get_profiler_meta(prof):
     Torch profiler includes metadata in an inserted operator called "record_param_comms".
     This function exports the trace and extracts those events.
     """
-    tf = tempfile.NamedTemporaryFile(mode="w+t", suffix=".json", delete=False)
+    # Intentionally not a context manager: we need the path after close, and
+    # delete=False keeps the file for export_chrome_trace to write into.
+    tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
+        mode="w+t", suffix=".json", delete=False
+    )
     tf.close()
     trace_file = tf.name
 

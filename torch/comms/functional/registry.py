@@ -79,11 +79,13 @@ def register_collective(
     _REGISTERED_COLLECTIVES[op_name] = collective_info
 
     logger.info(
-        f"Registered collective: {op_name} (method={name}, "
-        f"inputs={[p.name for p in param_schema.input_params]}, "
-        f"outputs={[p.name for p in param_schema.output_params]}, "
-        f"target_class={target_class.__name__}, "
-        f"has_autograd={backward_fn is not None})"
+        "Registered collective: %s (method=%s, inputs=%s, outputs=%s, target_class=%s, has_autograd=%s)",
+        op_name,
+        name,
+        [p.name for p in param_schema.input_params],
+        [p.name for p in param_schema.output_params],
+        target_class.__name__,
+        backward_fn is not None,
     )
 
     return method
@@ -276,7 +278,7 @@ def _generate_lib_ops(lib: Any) -> None:
             inplace_signature = (
                 f"{inplace_op_name}({schema.signature}) -> {schema.inplace_return_type}"
             )
-            logger.info(f"Defining inplace lib op: {inplace_signature}")
+            logger.info("Defining inplace lib op: %s", inplace_signature)
             lib.define(inplace_signature, tags=[torch.Tag.pt2_compliant_tag])
 
             # Inplace meta kernel - returns the input tensors (aliased)
@@ -331,7 +333,7 @@ def _generate_lib_ops(lib: Any) -> None:
 
             # === FUNCTIONAL VERSION (op) ===
             functional_signature = f"{functional_op_name}({schema.functional_signature}) -> {schema.functional_return_type}"
-            logger.info(f"Defining functional lib op: {functional_signature}")
+            logger.info("Defining functional lib op: %s", functional_signature)
             lib.define(functional_signature, tags=[torch.Tag.pt2_compliant_tag])
 
             # Track functional op for effectful registration
@@ -367,7 +369,7 @@ def _generate_lib_ops(lib: Any) -> None:
                             )
                         else:
                             results.append(
-                                torch.empty_like(
+                                torch.empty_like(  # pyrefly: ignore[bad-argument-type]
                                     out,
                                     requires_grad=(
                                         any_requires_grad or out.requires_grad
@@ -528,7 +530,9 @@ def _generate_lib_ops(lib: Any) -> None:
             inplace_op.default.py_functionalize_impl(functionalize_impl)
 
             logger.info(
-                f"Registered py_functionalize_impl: {inplace_op_name} -> {functional_op_name}"
+                "Registered py_functionalize_impl: %s -> %s",
+                inplace_op_name,
+                functional_op_name,
             )
 
             # === AUTOGRAD KERNEL FOR INPLACE OP ===
@@ -556,7 +560,7 @@ def _generate_lib_ops(lib: Any) -> None:
                     with_keyset=True,
                 )
                 logger.info(
-                    f"Registered Autograd kernel for inplace op {inplace_op_name}"
+                    "Registered Autograd kernel for inplace op %s", inplace_op_name
                 )
 
         else:
@@ -564,7 +568,7 @@ def _generate_lib_ops(lib: Any) -> None:
             full_signature = (
                 f"{base_op_name}({schema.signature}) -> {schema.return_type}"
             )
-            logger.info(f"Defining lib op: {full_signature}")
+            logger.info("Defining lib op: %s", full_signature)
             lib.define(full_signature, tags=[torch.Tag.pt2_compliant_tag])
 
             # Meta kernel
@@ -681,7 +685,8 @@ def _generate_lib_ops(lib: Any) -> None:
 
                 register_op_impl(torch_op.default)(fake_impl)
                 logger.info(
-                    f"Registered FakeTensorMode py_impl for {base_op_name} (no tensor inputs)"
+                    "Registered FakeTensorMode py_impl for %s (no tensor inputs)",
+                    base_op_name,
                 )
 
         # Register autograd if backward_fn is provided
@@ -701,10 +706,12 @@ def _generate_lib_ops(lib: Any) -> None:
                         setup_context=setup_context_fn,
                         lib=lib,
                     )
-                    logger.info(f"Registered autograd for functional op {base_op_name}")
+                    logger.info(
+                        "Registered autograd for functional op %s", base_op_name
+                    )
                 except RuntimeError as e:
                     logger.warning(
-                        f"Failed to register autograd for {base_op_name}: {e}"
+                        "Failed to register autograd for %s: %s", base_op_name, e
                     )
             else:
                 # Non-mutating op - register autograd directly
@@ -715,13 +722,13 @@ def _generate_lib_ops(lib: Any) -> None:
                         setup_context=setup_context_fn,
                         lib=lib,
                     )
-                    logger.info(f"Registered autograd for {base_op_name}")
+                    logger.info("Registered autograd for %s", base_op_name)
                 except RuntimeError as e:
                     logger.warning(
-                        f"Failed to register autograd for {base_op_name}: {e}"
+                        "Failed to register autograd for %s: %s", base_op_name, e
                     )
 
-        logger.info(f"Registered ops for {base_op_name}")
+        logger.info("Registered ops for %s", base_op_name)
 
 
 def _register_lowerings() -> None:
@@ -750,7 +757,9 @@ def _register_lowerings() -> None:
                 def _lowering(*args):
                     from torch._inductor.virtualized import V
 
-                    logger.info(f"Lowering torch.comms.{op_name} with {len(args)} args")
+                    logger.info(
+                        "Lowering torch.comms.%s with %s args", op_name, len(args)
+                    )
 
                     # Parse args using schema
                     parsed = lowering_schema.parse_lib_args(args)
@@ -852,6 +861,7 @@ def _register_lowerings() -> None:
 
                     else:
                         # Multiple outputs - use MultiOutputLayout
+                        # pyrefly: ignore[bad-argument-type]
                         layout = ir.MultiOutputLayout(device=device)
                         packed = ir._CollectiveKernel(
                             layout,
@@ -893,9 +903,9 @@ def _register_lowerings() -> None:
             lowering_fn = _create_lowering(op_name, torch_op, schema)
             register_lowering(torch_op)(lowering_fn)
 
-            logger.info(f"Registered lowering for {op_name}")
+            logger.info("Registered lowering for %s", op_name)
         except AttributeError as e:
-            logger.warning(f"Failed to register lowering for {op_name}: {e}")
+            logger.warning("Failed to register lowering for %s: %s", op_name, e)
 
 
 def _patch_eager_methods() -> None:
@@ -980,11 +990,13 @@ def _patch_eager_methods() -> None:
                 wrapper = _create_dispatch_wrapper(original_method, op_name, info)
                 setattr(target_class, method_name, wrapper)
                 logger.info(
-                    f"Patched {target_class.__name__}.{method_name} for tracing and autograd"
+                    "Patched %s.%s for tracing and autograd",
+                    target_class.__name__,
+                    method_name,
                 )
             except Exception as e:
                 logger.warning(
-                    f"Failed to patch {target_class.__name__}.{method_name}: {e}"
+                    "Failed to patch %s.%s: %s", target_class.__name__, method_name, e
                 )
 
 
@@ -1013,20 +1025,20 @@ def _register_effectful_ops() -> None:
     # Collect all op names to register (both functional and inplace versions)
     ops_to_register = []
 
-    for base_op_name in _REGISTERED_COLLECTIVES:
-        ops_to_register.append(base_op_name)
-
+    ops_to_register.extend(_REGISTERED_COLLECTIVES)
     ops_to_register.append("torchcomm_wait_tensors")
 
     logger.info(
-        f"_register_effectful_ops: Registering {len(ops_to_register)} ops: {ops_to_register}"
+        "_register_effectful_ops: Registering %s ops: %s",
+        len(ops_to_register),
+        ops_to_register,
     )
 
     for op_name in ops_to_register:
         try:
             op_packet = getattr(torch.ops.torchcomms, op_name, None)
             if op_packet is None:
-                logger.warning(f"Op torch.comms.{op_name} not found, skipping")
+                logger.warning("Op torch.comms.%s not found, skipping", op_name)
                 continue
             # Get the default overload
             if hasattr(op_packet, "default"):
@@ -1035,10 +1047,10 @@ def _register_effectful_ops() -> None:
                 _EFFECTFUL_HANDLES.append(handle)  # Keep handle alive
                 # Verify registration worked
                 effect = _get_effect(torch_op)
-                logger.info(f"Registered torch.comms.{op_name}: effect={effect}")
+                logger.info("Registered torch.comms.%s: effect=%s", op_name, effect)
         except Exception as e:
             logger.warning(
-                f"Failed to register torch.comms.{op_name} as effectful: {e}"
+                "Failed to register torch.comms.%s as effectful: %s", op_name, e
             )
 
 
@@ -1051,7 +1063,7 @@ def finalize_registration(lib: Any) -> None:
     from torch.comms.functional.inductor_lowering import register_torchcomms_lowerings
 
     logger.info(
-        f"Finalizing registration for {len(_REGISTERED_COLLECTIVES)} collectives"
+        "Finalizing registration for %s collectives", len(_REGISTERED_COLLECTIVES)
     )
     _generate_lib_ops(lib)
     _register_effectful_ops()

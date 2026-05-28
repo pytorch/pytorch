@@ -10,7 +10,7 @@ import unittest
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
 
-from helpers.test_helpers import skip_if_torch_compile_not_supported_or_enabled
+from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 from integration.helpers.TorchCommTestHelpers import skip_backend
 
 import torch
@@ -88,7 +88,7 @@ class FullgraphCompileTest(unittest.TestCase):
             """Read and log inductor output_code from the code cache."""
             import torch._inductor.codecache as codecache
 
-            logger.info(f"\n{'=' * 80}\nINDUCTOR OUTPUT CODE\n{'=' * 80}")
+            logger.info("\n%s\nINDUCTOR OUTPUT CODE\n%s", "=" * 80, "=" * 80)
 
             # Get the cache directory and find the most recent output_code file
             try:
@@ -107,34 +107,34 @@ class FullgraphCompileTest(unittest.TestCase):
                         try:
                             with open(py_file) as f:
                                 code = f.read()
-                            logger.info(f"\n--- {os.path.basename(py_file)} ---")
+                            logger.info("\n--- %s ---", os.path.basename(py_file))
                             logger.info(code)
                         except Exception as e:
-                            logger.warning(f"Could not read {py_file}: {e}")
+                            logger.warning("Could not read %s: %s", py_file, e)
                 else:
-                    logger.info(f"Cache dir not found: {cache_dir}")
+                    logger.info("Cache dir not found: %s", cache_dir)
             except Exception as e:
-                logger.warning(f"Could not access inductor cache: {e}")
+                logger.warning("Could not access inductor cache: %s", e)
 
-            logger.info(f"{'=' * 80}\n")
+            logger.info("%s\n", "=" * 80)
 
         def graph_capture_backend(gm, example_inputs):
             """Custom backend that captures the graph before passing to inductor."""
             logger.info(
-                f"\n{'=' * 80}\nDYNAMO CAPTURED GRAPH for {test_name}\n{'=' * 80}"
+                "\n%s\nDYNAMO CAPTURED GRAPH for %s\n%s", "=" * 80, test_name, "=" * 80
             )
             logger.info("\nGraph code:")
             logger.info(gm.code)
-            logger.info(f"\nGraph has {len(list(gm.graph.nodes))} nodes")
+            logger.info("\nGraph has %s nodes", len(list(gm.graph.nodes)))
             logger.info("\nGraph nodes:")
 
             for node in gm.graph.nodes:
-                logger.info(f"  {node.op}: {node.target} -> {node.name}")
+                logger.info("  %s: %s -> %s", node.op, node.target, node.name)
 
             has_torchcomms = any(
                 "torchcomms" in str(node.target) for node in gm.graph.nodes
             )
-            logger.info(f"\nContains torchcomms ops: {has_torchcomms}")
+            logger.info("\nContains torchcomms ops: %s", has_torchcomms)
 
             # Check for custom ops that might bypass inductor
             custom_ops = [
@@ -143,15 +143,19 @@ class FullgraphCompileTest(unittest.TestCase):
                 if node.op == "call_function" and "torchcomms" in str(node.target)
             ]
             if custom_ops:
-                logger.info(f"\nFound {len(custom_ops)} torchcomms custom ops:")
+                logger.info("\nFound %s torchcomms custom ops:", len(custom_ops))
                 for op in custom_ops:
-                    logger.info(f"  - {op.target}")
+                    logger.info("  - %s", op.target)
 
-            logger.info(f"{'=' * 80}\n")
+            logger.info("%s\n", "=" * 80)
 
             logger.info("Calling compile_fx (inductor default)...")
             logger.info(
-                f"Example inputs: {[inp.shape if hasattr(inp, 'shape') else type(inp) for inp in example_inputs]}"
+                "Example inputs: %s",
+                [
+                    inp.shape if hasattr(inp, "shape") else type(inp)
+                    for inp in example_inputs
+                ],
             )
 
             try:
@@ -162,17 +166,20 @@ class FullgraphCompileTest(unittest.TestCase):
                     """Log the graph after AOT/functionalization, then call default compiler."""
                     # Log fx_graph_readable
                     logger.info(
-                        f"\n{'=' * 80}\nFX GRAPH READABLE for {test_name}\n{'=' * 80}"
+                        "\n%s\nFX GRAPH READABLE for %s\n%s",
+                        "=" * 80,
+                        test_name,
+                        "=" * 80,
                     )
                     try:
                         # print_readable() returns a string representation
                         readable = gm.print_readable(print_output=False)
                         logger.info(readable)
                     except Exception as e:
-                        logger.info(f"Could not get readable graph: {e}")
+                        logger.info("Could not get readable graph: %s", e)
                         # Fallback to code
                         logger.info(gm.code)
-                    logger.info(f"{'=' * 80}\n")
+                    logger.info("%s\n", "=" * 80)
 
                     # Call the default inductor compiler
                     result = compile_fx_inner(gm, example_inputs, **kwargs)
@@ -183,10 +190,10 @@ class FullgraphCompileTest(unittest.TestCase):
                     return result
 
                 compiled = compile_fx(gm, example_inputs, inner_compile=log_and_compile)
-                logger.info(f"Compilation complete, result type: {type(compiled)}")
+                logger.info("Compilation complete, result type: %s", type(compiled))
                 return compiled
             except Exception as e:
-                logger.error(f"Compilation failed: {e}")
+                logger.error("Compilation failed: %s", e)
                 import traceback
 
                 logger.error(traceback.format_exc())
@@ -207,8 +214,11 @@ class FullgraphCompileTest(unittest.TestCase):
     def _test_fullgraph_compile_all_reduce(self, count, dtype, op, async_op):
         """Test torch.compile with fullgraph=True for all_reduce operation."""
         logger.info(
-            f"Testing fullgraph compile all_reduce with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile all_reduce with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -246,8 +256,11 @@ class FullgraphCompileTest(unittest.TestCase):
     ):
         """Test torch.compile with fullgraph=True for multiple all_reduce calls."""
         logger.info(
-            f"Testing fullgraph compile all_reduce with multiple calls with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile all_reduce with multiple calls with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -379,8 +392,11 @@ class FullgraphCompileTest(unittest.TestCase):
     def _test_fullgraph_compile_reduce(self, count, dtype, op, async_op):
         """Test torch.compile with fullgraph=True for reduce operation."""
         logger.info(
-            f"Testing fullgraph compile reduce with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile reduce with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -456,8 +472,9 @@ class FullgraphCompileTest(unittest.TestCase):
         op = ReduceOp.PREMUL_SUM(factor)
 
         logger.info(
-            f"Testing fullgraph compile all_reduce with PREMUL_SUM(factor={factor}), "
-            f"async_op={async_op}"
+            "Testing fullgraph compile all_reduce with PREMUL_SUM(factor=%s), async_op=%s",
+            factor,
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -493,13 +510,15 @@ class FullgraphCompileTest(unittest.TestCase):
             f"Tensors not close enough for {description}. Expected {expected}, got {result[0].item()}",
         )
 
-        logger.info(f"All_reduce PREMUL_SUM test passed for rank {self.rank}")
+        logger.info("All_reduce PREMUL_SUM test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_broadcast(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for broadcast operation."""
         logger.info(
-            f"Testing fullgraph compile broadcast with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"async_op={async_op}"
+            "Testing fullgraph compile broadcast with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -561,8 +580,11 @@ class FullgraphCompileTest(unittest.TestCase):
     def _test_fullgraph_compile_barrier(self, count, dtype, op, async_op):
         """Test torch.compile with fullgraph=True for barrier synchronization."""
         logger.info(
-            f"Testing fullgraph compile barrier with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile barrier with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Create input tensor with rank-specific values
@@ -648,8 +670,10 @@ class FullgraphCompileTest(unittest.TestCase):
     def _test_fullgraph_compile_all_gather(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for all_gather operation."""
         logger.info(
-            f"Testing fullgraph compile all_gather with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"async_op={async_op}"
+            "Testing fullgraph compile all_gather with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -679,19 +703,22 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution to ensure all ranks compiled
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function (this triggers compilation)
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(tensor_list, input_tensor)
 
         logger.info(
-            f"Rank {self.rank}: tensor_list[0] = {result[0][0].item()}, "
-            f"tensor_list[{self.rank}] = {result[self.rank][0].item()}"
+            "Rank %s: tensor_list[0] = %s, tensor_list[%s] = %s",
+            self.rank,
+            result[0][0].item(),
+            self.rank,
+            result[self.rank][0].item(),
         )
 
         # Verify results: each tensor_list[i] should contain value (i + 1)
@@ -716,7 +743,7 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"got {result[rank_idx][0].item()}",
                 )
 
-        logger.info(f"All_gather test passed for rank {self.rank}")
+        logger.info("All_gather test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_window_put_get(
         self, count, dtype, signal, window_is_cpu, async_op
@@ -725,8 +752,11 @@ class FullgraphCompileTest(unittest.TestCase):
         self.torchcomm.barrier(async_op=False)
 
         logger.info(
-            f"Testing fullgraph compile window put/get with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, signal={signal}, async_op={async_op}"
+            "Testing fullgraph compile window put/get with count=%s, dtype=%s, signal=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            signal,
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -797,14 +827,14 @@ class FullgraphCompileTest(unittest.TestCase):
             backend = self._create_graph_logging_backend(test_name)
 
             # Compile with custom backend
-            logger.info(f"Rank {self.rank}: Compiling function")
+            logger.info("Rank %s: Compiling function", self.rank)
             compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
             # Execute compiled function (this triggers compilation)
-            logger.info(f"Rank {self.rank}: Running compiled version")
+            logger.info("Rank %s: Running compiled version", self.rank)
             compiled_result = compiled_func(input_tensor, window)
             logger.info(
-                f"Rank {self.rank}: Compiled result = {compiled_result[0:4].cpu()}"
+                "Rank %s: Compiled result = %s", self.rank, compiled_result[0:4].cpu()
             )
 
             # Compute expected result: each rank should receive from previous rank in ring
@@ -830,14 +860,14 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"Expected {expected_result[0:4].cpu()}, got {compiled_result[0:4].cpu()}",
                 )
 
-            logger.info(f"Window put/get test passed for rank {self.rank}")
+            logger.info("Window put/get test passed for rank %s", self.rank)
         except Exception as e:
             logger.error(
-                f"Rank {self.rank}: Window put/get test failed with exception: {e}"
+                "Rank %s: Window put/get test failed with exception: %s", self.rank, e
             )
             import traceback
 
-            logger.error(f"Rank {self.rank}: Traceback:\n{traceback.format_exc()}")
+            logger.error("Rank %s: Traceback:\n%s", self.rank, traceback.format_exc())
             raise
         finally:
             # Always clean up and barrier, even if test fails
@@ -847,8 +877,10 @@ class FullgraphCompileTest(unittest.TestCase):
     def _test_fullgraph_compile_send_recv(self, count, dtype, async_op=False):
         """Test torch.compile with fullgraph=True for send/recv operations."""
         logger.info(
-            f"Testing fullgraph compile send/recv with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile send/recv with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Use simple ring pattern: each rank sends to next rank and receives from previous rank
@@ -931,12 +963,15 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"Tensors not equal for {description}",
             )
 
-        logger.info(f"Send/recv test passed for rank {self.rank}")
+        logger.info("Send/recv test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_send_recv_multiple(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for multiple send/recv operations."""
         logger.info(
-            f"Testing fullgraph compile send/recv (multiple) with count={count}, dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile send/recv (multiple) with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # First exchange in ring
@@ -1043,7 +1078,7 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"Tensors not equal for {description}",
             )
 
-        logger.info(f"Send/recv (multiple) test passed for rank {self.rank}")
+        logger.info("Send/recv (multiple) test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_with_hints_timeout(self):
         """Test torch.compile with fullgraph=True for all_reduce with hints and timeout."""
@@ -1059,8 +1094,10 @@ class FullgraphCompileTest(unittest.TestCase):
         op = ReduceOp.SUM
 
         logger.info(
-            f"Testing fullgraph compile all_reduce with hints/timeout: count={count}, "
-            f"dtype={get_dtype_name(dtype)}, op={get_op_name(op)}"
+            "Testing fullgraph compile all_reduce with hints/timeout: count=%s, dtype=%s, op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
         )
 
         # Define test hints and timeout
@@ -1103,7 +1140,7 @@ class FullgraphCompileTest(unittest.TestCase):
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function (this triggers compilation)
-        logger.info(f"Rank {self.rank}: Running compiled version with hints/timeout")
+        logger.info("Rank %s: Running compiled version with hints/timeout", self.rank)
         result = compiled_func(input_tensor)
 
         # Verify result (same as all_reduce logic)
@@ -1118,13 +1155,15 @@ class FullgraphCompileTest(unittest.TestCase):
             f"Tensors not close enough for {description}",
         )
 
-        logger.info(f"Hints/timeout test passed for rank {self.rank}")
+        logger.info("Hints/timeout test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_scatter(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for scatter operation."""
         logger.info(
-            f"Testing fullgraph compile scatter with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"async_op={async_op}"
+            "Testing fullgraph compile scatter with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         root = 0
@@ -1172,14 +1211,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_tensor_list)
 
         # Verify: each rank should receive value (rank + 1) from root
@@ -1201,13 +1240,15 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"Scatter result mismatch: expected {expected_value}, got {result[0].item()}",
             )
 
-        logger.info(f"Scatter test passed for rank {self.rank}")
+        logger.info("Scatter test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_gather(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for gather operation."""
         logger.info(
-            f"Testing fullgraph compile gather with count={count}, dtype={get_dtype_name(dtype)}, "
-            f"async_op={async_op}"
+            "Testing fullgraph compile gather with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         root = 0
@@ -1248,14 +1289,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor_list, input_tensor)
 
         # Verify on root: each tensor should contain value (rank + 1)
@@ -1281,13 +1322,15 @@ class FullgraphCompileTest(unittest.TestCase):
                         f"got {result[rank_idx][0].item()}",
                     )
 
-        logger.info(f"Gather test passed for rank {self.rank}")
+        logger.info("Gather test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_all_gather_single(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for all_gather_single (all_gather_into_tensor)."""
         logger.info(
-            f"Testing fullgraph compile all_gather_single with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile all_gather_single with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1323,14 +1366,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_tensor)
 
         # Verify: output should contain [1,1,..., 2,2,..., 3,3,..., ...]
@@ -1355,15 +1398,18 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"all_gather_single result[{start_idx}:{end_idx}] mismatch",
                 )
 
-        logger.info(f"all_gather_single test passed for rank {self.rank}")
+        logger.info("all_gather_single test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_reduce_scatter_single(
         self, count, dtype, op, async_op=False
     ):
         """Test torch.compile with fullgraph=True for reduce_scatter_single."""
         logger.info(
-            f"Testing fullgraph compile reduce_scatter_single with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile reduce_scatter_single with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1400,14 +1446,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_tensor)
 
         # Calculate expected value based on op
@@ -1436,13 +1482,15 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"reduce_scatter_single result mismatch: expected {expected_value}",
             )
 
-        logger.info(f"reduce_scatter_single test passed for rank {self.rank}")
+        logger.info("reduce_scatter_single test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_all_to_all_single(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for all_to_all_single."""
         logger.info(
-            f"Testing fullgraph compile all_to_all_single with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile all_to_all_single with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1485,14 +1533,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_tensor)
 
         # Verify: chunk i should contain value from rank i = (i + 1) * 10 + self.rank
@@ -1519,13 +1567,16 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"expected {expected_value}",
                 )
 
-        logger.info(f"all_to_all_single test passed for rank {self.rank}")
+        logger.info("all_to_all_single test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_reduce_scatter(self, count, dtype, op, async_op):
         """Test torch.compile with fullgraph=True for reduce_scatter (tensor list version)."""
         logger.info(
-            f"Testing fullgraph compile reduce_scatter with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile reduce_scatter with count=%s, dtype=%s, op=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1562,14 +1613,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_list)
 
         # Calculate expected value based on op
@@ -1598,13 +1649,15 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"reduce_scatter result mismatch: expected {expected_value}",
             )
 
-        logger.info(f"reduce_scatter test passed for rank {self.rank}")
+        logger.info("reduce_scatter test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_all_to_all(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for all_to_all (tensor list version)."""
         logger.info(
-            f"Testing fullgraph compile all_to_all with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile all_to_all with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1645,14 +1698,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor_list, input_tensor_list)
 
         # Verify: result[i] should contain value from rank i = (i + 1) * 10 + self.rank
@@ -1675,13 +1728,15 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"all_to_all result[{i}] mismatch: expected {expected_value}",
                 )
 
-        logger.info(f"all_to_all test passed for rank {self.rank}")
+        logger.info("all_to_all test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_all_gather_v(self, base_count, dtype, async_op):
         """Test torch.compile with fullgraph=True for all_gather_v (variable sizes)."""
         logger.info(
-            f"Testing fullgraph compile all_gather_v with base_count={base_count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile all_gather_v with base_count=%s, dtype=%s, async_op=%s",
+            base_count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1723,14 +1778,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(tensor_list, input_tensor)
 
         # Verify: tensor_list[i] should contain value (i + 1) with size all_sizes[i]
@@ -1754,15 +1809,18 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"all_gather_v result[{rank_idx}] mismatch: expected {expected_value}",
                 )
 
-        logger.info(f"all_gather_v test passed for rank {self.rank}")
+        logger.info("all_gather_v test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_reduce_scatter_v(
         self, base_count, dtype, op, async_op=False
     ):
         """Test torch.compile with fullgraph=True for reduce_scatter_v (variable sizes)."""
         logger.info(
-            f"Testing fullgraph compile reduce_scatter_v with base_count={base_count}, "
-            f"dtype={get_dtype_name(dtype)}, op={get_op_name(op)}, async_op={async_op}"
+            "Testing fullgraph compile reduce_scatter_v with base_count=%s, dtype=%s, op=%s, async_op=%s",
+            base_count,
+            get_dtype_name(dtype),
+            get_op_name(op),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1803,14 +1861,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_list)
 
         # Calculate expected value based on op
@@ -1839,15 +1897,17 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"reduce_scatter_v result mismatch: expected {expected_value}",
             )
 
-        logger.info(f"reduce_scatter_v test passed for rank {self.rank}")
+        logger.info("reduce_scatter_v test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_all_to_all_v_single(
         self, base_count, dtype, async_op=False
     ):
         """Test torch.compile with fullgraph=True for all_to_all_v_single (variable sizes)."""
         logger.info(
-            f"Testing fullgraph compile all_to_all_v_single with base_count={base_count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile all_to_all_v_single with base_count=%s, dtype=%s, async_op=%s",
+            base_count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -1898,14 +1958,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor, input_tensor)
 
         # Verify: chunk i should contain value from rank i = (i + 1) * 10 + self.rank
@@ -1935,7 +1995,7 @@ class FullgraphCompileTest(unittest.TestCase):
                 )
             offset += size
 
-        logger.info(f"all_to_all_v_single test passed for rank {self.rank}")
+        logger.info("all_to_all_v_single test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_batch_send_recv(self, count, dtype, async_op):
         """Test torch.compile with fullgraph=True for batch send/recv operations.
@@ -1943,8 +2003,10 @@ class FullgraphCompileTest(unittest.TestCase):
         Each rank sends to and receives from every other rank to test batching logic.
         """
         logger.info(
-            f"Testing fullgraph compile batch_send_recv with count={count}, "
-            f"dtype={get_dtype_name(dtype)}, async_op={async_op}"
+            "Testing fullgraph compile batch_send_recv with count=%s, dtype=%s, async_op=%s",
+            count,
+            get_dtype_name(dtype),
+            async_op,
         )
 
         # Reset dynamo to clear any cached graphs
@@ -2041,7 +2103,7 @@ class FullgraphCompileTest(unittest.TestCase):
                     f"Expected {expected_value}, got {result[i][0].item()}",
                 )
 
-        logger.info(f"batch_send_recv test passed for rank {self.rank}")
+        logger.info("batch_send_recv test passed for rank %s", self.rank)
 
     def _test_fullgraph_compile_gather_empty_output_list(self):
         """
@@ -2105,14 +2167,14 @@ class FullgraphCompileTest(unittest.TestCase):
         backend = self._create_graph_logging_backend(test_name)
 
         # Compile with custom backend
-        logger.info(f"Rank {self.rank}: Compiling function")
+        logger.info("Rank %s: Compiling function", self.rank)
         compiled_func = torch.compile(my_func, fullgraph=True, backend=backend)
 
         # Barrier before execution
         self.torchcomm.barrier(async_op=False)
 
         # Execute compiled function
-        logger.info(f"Rank {self.rank}: Running compiled version")
+        logger.info("Rank %s: Running compiled version", self.rank)
         result = compiled_func(output_tensor_list, input_tensor)
 
         self.torchcomm.barrier(async_op=False)
@@ -2137,7 +2199,7 @@ class FullgraphCompileTest(unittest.TestCase):
                 f"Non-dst rank {self.rank} should have an empty result, got {result}",
             )
 
-        logger.info(f"Gather compile test passed for rank {self.rank}")
+        logger.info("Gather compile test passed for rank %s", self.rank)
 
     # =========================================================================
     # Test entry points (picked up by test harness)
