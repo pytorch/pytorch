@@ -147,16 +147,18 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T>
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-      ArrayRef<T>& operator=(U&& Temporary) = delete;
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  requires std::is_same_v<U, T> ArrayRef<T>& operator=(
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
       std::initializer_list<U>) = delete;
 
   /// @}
