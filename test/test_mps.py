@@ -4418,7 +4418,7 @@ class TestMPS(TestCaseMPS):
     @parametrize("dim", [0, 1, 2, 3, 4])
     def test_cumulative_ops_5d(self, op_name, dtype, dim):
         # Regression for scans on >4D tensors: MPSGraph's MPSNDArrayScan asserts
-        # for scan axes outside the rightmost 4 dims (issue #184844); the Metal
+        # for scan axes outside the rightmost 4 dims (issue #184844 and #154881); the Metal
         # scan kernels handle any dim.
         self._check_cumulative_op(op_name, (2, 3, 4, 5, 6), dim, dtype)
 
