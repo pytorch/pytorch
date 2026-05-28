@@ -246,4 +246,6 @@ ops_unbacked_skip = {
     skip("zeros"),
     # Sparse ops that can't be deepcopied
     skip("sparse.sampled_addmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179881
+    skip("norm", "nuc"),
 }
