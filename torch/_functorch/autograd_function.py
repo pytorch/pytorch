@@ -449,6 +449,8 @@ def custom_function_call_vmap_generate_rule(
     if not isinstance(outputs, tuple):
         raise AssertionError(f"expected outputs to be a tuple, got {type(outputs)}")
     outputs, out_dims = unpack_outputs(outputs)
+    # vmap.wrap_batched accepts None inside nested dim structures even though
+    # its public in_dims_t alias does not currently spell that out.
     return wrap_batched(
         cast(tuple[Any, ...], outputs),
         cast(int | tuple[Any, ...], out_dims),
@@ -473,6 +475,8 @@ def vmapify_autograd_function(
     randomness: str,
 ) -> type[torch.autograd.Function]:
     def forward(*operands: Any) -> _TensorTree:
+        # restore_vmap accepts None inside nested dim structures even though
+        # its public in_dims_t alias does not currently spell that out.
         outputs, out_dims = restore_vmap(
             autograd_function.forward,
             cast(int | tuple[Any, ...], in_dims),
@@ -738,7 +742,7 @@ class CtxCustomSave(WrappedCtx):
 
 
 def reductify(
-    grad_input: torch.Tensor | tuple[torch.Tensor, ...],
+    grad_input: torch.Tensor | None | tuple[torch.Tensor | None, ...],
     grad_input_bdim: int | None | tuple[int | None, ...],
     input_bdim: int | None | tuple[int | None, ...],
     batch_size: int,
