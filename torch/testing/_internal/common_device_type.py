@@ -10,7 +10,7 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -348,15 +348,44 @@ class DeviceTypeTestBase(TestCase):
     op_allowlist = None  # type: Optional[Collection[str]]
 
     # An optional skip mechanism built upon instantiate_device_type_tests(),
-    # designed to facilitate skipping either an entire class or specific test cases
-    # within a class.
+    # designed to filter generated tests at different granularities.
+    #
+    # Supported exclusions:
+    #   - Exclude an entire test class
+    #   - Exclude specific test methods within a class
+    #   - Exclude specific @dtypes/@dtypesIf-generated dtype variants of a
+    #     test method
     #
     # Format:
+    #
     #   test_exclusions = {
-    #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
-    #       "TestClassB": "*",                    # Global: Skips the entire class
+    #       # Exclude all generated variants in the class.
+    #       "TestClassA": "*",
+    #
+    #       # Backward-compatible shorthand: exclude all generated variants
+    #       # of specific methods.
+    #       "TestClassB": ["test_a", "test_b"],
+    #
+    #       # Unified form: supports unconditional method exclusions and
+    #       # dtype-specific generated variant exclusions.
+    #       "TestClassC": {
+    #           "test_a": "*",
+    #           "test_b": {
+    #               "dtypes": [torch.float32],
+    #           },
+    #       },
     #   }
-    test_exclusions: ClassVar[dict[str, Collection[str]] | None] = None
+    #
+    # Note:
+    #   Conditional filtering currently only supports per-method dtype-based
+    #   filtering for variants generated from @dtypes and @dtypesIf decorators
+    #   in the unified mapping form. Class-level dtype exclusions are not
+    #   supported.
+    #   A tuple/list dtype variant is excluded if any dtype in the variant is
+    #   listed in the method's excluded dtypes.
+    #   @ops-generated dtype variants and other parametrized arguments are
+    #   ignored for now.
+    test_exclusions: ClassVar[dict[str, Any] | None] = None
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -430,7 +459,65 @@ class DeviceTypeTestBase(TestCase):
         test_exclusions = getattr(cls, "test_exclusions", None)
         if test_exclusions is not None and test_class_name in test_exclusions:
             return test_exclusions[test_class_name]
-        return []
+        return None
+
+    @classmethod
+    def _should_exclude_test(cls, test_class_name, test_name=None):
+        exclusion_rule = cls._get_test_exclusions(test_class_name)
+
+        if exclusion_rule is None:
+            return False
+
+        # Exclude the entire test class.
+        if exclusion_rule == "*":
+            return True
+
+        # test_name is None means we are only checking class-level exclusion.
+        if test_name is None:
+            return False
+
+        # Unified form: "test_a": "*" excludes all generated variants of
+        # the method. Conditional mapping entries are handled separately.
+        if isinstance(exclusion_rule, Mapping):
+            return exclusion_rule.get(test_name) == "*"
+
+        # Backward-compatible shorthand: ["test_a", "test_b"].
+        if isinstance(exclusion_rule, Collection) and not isinstance(
+            exclusion_rule, (str, bytes)
+        ):
+            return test_name in exclusion_rule
+
+        return False
+
+    @classmethod
+    def _should_exclude_test_conditionally(
+        cls, test_class_name, test_name, *, dtypes=None
+    ):
+        return cls._should_exclude_dtype_variant(
+            test_class_name, test_name, dtypes=dtypes
+        )
+
+    @classmethod
+    def _should_exclude_dtype_variant(cls, test_class_name, test_name, *, dtypes=None):
+        if dtypes is None:
+            return False
+
+        exclusion_rule = cls._get_test_exclusions(test_class_name)
+
+        if not isinstance(exclusion_rule, Mapping):
+            return False
+
+        method_exclusion = exclusion_rule.get(test_name)
+        if not isinstance(method_exclusion, Mapping):
+            return False
+
+        excluded_dtypes = set(method_exclusion.get("dtypes", ()))
+        if not excluded_dtypes:
+            return False
+
+        if isinstance(dtypes, (list, tuple)):
+            return any(component_dtype in excluded_dtypes for component_dtype in dtypes)
+        return dtypes in excluded_dtypes
 
     @classmethod
     def _apply_op_allowlist(cls, ops):
@@ -523,6 +610,10 @@ class DeviceTypeTestBase(TestCase):
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
+        test_class_name = (
+            generic_cls.__name__ if generic_cls is not None else cls.__name__
+        )
+
         def instantiate_test_helper(
             cls, name, *, test, param_kwargs=None, decorator_fn=lambda _: []
         ):
@@ -589,6 +680,16 @@ class DeviceTypeTestBase(TestCase):
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
         if dtypes is not None:
+            dtypes = tuple(
+                dtype
+                for dtype in dtypes
+                if not cls._should_exclude_test_conditionally(
+                    test_class_name, name, dtypes=dtype
+                )
+            )
+
+            if not dtypes:
+                return
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
@@ -1027,9 +1128,8 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
-        skipped = base._get_test_exclusions(generic_test_class.__name__)
         # Skip the entire class
-        if "*" in skipped:
+        if base._should_exclude_test(generic_test_class.__name__):
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
@@ -1064,7 +1164,7 @@ def instantiate_device_type_tests(
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
                 # Skip the specified methods.
-                if name in skipped:
+                if base._should_exclude_test(generic_test_class.__name__, name):
                     continue
                 test = getattr(generic_test_class, name)
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
