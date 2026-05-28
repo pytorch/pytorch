@@ -370,9 +370,54 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             handle_view_scatter(node)
 
 
+def _may_overlap(lhs: Any, rhs: Any) -> bool:
+    if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+        return False
+
+    lhs_storage = get_node_storage(lhs)
+    rhs_storage = get_node_storage(rhs)
+    if lhs_storage is None or lhs_storage != rhs_storage:
+        return False
+
+    try:
+        return len(compute_overlapping_tensors([lhs.meta["val"], rhs.meta["val"]])) != 0
+    except GuardOnDataDependentSymNode:
+        return True
+
+
+def _may_overlap_with_any(lhs: Any, rhs: Any) -> bool:
+    if _may_overlap(lhs, rhs):
+        return True
+    if isinstance(rhs, (list, tuple, immutable_list)):
+        return any(_may_overlap_with_any(lhs, arg) for arg in rhs)
+    return False
+
+
+def _node_arg(node: torch.fx.Node, index: int, name: str) -> Any:
+    if node.target is torch.ops.higher_order.with_effects:
+        index += 2
+    if len(node.args) > index:
+        return node.args[index]
+    return node.kwargs.get(name)
+
+
+def _index_put_no_read_overlap(node: torch.fx.Node) -> bool:
+    self_arg = _node_arg(node, 0, "self")
+    return not (
+        _may_overlap_with_any(self_arg, _node_arg(node, 1, "indices"))
+        or _may_overlap_with_any(self_arg, _node_arg(node, 2, "values"))
+    )
+
+
 inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
-    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
+    aten.index_put.default: InplaceableOp(
+        aten.index_put_.default, 0, extra_check=_index_put_no_read_overlap
+    ),
+    aten._unsafe_index_put.default: InplaceableOp(
+        inductor_prims._unsafe_index_put_,
+        0,
+        extra_check=_index_put_no_read_overlap,
+    ),
     _generalized_scatter: InplaceableOp(
         _inplace_generalized_scatter,
         0,
