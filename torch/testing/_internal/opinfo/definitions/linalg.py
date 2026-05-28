@@ -1522,13 +1522,7 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
-            DecorateInfo(
-                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
-                device_type="cuda",
-                dtypes=(torch.complex64, torch.complex128),
-                active_if=TEST_WITH_ROCM,
-            ),
+            skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
     ),
     OpInfo(
@@ -1553,6 +1547,15 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # https://github.com/pytorch/pytorch/issues/76962
+            DecorateInfo(
+                unittest.skip("Flaky on Linux CUDA"),
+                "TestDecomp",
+                "test_comprehensive",
+                device_type="cuda",
+                dtypes=(torch.complex64, torch.complex128),
+                active_if=IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
