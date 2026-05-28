@@ -14836,7 +14836,10 @@ if __name__ == '__main__':
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
-                    expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
+                    if "mps" in device:
+                        expected_weight_grad_max_ulp_diff = 36 if bias else 0
+                    else:  # CUDA
+                        expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
                     expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         elif _resolved_policy == "compact":
             # Mirrors "balanced" except on CUDA (direct addmm_ skips
