@@ -72,6 +72,33 @@ std::unordered_map<std::string, AtenTensorHandle> constant_map_from_pairs(
   return input_map;
 }
 
+// Shared constructor for AOTInductorModelCreate / AOTInductorModelCreateV2.
+// `populate(constant_map)` is called between model construction and
+// optional embedded-blob loading.
+template <typename Populate>
+AOTIRuntimeError createModelImpl(
+    AOTInductorModelHandle* model_handle,
+    bool load_constants_from_blob,
+    Populate&& populate) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+    auto constant_array = std::make_shared<
+        std::vector<torch::aot_inductor::ConstantHandle>>();
+    auto* model = new torch::aot_inductor::AOTInductorModel(
+        constant_map,
+        constant_array,
+        // device_str is hardcoded, as AOTInductorModelCreate is only used
+        // for CPU models.
+        "cpu",
+        "");
+    populate(*constant_map);
+    if (load_constants_from_blob) {
+      model->load_constants();
+    }
+    *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
+  })
+}
+
 } // namespace
 
 extern "C" {
@@ -502,29 +529,34 @@ AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
 
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
-    AOTInductorConstantMapHandle constant_map_handle){
-    CONVERT_EXCEPTION_TO_ERROR_CODE({
-      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
-      auto constant_array = std::make_shared<std::vector<torch::aot_inductor::ConstantHandle>>();
-      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
-
-      auto model = new torch::aot_inductor::AOTInductorModel(
-          constant_map,
-          constant_array,
-          "cpu", // device_str is hardcoded, as AOTInductorModelCreate is only use for CPU models
-          ""
-      );
-
-      if (input_map) {
-        for (auto const& kv : *input_map) {
-          constant_map->emplace(kv.first, kv.second);
+    AOTInductorConstantMapHandle constant_map_handle) {
+  return createModelImpl(
+      model_handle, constant_map_handle == nullptr, [=](auto& constant_map) {
+        auto* input_map = reinterpret_cast<
+            std::unordered_map<std::string, AtenTensorHandle>*>(
+            constant_map_handle);
+        if (input_map) {
+          for (const auto& kv : *input_map) {
+            constant_map.emplace(kv.first, kv.second);
+          }
         }
-      } else {
-        model->load_constants();
-      }
+      });
+}
 
-      *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
-    })}
+AOTIRuntimeError AOTInductorModelCreateV2(
+    AOTInductorModelHandle* model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  return createModelImpl(
+      model_handle, pairs == nullptr || num_pairs == 0, [=](auto& constant_map) {
+        if (pairs && num_pairs > 0) {
+          constant_map.reserve(num_pairs);
+          for (size_t i = 0; i < num_pairs; ++i) {
+            constant_map.emplace(pairs[i].name, pairs[i].handle);
+          }
+        }
+      });
+}
 
 AOTIRuntimeError AOTInductorModelRun(
     AOTInductorModelHandle model_handle,
