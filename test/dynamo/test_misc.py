@@ -12585,6 +12585,16 @@ def ___make_guard_fn():
         self.assertEqual(x.untyped_storage().size(), 0)
         self.assertIs(s, x.untyped_storage())
 
+    def test_storage_cdata_use_count_graph_break_lifetime(self):
+        def fn():
+            a = torch.randn(10)
+            return torch._C._storage_Use_Count(a.untyped_storage()._cdata)
+
+        expected = fn()
+        ref = torch.compile(fn, backend="eager")()
+        self.assertEqual(ref, expected)
+        self.assertLess(ref, 10)
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:

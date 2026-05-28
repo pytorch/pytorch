@@ -48,6 +48,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
+from ..bytecode_transformation import create_dup_top
 from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
@@ -2978,6 +2979,11 @@ class UntypedStorageVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.UntypedStorage
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "_cdata":
+            return StorageCDataVariable(self)
+        return super().var_getattr(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3027,6 +3033,23 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
+
+
+class StorageCDataVariable(VariableTracker):
+    def __init__(self, from_storage: UntypedStorageVariable, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.from_storage = from_storage
+
+    def python_type(self) -> type:
+        return int
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.from_storage.from_tensor)
+        keepalive = codegen.new_var("tensor_keepalive")
+        codegen.extend_output([create_dup_top(), codegen.create_store(keepalive)])
+        codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+        codegen.load_attr("_cdata")
 
 
 class DataPtrVariable(VariableTracker):
@@ -3097,5 +3120,7 @@ class DataPtrVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
+        keepalive = codegen.new_var("tensor_keepalive")
+        codegen.extend_output([create_dup_top(), codegen.create_store(keepalive)])
         codegen.load_method(self.method_name)
         codegen.call_method(0)
