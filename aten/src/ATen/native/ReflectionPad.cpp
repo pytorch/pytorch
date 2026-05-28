@@ -104,6 +104,8 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
 }
 
 TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
+  at::native::padding::check_valid_input<3>(input, padding);
+
   int64_t pad_left = padding[0];
   int64_t pad_right = padding[1];
   int64_t pad_top = padding[2];
@@ -114,8 +116,6 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_h = 2;
   int64_t dim_d = 1;
   int64_t dim_plane = 0;
-
-  at::native::padding::check_valid_input<3>(input, padding);
 
   bool batch_mode = (input.dim() == 5);
   if (batch_mode) {
@@ -166,7 +166,10 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
     const Tensor& input,
     IntArrayRef padding
 ) {
-  TORCH_CHECK(padding.size() == 6, "padding size is expected to be 6");
+  TORCH_CHECK(
+      padding.size() == 6,
+      "padding size is expected to be 6, but got: ",
+      padding.size());
   TORCH_CHECK(input.dim() > 3);
   TORCH_CHECK(grad_output.dim() == input.dim());
 
