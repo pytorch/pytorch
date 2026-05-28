@@ -13,6 +13,8 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/CachingHostAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
@@ -37,6 +39,10 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_foreach_add.h>
+#include <ATen/ops/_foreach_mm.h>
+#include <ATen/ops/_foreach_mm_native.h>
+#include <ATen/ops/_foreach_mul.h>
 #include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
@@ -726,6 +732,416 @@ std::optional<c10::ScalarType> out_dtype) {
 #endif //USE_ROCM_CK_GEMM
 #endif //ifndef USE_ROCM
   return out;
+}
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12050
+void cublas_foreach_mm(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+  const int group_count = static_cast<int>(self_list.size());
+  const auto& first_a = self_list[0];
+  const auto& first_b = mat2_list[0];
+
+  bool a_row_major = first_a.stride(-1) == 1;
+  bool b_row_major = first_b.stride(-1) == 1;
+
+  // cuBLAS uses column-major layout, so we compute C^T = mat2^T * self^T
+  // by passing cuBLAS-A=mat2, cuBLAS-B=self. When a matrix is row-major,
+  // cuBLAS already sees it transposed, so op=N; col-major needs op=T.
+  cublasOperation_t transa = b_row_major ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t transb = a_row_major ? CUBLAS_OP_N : CUBLAS_OP_T;
+
+  int m = static_cast<int>(first_b.size(1)); // N
+  int n = static_cast<int>(first_a.size(0)); // M
+  int k = static_cast<int>(first_a.size(1)); // K
+
+  int lda = static_cast<int>(first_b.stride(b_row_major ? 0 : 1));
+  int ldb = static_cast<int>(first_a.stride(a_row_major ? 0 : 1));
+  int ldc = static_cast<int>(outputs[0].stride(0));
+
+  int group_size = group_count;
+
+  // cublasGemmGroupedBatchedEx requires pointer arrays in DEVICE memory.
+  // Build on host in pinned memory, async-copy to device.
+  size_t ptrs_bytes = 3 * group_count * sizeof(void*);
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto dev_buf = allocator.allocate(ptrs_bytes);
+  char* dev_base = static_cast<char*>(dev_buf.get());
+  // Layout: A_ptrs[G] | B_ptrs[G] | C_ptrs[G], all as void*
+  void** dev_A_ptrs = reinterpret_cast<void**>(dev_base);
+  void** dev_B_ptrs = reinterpret_cast<void**>(dev_base + group_count * sizeof(void*));
+  void** dev_C_ptrs = reinterpret_cast<void**>(dev_base + 2 * group_count * sizeof(void*));
+
+  auto* host_allocator = at::getHostAllocator(at::kCUDA);
+  auto pinned_buf = host_allocator->allocate(ptrs_bytes);
+  void** host_ptrs = static_cast<void**>(pinned_buf.get());
+  for (int i = 0; i < group_count; i++) {
+    host_ptrs[i] = const_cast<void*>(mat2_list[i].data_ptr());
+    host_ptrs[group_count + i] = const_cast<void*>(self_list[i].data_ptr());
+    host_ptrs[2 * group_count + i] = outputs[i].data_ptr();
+  }
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      dev_base, host_ptrs, ptrs_bytes,
+      cudaMemcpyHostToDevice, stream.stream()));
+  host_allocator->record_event(
+      pinned_buf.get(), pinned_buf.get_context(), stream.unwrap());
+
+  float alpha = 1.0f;
+  float beta = 0.0f;
+
+  cudaDataType_t data_type;
+  auto dtype = first_a.scalar_type();
+  if (dtype == at::kBFloat16) {
+    data_type = CUDA_R_16BF;
+  } else if (dtype == at::kHalf) {
+    data_type = CUDA_R_16F;
+  } else if (dtype == at::kFloat) {
+    data_type = CUDA_R_32F;
+  } else {
+    TORCH_CHECK(false, "cublas_foreach_mm: unsupported dtype ", dtype);
+  }
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+
+  TORCH_CUDABLAS_CHECK(cublasGemmGroupedBatchedEx(
+      handle,
+      &transa,
+      &transb,
+      &m,
+      &n,
+      &k,
+      &alpha,
+      (const void* const*)dev_A_ptrs,
+      data_type,
+      &lda,
+      (const void* const*)dev_B_ptrs,
+      data_type,
+      &ldb,
+      &beta,
+      (void* const*)dev_C_ptrs,
+      data_type,
+      &ldc,
+      /*group_count=*/1,
+      &group_size,
+      CUBLAS_COMPUTE_32F));
+}
+#endif // !USE_ROCM && CUDA_VERSION >= 12050
+
+#if !defined(USE_ROCM)
+// cublasLt grouped GEMM: uses cublasLtGroupedMatrixLayoutCreate (cuBLAS 13.2+)
+// Forward-declare the API since it may not be in the compile-time headers.
+// Availability is checked at runtime via cublasLtGetVersion().
+extern "C" {
+cublasStatus_t cublasLtGroupedMatrixLayoutCreate(
+    cublasLtMatrixLayout_t* matLayout,
+    cudaDataType type,
+    int groupCount,
+    const void* rows_array,
+    const void* cols_array,
+    const void* ld_array) __attribute__((weak));
+}
+
+// Grouped layout attributes not in old headers
+#ifndef CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS
+#define CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS ((cublasLtMatmulPreferenceAttributes_t)14)
+#define CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS ((cublasLtMatmulPreferenceAttributes_t)15)
+#define CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM ((cublasLtMatmulPreferenceAttributes_t)13)
+#endif
+#ifndef CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE
+#define CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE ((cublasLtMatmulDescAttributes_t)39)
+#define CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE ((cublasLtMatmulDescAttributes_t)40)
+#endif
+
+void cublaslt_foreach_mm(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+  const int group_count = static_cast<int>(self_list.size());
+  const auto& first_a = self_list[0];
+  const auto& first_b = mat2_list[0];
+
+  bool a_row_major = first_a.stride(-1) == 1;
+  bool b_row_major = first_b.stride(-1) == 1;
+
+  // cuBLAS col-major: C^T = mat2^T * self^T => cuBLAS-A=mat2, cuBLAS-B=self
+  char transa_c = b_row_major ? 'n' : 't';
+  char transb_c = a_row_major ? 'n' : 't';
+  cublasOperation_t opa = transa_c == 'n' ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t opb = transb_c == 'n' ? CUBLAS_OP_N : CUBLAS_OP_T;
+
+  int32_t cublas_m = static_cast<int32_t>(first_b.size(1)); // N
+  int32_t cublas_n = static_cast<int32_t>(first_a.size(0)); // M
+  int32_t cublas_k = static_cast<int32_t>(first_a.size(1)); // K
+  int32_t lda = static_cast<int32_t>(first_b.stride(b_row_major ? 0 : 1));
+  int32_t ldb = static_cast<int32_t>(first_a.stride(a_row_major ? 0 : 1));
+  int32_t ldd = static_cast<int32_t>(outputs[0].stride(0));
+
+  auto dtype = first_a.scalar_type();
+  cudaDataType_t cuda_dtype;
+  if (dtype == at::kBFloat16) cuda_dtype = CUDA_R_16BF;
+  else if (dtype == at::kHalf) cuda_dtype = CUDA_R_16F;
+  else if (dtype == at::kFloat) cuda_dtype = CUDA_R_32F;
+  else TORCH_CHECK(false, "cublaslt_foreach_mm: unsupported dtype");
+
+  // Device layout: [m(G), n(G), k(G), lda(G), ldb(G), ldd(G)] as int32
+  //                [Aptr(G), Bptr(G), Dptr(G), alpha_ptr(G), beta_ptr(G)] as int64
+  //                [alpha_scalar, beta_scalar] as float
+  const int G = group_count;
+  size_t dims_bytes = 6 * G * sizeof(int32_t);
+  size_t ptrs_bytes = 5 * G * sizeof(int64_t);
+  size_t scalars_bytes = 2 * sizeof(float);
+  size_t total = dims_bytes + ptrs_bytes + scalars_bytes;
+
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto dev_buf = allocator.allocate(total);
+  char* base = static_cast<char*>(dev_buf.get());
+
+  size_t off = 0;
+  int32_t* dev_m = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int32_t* dev_n = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int32_t* dev_k = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int32_t* dev_lda = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int32_t* dev_ldb = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int32_t* dev_ldd = reinterpret_cast<int32_t*>(base + off); off += G * sizeof(int32_t);
+  int64_t* dev_Aptr = reinterpret_cast<int64_t*>(base + off); off += G * sizeof(int64_t);
+  int64_t* dev_Bptr = reinterpret_cast<int64_t*>(base + off); off += G * sizeof(int64_t);
+  int64_t* dev_Dptr = reinterpret_cast<int64_t*>(base + off); off += G * sizeof(int64_t);
+  int64_t* dev_alpha_ptrs = reinterpret_cast<int64_t*>(base + off); off += G * sizeof(int64_t);
+  int64_t* dev_beta_ptrs = reinterpret_cast<int64_t*>(base + off); off += G * sizeof(int64_t);
+  float* dev_alpha = reinterpret_cast<float*>(base + off); off += sizeof(float);
+  float* dev_beta = reinterpret_cast<float*>(base + off);
+
+  // Build all arrays in pinned host memory, async-copy to device in one shot.
+  auto* host_allocator = at::getHostAllocator(at::kCUDA);
+  auto pinned_buf = host_allocator->allocate(total);
+  char* hbase = static_cast<char*>(pinned_buf.get());
+
+  size_t hoff = 0;
+  int32_t* h_m = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int32_t* h_n = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int32_t* h_k = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int32_t* h_lda = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int32_t* h_ldb = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int32_t* h_ldd = reinterpret_cast<int32_t*>(hbase + hoff); hoff += G * sizeof(int32_t);
+  int64_t* h_Aptr = reinterpret_cast<int64_t*>(hbase + hoff); hoff += G * sizeof(int64_t);
+  int64_t* h_Bptr = reinterpret_cast<int64_t*>(hbase + hoff); hoff += G * sizeof(int64_t);
+  int64_t* h_Dptr = reinterpret_cast<int64_t*>(hbase + hoff); hoff += G * sizeof(int64_t);
+  int64_t* h_alpha_ptrs = reinterpret_cast<int64_t*>(hbase + hoff); hoff += G * sizeof(int64_t);
+  int64_t* h_beta_ptrs = reinterpret_cast<int64_t*>(hbase + hoff); hoff += G * sizeof(int64_t);
+  float* h_alpha_scalar = reinterpret_cast<float*>(hbase + hoff); hoff += sizeof(float);
+  float* h_beta_scalar = reinterpret_cast<float*>(hbase + hoff);
+
+  *h_alpha_scalar = 1.0f;
+  *h_beta_scalar = 0.0f;
+  for (int i = 0; i < G; i++) {
+    h_m[i] = cublas_m;
+    h_n[i] = cublas_n;
+    h_k[i] = cublas_k;
+    h_lda[i] = lda;
+    h_ldb[i] = ldb;
+    h_ldd[i] = ldd;
+    // cuBLAS-A = mat2, cuBLAS-B = self, cuBLAS-D = output
+    h_Aptr[i] = reinterpret_cast<int64_t>(mat2_list[i].data_ptr());
+    h_Bptr[i] = reinterpret_cast<int64_t>(self_list[i].data_ptr());
+    h_Dptr[i] = reinterpret_cast<int64_t>(outputs[i].data_ptr());
+    // alpha/beta pointers point to device scalars (will be valid after copy)
+    h_alpha_ptrs[i] = reinterpret_cast<int64_t>(dev_alpha);
+    h_beta_ptrs[i] = reinterpret_cast<int64_t>(dev_beta);
+  }
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      base, hbase, total,
+      cudaMemcpyHostToDevice, stream.stream()));
+  host_allocator->record_event(
+      pinned_buf.get(), pinned_buf.get_context(), stream.unwrap());
+
+  // SM 9.0 uses scalar alpha/beta (batch_stride=0), SM 10.0+ uses per-group arrays
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = prop->major == 9;
+  const int64_t alphaBatchStride = sm90 ? 0 : 1;
+  const int64_t betaBatchStride = sm90 ? 0 : 1;
+  const auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+
+  // Matmul descriptor
+  cublasLtMatmulDesc_t computeDesc;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescCreate(&computeDesc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_TRANSA, &opa, sizeof(opa)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opb, sizeof(opb)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_POINTER_MODE, &pointer_mode, sizeof(pointer_mode)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, &alphaBatchStride, sizeof(alphaBatchStride)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(computeDesc, CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, &betaBatchStride, sizeof(betaBatchStride)));
+
+  // Grouped matrix layouts
+  cublasLtMatrixLayout_t Adesc, Bdesc, Cdesc, Ddesc;
+  // A layout: cuBLAS-A = mat2
+  TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+      &Adesc, cuda_dtype, group_count,
+      opa == CUBLAS_OP_N ? static_cast<const void*>(dev_m) : static_cast<const void*>(dev_k),
+      opa == CUBLAS_OP_N ? static_cast<const void*>(dev_k) : static_cast<const void*>(dev_m),
+      static_cast<const void*>(dev_lda)));
+  // B layout: cuBLAS-B = self
+  TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+      &Bdesc, cuda_dtype, group_count,
+      opb == CUBLAS_OP_N ? static_cast<const void*>(dev_k) : static_cast<const void*>(dev_n),
+      opb == CUBLAS_OP_N ? static_cast<const void*>(dev_n) : static_cast<const void*>(dev_k),
+      static_cast<const void*>(dev_ldb)));
+  // C and D layouts: output (m x n in cuBLAS terms)
+  TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+      &Cdesc, cuda_dtype, group_count,
+      static_cast<const void*>(dev_m), static_cast<const void*>(dev_n),
+      static_cast<const void*>(dev_ldd)));
+  TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+      &Ddesc, cuda_dtype, group_count,
+      static_cast<const void*>(dev_m), static_cast<const void*>(dev_n),
+      static_cast<const void*>(dev_ldd)));
+
+  // Heuristic
+  cublasLtMatmulPreference_t preference;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&preference));
+  size_t workspace_size = 32 * 1024 * 1024; // 32MB
+  auto workspace = allocator.allocate(workspace_size);
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+  int64_t avgM = cublas_m, avgN = cublas_n, avgK = cublas_k;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, &avgM, sizeof(avgM)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, &avgN, sizeof(avgN)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference, CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, &avgK, sizeof(avgK)));
+
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle, computeDesc, Adesc, Bdesc, Cdesc, Ddesc,
+      preference, 1, &heuristicResult, &returnedResult));
+  TORCH_CHECK(returnedResult > 0, "cublasLt grouped GEMM: no algorithm found");
+
+  const void* alpha_ptr = sm90 ? static_cast<const void*>(dev_alpha) : static_cast<const void*>(dev_alpha_ptrs);
+  const void* beta_ptr = sm90 ? static_cast<const void*>(dev_beta) : static_cast<const void*>(dev_beta_ptrs);
+
+  TORCH_CUDABLAS_CHECK(cublasLtMatmul(
+      ltHandle, computeDesc,
+      alpha_ptr,
+      dev_Aptr, Adesc,
+      dev_Bptr, Bdesc,
+      beta_ptr,
+      dev_Dptr, Cdesc,
+      dev_Dptr, Ddesc,
+      &heuristicResult.algo,
+      workspace.get(), workspace_size,
+      stream.stream()));
+
+  // Cleanup descriptors
+  cublasLtMatmulPreferenceDestroy(preference);
+  cublasLtMatrixLayoutDestroy(Ddesc);
+  cublasLtMatrixLayoutDestroy(Cdesc);
+  cublasLtMatrixLayoutDestroy(Bdesc);
+  cublasLtMatrixLayoutDestroy(Adesc);
+  cublasLtMatmulDescDestroy(computeDesc);
+}
+#endif // !USE_ROCM
+
+std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
+    at::TensorList self_list,
+    at::TensorList mat2_list) {
+  const int64_t group_count = self_list.size();
+  TORCH_CHECK(group_count > 0, "_foreach_mm requires non-empty tensor lists");
+  TORCH_CHECK(
+      group_count == static_cast<int64_t>(mat2_list.size()),
+      "_foreach_mm: self and mat2 must have the same number of tensors, got ",
+      group_count, " and ", mat2_list.size());
+
+  const auto& first_a = self_list[0];
+  const auto& first_b = mat2_list[0];
+  TORCH_CHECK(first_a.dim() == 2, "_foreach_mm: tensors in self must be 2D");
+  TORCH_CHECK(first_b.dim() == 2, "_foreach_mm: tensors in mat2 must be 2D");
+
+  const int64_t M = first_a.size(0);
+  const int64_t K = first_a.size(1);
+  const int64_t N = first_b.size(1);
+  TORCH_CHECK(
+      first_b.size(0) == K,
+      "_foreach_mm: contraction dimension mismatch");
+
+  for (int64_t i = 1; i < group_count; i++) {
+    TORCH_CHECK(self_list[i].dim() == 2 && mat2_list[i].dim() == 2,
+        "_foreach_mm: all tensors must be 2D");
+    TORCH_CHECK(
+        self_list[i].size(0) == M && self_list[i].size(1) == K,
+        "_foreach_mm: all tensors in self must have shape [", M, ", ", K, "]");
+    TORCH_CHECK(
+        mat2_list[i].size(0) == K && mat2_list[i].size(1) == N,
+        "_foreach_mm: all tensors in mat2 must have shape [", K, ", ", N, "]");
+    TORCH_CHECK(
+        self_list[i].dtype() == first_a.dtype() &&
+        mat2_list[i].dtype() == first_b.dtype(),
+        "_foreach_mm: all tensors must have the same dtype");
+    TORCH_CHECK(
+        self_list[i].device() == first_a.device() &&
+        mat2_list[i].device() == first_b.device(),
+        "_foreach_mm: all tensors must be on the same device");
+    TORCH_CHECK(
+        self_list[i].stride(0) == first_a.stride(0) &&
+        self_list[i].stride(1) == first_a.stride(1),
+        "_foreach_mm: all tensors in self must have the same strides");
+    TORCH_CHECK(
+        mat2_list[i].stride(0) == first_b.stride(0) &&
+        mat2_list[i].stride(1) == first_b.stride(1),
+        "_foreach_mm: all tensors in mat2 must have the same strides");
+  }
+
+  const auto out_dtype = first_a.scalar_type();
+  const auto alignment = static_cast<int64_t>(16 / c10::elementSize(out_dtype));
+  const int64_t N_padded = (N + alignment - 1) / alignment * alignment;
+
+  std::vector<at::Tensor> outputs;
+  outputs.reserve(group_count);
+  for (int64_t i = 0; i < group_count; i++) {
+    outputs.push_back(at::empty_strided(
+        {M, N}, {N_padded, 1}, first_a.options().dtype(out_dtype)));
+  }
+
+  bool use_cutlass_path =
+      _scaled_mm_allowed_device(/*sm90_only=*/true, /*sm100_only=*/true) &&
+      first_a.dtype() == at::kBFloat16 &&
+      first_b.dtype() == at::kBFloat16;
+
+  // Allow switching backends via env var for benchmarking.
+  // TORCH_FOREACH_MM_CUBLAS=1 → cublasGemmGroupedBatchedEx
+  // TORCH_FOREACH_MM_CUBLASLT=1 → cublasLt grouped layout
+  const char* cublas_env = std::getenv("TORCH_FOREACH_MM_CUBLAS");
+  bool use_cublas = cublas_env != nullptr && cublas_env[0] == '1';
+  const char* cublaslt_env = std::getenv("TORCH_FOREACH_MM_CUBLASLT");
+  bool use_cublaslt = cublaslt_env != nullptr && cublaslt_env[0] == '1';
+
+#if !defined(USE_ROCM)
+  if (use_cublaslt) {
+    TORCH_CHECK(cublasLtGroupedMatrixLayoutCreate != nullptr,
+        "cublasLt grouped GEMM requires cuBLAS >= 13.2 (CUDA 13.2+). "
+        "cublasLtGroupedMatrixLayoutCreate not found in linked library.");
+    cublaslt_foreach_mm(self_list, mat2_list, outputs);
+  } else
+#endif
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12050
+  if (use_cublas) {
+    cublas_foreach_mm(self_list, mat2_list, outputs);
+  } else
+#endif
+  if (use_cutlass_path) {
+    at::cuda::detail::bf16bf16_foreach_mm(self_list, mat2_list, outputs);
+  } else {
+    for (int64_t i = 0; i < group_count; i++) {
+      at::mm_out(outputs[i], self_list[i], mat2_list[i]);
+    }
+  }
+
+  return outputs;
 }
 
 } // namespace at::native
