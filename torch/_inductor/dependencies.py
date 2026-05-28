@@ -371,6 +371,10 @@ class StarDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class UserTritonDep(StarDep):
     # pyrefly: ignore [bad-override]
+
+    # `access_count == 1` is enforced during fusion legality.
+    # Thus, conservatively default to 0 when unknown.
+    # Explicitly set during ttir parsing (analyze_kernel_access)
     access_count: int = 0
 
     # depends on the entire buffer
