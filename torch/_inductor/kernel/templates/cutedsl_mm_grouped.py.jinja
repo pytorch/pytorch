@@ -57,10 +57,7 @@ _TORCH_TO_CUTLASS_DTYPE = {
 def _to_fake_cute_tensor(shape, dtype, assumed_align=16, dynamic=True):
     ndim = len(shape)
     if dynamic:
-        dyn_shape = tuple(
-            s if isinstance(s, int) and s == 1 else cute.sym_int64()
-            for s in shape
-        )
+        dyn_shape = tuple(cute.sym_int64() for _ in range(ndim))
     else:
         dyn_shape = tuple(int(s) for s in shape)
     stride_order = tuple(range(ndim - 1, -1, -1))
