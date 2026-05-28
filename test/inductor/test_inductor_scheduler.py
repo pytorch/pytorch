@@ -7,15 +7,22 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
-from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.scheduler import (
+    _get_benchmarkable_extern_fn,
+    BaseSchedulerNode,
+    ExternKernelSchedulerNode,
+    NestedReduction,
+    Scheduler,
+)
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -86,6 +93,98 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _extern_snode_for_op(self, op_overload, python_kernel_name):
+        node = object.__new__(ir.ExternKernel)
+        node.op_overload = op_overload
+        node.python_kernel_name = python_kernel_name
+        snode = object.__new__(ExternKernelSchedulerNode)
+        snode.node = node
+        return snode
+
+    def test_get_benchmarkable_extern_fn_uses_op_overload(self):
+        self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(torch.ops.aten.mm.out, "renamed_mm")
+            ),
+            torch.ops.aten.mm,
+        )
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten._scaled_mm.out, "extern_kernels.mm"
+                )
+            ),
+            torch.ops.aten._scaled_mm,
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(None, "extern_kernels.mm")
+            )
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten.relu.out, "extern_kernels.relu"
+                )
+            )
+        )
+
+    def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [torch.empty(2, 2), torch.empty(2, 2)]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"out_dtype": torch.float16}
+        snode.node.op_overload = torch.ops.aten.mm.dtype_out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: [
+            *args,
+            kwargs["out_dtype"],
+        ]
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(args[2], torch.float16)
+        self.assertEqual(kwargs, {})
+
+    def test_snode_args_kwargs_preserves_keyword_only_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+        ]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"alpha": 2}
+        snode.node.op_overload = torch.ops.aten.addmm.out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: args
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(len(args), 3)
+        self.assertEqual(kwargs, {"alpha": 2})
+
+    def test_snode_args_kwargs_unflattens_fallback_kernel_args(self):
+        node = object.__new__(ir.FallbackKernel)
+        node.inputs = [torch.empty(2, 3), torch.empty(2, 3)]
+        node.constant_args = (1,)
+        node.kwargs = {}
+        node.op_overload = torch.ops.aten.cat.default
+        node.unflatten_args = lambda tensor_args, constant_args: (
+            [list(tensor_args)],
+            {"dim": constant_args[0]},
+        )
+        node.fill_non_provided_args = lambda args, kwargs: [*args, kwargs["dim"]]
+        snode = Mock()
+        snode.node = node
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
+        self.assertEqual(args[1], 1)
+        self.assertEqual(kwargs, {})
+
     def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
