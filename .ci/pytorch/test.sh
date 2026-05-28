@@ -2196,7 +2196,7 @@ test_operator_microbenchmark() {
   # local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
   # for op in $op_list; do
 
-  local op_list="${OP_BENCHMARK_TESTS:-scaled_mm scaled_grouped_mm}"
+  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
   for op in $op_list; do
     _log_opbench_rocm_scaled_mm_debug "$op"
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
