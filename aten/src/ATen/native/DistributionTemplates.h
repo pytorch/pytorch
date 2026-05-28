@@ -301,7 +301,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, std::optiona
             ">::max(), but found to=", to, " and from=", from,
             " which result in to-from to exceed the limit");
       from = std::clamp(from, min, max);
-      to = std::max(std::min(to, max), min);
+      to = std::clamp(to, min, max);
     });
     CHECK_EMPTY_AND_RETURN(self);
     auto iter = at::TensorIterator::borrowing_nullary_op(self);
