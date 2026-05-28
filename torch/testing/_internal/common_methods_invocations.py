@@ -15754,6 +15754,12 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=5e-3, rtol=5e-3)}),
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+                device_type="cpu",
+            ),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
@@ -15774,19 +15780,15 @@ op_db: list[OpInfo] = [
                 unittest.skip("internal assert failure"),
                 'TestJit', 'test_variant_consistency_jit',
                 dtypes=(torch.float32,)),
-            # Exception: Tensor-likes are not close!
-            # Mismatched elements: 1 / 8 (12.5%)
-            # Greatest absolute difference: 0.0004601478576660156 at index (5,) (up to 1e-05 allowed)
-            # Greatest relative difference: 0.89208984375 at index (5,) (up to 0.001 allowed)
+            # MPS fp16/bf16: 1/8 mismatched, max abs 4.6e-4 (atol 1e-5),
+            # max rel 0.89 (rtol 1e-3).
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 'TestConsistency', 'test_output_match',
                 dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
-            # Exception: Scalars are not close!
-            # Expected -152.75 but got -157.25.
-            # Absolute difference: 4.5 (up to 0.001 allowed)
-            # Relative difference: 0.029459901800327332 (up to 0.01 allowed)
+            # MPS scalar mismatch: -152.75 vs -157.25 (abs 4.5 vs atol 1e-3,
+            # rel 0.029 vs rtol 1e-2).
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 "TestConsistency", "test_output_grad_match",
@@ -15803,10 +15805,8 @@ op_db: list[OpInfo] = [
             # (options=None) would lower, but OpInfo can't gate per-sample.
             DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
                          'TestInductorOpInfo', 'test_comprehensive'),
-            # Chunked op: no jvp registered, no second derivatives.
-            # Mirrors the limitations notes on F.linear_cross_entropy
-            # / LinearCrossEntropyLoss; keep those in sync if any
-            # turns into unexpectedSuccess.
+            # Chunked op: no jvp / no second derivatives. Keep in sync with
+            # F.linear_cross_entropy limitations notes (unexpectedSuccess => sync).
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
             DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
