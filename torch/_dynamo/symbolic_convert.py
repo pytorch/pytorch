@@ -161,6 +161,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    CO_VARARGS,
+    CO_VARKEYWORDS,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -4860,21 +4862,27 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, inst.argval))
 
     # See
-    # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
+    # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/pylifecycle.c#L881
     # for the common constants - make sure it matches for Python 3.14+.
-    # The common constants are all attributes of `builtins`.
     _common_constants = (
-        "AssertionError",
-        "NotImplementedError",
-        "tuple",
-        "all",
-        "any",
+        AssertionError,
+        NotImplementedError,
+        tuple,
+        all,
+        any,
+        list,
+        set,
+        None,
+        "",
+        True,
+        False,
+        -1,
     )
 
     def LOAD_COMMON_CONSTANT(self, inst: Instruction) -> None:
         if not isinstance(inst.arg, int):
             raise AssertionError("expected LOAD_COMMON_CONSTANT arg to be set to int")
-        self.push(self.load_builtin_from_argval(self._common_constants[inst.arg]))
+        self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
@@ -5360,6 +5368,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
 
+            # Identify the names of `*args` / `**kwargs` parameters (if any)
+            # via the function's `co_flags`. The varargs param (if present)
+            # comes immediately after `co_argcount + co_kwonlyargcount`
+            # entries in `co_varnames`; the varkw param comes right after.
+            varargs_name: str | None = None
+            varkw_name: str | None = None
+            _vararg_idx = f_code.co_argcount + f_code.co_kwonlyargcount
+            if f_code.co_flags & CO_VARARGS:
+                varargs_name = f_code.co_varnames[_vararg_idx]
+                _vararg_idx += 1
+            if f_code.co_flags & CO_VARKEYWORDS:
+                varkw_name = f_code.co_varnames[_vararg_idx]
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
@@ -5372,6 +5393,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                             name,
                             is_input=True,
                             dynamism=local_dynamism,
+                            is_varargs=(name == varargs_name),
+                            is_varkw=(name == varkw_name),
                         ),
                     )
                     self.symbolic_locals[name] = var
@@ -5806,11 +5829,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        if code.co_name in ("__setitem__", "__setattr__") and not (
-            args and isinstance(args[0], variables.UserDefinedObjectVariable)
+        if code.co_name in (
+            "__setitem__",
+            "__setattr__",
+            "__delitem__",
+            "__delattr__",
+        ) and not (
+            args
+            and isinstance(
+                args[0],
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
         ):
             unimplemented(
-                gb_type="Unsupported __setitem__/__setattr__ inline attempt",
+                gb_type="Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
                 hints=[],
