@@ -160,7 +160,7 @@ class SuperVariable(VariableTracker):
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            # Dont call getattr, just check the __dict__ of the class
+            # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
