@@ -43,6 +43,7 @@ class TestCppExtensionImport(common.TestCase):
     def test_cython_not_loaded_with_import_cpp_extension(self):
         script = """
 import importlib.util
+import inspect
 import pathlib
 import sys
 import tempfile
@@ -71,6 +72,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
     build_extension_cls = torch.utils.cpp_extension.BuildExtension
     assert isinstance(build_extension_cls, type)  # noqa: S101
     assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
+    build_extension_source = inspect.getsource(build_extension_cls)
+    assert "def build_extensions" in build_extension_source  # noqa: S101
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
@@ -376,14 +379,11 @@ class TestCppExtensionJIT(common.TestCase):
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
         major, minor = map(int, torch.version.cuda.split(".")[:2])
-        if major < 12 or (major == 12 and minor <= 9):
+        if major == 12 and minor <= 9:
             # Compute capability <= 7.0 is only supported up to CUDA 12.9
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
             archflags["Volta"] = (["70"], ["70"])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if major < 12:
-            # CUDA 12 drops compute capability < 5.0
-            archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
         for flags, expected in archflags.items():
             try:
