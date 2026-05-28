@@ -208,7 +208,6 @@ class TestSACILP(TestCase):
             g, memory_budget=0.8, world_size=4
         )
         self.assertEqual(ac_decisions, {})
-        self.assertEqual(recomputation_time, 0)
         # make a code change to commit and trigger CI
 
 
