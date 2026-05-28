@@ -195,24 +195,26 @@ def create_structured_trace_for_min_cut_info(
     joint_graph_edges = create_joint_graph_edges(joint_graph)
 
     # Create activation checkpointing logging structure payload
-    activation_checkpointing_logging_structure_payload = create_activation_checkpointing_logging_structure_payload(
-        joint_graph=joint_graph,
-        joint_graph_node_information=joint_graph_node_information,
-        joint_graph_edges=joint_graph_edges,
-        all_recomputable_banned_nodes=all_recomputable_banned_nodes,
-        expected_runtime=expected_runtime,
-        saved_node_idxs=saved_node_idxs,
-        recomputable_node_idxs=recomputable_node_idxs,
-        memories_banned_nodes=memories_banned_nodes,
-        normalized_memories_banned_nodes=normalized_memories_banned_nodes,
-        runtimes_banned_nodes=runtimes_banned_nodes,
-        min_cut_saved_values=min_cut_saved_values,
-        memory_budget=memory_budget,
-        min_act_size=min_act_size,
-        max_act_size=max_act_size,
-        saved_values_act_size=saved_values_act_size,
-        more_aggressive_saved_values_mem_ratio=more_aggressive_saved_values_mem_ratio,
-        aggressive_recomputation_saved_values_mem_ratio=aggressive_recomputation_saved_values_mem_ratio,
+    activation_checkpointing_logging_structure_payload = (
+        create_activation_checkpointing_logging_structure_payload(
+            joint_graph=joint_graph,
+            joint_graph_node_information=joint_graph_node_information,
+            joint_graph_edges=joint_graph_edges,
+            all_recomputable_banned_nodes=all_recomputable_banned_nodes,
+            expected_runtime=expected_runtime,
+            saved_node_idxs=saved_node_idxs,
+            recomputable_node_idxs=recomputable_node_idxs,
+            memories_banned_nodes=memories_banned_nodes,
+            normalized_memories_banned_nodes=normalized_memories_banned_nodes,
+            runtimes_banned_nodes=runtimes_banned_nodes,
+            min_cut_saved_values=min_cut_saved_values,
+            memory_budget=memory_budget,
+            min_act_size=min_act_size,
+            max_act_size=max_act_size,
+            saved_values_act_size=saved_values_act_size,
+            more_aggressive_saved_values_mem_ratio=more_aggressive_saved_values_mem_ratio,
+            aggressive_recomputation_saved_values_mem_ratio=aggressive_recomputation_saved_values_mem_ratio,
+        )
     )
 
     # Create structured trace
