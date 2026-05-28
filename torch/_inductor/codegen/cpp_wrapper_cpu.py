@@ -2442,6 +2442,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        # TODO: add AOTI C API for event-based D2H copy synchronization
+        pass
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
