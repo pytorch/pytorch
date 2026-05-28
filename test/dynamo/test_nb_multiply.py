@@ -3,6 +3,7 @@
 """Tests for the * and *= operators in PyTorch Dynamo (nb_multiply slot)."""
 
 import operator
+import sys
 
 import torch
 import torch._dynamo.test_case
@@ -164,6 +165,35 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
     def test_tuple_mul_int(self):
         self.assertEqual((1, 2) * 3, (1, 2, 1, 2, 1, 2))
         self.assertEqual((1,) * 5, (1, 1, 1, 1, 1))
+
+    @make_dynamo_test
+    def test_tuple_mul_identity(self):
+        empty = ()
+        self.assertEqual(id(empty), id(empty * -3))
+        self.assertEqual(id(empty), id(empty * 0))
+        self.assertEqual(id(empty), id(empty * 3))
+
+        values = (1, 2)
+        self.assertEqual(id(values), id(values * 1))
+        self.assertFalse(id(values) == id(values * 0))
+        self.assertFalse(id(values) == id(values * 2))
+
+    @make_dynamo_test
+    def test_empty_tuple_mul_overflow_raises(self):
+        with self.assertRaisesRegex(
+            OverflowError, "cannot fit 'int' into an index-sized integer"
+        ):
+            () * (sys.maxsize + 1)
+        with self.assertRaisesRegex(
+            OverflowError, "cannot fit 'int' into an index-sized integer"
+        ):
+            () * (-sys.maxsize - 2)
+
+    @make_dynamo_test
+    def test_list_mul_one_returns_new_list(self):
+        values = [1, 2]
+        self.assertEqual(values * 1, values)
+        self.assertFalse(id(values) == id(values * 1))
 
     @make_dynamo_test
     def test_str_mul_int(self):
