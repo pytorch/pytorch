@@ -1360,6 +1360,11 @@ class PythonWrapperCodegen(CodeGen):
         # Additional files that are dependent to the wrapper (ex. cubin files)
         self.additional_files = []
 
+        # Precompiled kernel .so paths to link into the JIT cpp_wrapper
+        # (e.g. CUTLASS, ROCm CK). Populated by the scheduling layer when
+        # cpp_wrapper is set and not aot_mode.
+        self.external_kernel_libs: OrderedSet[str] = OrderedSet()
+
     @staticmethod
     def create(
         is_subgraph: bool,
