@@ -7874,6 +7874,49 @@ torch.cuda.synchronize()
         output.backward(torch.ones_like(output))
         self.assertEqual(output._metadata_cache, cache)
 
+    @onlyCUDA
+    @dtypes(torch.float16)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
+    @skipIfRocm
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_sdpa_backward_uncached_metadata_cache(self, device, dtype):
+        class DummyTransformer(torch.nn.Module):
+            def __init__(self, d_model):
+                super().__init__()
+                self.d_model = d_model
+                self.linear = torch.nn.Linear(d_model, d_model, dtype=dtype)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x.unflatten(-1, [1, self.d_model]).transpose(1, 2)
+                return F.scaled_dot_product_attention(x, x, x)
+
+        d_model = 8
+        offsets = torch.tensor([0, 5, 11], dtype=torch.int64, device=device)
+        x = torch.nested.nested_tensor_from_jagged(
+            torch.randn(11, d_model, dtype=dtype, device=device),
+            offsets=offsets,
+        )
+        self.assertEqual(x._metadata_cache, {})
+
+        layer = torch.compile(DummyTransformer(d_model).to(device))
+        with torch.nn.attention.sdpa_kernel(
+            [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            ]
+        ):
+            y = layer(x)
+            self.assertIn("min_seqlen", y._metadata_cache)
+            self.assertIn("max_seqlen", y._metadata_cache)
+            y.sum().backward()
+
+        self.assertIsNotNone(layer._orig_mod.linear.weight.grad)
+
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")

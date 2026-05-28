@@ -3650,6 +3650,15 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             expected_type = meta.original_subclass_type
             expected_meta = meta.meta
 
+        orig_x = x
+
+        # Trace-time tangent metadata is normalized with the same subclass hook.
+        # Keep runtime tangents in that canonical form before comparing metadata.
+        if is_traceable_wrapper_subclass(x) and hasattr(
+            x, "__coerce_tangent_metadata__"
+        ):
+            x = x.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
+
         runtime_type = type(x)
         # When we're inside compiled autograd's AOTDispatcher step,
         # regular Tensors look like FunctionalTensors.
@@ -3680,7 +3689,6 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
 
         # Coerce to expected type and metadata
-        orig_x = x
         x = maybe_coerce(x)
         if x is None:
             raise AOTDispatchAutograd._raise_tangent_metadata_error(
