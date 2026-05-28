@@ -1201,10 +1201,15 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
+            del big_model
+            gc.collect()
             f.seek(0)
             state = torch.load(f)
 
-
+        # BytesIOContext does not close the buffer on exit; release the large
+        # serialized buffer before allocating the filesystem tensor below.
+        f.close()
+        del state, f
         gc.collect()
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
