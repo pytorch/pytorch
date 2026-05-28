@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     runOnRocm,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -388,9 +387,6 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(
-        msg="lack _get_exceeding_shared_memory_checker support - torch-xpu-ops: 2331"
-    )
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
@@ -398,6 +394,7 @@ class TestTritonHeuristics(TestCase):
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
+            XPUConfigHeuristic,
         )
 
         expected_count = 1 if do_pruning else 2
@@ -410,7 +407,9 @@ class TestTritonHeuristics(TestCase):
         with config.patch(
             {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
         ):
-            if torch.version.hip:
+            if GPU_TYPE == "xpu":
+                config_heuristic = XPUConfigHeuristic()
+            elif torch.version.hip:
                 config_heuristic = ROCmConfigHeuristic()
             else:
                 config_heuristic = CUDAConfigHeuristic()
@@ -793,10 +792,13 @@ class TestDumpLaunchTensors(TestCase):
 
 class TestCachingAutotunerMakeLaunchers(TestCase):
     @staticmethod
-    def _make_compile_result(cfg, exc):
+    def _make_compile_result(cfg, exc=None, launcher=None):
         result = MagicMock()
         result.config = cfg
-        result.make_launcher.side_effect = exc
+        if exc is not None:
+            result.make_launcher.side_effect = exc
+        else:
+            result.make_launcher.return_value = launcher or MagicMock()
         return result
 
     @staticmethod
@@ -808,50 +810,55 @@ class TestCachingAutotunerMakeLaunchers(TestCase):
         return autotuner
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_make_launchers_recovers_earlier_oom_by_disabling_pipelining(self):
+    def test_make_launchers_recovers_earlier_oom_when_all_launchers_fail(self):
         cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
         cfg_ptxas = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
         result_oom = self._make_compile_result(
             cfg_oom, OutOfResources(10, 5, "shared memory")
         )
         result_ptxas = self._make_compile_result(cfg_ptxas, PTXASError("ptxas"))
+        original_compile_results = [result_oom, result_ptxas]
         autotuner = self._make_autotuner_with_results(
             [cfg_oom, cfg_ptxas],
-            [result_oom, result_ptxas],
+            original_compile_results,
         )
 
-        fallback_result = MagicMock()
         fallback_launcher = MagicMock()
         with patch.object(
             autotuner,
-            "_compile_config_with_disabled_pipelining",
-            return_value=(fallback_result, fallback_launcher),
+            "compile_by_disabling_pipelining",
+            return_value=fallback_launcher,
         ) as mock_disable_pipelining:
             autotuner._make_launchers()
 
         mock_disable_pipelining.assert_called_once_with(cfg_oom)
-        self.assertEqual(len(autotuner.launchers), 1)
-        self.assertIs(autotuner.launchers[0], fallback_launcher)
-        self.assertEqual(len(autotuner.compile_results), 1)
-        self.assertIs(autotuner.compile_results[0], fallback_result)
+        self.assertEqual(autotuner.launchers, [fallback_launcher])
+        self.assertEqual(autotuner.compile_results, original_compile_results)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_make_launchers_does_not_retry_failed_disabled_pipelining(self):
+    def test_make_launchers_keeps_valid_launcher_without_extra_fallback(self):
         cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
+        cfg_valid = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
         result_oom = self._make_compile_result(
             cfg_oom, OutOfResources(10, 5, "shared memory")
         )
-        autotuner = self._make_autotuner_with_results([cfg_oom], [result_oom])
+        valid_launcher = MagicMock()
+        result_valid = self._make_compile_result(cfg_valid, launcher=valid_launcher)
+        original_compile_results = [result_oom, result_valid]
+        autotuner = self._make_autotuner_with_results(
+            [cfg_oom, cfg_valid],
+            original_compile_results,
+        )
 
         with patch.object(
             autotuner,
-            "_compile_config_with_disabled_pipelining",
-            side_effect=OutOfResources(10, 5, "shared memory"),
+            "compile_by_disabling_pipelining",
         ) as mock_disable_pipelining:
-            with self.assertRaisesRegex(RuntimeError, "No valid triton configs"):
-                autotuner._make_launchers()
+            autotuner._make_launchers()
 
-        mock_disable_pipelining.assert_called_once_with(cfg_oom)
+        mock_disable_pipelining.assert_not_called()
+        self.assertEqual(autotuner.launchers, [valid_launcher])
+        self.assertEqual(autotuner.compile_results, original_compile_results)
 
 
 class TestRecheckAutotuneCache(TestCase):
