@@ -696,6 +696,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         compiled_fn()
 
+    def test_infer_size_with_size_inputs(self):
+        def fn(x, y):
+            shape = torch._C._infer_size(x.shape[:-1], y.shape[:-1])
+            return torch.ones(shape, device=x.device)
+
+        x = torch.randn(2, 1, 3)
+        y = torch.randn(4, 3)
+
+        expected = fn(x, y)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
+
+    def test_infer_size_with_negative_one_dynamic_size(self):
+        def fn(y):
+            shape = torch._C._infer_size(
+                torch.Size([-1, 1]), torch.Size([1]) + y.shape[:1]
+            )
+            return y + shape[0] + shape[1]
+
+        y = torch.randn(3)
+        expected = fn(y)
+        actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(y)
+        self.assertEqual(actual, expected)
+
     @make_test
     def test_is_in_onnx_export(x, y):
         if torch.onnx.is_in_onnx_export():
