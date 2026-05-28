@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
@@ -499,6 +500,54 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, ret, alpha_contig, std::array<long, 2>{seed, base_offset});
         mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
+}
+
+Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  if (alpha.numel() == 0) {
+    return at::empty_like(alpha);
+  }
+
+  using namespace mps;
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(alpha, alpha.options(), at::MemoryFormat::Contiguous);
+  auto alpha_contig = alpha.contiguous();
+
+  const int64_t num_alpha = (alpha.dim() > 0) ? alpha.size(-1) : 1;
+  const int64_t num_batches = ret.numel() / num_alpha;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("standard_dirichlet_" + scalarToMetalTypeString(ret));
+    auto tptg = std::min(num_alpha, int64_t(pso.maxTotalThreadsPerThreadgroup));
+
+    int64_t seed;
+    int64_t base_offset;
+    constexpr int64_t GAMMA_RANDOMS_STRIDE = 32;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + GAMMA_RANDOMS_STRIDE * ret.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder,
+                    ret,
+                    alpha_contig,
+                    std::array<long, 2>{seed, base_offset},
+                    static_cast<uint32_t>(num_alpha));
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(num_batches, 1, 1)
+                       threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
       }
     });
   }
