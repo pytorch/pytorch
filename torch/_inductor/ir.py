@@ -9992,7 +9992,14 @@ class StorageBox(MutableBox):
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
                 opcount = self.data.inner_fn_opcount()
-                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+                heavy_ops = [
+                    "exp",
+                    "log",
+                    "log10",
+                    "log1p",
+                    "log2",
+                    "sigmoid",
+                ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
             return (
