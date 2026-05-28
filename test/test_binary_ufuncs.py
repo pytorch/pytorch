@@ -987,7 +987,7 @@ class TestBinaryUfuncs(TestCase):
         d_trunc = torch.divide(a, b, rounding_mode="trunc")
         rounding_unsupported = (
             dtype == torch.half
-            and torch.device(device).type != "cpu"
+            and torch.device(device).type == "cpu"
             or dtype == torch.bfloat16
             and device != "cpu"
         )
