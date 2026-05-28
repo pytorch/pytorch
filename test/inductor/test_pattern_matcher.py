@@ -1297,6 +1297,89 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @inductor_config.patch(
+        {
+            "fx_graph_remote_cache": False,
+            "keep_addmm_fused_for_half_dtypes": True,
+        }
+    )
+    def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
+        # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
+        # lets the Triton pointwise kernel load the fp32 bias directly,
+        # preserving precision instead of truncating before fused addmm.
+        bias_fp32 = torch.randn(20, device=GPU_TYPE, dtype=torch.float32)
+        args = [
+            torch.randn(10, 15, device=GPU_TYPE, dtype=dtype),
+            torch.randn(15, 20, device=GPU_TYPE, dtype=dtype),
+        ]
+
+        @torch.compile()
+        def fn(bias, a, b):
+            bias_half = bias.to(dtype)
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(bias_half, a, b))
+
+        _, (code) = run_and_get_code(fn, bias_fp32, args[0], args[1])
+        # Should be unfused (mm, not addmm) because bias is a narrowing cast
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @inductor_config.patch(
+        {
+            "fx_graph_remote_cache": False,
+            "keep_addmm_fused_for_half_dtypes": True,
+        }
+    )
+    def test_unfuse_bias_addmm_half_dtypes_narrowing_cast_numerics(self, dtype):
+        # Verify that unfusing a narrowing-cast bias produces results whose
+        # RMSE vs fp64 stays within 3x of eager's RMSE (the torchbench
+        # accuracy check threshold for half dtypes).
+        torch.manual_seed(42)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(256, 256) for _ in range(8)]
+                )
+                for l in self.linears:
+                    l.bias.data = torch.randn(256, device=GPU_TYPE) * 0.01 + 1.0
+                    l.weight.data *= 0.1
+
+            def forward(self, x):
+                for l in self.linears:
+                    x = l(x) + x  # residual add is pointwise use
+                return x
+
+        model = Model().to(GPU_TYPE)
+        x = torch.randn(32, 256, device=GPU_TYPE)
+
+        def rmse(a, b):
+            return torch.sqrt(torch.mean((a.float() - b.float()) ** 2)).item()
+
+        # fp64 ground truth
+        model_fp64 = Model().double().to(GPU_TYPE)
+        model_fp64.load_state_dict(
+            {k: v.double() for k, v in model.state_dict().items()}
+        )
+        with torch.no_grad():
+            fp64_ref = model_fp64(x.double())
+
+        # Eager under AMP
+        with torch.no_grad(), torch.autocast(GPU_TYPE, dtype=dtype):
+            eager_out = model(x)
+
+        # Compiled under AMP
+        torch._dynamo.reset()
+        compiled = torch.compile(model)
+        with torch.no_grad(), torch.autocast(GPU_TYPE, dtype=dtype):
+            compiled_out = compiled(x)
+
+        eager_err = rmse(fp64_ref, eager_out)
+        compiled_err = rmse(fp64_ref, compiled_out)
+        # compiled should not be significantly worse than eager
+        self.assertLessEqual(compiled_err, 3.0 * eager_err + 1e-4)
+
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
         # See https://github.com/pytorch/pytorch/issues/167313
@@ -1739,6 +1822,64 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (x, scale), 0, 0)
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
+
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_softmax_nonfinite_matches_eager(self):
+        def check(fn, args):
+            torch._dynamo.reset()
+            counters.clear()
+            expected = fn(*args)
+            actual, _ = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual[0], expected[0])
+            self.assertTrue(torch.isnan(expected[-1]).all().item())
+            self.assertTrue(torch.isnan(actual[-1]).all().item())
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        def mul_softmax(x, scale):
+            for _ in range(3):
+                x = x * scale
+            return x, F.softmax(x, dim=0)
+
+        def div_softmax(x, inv_scale):
+            x = x / inv_scale
+            return x, F.softmax(x, dim=0)
+
+        def duplicated_mul_softmax(x, scale):
+            y = x
+            for _ in range(3):
+                y = y * scale
+            z = x
+            for _ in range(3):
+                z = z * scale
+            return y, F.softmax(z, dim=0)
+
+        torch.manual_seed(100)
+        check(mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(duplicated_mul_softmax, (torch.randn((1, 10)), torch.tensor([-1.7e14])))
+        check(
+            div_softmax,
+            (
+                torch.tensor([[1.0, -1.0, 2.0, -2.0]]),
+                torch.tensor([1e-45]),
+            ),
+        )
+
+    @inductor_config.patch(fx_graph_cache=False)
+    def test_scaled_amax_sub_nonfinite_matches_eager(self):
+        def fn(x, scale):
+            y = x * scale
+            return y - torch.amax(y, dim=0, keepdim=True)
+
+        torch._dynamo.reset()
+        counters.clear()
+        x = torch.tensor([[10.0], [0.0]])
+        scale = torch.tensor([1e38])
+        expected = fn(x, scale)
+        actual, _ = run_and_get_code(torch.compile(fn), x, scale)
+        self.assertTrue(torch.isnan(expected[0, 0]).item())
+        self.assertTrue(torch.isnan(actual[0, 0]).item())
+        self.assertEqual(actual[1, 0].item(), float("-inf"))
+        self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):

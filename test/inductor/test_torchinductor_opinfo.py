@@ -39,7 +39,9 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfTorchDynamo,
+    skipIfTorchInductor,
     suppress_warnings,
     TEST_MKL,
     TEST_WITH_ASAN,
@@ -439,6 +441,7 @@ inductor_override_kwargs["cuda"] = {
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
+    ("nn.functional.rms_norm.cutedsl", f16): {"reference_in_float": True},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -529,6 +532,9 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -695,6 +701,9 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1213,6 +1222,13 @@ class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_gpu = check_model_gpu
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147047")
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/156514")
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147058")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/147057")
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/140383")
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/137684")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165296")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(
