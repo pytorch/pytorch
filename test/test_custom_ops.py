@@ -5610,6 +5610,47 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    @scoped_load_inline
+    def test_opcheck_fails_cpp_meta_kernel_guard_int(self, load_inline):
+        cpp_source = r"""
+#include <torch/extension.h>
+
+torch::Tensor bad_meta(const torch::Tensor& x) {
+  auto s0 = x.sym_size(0).guard_int(__FILE__, __LINE__);
+  return at::empty_symint({c10::SymInt(s0), x.sym_size(1)}, x.options());
+}
+
+torch::Tensor cpu_impl(const torch::Tensor& x) {
+  return x.clone();
+}
+
+TORCH_LIBRARY(test_opcheck_fails_cpp_meta_kernel_guard_int, m) {
+  m.def("foo(Tensor x) -> Tensor");
+}
+
+TORCH_LIBRARY_IMPL(test_opcheck_fails_cpp_meta_kernel_guard_int, CPU, m) {
+  m.impl("foo", cpu_impl);
+}
+
+TORCH_LIBRARY_IMPL(test_opcheck_fails_cpp_meta_kernel_guard_int, Meta, m) {
+  m.impl("foo", bad_meta);
+}
+"""
+        load_inline(
+            name="test_opcheck_fails_cpp_meta_kernel_guard_int_extension",
+            cpp_sources=cpp_source,
+            functions=[],
+            is_python_module=False,
+        )
+
+        op = torch.ops.test_opcheck_fails_cpp_meta_kernel_guard_int.foo.default
+        x = torch.randn(3, 4)
+        with self.assertRaisesRegex(
+            optests.OpCheckError,
+            "Guard attempted while ShapeEnv guards are frozen",
+        ):
+            torch.library.opcheck(op, (x,), test_utils="test_faketensor")
+
     def test_opcheck_customopdef(self):
         sample_inputs = [
             (torch.randn(3),),

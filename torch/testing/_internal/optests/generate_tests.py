@@ -96,7 +96,7 @@ def safe_fake_check(
         return None
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
-    return fake_check(op, args, kwargs)
+    return fake_check(op, args, kwargs, check_symbolic_guards=True)
 
 
 def safe_aot_autograd_check(
