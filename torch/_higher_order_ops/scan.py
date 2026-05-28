@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import enum
 import functools
 import itertools
@@ -843,7 +844,14 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_impl(FakeTensorMode)
 def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
-    with mode:
+    # Fresh unbacked symbols created only while evaluating the body for scan
+    # metadata are represented in the traced body graph, not as scan outputs.
+    ignore_fresh_unbacked = (
+        mode.shape_env.ignore_fresh_unbacked_symbols()
+        if mode.shape_env
+        else contextlib.nullcontext()
+    )
+    with mode, ignore_fresh_unbacked:
         scan_length = xs[0].shape[0]
         carry, outputs = _extract_carry_and_out(
             combine_fn(

@@ -218,15 +218,16 @@ if torch.distributed.is_available():
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
-# Ops that consume scalar values from 0-d tensors (via .item()) for computation
-# only, not for output shapes. When capture_scalar_outputs is enabled, these ops
-# create unbacked symbols that don't affect the outputs, causing
+# Ops that consume scalar values from 0-d tensors (via .item()) in fake/meta
+# evaluation without returning those scalar symbols directly. When
+# capture_scalar_outputs is enabled, these ops create unbacked symbols that don't
+# correspond to a bindable output, causing
 # PendingUnbackedSymbolNotFound errors.
 #
 # We use an explicit allowlist rather than generically suppressing for any 0-d
-# tensor argument because an op could legitimately create unbacked symbols for
-# data-dependent output shapes. Suppressing those would silently drop binding
-# information.
+# tensor argument because many data-dependent output-shape ops allocate fresh
+# unbacked symbols that are the output shape itself. Suppressing those would
+# silently drop binding information.
 ops_consuming_unbacked_scalars: frozenset[Callable[..., Any]] = frozenset(
     {
         # ops with Scalar alpha/beta/value arguments
@@ -239,6 +240,8 @@ ops_consuming_unbacked_scalars: frozenset[Callable[..., Any]] = frozenset(
         torch.baddbmm,
         torch.addcmul,
         torch.addcdiv,
+        # constructor with scalar start/end/step arguments
+        torch.arange,
         # foreach ops with scalar/alpha arguments
         torch._foreach_add,
         torch._foreach_add_,
