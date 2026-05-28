@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
+#include <iostream>
 #include <string>
 #include <unordered_set>
 
@@ -719,8 +720,7 @@ void fakeFallback(
 
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
-  bool has_meta_kernel = op.hasKernelForDispatchKey(c10::DispatchKey::Meta);
-  if (!has_meta_kernel && mode && interp) {
+  if (mode && interp) {
     if ((*interp)->fake_try_op_impl(
             op,
             stack,
@@ -737,12 +737,6 @@ void fakeFallback(
   if (!common_device.has_value()) {
     common_device = c10::Device(c10::DeviceType::CPU);
   }
-
-  // if (can_generate_trivial_fake_impl(schema)) {
-  //   // do nothing for mutable ops that only modify out tensor
-  //   stack->resize(arguments_begin);
-  //   return;
-  // }
 
   // Try the Meta kernel. If it raises, fall back to:
   //   1. Python op_impl handlers (for ops like _local_scalar_dense whose
@@ -766,25 +760,8 @@ void fakeFallback(
   } catch (...) {
     auto eptr = std::current_exception();
 
-    // Meta kernel failed. Try the Python op_impl handler as a fallback
-    // (e.g. _local_scalar_dense has a Meta kernel that raises but a Python
-    // handler that creates unbacked symbolic values).
-    stack->resize(arguments_begin);
-    for (const auto& arg : saved_args) {
-      stack->push_back(arg);
-    }
-
-    if (mode && interp) {
-      if ((*interp)->fake_try_op_impl(
-              op,
-              stack,
-              common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
-        return;
-      }
-    }
-
-    // Python handler didn't handle it either. For NotImplementedError,
-    // try the unsafe fallback. For other errors, rethrow.
+    // For NotImplementedError, try the unsafe fallback.
+    // For other errors, rethrow.
     try {
       std::rethrow_exception(eptr);
     } catch (c10::NotImplementedError&) {
