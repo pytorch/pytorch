@@ -6057,6 +6057,24 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
 
+    def test_compile_vmap_compiled_fn_jacrev_has_aux(self):
+        def fn(x):
+            grad_res, _ = torch.func.jacrev(lambda x: tuple([x] * 2), has_aux=True)(x)
+            return grad_res
+
+        compile_options = dict(backend="eager", fullgraph=True, dynamic=False)
+        compiled_fn = torch.compile(fn, **compile_options)
+        vmapped_fn = torch.vmap(compiled_fn)
+        compiled_vmapped_fn = torch.compile(vmapped_fn, **compile_options)
+
+        x = torch.randn(8, dtype=torch.float64)
+        expected = vmapped_fn(x)
+        actual = compiled_vmapped_fn(x)
+
+        self.assertEqual(expected.shape, torch.Size([8]))
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual, expected)
+
     def test_vmap_call_torch_compile_fn(self):
         def wrapped_fn(x):
             return x.sin()
