@@ -143,6 +143,9 @@ class ConstantVariable(VariableTracker):
     def is_python_constant(self) -> Literal[True]:
         return True
 
+    def repr_impl(self, tx: InstructionTranslator) -> VariableTracker:
+        return ConstantVariable.create(repr(self.value))
+
     def is_symnode_like(self) -> bool:
         return isinstance(self.value, (int, bool))
 
@@ -261,11 +264,11 @@ class ConstantVariable(VariableTracker):
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
 
-        if istype(self.value, str):
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
-        return super().tp_iter_impl(tx)
+        try:
+            items = self.unpack_var_sequence(tx)
+        except NotImplementedError:
+            return super().tp_iter_impl(tx)
+        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
 
     def call_method(
         self,
