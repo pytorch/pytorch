@@ -36,7 +36,6 @@ _nvmath_warned = False
 
 _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
-    ("cuda-python", "cuda.bindings.runtime"),
 ]
 
 
