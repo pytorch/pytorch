@@ -12,7 +12,6 @@ import enum
 import sys
 import types
 import typing
-import sys
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
