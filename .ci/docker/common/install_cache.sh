@@ -106,10 +106,10 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # Skip sccache wrapping for theRock nightly - sccache has issues parsing
-  # theRock's complex include paths and causes hipconfig to fail
-  if [ "$ROCM_VERSION" = "nightly" ]; then
-    echo "Skipping sccache wrapping for theRock nightly ROCm"
+  # Skip sccache wrapping for Python-wheel ROCm installs. These installs use
+  # an LLVM layout that does not match the traditional /opt/rocm symlink chain.
+  if [[ "$ROCM_VERSION" = "nightly" || "$ROCM_VERSION" = 7.13* ]]; then
+    echo "Skipping sccache wrapping for ROCm ${ROCM_VERSION}"
   else
     source /etc/rocm_env.sh
 
