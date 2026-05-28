@@ -6,7 +6,7 @@ IR pattern (offload/reload + wait_tensor) similar to c10d functional collectives
 A single dedicated transfer stream handles all D2H/H2D copies.
 Completion events are keyed by output tensor data_ptr() and stored in a
 module-level registry, so ``ao.wait_tensor`` takes only the tensor itself
-(plus an optional keepalive).
+(plus optional ``keepalive`` and ``last_use_of_storage`` args).
 
 Offload pattern:
     cpu_tensor = ao.offload(gpu_tensor)
@@ -17,6 +17,10 @@ Reload pattern:
     gpu_tensor = ao.reload(cpu_tensor, device)
     gpu_tensor = ao.wait_tensor(gpu_tensor, keepalive=cpu_tensor)
         keepalive frees the CPU tensor's storage after the H2D copy completes.
+
+The optional ``last_use_of_storage`` arg creates a dependency on a tensor whose
+storage must outlive the async transfer but is not otherwise connected by a
+data-flow edge in the graph.
 """
 
 import torch
@@ -149,14 +153,26 @@ def _(
 # it is no longer needed:
 #   - Offload (D2H): keepalive is the GPU tensor; freed after the D2H copy.
 #   - Reload (H2D): keepalive is the CPU tensor; freed after the H2D copy.
+#
+# ``last_use_of_storage`` is an optional tensor whose storage is shared with
+# other live tensors (views/aliases). Passing it here tells the scheduler
+# that this wait_tensor call is the last consumer of that storage, creating
+# a data dependency edge that prevents the storage from being freed or
+# reused before the async transfer completes. This is needed when the
+# storage is not otherwise kept alive by a direct data-flow edge in the
+# graph -- without it, a compiler pass could schedule a storage-freeing op
+# before the transfer finishes.
 _lib = torch.library.Library("ao", "DEF")
-_lib.define("wait_tensor(Tensor(a) tensor, Tensor? keepalive=None) -> Tensor(a)")
+_lib.define(
+    "wait_tensor(Tensor(a) tensor, Tensor? keepalive=None, Tensor? last_use_of_storage=None) -> Tensor(a)"
+)
 
 
 @torch.library.impl("ao::wait_tensor", "CompositeExplicitAutograd")
 def _ao_wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    last_use_of_storage: torch.Tensor | None = None,
 ) -> torch.Tensor:
     completion_event, device = _pop_wait(tensor)
     current_stream = torch.accelerator.current_stream(device)
@@ -173,6 +189,7 @@ def _ao_wait_tensor(
 def _ao_wait_tensor_fake(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    last_use_of_storage: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return tensor
 
@@ -183,6 +200,7 @@ has_side_effect(torch.ops.ao.wait_tensor.default)
 def wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    last_use_of_storage: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Callable wrapper so ``wait_tensor`` can be imported by name for op registration."""
-    return torch.ops.ao.wait_tensor.default(tensor, keepalive)
+    return torch.ops.ao.wait_tensor.default(tensor, keepalive, last_use_of_storage)
