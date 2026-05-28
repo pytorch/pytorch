@@ -64,9 +64,11 @@ class ComplexTests(ComplexDynamoTestCase):
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
 
-    def test_incorrect_aliasing_semantics_raises(self):
-        # view_as_real decomposes to stack (a copy), so mutation of the
-        # original complex tensor does not propagate through the view.
+    def test_view_as_real_with_mutation(self):
+        # view_as_real decomposes to stack (a copy) under ComplexTensor, so
+        # the result does not alias the input. This is safe because we run
+        # post-functionalization (no mutations in the graph) and Inductor
+        # re-establishes any required output aliasing.
         def f(a):
             out = torch.view_as_real(a)
             a[...] = torch.zeros_like(a)
@@ -74,7 +76,7 @@ class ComplexTests(ComplexDynamoTestCase):
 
         a = torch.randn(2, 2, dtype=torch.complex64)
         fn_c = torch.compile(f, fullgraph=True)
-        self.assertRaises(RuntimeError, fn_c, a)
+        self.assertEqual(fn_c(a.clone()), f(a.clone()))
 
     def test_aliasing_semantics(self):
         def f(a):
@@ -88,6 +90,24 @@ class ComplexTests(ComplexDynamoTestCase):
 
         fn_c = torch.compile(f, fullgraph=True)
         self.assertEqual(mutate(f), mutate(fn_c))
+
+    def test_input_mutation(self):
+        def f(a, b):
+            a.mul_(b)
+            return a.abs()
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        b = torch.randn(2, 2, dtype=torch.complex64)
+
+        a_ref = a.clone()
+        ref = f(a_ref, b)
+
+        fn_c = torch.compile(f, fullgraph=True)
+        a_test = a.clone()
+        result = fn_c(a_test, b)
+
+        self.assertEqual(result, ref)
+        self.assertEqual(a_test, a_ref)
 
     def test_view_as_real(self):
         def f():

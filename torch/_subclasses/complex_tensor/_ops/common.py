@@ -40,8 +40,6 @@ PROMOTE_TYPES = {
     torch.complex32: torch.complex64,
 }
 
-INCORRECT_ALIASING_OPS: set[OpType] = set()
-
 
 def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
     r"""Returns True if the input is a ComplexTensor, else False
@@ -122,15 +120,6 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-def register_incorrect_aliasing(
-    op: OpType, func_impl: Callable[..., Any] | None = None
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
-    """These ops are known to have incorrect aliasing semantics, and will err on
-    `torch.compile` when the inputs/outputs are mutated, or they escape the compiled block."""
-    INCORRECT_ALIASING_OPS.add(op)
-    return register_complex(op, func_impl)
-
-
 DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
 
 
@@ -198,7 +187,7 @@ def split_complex_arg(
 
 def split_complex_tensor(complex_tensor: ComplexTensor) -> tuple[Tensor, Tensor]:
     """Split a ComplexTensor into its real and imaginary parts."""
-    return torch.resolve_neg(complex_tensor.re), torch.resolve_neg(complex_tensor.im)
+    return complex_tensor.re, complex_tensor.im
 
 
 def complex_to_real_dtype(dtype: torch.dtype) -> torch.dtype:
