@@ -49,6 +49,7 @@ from ..utils import (
     istype,
     raise_args_mismatch,
     tracked_repr,
+    unpack_iterable,
 )
 from .base import (
     AttributeMutationExisting,
@@ -60,6 +61,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
+from .object_protocol import vt_getitem
 from .sets import SetVariable
 
 
@@ -643,35 +645,48 @@ class ConstDictVariable(VariableTracker):
             self.items.clear()
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
-            # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
-            # Either `b` or the kwargs is omittable, but not both.
+            # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
+            # __getitem__; else treat arg as iterable of (key, value) pairs.
+            # kwargs are always merged on top.
+            # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/dictobject.c#L3571
             self.install_dict_keys_match_guard()
-            has_arg = len(args) == 1
-            has_kwargs = len(kwargs) > 0
-            if has_arg or has_kwargs:
+            if len(args) > 1:
+                raise_args_mismatch(tx, name, "at most 1 args", f"{len(args)} args")
+            if args or kwargs:
                 tx.output.side_effects.mutation(self)
-                if has_arg:
-                    dict_vt: VariableTracker
-                    if isinstance(args[0], ConstDictVariable):
-                        # NB - Guard on all the keys of the other dict to ensure
-                        # correctness.
-                        args[0].install_dict_keys_match_guard()
-                        dict_vt = args[0]
-                    else:
-                        dict_vt = DictBuiltinVariable.call_custom_dict(
-                            tx, dict, args[0]
-                        )
-                    self.items.update(dict_vt.items)  # type: ignore[attr-defined]
-                if has_kwargs:
-                    # Handle kwargs
-                    kwargs_hashable = {
-                        Hashable(VariableTracker.build(tx, k)): v
-                        for k, v in kwargs.items()
-                    }
-                    self.items.update(kwargs_hashable)
-                return ConstantVariable.create(None)
-            else:
-                return super().call_method(tx, name, args, kwargs)
+            if args:
+                other = args[0]
+                if isinstance(other, ConstDictVariable):
+                    # NB - Guard on all the keys of the other dict to ensure
+                    # correctness.
+                    other.install_dict_keys_match_guard()
+                    self.items.update(other.items)
+                elif (
+                    isinstance(
+                        other,
+                        (variables.UserDefinedObjectVariable, MappingProxyVariable),
+                    )
+                    and other.call_obj_hasattr(tx, "keys").as_python_constant()
+                ):
+                    keys = other.call_method(tx, "keys", [], {})
+                    for key in unpack_iterable(tx, keys):
+                        self.items[Hashable(key)] = vt_getitem(tx, other, key)
+                else:
+                    for idx, item in enumerate(unpack_iterable(tx, other)):
+                        pair = unpack_iterable(tx, item)
+                        if len(pair) != 2:
+                            raise_observed_exception(
+                                ValueError,
+                                tx,
+                                args=[
+                                    "dictionary update sequence element "
+                                    f"#{idx} has length {len(pair)}; 2 is required"
+                                ],
+                            )
+                        self.items[Hashable(pair[0])] = pair[1]
+            for k, v in kwargs.items():
+                self.items[Hashable(VariableTracker.build(tx, k))] = v
+            return ConstantVariable.create(None)
         elif name == "setdefault" and self.is_mutable():
             if len(args) not in (1, 2):
                 raise_args_mismatch(
