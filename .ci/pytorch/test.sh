@@ -1428,8 +1428,9 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    # Allow 1% variance for CPU perf to accommodate perf fluctuation
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99
+    # Allow 1% variance for CPU perf to accommodate perf fluctuation.
+    # Fail on large improvements too so the baseline is updated promptly.
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99 --fail-on-improvement
   done
 }
 
