@@ -100,7 +100,32 @@ vectorized_logging_tensor = parametrize(
 )
 
 
-class TestAutogradFunctional(TestCase):
+class _AutogradFunctionalHelpers:
+    def _test_construct_standard_basis_for(self, inputs):
+        numels = tuple(tensor.numel() for tensor in inputs)
+        results = autogradF._construct_standard_basis_for(inputs, numels)
+        for result, inp in zip(results, inputs):
+            self.assertEqual(result.dtype, inp.dtype)
+            self.assertEqual(result.device, inp.device)
+        results = torch.cat(
+            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
+        )
+        expected = torch.eye(results[0].shape[0], dtype=torch.float)
+        self.assertEqual(results, expected)
+
+    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
+        expected = autogradF.jacobian(f, inputs, vectorize=False)
+        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
+        self.assertEqual(result_backward_mode, expected)
+
+        if test_forward_ad:
+            result_forward_mode = autogradF.jacobian(
+                f, inputs, strategy="forward-mode", vectorize=True
+            )
+            self.assertEqual(result_forward_mode, expected)
+
+
+class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
         if isinstance(base, torch.Tensor):
@@ -624,18 +649,6 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def _test_construct_standard_basis_for(self, inputs):
-        numels = tuple(tensor.numel() for tensor in inputs)
-        results = autogradF._construct_standard_basis_for(inputs, numels)
-        for result, inp in zip(results, inputs):
-            self.assertEqual(result.dtype, inp.dtype)
-            self.assertEqual(result.device, inp.device)
-        results = torch.cat(
-            [result.to(device="cpu", dtype=torch.float) for result in results], dim=1
-        )
-        expected = torch.eye(results[0].shape[0], dtype=torch.float)
-        self.assertEqual(results, expected)
-
     @base_and_logging_tensor
     def test_construct_standard_basis_for(self, ctors):
         test_cases = [
@@ -884,17 +897,6 @@ class TestAutogradFunctional(TestCase):
 
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
-
-    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
-        expected = autogradF.jacobian(f, inputs, vectorize=False)
-        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result_backward_mode, expected)
-
-        if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(
-                f, inputs, strategy="forward-mode", vectorize=True
-            )
-            self.assertEqual(result_forward_mode, expected)
 
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_simple(self, ctors):
@@ -1722,7 +1724,7 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
-class TestAutogradFunctionalDeviceType(TestAutogradFunctional):
+class TestAutogradFunctionalDeviceType(_AutogradFunctionalHelpers, TestCase):
     @onlyAccelerator
     @base_and_logging_tensor
     def test_construct_standard_basis_for_mixed_device(self, device, ctors):
