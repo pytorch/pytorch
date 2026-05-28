@@ -270,7 +270,16 @@ jobs:
           )
           # save container name for later step
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
+          WORKSPACE_ORIGINAL_OWNER_ID=$(docker exec -t "${container_name}" stat -c '%u' /var/lib/jenkins/workspace | tr -d '\r')
+          echo "WORKSPACE_ORIGINAL_OWNER_ID=${WORKSPACE_ORIGINAL_OWNER_ID}" >> "$GITHUB_ENV"
           docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
+
+      - name: Restore workspace owner (for gfx1100 only)
+        if: always() && contains(matrix.runner, 'gfx1100')
+        shell: bash
+        run: |
+          docker exec -t "${CONTAINER_NAME}" sh -c \
+            'sudo chown -R '"${WORKSPACE_ORIGINAL_OWNER_ID}"' /var/lib/jenkins/workspace'
 
       - name: Print remaining test logs
         shell: bash
