@@ -100,6 +100,13 @@ def send_and_delete_tensors(queue, event, device, dtype, count, size=5):
     event.wait()
 
 
+def limbo_cleanup_worker(q, e):
+    t = torch.zeros(5, 5, device="cuda")
+    q.put(t)
+    e.wait()
+    del t
+
+
 def send_tensor_with_untyped_storage(queue, event):
     tensors = torch.ones(2, device="cuda").chunk(2, dim=0)
     specs = []
@@ -537,6 +544,21 @@ class TestMultiprocessing(TestCase):
         del t
         e.set()
         p.join(1)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_cuda_ipc_limbo_cleanup_at_exit(self):
+        ctx = mp.get_context("spawn")
+        q = ctx.Queue()
+        e = ctx.Event()
+
+        p = ctx.Process(target=limbo_cleanup_worker, args=(q, e))
+        p.start()
+
+        t_received = q.get()
+        e.set()
+        p.join(5)
+        self.assertEqual(p.exitcode, 0)
+        del t_received
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_ipc_deadlock(self):
