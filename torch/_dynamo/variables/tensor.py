@@ -2611,7 +2611,8 @@ class SymNodeVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        if not other.is_symnode_like() and not other.is_python_constant():
+        # sequence * sym_node must go through sq_repeat and not nb_multiply
+        if not _is_sym_arith_operand(other):
             return VariableTracker.build(tx, NotImplemented)
         lhs, rhs = (other, self) if reverse else (self, other)
         return SymNodeVariable.create(
