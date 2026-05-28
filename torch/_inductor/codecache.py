@@ -3379,6 +3379,12 @@ def _precompile_header(
         "CppBuilder does not currently support precompiling on Windows!"
     )
 
+    # extra_flags carries link-time inputs (e.g. precompiled kernel .so paths
+    # for CUTLASS/ROCm CK under JIT cpp_wrapper). Preprocessing and PCH
+    # compilation don't link, so g++ rejects .so paths as unused linker
+    # input. Strip them here.
+    compile_command.pop("extra_flags", None)
+
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
     # is thread-safe, as each thread will get its own temporary directory.
@@ -4721,6 +4727,16 @@ class CUTLASSCodeCache:
 
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
+
+    @classmethod
+    def get_output_path(cls, source_code: str, dst_file_ext: str) -> str:
+        """
+        Returns the deterministic output path for `compile(source_code, dst_file_ext)`
+        without performing the compile. Useful when a caller needs to reference the
+        compiled artifact path before an async compile has finished.
+        """
+        _, input_path = cls.write(source_code, dst_file_ext)
+        return input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
 
     @classmethod
     def compile(
