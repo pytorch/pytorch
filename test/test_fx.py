@@ -4743,27 +4743,40 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
         h, _ = tensor_placeholder.meta["example_value"].shape  # h is a SymInt
         self.assertIsInstance(h, torch.SymInt)
 
-        result = gm.graph.materialize_symints([h - 1, 3 * (h - 1), (h - 1) ** 2, 5])
+        # Realistic usage: scope the materialization to run before the existing
+        # output so the new nodes land in the body (not orphaned after the
+        # return), and wire the result into the output so they're not dead.
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints(
+                [h - 1, 3 * (h - 1), (h - 1) ** 2, 5]
+            )
+        output_node.args = (output_node.args[0] + tuple(result),)
 
         # Plain int passes through, the rest are Nodes.
         self.assertEqual(result[3], 5)
         for got in result[:3]:
             self.assertIsInstance(got, torch.fx.Node)
 
+        # Note: ``h - 1`` is hash-consed across the inputs that share it as a
+        # sub-expression -- ``h - 1`` itself and ``(h - 1) ** 2`` both reference
+        # the same ``%add_1`` (``%pow_1`` takes ``%add_1`` as its base). The
+        # ``3 * (h - 1)`` input is *not* sharing here because sympy distributes
+        # it into ``3*h - 3`` (i.e., ``%mul`` + ``%add_2``), so ``h - 1`` is
+        # not a sub-expression of that lowered form.
         self.assertExpectedInline(
             str(gm.graph).strip(),
             """\
 graph():
-    %s77 : torch.SymInt [num_users=3] = placeholder[target=s77]
+    %s77 : torch.SymInt [num_users=2] = placeholder[target=s77]
     %s27 : torch.SymInt [num_users=0] = placeholder[target=s27]
     %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
     %add : [num_users=1] = call_function[target=operator.add](args = (%l_x_, 1), kwargs = {})
-    return (add,)
-    %add_1 : [num_users=0] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
+    %add_1 : [num_users=2] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
     %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %s77), kwargs = {})
-    %add_2 : [num_users=0] = call_function[target=operator.add](args = (-3, %mul), kwargs = {})
-    %add_3 : [num_users=1] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
-    %pow_1 : [num_users=0] = call_function[target=operator.pow](args = (%add_3, 2), kwargs = {})""",
+    %add_2 : [num_users=1] = call_function[target=operator.add](args = (-3, %mul), kwargs = {})
+    %pow_1 : [num_users=1] = call_function[target=operator.pow](args = (%add_1, 2), kwargs = {})
+    return (add, add_1, add_2, pow_1, 5)""",
         )
 
     def test_materialize_symints_constant_symint(self):
@@ -4791,7 +4804,7 @@ graph():
 
         # Empty graph has no producer for `h`'s symbol → must reject.
         empty_graph = torch.fx.Graph()
-        with self.assertRaisesRegex(AssertionError, "no producer in the graph"):
+        with self.assertRaisesRegex(AssertionError, "no producer for"):
             empty_graph.materialize_symints([h])
 
     def test_materialize_symints_symint_placeholder(self):
@@ -4803,7 +4816,11 @@ graph():
         s = sym_placeholder.meta["example_value"]
         self.assertIsInstance(s, torch.SymInt)
 
-        result = gm.graph.materialize_symints([s + 2, s * 3])
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        with gm.graph.inserting_before(output_node):
+            result = gm.graph.materialize_symints([s + 2, s * 3])
+        output_node.args = (output_node.args[0] + tuple(result),)
+
         self.assertEqual(len(result), 2)
         for got in result:
             self.assertIsInstance(got, torch.fx.Node)
@@ -4817,52 +4834,104 @@ graph():
     %l_n_ : torch.SymInt [num_users=3] = placeholder[target=L_n_]
     %add : [num_users=1] = call_function[target=operator.add](args = (%l_n_, 1), kwargs = {})
     %zeros : [num_users=1] = call_function[target=torch.zeros](args = (%add,), kwargs = {})
-    return (zeros,)
-    %add_1 : [num_users=0] = call_function[target=operator.add](args = (2, %l_n_), kwargs = {})
-    %mul : [num_users=0] = call_function[target=operator.mul](args = (3, %l_n_), kwargs = {})""",
+    %add_1 : [num_users=1] = call_function[target=operator.add](args = (2, %l_n_), kwargs = {})
+    %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %l_n_), kwargs = {})
+    return (zeros, add_1, mul)""",
         )
 
-    def test_materialize_symints_item_unbacked(self):
-        """When a symbol is produced by a data-dependent op like ``.item()``
-        (an unbacked SymInt), the producing FX node is used as the root —
-        which is what protects the ``.item()`` call from DCE."""
-        from torch._dynamo.testing import EagerAndRecordGraphs
+    def test_materialize_symints_unbacked_via_unbacked_bindings(self):
+        """When an unbacked SymInt's producer is described by
+        ``node.meta['unbacked_bindings']`` with a non-trivial keypath (e.g.
+        ``nonzero()`` → ``.size(0)``), ``materialize_symints`` follows the
+        keypath to emit the right accessor (``aten.sym_size.int``)."""
+        from torch.fx.experimental.proxy_tensor import make_fx
 
-        backend = EagerAndRecordGraphs()
-
-        def f(x):
-            n = x.item()
-            torch._check(n >= 1)
-            return torch.zeros(n + 2)
-
-        with torch._dynamo.config.patch(capture_scalar_outputs=True):
-            torch.compile(f, dynamic=True, backend=backend)(torch.tensor(5))
-        gm = backend.graphs[-1]
-
-        item_node = next(
-            n for n in gm.graph.nodes if n.op == "call_method" and n.target == "item"
+        gm = make_fx(torch.nonzero, tracing_mode="symbolic")(torch.randn(10))
+        nonzero_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.nonzero.default
         )
-        u = item_node.meta["example_value"]
-        self.assertIsInstance(u, torch.SymInt)
+        bindings = nonzero_node.meta["unbacked_bindings"]
+        self.assertEqual(len(bindings), 1)
+        u = next(iter(bindings))
+        # u is the unbacked SymInt for nonzero's first output dim.
+        u_symint = nonzero_node.meta["val"].shape[0]
+        self.assertIsInstance(u_symint, torch.SymInt)
+        self.assertEqual(u_symint.node._expr, u)
 
-        result = gm.graph.materialize_symints([u + 5])
+        result = gm.graph.materialize_symints([u_symint + 5])
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], torch.fx.Node)
 
-        # The new `add_1` references `%item` directly.
-        self.assertExpectedInline(
-            str(gm.graph).strip(),
-            """\
-graph():
-    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
-    %item : [num_users=3] = call_method[target=item](args = (%l_x_,), kwargs = {})
-    %ge : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
-    %_check : [num_users=0] = call_function[target=torch._check](args = (%ge,), kwargs = {})
-    %add : [num_users=1] = call_function[target=operator.add](args = (%item, 2), kwargs = {})
-    %zeros : [num_users=1] = call_function[target=torch.zeros](args = (%add,), kwargs = {})
-    return (zeros,)
-    %add_1 : [num_users=0] = call_function[target=operator.add](args = (5, %item), kwargs = {})""",
+        # The keypath `(CallMethodKey("size"), SequenceKey(0))` is traversed,
+        # emitting `aten.sym_size.int(%nonzero, 0)` as the producer.
+        sym_size_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.sym_size.int
+        ]
+        self.assertEqual(len(sym_size_nodes), 1)
+        self.assertIs(sym_size_nodes[0].args[0], nonzero_node)
+        self.assertEqual(sym_size_nodes[0].args[1], 0)
+
+    def test_materialize_symints_unbacked_via_divide_by_key(self):
+        """``DivideByKey(divisor)`` in an unbacked-binding keypath is lowered
+        to ``operator.floordiv(producer, divisor_node)``. When the divisor is
+        itself a SymInt (a backed shape symbol), the pre-scan adds its free
+        symbols to ``needed_symbols`` so Passes 1/2 produce a node for it,
+        and the lowering callback wires that node in as the floordiv arg."""
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import DivideByKey
+
+        # Trace a graph that has a tensor placeholder + nonzero producer for
+        # an unbacked symbol. We then synthetically rewrite the binding so
+        # the keypath includes a ``DivideByKey(s_backed)`` component, where
+        # ``s_backed`` is a backed shape symbol of the input tensor.
+        def f(x, y):
+            return torch.nonzero(y)
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.randn(8, 4), torch.randn(10)
         )
+        nonzero_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops.aten.nonzero.default
+        )
+        tensor_ph = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("val"), torch.Tensor)
+            and n.meta["val"].dim() == 2
+        )
+        s_backed_symint = tensor_ph.meta["val"].shape[0]
+        self.assertIsInstance(s_backed_symint, torch.SymInt)
+
+        # Splice DivideByKey(s_backed) onto the existing keypath. The
+        # synthetic semantic: u = nonzero.size(0) // s_backed.
+        u, keypath = next(iter(nonzero_node.meta["unbacked_bindings"].items()))
+        nonzero_node.meta["unbacked_bindings"] = {
+            u: keypath + (DivideByKey(s_backed_symint),)
+        }
+        u_symint = nonzero_node.meta["val"].shape[0]
+
+        result = gm.graph.materialize_symints([u_symint + 1])
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.fx.Node)
+
+        # A floordiv node was emitted whose divisor is the lowered backed
+        # shape symbol (a ``sym_size.int(%tensor_ph, 0)`` node) -- not a raw
+        # SymInt object.
+        floordiv_nodes = [
+            n for n in gm.graph.nodes if n.target is operator.floordiv
+        ]
+        self.assertEqual(len(floordiv_nodes), 1)
+        divisor_arg = floordiv_nodes[0].args[1]
+        self.assertIsInstance(divisor_arg, torch.fx.Node)
+        self.assertEqual(divisor_arg.target, torch.ops.aten.sym_size.int)
+        self.assertIs(divisor_arg.args[0], tensor_ph)
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch

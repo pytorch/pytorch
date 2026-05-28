@@ -29,7 +29,7 @@ from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
-from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
 
 from . import _pytree as fx_pytree
@@ -1921,12 +1921,10 @@ class Graph:
         that emit a new node should mirror ``key`` so the new node matches
         the surrounding graph's convention.
         """
-        val = tensor_node.meta.get("val")
-        if val is not None:
-            return val, "val"
-        val = tensor_node.meta.get("example_value")
-        if val is not None:
-            return val, "example_value"
+        if "val" in tensor_node.meta:
+            return tensor_node.meta["val"], "val"
+        if "example_value" in tensor_node.meta:
+            return tensor_node.meta["example_value"], "example_value"
         return None, "val"
 
     @compatibility(is_backward_compatible=False)
@@ -1959,6 +1957,69 @@ class Graph:
         return node
 
     @compatibility(is_backward_compatible=False)
+    def _resolve_unbacked_binding(
+        self,
+        producer: Node,
+        keypath: tuple[object, ...],
+        lower_symint: Callable[[torch.SymInt], Node | int],
+    ) -> Node:
+        """Walk an ``unbacked_bindings`` keypath, emitting FX ops on this
+        graph to recover the bound SymInt from ``producer``'s result.
+
+        ``lower_symint`` is invoked for the only keypath component that may
+        carry a non-literal value: ``DivideByKey`` with a SymInt divisor.
+        Callers must provide one (e.g. a wrapper around their sympy interp
+        cache).
+        """
+        import operator
+
+        from torch.fx.experimental.symbolic_shapes import (
+            CallMethodKey,
+            ConvertIntKey,
+            DivideByKey,
+            InnerTensorKey,
+        )
+
+        node = producer
+        i = 0
+        while i < len(keypath):
+            k = keypath[i]
+            nxt = keypath[i + 1] if i + 1 < len(keypath) else None
+            if isinstance(k, CallMethodKey) and isinstance(nxt, pytree.SequenceKey):
+                idx = nxt.idx
+                if k.name == "size":
+                    node = self.create_size_node(node, idx)
+                elif k.name == "stride":
+                    node = self.create_stride_node(node, idx)
+                else:
+                    node = self.call_method(k.name, (node, idx))
+                i += 2
+            elif isinstance(k, CallMethodKey):
+                if k.name == "storage_offset":
+                    node = self.create_storage_offset_node(node)
+                else:
+                    node = self.call_method(k.name, (node,))
+                i += 1
+            elif isinstance(k, pytree.SequenceKey):
+                node = self.call_function(operator.getitem, (node, k.idx))
+                i += 1
+            elif isinstance(k, ConvertIntKey):
+                node = self.call_function(torch.sym_ite, (node, 1, 0))
+                i += 1
+            elif isinstance(k, DivideByKey):
+                divisor = k.divisor
+                if isinstance(divisor, torch.SymInt):
+                    divisor = lower_symint(divisor)
+                node = self.call_function(operator.floordiv, (node, divisor))
+                i += 1
+            elif isinstance(k, InnerTensorKey):
+                node = self.call_function(getattr, (node, k.inner_name))
+                i += 1
+            else:
+                raise AssertionError(f"unrecognized keypath component {k}")
+        return node
+
+    @compatibility(is_backward_compatible=False)
     def materialize_symints(
         self, values: Sequence[torch.SymInt | int]
     ) -> list[Node | int]:
@@ -1983,96 +2044,192 @@ class Graph:
           via ``aten.sym_size.int(%x, 0)``, or a SymInt placeholder if one
           exists). The resulting node's value is "what ``s32`` is at runtime"
           -- which is determined by the input's shape and is INDEPENDENT of any
-          layout change to ``%x`` (size is invariant under layout transforms,
-          stride is not). This is the right behavior when you want to *freeze*
-          the trace-time stride into the graph.
+          layout change to ``%x``. This is the right behavior when you want to
+          *freeze* the trace-time stride into the graph.
+
+        Note: like other ``Graph`` node-creation APIs (``call_function``,
+        ``create_size_node``, etc.), nodes are emitted at the graph's current
+        insertion point. The default insertion point (``Graph._root.prepend``)
+        appends new nodes to the end of the graph, which on a graph that
+        already has an ``output`` node means they land *after* ``return``
+        (orphaned). Callers typically scope this in
+        ``with graph.inserting_before(graph.output_node()):`` so the new
+        nodes land in the body.
         """
         # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
-        # calls (invalidated on graph mutation) — currently we walk all of
-        # `self.nodes` on every invocation, which is O(N_nodes) per call.
+        # calls.
+
+        # Probe the graph's meta-key convention once -- in practice a graph
+        # uses either "val" (export / proxy_tensor) or "example_value"
+        # (dynamo) uniformly, not a mix.
+        meta_key = "val"
+        for node in self.nodes:
+            if "example_value" in node.meta:
+                meta_key = "example_value"
+                break
+            if "val" in node.meta:
+                break
 
         # Build the symbol -> Proxy map once; shared across all inputs so common
         # sub-expressions across symints get hash-consed into single subgraphs.
         tracer = torch.fx.proxy.GraphAppendingTracer(self)
         expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
-        expr_to_meta_key: dict[sympy.Expr, str] = {}
-        # Lazy registry: symbol -> (tensor_placeholder, dim). Used when a
-        # symbol only appears in a tensor placeholder's *shape* and there's
-        # no existing dedicated SymInt-valued node for it. We'll emit a
-        # `aten.sym_size.int(ph, dim)` lazily if the symbol is actually
-        # referenced by one of the requested values.
+
+        # Pass 1: walk the graph to discover producers. All backed symbols
+        # must be found here -- their only safe producer is an input.
+        # Populates:
+        #   - ``expr_to_proxy``: SymInt placeholders -> Proxy (direct).
+        #   - ``sym_size_sources``: tensor placeholder shape symbol
+        #     -> (placeholder, dim) (lazy, used by Pass 2).
+        #   - ``sym_to_binding``: unbacked symbol -> (producer node, keypath)
+        #     from ``node.meta["unbacked_bindings"]`` (lazy, used by Pass 2).
         sym_size_sources: dict[sympy.Symbol, tuple[Node, int]] = {}
+        sym_to_binding: dict[sympy.Symbol, tuple[Node, tuple[object, ...]]] = {}
 
         for node in self.nodes:
-            val, key = self._get_tensor_meta_val(node)
-            # SymInt-valued node (placeholder or other sym op): the node
-            # itself is the symbol's producer.
-            if isinstance(val, py_sym_types):
-                expr = val.node.expr
-                if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
-                    expr_to_proxy[expr] = torch.fx.Proxy(node, tracer=tracer)
-                    expr_to_meta_key[expr] = key
-                continue
-            # Tensor placeholder: shape symbols don't yet have a dedicated
-            # SymInt-valued node; we'll lazily emit `sym_size.int(ph, dim)`
-            # if any of them are actually referenced by the requested values.
-            if node.op == "placeholder" and isinstance(val, torch.Tensor):
-                for dim, s in enumerate(val.shape):
-                    if isinstance(s, torch.SymInt):
-                        expr = s.node.expr
-                        if isinstance(expr, sympy.Symbol):
-                            sym_size_sources.setdefault(expr, (node, dim))
+            if node.op == "placeholder":
+                val = node.meta.get(meta_key)
+                if isinstance(val, py_sym_types):
+                    expr = val.node.expr
+                    if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
+                        expr_to_proxy[expr] = torch.fx.Proxy(node, tracer=tracer)
+                elif isinstance(val, torch.Tensor):
+                    for dim, s in enumerate(val.shape):
+                        if isinstance(s, torch.SymInt):
+                            expr = s.node.expr
+                            if (
+                                isinstance(expr, sympy.Symbol)
+                                and expr not in expr_to_proxy
+                            ):
+                                sym_size_sources.setdefault(expr, (node, dim))
+            else:
+                bindings = node.meta.get("unbacked_bindings")
+                if bindings:
+                    for sym, keypath in bindings.items():
+                        sym_to_binding.setdefault(sym, (node, tuple(keypath)))
 
-        # Compute the union of symbols actually referenced by the requested
-        # values; lazily emit `sym_size.int` nodes for any missing ones that
-        # we can recover from a tensor placeholder's shape.
-        needed_symbols: set[sympy.Symbol] = set()
-        for s in values:
-            if isinstance(s, torch.SymInt):
-                needed_symbols.update(s.node.expr.free_symbols)
-        for sym in needed_symbols:
-            if sym in expr_to_proxy or sym not in sym_size_sources:
-                continue
-            ph, dim = sym_size_sources[sym]
-            sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
-            tensor, key = self._get_tensor_meta_val(ph)
-            if isinstance(tensor, torch.Tensor):
-                sym_node.meta[key] = tensor.shape[dim]
-            expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
-            expr_to_meta_key[sym] = key
+        from sympy.logic.boolalg import BooleanAtom
+
+        from torch.fx.experimental.symbolic_shapes import (
+            DivideByKey,
+            free_unbacked_symbols,
+        )
+
+        def _arg_meta_val(a: Any) -> Any:
+            if isinstance(a, torch.fx.Node):
+                return a.meta.get(meta_key)
+            return a
+
+        def _sympy_interp_cached(expr: sympy.Expr) -> Any:
+            # Common expressions cached in expr_to_proxy
+            if expr in expr_to_proxy:
+                return expr_to_proxy[expr]
+            if isinstance(
+                expr, (sympy.Integer, sympy.Number, sympy.Symbol, BooleanAtom)
+            ):
+                # handle leaf terms.
+                return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
+            # handle composite expressions.
+            result = _run_sympy_handler(
+                PythonReferenceAnalysis,
+                [_sympy_interp_cached(arg) for arg in expr.args],
+                expr,
+            )
+            if not isinstance(result, torch.fx.Proxy):
+                return result
+            expr_to_proxy[expr] = result
+            node = result.node
+            target = node.target
+            if not callable(target):
+                return result
+            try:
+                fake_args = tuple(_arg_meta_val(a) for a in node.args)
+                fake_kwargs = {k: _arg_meta_val(v) for k, v in node.kwargs.items()}
+                node.meta[meta_key] = target(*fake_args, **fake_kwargs)
+            except (TypeError, ValueError, AttributeError) as e:
+                log.debug(
+                    "materialize_symints: skipping meta annotation for %s: %s",
+                    expr,
+                    e,
+                )
+            return result
+
+        def _lower_symint_divisor(d: torch.SymInt) -> Node | int:
+            r = _sympy_interp_cached(d.node.expr)
+            return r.node if isinstance(r, torch.fx.Proxy) else r
+
+        # Pass 2 (lazy, recursive): materialize a producer for each needed
+        # symbol. Three cases:
+        #   - already in expr_to_proxy: nothing to do.
+        #   - in sym_size_sources: emit sym_size.int for shape symbols
+        #     recoverable from a tensor placeholder shape.
+        #   - in sym_to_binding: fallback for missing unbacked symbols. Use
+        #     the node.meta["unbacked_bindings"] map -- the authoritative
+        #     source for "this node produces these unbacked symbols". The
+        #     keypath tells us how to recover the SymInt from the node's
+        #     result (e.g. .size(i), .stride(i), storage_offset()).
+        def _ensure_produced(sym: sympy.Symbol) -> None:
+            if sym in expr_to_proxy:
+                return
+            if sym in sym_size_sources:
+                ph, dim = sym_size_sources[sym]
+                sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
+                tensor = ph.meta.get(meta_key)
+                if isinstance(tensor, torch.Tensor):
+                    sym_node.meta[meta_key] = tensor.shape[dim]
+                expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
+                return
+            if sym in sym_to_binding:
+                if not free_unbacked_symbols(sym):
+                    raise AssertionError(
+                        f"materialize_symints: backed symbol {sym} has no "
+                        f"input producer (backed symbols cannot be recovered "
+                        f"from non-placeholder nodes)"
+                    )
+                producer_node, keypath = sym_to_binding[sym]
+                for k in keypath:
+                    if isinstance(k, DivideByKey) and isinstance(
+                        k.divisor, torch.SymInt
+                    ):
+                        for s2 in k.divisor.node.expr.free_symbols:
+                            _ensure_produced(s2)
+                producer = self._resolve_unbacked_binding(
+                    producer_node, keypath, lower_symint=_lower_symint_divisor
+                )
+                expr_to_proxy[sym] = torch.fx.Proxy(producer, tracer=tracer)
+                return
+            raise AssertionError(f"materialize_symints: no producer for {sym}")
 
         out: list[Node | int] = []
         for s in values:
-            if not isinstance(s, torch.SymInt):
+            if isinstance(s, torch.SymInt):
+                pass
+            elif isinstance(s, int):  # also covers bool (subclass of int)
                 out.append(s)
                 continue
+            else:
+                raise TypeError(
+                    f"materialize_symints: expected SymInt or int, got "
+                    f"{type(s).__name__} ({s!r})"
+                )
             target_expr = s.node.expr
             if target_expr.is_number:
                 out.append(int(s))
                 continue
-            missing = target_expr.free_symbols - expr_to_proxy.keys()
-            if missing:
-                raise AssertionError(
-                    f"materialize_symints: cannot materialize {s!r}; the "
-                    f"following symbols have no producer in the graph: {missing}"
-                )
-            result = sympy_interp(PythonReferenceAnalysis, expr_to_proxy, target_expr)
-            # For a non-constant target_expr we expect a Proxy. (Constants
-            # would have been handled by the `is_number` branch above.)
+            for sym in target_expr.free_symbols:
+                _ensure_produced(sym)
+            result = _sympy_interp_cached(target_expr)
             if not isinstance(result, torch.fx.Proxy):
-                raise AssertionError(
-                    f"materialize_symints: expected Proxy for non-constant "
-                    f"expr {target_expr!r}, got {result!r}"
-                )
+                # ``target_expr`` was non-constant per sympy but our interpreter
+                # still folded it to a Python int/bool. Unwrap to that constant.
+                if not isinstance(result, (int, bool)):
+                    raise AssertionError(
+                        f"materialize_symints: non-Proxy result {result!r} for "
+                        f"non-constant target {target_expr!r}"
+                    )
+                out.append(int(result))
+                continue
             out_node = result.node
-            meta_key = (
-                "example_value"
-                if any(
-                    expr_to_meta_key.get(sym) == "example_value"
-                    for sym in target_expr.free_symbols
-                )
-                else "val"
-            )
             out_node.meta[meta_key] = s
             out.append(out_node)
         return out
