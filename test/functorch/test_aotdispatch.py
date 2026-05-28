@@ -7434,6 +7434,20 @@ def forward(self, primals_1, tangents_1):
         result = wrapper([10, 20])
         self.assertIsNone(result)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_linalg_check_errors_not_eliminated(self):
+        # [[1, 2], [2, 1]] has eigenvalues ~3 and ~-1 (not PD)
+        A = torch.tensor([[1.0, 2.0], [2.0, 1.0]], device="cuda", dtype=torch.float32)
+
+        def fn(x):
+            return torch.linalg.cholesky(x)
+
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch.linalg.LinAlgError, r"linalg\.cholesky.*not positive-definite"
+        ):
+            compiled_fn(A)
+
     # --- FunctionalizedRngRuntimeWrapper codegen tests ---
 
     def _make_rng_wrapper_via_post_compile(

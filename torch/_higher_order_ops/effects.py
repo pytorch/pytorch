@@ -65,6 +65,7 @@ _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)
 _register_effectful_op(invoke_leaf_function, _EffectType.ORDERED)
+_register_effectful_op("aten::_linalg_check_errors", _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
