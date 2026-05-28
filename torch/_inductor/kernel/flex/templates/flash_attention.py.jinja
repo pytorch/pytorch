@@ -102,9 +102,8 @@
         mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)
         mask_mod_packed[0] = cutlass.Uint32(0)
         for mask_lane_idx in cutlass.range_constexpr({{ MASK_MOD_VEC_SIZE }}):
-            mask_bit = cutlass.Uint32(1) << mask_lane_idx
             mask_mod_packed[0] = (
-                mask_mod_packed[0] | mask_bit
+                mask_mod_packed[0] | (cutlass.Uint32(1) << mask_lane_idx)
                 if cutlass.Boolean(mask_mod_output[mask_lane_idx])
                 else mask_mod_packed[0]
             )
