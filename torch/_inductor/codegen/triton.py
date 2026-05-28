@@ -7114,11 +7114,11 @@ class FusedUserTritonKernel(TritonKernel):
         # For now, we enforce 1d reductions. Thus, suppress XBLOCK=1 for reductions.
         return self.features.is_reduction()
 
-    def _get_persistent_RBLOCK(self, rnumel) -> int | str:
+    def _get_persistent_RBLOCK(self, rnumel) -> int:
         if self.ir_node.output_tile:
             # For now, only allow 1d persistent reductions, hence len(grid) == 1.
             assert len(self.ir_node.output_tile) == 1
-            return self.ir_node.output_tile[0]
+            return int(self.ir_node.kwargs[self.ir_node.output_tile[0]])
         raise AssertionError(
             "Reduction epilogue fusion requires an annotated output_tile on the user kernel"
         )
@@ -7236,11 +7236,15 @@ class FusedUserTritonKernel(TritonKernel):
             self.codegen_new_params()
 
         def _replace_arg(call_node, arg_name, positional_index, new_arg):
+            replaced = False
             if len(call_node.args) > positional_index:
                 call_node.args[positional_index] = new_arg
+                replaced = True
             for keyword in call_node.keywords:
                 if keyword.arg == arg_name:
                     keyword.value = new_arg
+                    replaced = True
+            assert replaced, f"Failed to replace '{arg_name}' in tl.store call"
 
         assert self.new_store_cse_var is not None
         _replace_arg(

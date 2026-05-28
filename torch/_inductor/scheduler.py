@@ -3290,7 +3290,7 @@ class FusedUserTritonSchedulerNode(FusedSchedulerNode):
         # pyrefly: ignore[bad-assignment]
         self.outputs = self.writing_node.get_outputs()
 
-    @property
+    @functools.cached_property
     def writing_node(self) -> SchedulerNode:
         ep_names = OrderedSet(sn.get_name() for sn in self.epilogue.get_nodes())
         writers = [
