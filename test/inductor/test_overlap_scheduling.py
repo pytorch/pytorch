@@ -132,11 +132,15 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
                 return 7.0
             return None
 
-        estimations = gather_node_runtime_estimations(
-            gm,
-            custom_runtime_estimation=custom_runtime_estimation,
-            log_estimations=False,
-        )
+        with patch(
+            "torch._inductor.fx_passes.overlap_scheduling._schedulable_wait_node",
+            return_value=False,
+        ):
+            estimations = gather_node_runtime_estimations(
+                gm,
+                custom_runtime_estimation=custom_runtime_estimation,
+                log_estimations=False,
+            )
 
         self.assertEqual(estimations[relu], 7.0)
 
@@ -155,9 +159,15 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
         ) -> float | None:
             return None
 
-        with patch(
-            "torch._inductor.fx_passes.overlap_scheduling.estimate_roofline_runtime_ms"
-        ) as mock_estimate_roofline:
+        with (
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling._schedulable_wait_node",
+                return_value=False,
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.estimate_roofline_runtime_ms"
+            ) as mock_estimate_roofline,
+        ):
             estimations = gather_node_runtime_estimations(
                 gm,
                 custom_runtime_estimation=custom_runtime_estimation,
