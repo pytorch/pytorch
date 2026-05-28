@@ -233,7 +233,7 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
       auto tg_x = std::min(static_cast<NSUInteger>(sizes[0]), maxTg);
       auto tg_y = std::min(static_cast<NSUInteger>(sizes[1]), maxTg / tg_x);
       auto grid_z = ndim > 2 ? static_cast<NSUInteger>(sizes[2]) : 1;
-      auto tg_z = std::min(grid_z, std::max(maxTg / (tg_x * tg_y), (NSUInteger)1));
+      auto tg_z = std::clamp(grid_z, 1UL, maxTg / (tg_x * tg_y));
       [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], grid_z)
                 threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
     });
