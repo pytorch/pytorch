@@ -44,8 +44,11 @@ inline void pos_from_thread_index(
     constant long* sizes,
     uint ndim) {
   pos[0] = static_cast<T>(thread_pos.x);
-  pos_from_thread_index(
-      static_cast<T>(thread_pos.y), pos + 1, sizes + 1, ndim - 1);
+  auto idx = static_cast<T>(thread_pos.y);
+  for (uint i = 1; i < ndim; ++i) {
+    pos[i] = idx % T(sizes[i]);
+    idx /= T(sizes[i]);
+  }
 }
 
 inline long offset_from_thread_index(
