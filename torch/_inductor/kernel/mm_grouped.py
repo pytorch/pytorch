@@ -220,11 +220,15 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not (
-        torch.cuda.is_available()
+    device_type = mat_a.get_device().type
+    is_cuda_capable = (
+        device_type == "cuda"
         and torch.cuda.get_device_capability() >= (9, 0)
         and not torch.version.hip
-    ):
+    )
+    is_xpu_capable = device_type == "xpu"
+
+    if not (is_cuda_capable or is_xpu_capable):
         return False
     if not has_triton():
         return False
@@ -378,10 +382,11 @@ def _tuned_grouped_mm_common(
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
         )
+        is_xpu = mat_a.get_device().type == "xpu"
         use_tma_load = (
             triton_has_make_tensor_descriptor
             or triton_has_experimental_make_tensor_descriptor
-        )
+        ) and not is_xpu
         kwargs = {
             "SCALED": scaled,
             "A_IS_2D": a_is_2d,

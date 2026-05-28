@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
+    TEST_XPU,
     TestCase,
     TemporaryFileName,
     decorateIf,
@@ -719,13 +720,12 @@ class TestMatmulCuda(InductorTestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(not SM90OrLater and not TEST_XPU, "Grouped gemm with compile supported on SM90 or XPU")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        device = "cuda"
+    def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -1249,7 +1249,7 @@ class TestMixedDtypesLinearCuda(TestCase):
                 atol,
             )
 
-instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':

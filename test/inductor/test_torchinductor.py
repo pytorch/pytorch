@@ -18064,7 +18064,7 @@ if RUN_GPU:
                 torch._inductor.aot_compile(traced, inputs)
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
         def test_grouped_mm(self):
@@ -18074,7 +18074,7 @@ if RUN_GPU:
                     a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
                 )
 
-            device = "cuda"
+            device = GPU_TYPE
             dtype = torch.bfloat16
 
             m, n, k, n_groups = 16, 32, 16, 4
@@ -19257,7 +19257,11 @@ if RUN_GPU:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
-        @unittest.skipIf(TEST_WITH_ROCM or not IS_SM90, "no scaled_grouped_mm support")
+        @unittest.skipIf(
+            TEST_WITH_ROCM or (not IS_SM90 and GPU_TYPE != "xpu"),
+            "no scaled_grouped_mm support",
+        )
+        @config.patch(max_autotune=True)
         def test_respect_scaled_grouped_mm_layout_tag(self):
             # scaled_grouped_mm needs `mat2` to be column-major
             M, K, N = 128, 64, 32  # K and N must be divisible by 16
