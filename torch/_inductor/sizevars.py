@@ -186,7 +186,8 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    index = sympy.simplify(index)
+    if not index.has(sympy.Rel):
+        index = sympy.simplify(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
