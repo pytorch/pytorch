@@ -19,10 +19,14 @@ fi
 
 WIN_CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# install_python.bat installs into %CD%\Python; preserve that convention.
+# install_python.bat uses %CD%\Python as the install target, so cmd's
+# working directory must be WIN_CI_DIR. A bash `cd` inside a `(...)`
+# subshell does not reliably propagate to the cmd child's Windows CWD on
+# the MSYS/Git-Bash + Windows runner combo, so cd inside cmd explicitly.
+WIN_CI_DIR_W="$(cygpath -w "$WIN_CI_DIR")"
 attempts=3
 for ((i = 1; i <= attempts; i++)); do
-    if (cd "$WIN_CI_DIR" && cmd /c "internal\\install_python.bat"); then
+    if cmd /c "cd /d \"$WIN_CI_DIR_W\" && internal\\install_python.bat"; then
         break
     fi
     if [[ $i -eq $attempts ]]; then
@@ -33,6 +37,14 @@ for ((i = 1; i <= attempts; i++)); do
 done
 
 PYDIR="$WIN_CI_DIR/Python"
+# install_python.bat is known to exit silently if its embedded installer
+# never runs (the original symptom that produced the `python: command not
+# found` downstream). Verify the binary actually landed so the failure
+# surfaces here with a meaningful message.
+if [[ ! -x "$PYDIR/python.exe" ]]; then
+    echo "install_python.bat reported success but $PYDIR/python.exe is missing" >&2
+    exit 1
+fi
 # `cmake/data/bin` is materialized by the cmake pip install later, but adding
 # it to PATH preemptively is harmless and matches the legacy ordering in
 # setup_build.bat.
