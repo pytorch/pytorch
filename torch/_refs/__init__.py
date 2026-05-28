@@ -50,6 +50,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+from torch.testing._internal.common_dtype import highest_precision_float
 
 
 # Experimental module containing prototype Python references for existing
@@ -770,8 +771,7 @@ def floor(a):
     exact_dtype=True,
 )
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
-    return torch.sub(x, trunc_x)
+    return torch.sub(x, torch.trunc(x))
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -1333,20 +1333,22 @@ def pow(
     a: TensorLikeType | NumberType,
     b: TensorLikeType | NumberType,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     if not (isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)):
         raise AssertionError("at least one of a or b must be TensorLikeType")
 
     if isinstance(b, Number):
-        if b == 1.0:
+        if statically_known_true(b == 1.0):
             return a.clone()  # type: ignore[return-value,union-attr]
-        elif b == 2.0:
+        elif statically_known_true(b == 2.0):
             return a * a  # type: ignore[return-value]
-        elif b == 0.5:
+        elif statically_known_true(b == 0.5):
             return torch.sqrt(a)  # type: ignore[arg-type]
     elif isinstance(a, Number):
-        if a == 1.0:
+        if statically_known_true(a == 1.0):
             return torch.fill(b, True)
-        if a == 2.0 and (
+        if statically_known_true(a == 2.0) and (
             utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
         ):
             return torch.exp2(b)
@@ -3259,6 +3261,8 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
         raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
+    if a.ndim == 0:
+        return torch.clone(a)
     return prims.rev(a, dims)
 
 
@@ -3817,9 +3821,8 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    length = max(0, end - start)
-    y = y.narrow(dim=1, start=start, length=length)
-    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+    y = aten.slice.Tensor(y, 1, start, end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:
@@ -4409,7 +4412,7 @@ def squeeze(a: TensorLikeType, dim: DimsType | None = None) -> TensorLikeType:
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    # would it be better if we just not allow 1 for unbacked at runtiume?
+    # would it be better if we just not allow 1 for unbacked at runtime?
     dims = tuple(d for d in dims if guard_or_false(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
@@ -5265,10 +5268,11 @@ def new_full(
 
 @aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 def empty_out(
-    size: TensorLikeType,
+    size: ShapeType,
     out: TensorLikeType,
     memory_format: torch.memory_format | None = None,
 ) -> TensorLikeType:
+    _maybe_resize_out(out, size, memory_format)
     return out
 
 
@@ -5382,6 +5386,7 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64 or integer_args:
+        torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
@@ -5469,13 +5474,13 @@ def linspace(
             start.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        start = _maybe_convert_to_dtype(start, torch.float64)
+        start = _maybe_convert_to_dtype(start, highest_precision_float(device))
     if isinstance(end, TensorLikeType):
         torch._check(
             end.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        end = _maybe_convert_to_dtype(end, torch.float64)
+        end = _maybe_convert_to_dtype(end, highest_precision_float(device))
 
     if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(

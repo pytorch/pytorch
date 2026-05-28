@@ -1201,7 +1201,6 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
       case ScalarType::Float8_e5m2:   return f8_support;
       default:                        return false;
     }
-    return false;
   }
 };
 
@@ -1261,7 +1260,6 @@ struct Pack : public KernelCache <PackKey, pack_t> {
       case ScalarType::Float8_e5m2:   return fp8_pack;
       default:                        return false;
     }
-    return false;
   }
 };
 #endif

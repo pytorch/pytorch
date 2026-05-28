@@ -13,7 +13,7 @@ internally!
 In this post, we will go over the internal design of Dynamo from the
 ground up. We will discuss the functionality it provides, and how it is
 implemented. By the end of this post, you will have a better
-understanding of what went wrong when you `torch.compiled` a PyTorch
+understanding of what went wrong when you `torch.compile`d a PyTorch
 program and the compilation errored out, or succeeded but the speed-up
 was not what you expected.
 
@@ -22,7 +22,7 @@ was not what you expected.
 Before getting our hands dirty with all the implementation details,
 let’s start by discussing what it is that Dynamo does.
 
-Dynamo is a tracer. This means, given and function and inputs to it, it
+Dynamo is a tracer. This means, given a function and inputs to it, it
 executes the function and records a linear sequence of instructions
 (without control flow) into a graph. For example, consider the following
 program:
@@ -371,7 +371,7 @@ order to specialize a frame for one set of example inputs. Reusing the
 graph is only valid if these assumptions hold on the new inputs.
 
 For example, any constant input to a function, like a string, installs a
-guard stating that that input should be of type `str` and equal to the
+guard stating that input should be of type `str` and equal to the
 string we passed. Running
 
 ```python

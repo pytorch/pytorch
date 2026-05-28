@@ -1416,6 +1416,89 @@ struct HelperInterpCubic : public HelperInterpBase {
 
 };
 
+struct HelperInterpLanczos : public HelperInterpBase {
+
+  static constexpr int interp_size = 6;
+
+  // Taken from
+  // https://github.com/python-pillow/Pillow/blob/8004234d879254cc354935ad42fbb51b1700925e/src/libImaging/Resample.c#L64-L86
+  template<typename scalar_t>
+  static inline scalar_t sinc_filter(scalar_t x) {
+    if (x == 0.0) {
+      return 1.0;
+    }
+    x *= c10::pi<scalar_t>;
+    return std::sin(x) / x;
+  }
+
+  template<typename scalar_t>
+  static inline scalar_t aa_filter(scalar_t x) {
+    // Lanczos-3 filter: sinc(x) * sinc(x/3) for |x| < 3
+    x = std::abs(x);
+    if (x < 3.0) {
+      return sinc_filter(x) * sinc_filter(x / 3.0);
+    }
+    return 0.0;
+  }
+
+  static inline std::vector<Tensor> compute_index_ranges_weights(
+    at::ScalarType scalar_type,
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const std::optional<double>& opt_scale,
+    bool antialias
+  ) {
+
+    std::vector<Tensor> indices_weights;
+    AT_DISPATCH_FLOATING_TYPES(
+      scalar_type, "compute_index_ranges_weights", [&] {
+
+        scalar_t scale = area_pixel_compute_scale<scalar_t>(
+            input_size, output_size, align_corners, opt_scale);
+
+        auto interp_size = HelperInterpLanczos::interp_size;
+
+        indices_weights = std::get<0>(HelperInterpLanczos::_compute_index_ranges_weights<scalar_t>(
+            input_size,
+            output_size,
+            stride,
+            ndims,
+            reshape_dim,
+            scale,
+            interp_size,
+            &HelperInterpLanczos::aa_filter<scalar_t>,
+            /*antialias=*/antialias,
+            /*align_corners=*/align_corners));
+      }
+    );
+    return indices_weights;
+  }
+
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_index_ranges_int16_weights(
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const std::optional<double>& opt_scale,
+    bool antialias,
+    bool align_i32=false
+  ) {
+
+    auto interp_size = HelperInterpLanczos::interp_size;
+    auto fn = HelperInterpLanczos::aa_filter<double>;
+    return HelperInterpLanczos::_compute_index_ranges_int16_weights(
+        input_size, output_size, stride, ndims, reshape_dim,
+        align_corners, opt_scale, interp_size, fn, antialias, align_i32);
+  }
+
+};
+
 // Generic upsampling interpolation kernel for N-d case.
 // Input is assumed to be like NCHW, NCL, NCKHW - interpolated spatial dimension
 // are those from the end up to batch size N and number of channels C.
@@ -1485,15 +1568,19 @@ void upsample_non_separable_Nd_kernel_impl(
 
   if (interp_size > 1) {
     // Nearest also supports uint8 tensor, so need to handle it separately
+    // Dispatch name should be "upsample_non_separable" but we keep the old
+    // name for internal BC.
     AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iter.dtype(), "upsample_non_separable", [&] {
+        kBFloat16, kHalf, iter.dtype(), "upsample_generic_Nd", [&] {
         // MSVC can not catch constexpr int interp_size here
         constexpr int mode = F::interp_size;
         upsample_non_separable<scalar_t, out_ndims, mode>(iter);
     });
   } else {
+    // Dispatch name should be "upsample_non_separable" but we keep the old
+    // name for internal BC.
     AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf,
-        iter.dtype(), "upsample_non_separable", [&] {
+        iter.dtype(), "upsample_generic_Nd", [&] {
         constexpr int mode = F::interp_size;
         upsample_non_separable<scalar_t, out_ndims, mode>(iter);
     });
@@ -1530,8 +1617,8 @@ void upsample_separable_1d(
   unsigned int weights_precision = 0;
 
   if (input_scalar_type == at::kByte) {
-    // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
-    TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
+    // This is a special branch to provide uint8 dtype support for bilinear, bicubic and lanczos modes only
+    TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4 || F::interp_size == 6);
     int unused = 0;
     std::tie(indices_weights, unused, weights_precision) =
       F::compute_index_ranges_int16_weights(
@@ -1561,8 +1648,10 @@ void upsample_separable_1d(
 
   auto iter = config.build();
 
+  // Dispatch name should be "upsample_separable_1d" but we keep the old
+  // name for internal BC.
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::Byte, iter.dtype(), "upsample_separable_1d", [&] {
+      at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           if constexpr (is_horizontal) {
             // Strides are : X 0 | 8 8 8 0 8  (Channels first)
@@ -1931,6 +2020,35 @@ void upsample_bicubic2d_aa_kernel_impl(
     /*antialias=*/true);
 }
 
+void upsample_lanczos2d_aa_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+
+  if (input.dtype() == at::kByte) {
+    #ifdef CPU_CAPABILITY_AVX2
+      if (input.size(1) <= 4) {
+        return upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpLanczos>(
+          input, output, align_corners, {scales_h, scales_w},
+          /*antialias=*/true);
+      }
+    #elif defined(__aarch64__)
+      if (input.size(1) == 3
+          && input.is_contiguous(at::MemoryFormat::ChannelsLast)
+          && output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        return upsample_neon_bilinear_bicubic_uint8<scale_t, HelperInterpLanczos>(
+          input, output, align_corners, {scales_h, scales_w},
+          /*antialias=*/true);
+      }
+    #endif  // CPU_CAPABILITY_AVX2
+  }
+  return upsample_separable_Nd_kernel_impl<2, scale_t, HelperInterpLanczos>(
+    output, input, align_corners, {scales_h, scales_w},
+    /*antialias=*/true);
+}
+
 template <
     typename scalar_t,
     typename scale_type,
@@ -2071,6 +2189,19 @@ void upsample_bicubic2d_aa_backward_kernel_impl(
       });
 }
 
+void upsample_lanczos2d_aa_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(
+      grad_output.scalar_type(), "upsample_lanczos2d_aa_backward_cpu", [&] {
+        upsample_separable_Nd_backward_aa<scalar_t, scale_t, HelperInterpLanczos>(
+            grad_input, grad_output, align_corners, {scales_h, scales_w});
+      });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl)
@@ -2089,4 +2220,7 @@ REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl)
 REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl)
 REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl)
+
+REGISTER_DISPATCH(_upsample_lanczos2d_aa_kernel, &upsample_lanczos2d_aa_kernel_impl)
+REGISTER_DISPATCH(_upsample_lanczos2d_aa_backward_kernel, &upsample_lanczos2d_aa_backward_kernel_impl)
 } // namespace at::native

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
+#ifdef FBCODE_CAFFE2
 #include <torch/nativert/ModelRunner.h>
 
 namespace py = pybind11;
@@ -81,3 +82,22 @@ void initModelRunnerPybind(py::module& m) {
 }
 
 } // namespace torch::nativert
+
+#else // !FBCODE_CAFFE2
+
+namespace py = pybind11;
+
+namespace torch::nativert {
+
+class StubModelRunner {};
+
+// PyModelRunner is referenced from
+// https://github.com/pytorch/benchmark/blob/b8d35ba51a3149b7212888b4010ddee97f19947f/userbenchmark/dynamo/dynamobench/common.py#L45
+void initModelRunnerPybind(py::module& m) {
+  py::class_<StubModelRunner, std::shared_ptr<StubModelRunner>>(
+      m, "PyModelRunner");
+}
+
+} // namespace torch::nativert
+
+#endif // FBCODE_CAFFE2

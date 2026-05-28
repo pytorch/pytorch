@@ -37,6 +37,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    OperatorName,
     Return,
     SchemaKind,
     SelfArgument,
@@ -75,6 +76,16 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "_flash_attention_forward_no_dropout_inplace",
     ]
 )
+
+# Eager cumulative out variants compute in the out dtype when dtype is omitted.
+# Functionalization normally lowers mutable ops through their functional variants,
+# so these need to thread the out dtype explicitly to preserve eager semantics.
+CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
+    OperatorName.parse("cumsum.out"),
+    OperatorName.parse("cumprod.out"),
+    OperatorName.parse("cumsum.dimname_out"),
+    OperatorName.parse("cumprod.dimname_out"),
+}
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -607,6 +618,40 @@ def wrap_propagate_mutations_and_return(
     {returns_str}"""
 
 
+def maybe_replace_cumulative_out_dtype_exprs(
+    f: NativeFunction,
+    functional_sig: DispatcherSignature,
+    functional_exprs: list[str],
+) -> list[str]:
+    if (
+        f.func.kind() != SchemaKind.out
+        or f.func.name not in CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE
+    ):
+        return functional_exprs
+
+    if len(f.func.arguments.out) != 1:
+        raise AssertionError(
+            f"Expected a single out argument for cumulative out op: {f.func.name}"
+        )
+
+    dtype_arg_idx = next(
+        (i for i, arg in enumerate(functional_sig.arguments()) if arg.name == "dtype"),
+        None,
+    )
+    if dtype_arg_idx is None:
+        raise AssertionError(
+            f"Expected dtype argument for cumulative out op: {f.func.name}"
+        )
+
+    adjusted_exprs = functional_exprs.copy()
+    dtype_expr = adjusted_exprs[dtype_arg_idx]
+    adjusted_exprs[dtype_arg_idx] = (
+        f"{dtype_expr}.has_value() ? {dtype_expr} : "
+        f"std::optional<at::ScalarType>({f.func.arguments.out[0].name}_.scalar_type())"
+    )
+    return adjusted_exprs
+
+
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -678,6 +723,9 @@ def emit_inplace_functionalization_body(
         e.expr
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
+    functional_exprs = maybe_replace_cumulative_out_dtype_exprs(
+        f, functional_sig, functional_exprs
+    )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:

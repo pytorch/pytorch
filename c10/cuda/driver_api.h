@@ -20,6 +20,23 @@
     }                                                                      \
   } while (0)
 
+// clang-format off
+#define C10_CUDA_DRIVER_CHECK_MSG(EXPR, ...)                                \
+  do {                                                                      \
+    CUresult __err = EXPR;                                                  \
+    if (__err != CUDA_SUCCESS) {                                            \
+      const char* err_str;                                                  \
+      CUresult get_error_str_err [[maybe_unused]] =                         \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);  \
+      if (get_error_str_err != CUDA_SUCCESS) {                              \
+        TORCH_CHECK(false, "CUDA driver error: unknown error", __VA_ARGS__);\
+      } else {                                                              \
+        TORCH_CHECK(false, "CUDA driver error: ", err_str, __VA_ARGS__);   \
+      }                                                                     \
+    }                                                                       \
+  } while (0)
+// clang-format on
+
 #define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                             \
   do {                                                                     \
     CUresult __err = EXPR;                                                 \

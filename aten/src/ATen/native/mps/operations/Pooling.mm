@@ -69,7 +69,10 @@ static void pool2d_template(const Tensor& input,
   const bool is_backward_pass = grad_output.defined();
   const bool has_indices = indices.defined();
   const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-  const auto suggested_memory_format = input.suggest_memory_format();
+  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
+  // strides but is not NHWC-packed, so the raw-buffer NHWC path would misread
+  // it. See https://github.com/pytorch/pytorch/issues/180984
+  const auto suggested_memory_format = input.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   // for max_pool2d_with_indices() we cannot pass ChannelsLast (i.e., NHWC) to 'desc.dataLayout' in MPSGraph.
   // Because the returned indices will be selected based on NHWC memory layout which will
   // be incompatible with the PyTorch's global NCHW layout.
@@ -334,6 +337,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
   for (const auto dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(stride_expanded[dim] > 0, op_name, ": stride should not be zero");
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,

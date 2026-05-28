@@ -26,7 +26,7 @@ enum class AllReduceAlgo : uint8_t {
   TWO_SHOT = 2,
 };
 
-// NOTE: this class will be be removed soon in favor of SymmetricMemory
+// NOTE: this class will be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(

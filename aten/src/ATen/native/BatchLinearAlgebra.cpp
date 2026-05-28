@@ -1843,7 +1843,21 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
 
   cholesky_stub(L.device().type(), L, info, upper);
 
-  if (!cpu) {
+  // On non-CPU devices (MAGMA) the pre-copy doesn't zero the unused triangle,
+  // so we must clean up after. On macOS, Accelerate's LAPACK writes into the
+  // unreferenced triangle for matrices larger than its internal block size
+  // (e.g. n > 64), violating the LAPACK spec which says "not referenced"
+  // elements are "never read, written to, or otherwise accessed"
+  // (see https://www.netlib.org/lapack/lug/node121.html).
+  // We work around this by applying the same cleanup on macOS.
+  // TODO(https://github.com/pytorch/pytorch/issues/179152): always
+  // clean up the unused triangle on all platforms.
+#if defined(__APPLE__)
+  constexpr bool needs_triangle_cleanup = true;
+#else
+  const bool needs_triangle_cleanup = !cpu;
+#endif
+  if (needs_triangle_cleanup) {
     if (upper) {
       L.triu_();
     } else {

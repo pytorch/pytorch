@@ -395,6 +395,14 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
       m, "_xpu_XPUAllocator");
 
+  // Register concrete XPUPluggableAllocator type with inheritance
+  py::class_<
+      torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator,
+      c10::xpu::XPUCachingAllocator::XPUAllocator,
+      std::shared_ptr<
+          torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
+      m, "_XPUPluggableAllocator");
+
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());
   });

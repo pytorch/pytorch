@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, TypeGuard
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -28,7 +28,7 @@ class ROCmCPPScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
-    def is_rocm_cpp_template(node: BaseSchedulerNode) -> bool:
+    def is_rocm_cpp_template(node: BaseSchedulerNode) -> TypeGuard[SchedulerNode]:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, ROCmTemplateBuffer
         )
@@ -82,7 +82,6 @@ class ROCmCPPScheduling(BaseScheduling):
         assert self.is_rocm_cpp_template(template_node), (
             "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
         )
-        template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)

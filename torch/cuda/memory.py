@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
@@ -98,15 +99,6 @@ def _host_allocator():
     return torch._C._cuda_cudaHostAllocator()
 
 
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
-
-
 def caching_allocator_alloc(size, device: "Device" = None, stream=None):
     r"""Perform a memory allocation using the CUDA memory allocator.
 
@@ -137,7 +129,7 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
         raise TypeError(
             "Invalid type for stream argument, must be "
             "`torch.cuda.Stream` or `int` representing a pointer "
-            "to a existing stream"
+            "to an existing stream"
         )
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
@@ -164,6 +156,18 @@ def caching_allocator_enable(value: bool = True) -> None:
     r"""Enable or disable the CUDA memory allocator. On by default."""
     if is_initialized():
         torch._C._cuda_cudaCachingAllocator_enable(value)
+
+
+@contextlib.contextmanager
+def caching_allocator_disabled():
+    r"""Context manager that temporarily disables the CUDA caching allocator."""
+    # pyrefly: ignore [missing-attribute]
+    prev = torch._C._cuda_cudaCachingAllocator_is_enabled()
+    caching_allocator_enable(False)
+    try:
+        yield
+    finally:
+        caching_allocator_enable(prev)
 
 
 def set_per_process_memory_fraction(fraction, device: "Device" = None) -> None:
@@ -277,6 +281,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
       cuMemMap and cudaMalloc.
     - ``"num_device_free"``: number of CUDA free calls. This includes both cuMemUnmap
       and cudaFree.
+    - ``"num_oom_rejections"``: number of allocations preemptively rejected by the
+        throw_on_cudamalloc_oom + per_process_memory_fraction policy.
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
@@ -297,6 +303,12 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
       memory requested by client code, compare this with allocated_bytes to check if
       allocation rounding adds too much overhead.
+    - ``"reserved_bytes_by_private_pools"``: nested dictionary keyed by
+      ``torch.cuda.MemPool.id`` tuples. Each value has the same
+      ``{all,large_pool,small_pool}.{current,peak,allocated,freed}`` structure
+      as ``reserved_bytes``, but scoped to a single private pool. In
+      :func:`~torch.cuda.memory_stats`, tuple keys are flattened by joining
+      their stringified elements with ``"_"``, so ``(0, 1)`` becomes ``"0_1"``.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -313,12 +325,20 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     """
     result = []
 
+    def _format_key(key):
+        if isinstance(key, str):
+            return key
+        if isinstance(key, tuple):
+            return "_".join(str(part) for part in key)
+        return str(key)
+
     def _recurse_add_to_result(prefix, obj):
         if isinstance(obj, dict):
             if len(prefix) > 0:
                 prefix += "."
             for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
+                key = _format_key(k)
+                _recurse_add_to_result(prefix + key, v)
         else:
             result.append((prefix, obj))
 

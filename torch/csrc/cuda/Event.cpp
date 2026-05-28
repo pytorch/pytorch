@@ -47,12 +47,6 @@ static PyObject* THCPEvent_pynew(
   }
 
   THCPEvent* self = (THCPEvent*)ptr.get();
-  self->weakreflist = nullptr;
-  new (&self->event) c10::Event(
-      c10::DeviceType::CUDA,
-      (enable_timing ? c10::EventFlag::BACKEND_DEFAULT
-                     : c10::EventFlag::PYTORCH_DEFAULT));
-
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault) |
@@ -111,7 +105,7 @@ static void THCPEvent_dealloc(THCPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.~CUDAEvent();
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPEvent_dealloc_common(reinterpret_cast<THPEvent*>(self));
 }
 
 static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* unused) {
@@ -251,7 +245,7 @@ PyTypeObject THCPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPEventType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THCPEvent_methods, /* tp_methods */

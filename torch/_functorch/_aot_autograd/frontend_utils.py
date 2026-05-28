@@ -34,7 +34,48 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
-) -> FakifiedFlatArgs:
+) -> tuple[FakifiedFlatArgs, list[int]]:
+    """Convert real tensor inputs into fake tensors for AOT autograd tracing.
+
+    Called at compile time (not runtime) to produce the fake inputs that AOT
+    autograd traces through. Each real tensor is converted to a FakeTensor
+    via ``fake_mode.from_tensor``, preserving shape, dtype, device, and
+    symbolic shape information from the ShapeEnv. Non-tensor inputs (ints,
+    SymInts, ScriptObjects) are converted or passed through as appropriate.
+
+    Tensor subclass inputs (DTensor, etc.) are fakified recursively by
+    walking their ``__tensor_flatten__`` attrs. AsyncCollectiveTensors are
+    resolved via ``trigger_wait()`` before fakification so they don't appear
+    in the traced metadata (see below).
+
+    Called from ``aot_function``, ``aot_module_simplified``, and
+    ``aot_export_module`` — anywhere AOT autograd needs fake inputs before
+    graph capture.
+
+    Returns:
+        A tuple of (fakified_args, act_input_indices) where act_input_indices
+        records which positions held AsyncCollectiveTensors. These indices are
+        stored on ViewAndMutationMeta so that the runtime wrapper can emit
+        direct trigger_wait() calls on those positions.
+    """
+    # Resolve AsyncCollectiveTensors before tracing. ACTs are transient
+    # eager-mode wrappers for async collective overlap; if they leak into the
+    # traced graph as input types, AOT autograd records them in
+    # SubclassCreationMeta for output tangent metadata. At runtime, autograd
+    # produces plain tensor tangents, causing a type mismatch. Unwrapping
+    # here prevents ACT from appearing in the traced metadata.
+    try:
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+    except ImportError:
+        AsyncCollectiveTensor = None
+
+    act_input_indices: list[int] = []
+    if AsyncCollectiveTensor is not None:
+        for i, a in enumerate(flat_args):
+            if isinstance(a, AsyncCollectiveTensor):
+                act_input_indices.append(i)
+                flat_args[i] = a.trigger_wait()
+
     with fake_mode:
 
         def convert(idx: int, x: Any) -> Any:
@@ -120,7 +161,9 @@ def process_inputs(
             )
             return result
 
-        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
+        return FakifiedFlatArgs(
+            [convert(idx, x) for idx, x in enumerate(flat_args)]
+        ), act_input_indices
 
 
 def construct_fake_mode(

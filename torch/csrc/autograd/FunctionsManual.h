@@ -736,6 +736,26 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const std::optional<Tensor>& save_mean,
     const std::optional<Tensor>& save_invstd,
     std::array<bool, 3> output_mask);
+std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
+    const Tensor& ggI,
+    const Tensor& ggGrid,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& grid,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners,
+    std::array<bool, 3> output_mask);
+std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
+    const Tensor& ggI,
+    const Tensor& ggGrid,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& grid,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners,
+    std::array<bool, 3> output_mask);
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
@@ -819,6 +839,20 @@ Tensor amaxamin_jvp(
     const Tensor& dx,
     const Tensor& result,
     IntArrayRef dim,
+    bool keepdim);
+Tensor aminmax_backward(
+    const at::Tensor& self,
+    std::optional<int64_t> dim,
+    bool keepdim,
+    const at::Tensor& grad_min,
+    const at::Tensor& grad_max,
+    const at::Tensor& min,
+    const at::Tensor& max);
+Tensor aminmax_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Tensor& result,
+    std::optional<int64_t> dim,
     bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,

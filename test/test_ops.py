@@ -31,14 +31,18 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skip,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipOps,
     skipXPU,
+    xfail,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types_and,
+    highest_precision_float,
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -48,11 +52,8 @@ from torch.testing._internal.common_methods_invocations import (
     python_ref_db,
     ReductionOpInfo,
     ReductionPythonRefInfo,
-    skip,
-    skipOps,
     SpectralFuncInfo,
     UnaryUfuncInfo,
-    xfail,
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
@@ -60,12 +61,14 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_LINUX,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
     set_default_dtype,
+    skipIfRocm,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
@@ -467,6 +470,7 @@ class TestCommon(TestCase):
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
     # XPU test will be enabled step by step. Skip the tests temporarily.
+    # MPS does not support double precision, so single precision has to be used instead.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -479,17 +483,18 @@ class TestCommon(TestCase):
             and dtype == torch.float64
             and ("cuda" in device or "xpu" in device)
             or "cpu" in device
-        ):  # noqa: E121
+        ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double
-        with set_default_dtype(torch.double):
+        with set_default_dtype(highest_precision_float(device)):
             for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
 
     # Tests that the cpu and gpu results are consistent
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/101625")
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
     @skipCUDAIfNotRocm
@@ -515,7 +520,8 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            atol, rtol = 0, 0
+            atol = None if torch.xpu.is_available() else 0
+            rtol = None if torch.xpu.is_available() else 0
             if dtype.is_floating_point or dtype.is_complex:
                 atol, rtol = 1e-3, 1e-3
             self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
@@ -601,11 +607,10 @@ class TestCommon(TestCase):
             if skip_bfloat and (
                 (
                     isinstance(sample.input, torch.Tensor)
-                    and sample.input.dtype in {torch.bfloat16, torch.bcomplex32}
+                    and sample.input.dtype == torch.bfloat16
                 )
                 or any(
-                    isinstance(arg, torch.Tensor)
-                    and arg.dtype in {torch.bfloat16, torch.bcomplex32}
+                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
                     for arg in sample.args
                 )
             ):
@@ -636,9 +641,13 @@ class TestCommon(TestCase):
                 # precise dtypes -- they simply must be close
                 precise_dtype = dtype
             if prims.utils.is_float_dtype(dtype):
-                precise_dtype = torch.double
+                precise_dtype = highest_precision_float(device)
             if prims.utils.is_complex_dtype(dtype):
-                precise_dtype = torch.cdouble
+                precise_dtype = (
+                    torch.complex32
+                    if torch.device(device).type == "mps"
+                    else torch.cdouble
+                )
 
             # Checks if the results are close
             try:
@@ -731,12 +740,6 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
@@ -833,6 +836,7 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165294")
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1535,6 +1539,7 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/108743")
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
@@ -1542,20 +1547,12 @@ class TestCommon(TestCase):
             unittest.skip("Does not support complex32")
 
         for sample in op.sample_inputs(device, dtype):
-            # MPS doesn't support float64
-            if torch.float64 in (
-                *sample.args,
-                *sample.kwargs.values(),
-            ) and not op.supports_dtype(torch.float64, device):
-                continue
-
             actual = op(sample.input, *sample.args, **sample.kwargs)
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
                 lambda x: x.to(torch.complex64)
-                if isinstance(x, torch.Tensor)
-                and x.dtype in (torch.complex32, torch.bcomplex32)
+                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
                 else x
             )
             expected = op(
@@ -1839,11 +1836,7 @@ class TestCommon(TestCase):
     # of other concrete devices (e.g. CPU and CUDA).
     @onlyCPU
     @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
-    @skipOps(
-        "TestCommon",
-        "test_meta_consistency_out_dtype_mismatch",
-        meta_consistency_out_dtype_mismatch_xfails,
-    )
+    @skipOps(meta_consistency_out_dtype_mismatch_xfails)
     @skipIfTorchDynamo("meta device runs only on eager")
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
@@ -1975,6 +1968,10 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
+        "https://github.com/pytorch/pytorch/issues/181685",
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2503,7 +2500,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
-        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2980,21 +2976,22 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159151"
+    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
-    )
+    @skipOps(fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/159150",
+    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor",
-        "test_fake_crossref_backward_amp",
-        fake_backward_xfails | fake_autocast_backward_xfails,
-    )
+    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 

@@ -21,7 +21,7 @@ def _get_device_index(
     """
 
     if device is None and optional:
-        # If device is None (frequent), then we can can short-circuit the logic
+        # If device is None (frequent), then we can short-circuit the logic
         return torch._C._mtia_getDevice()
     if isinstance(device, int):
         return device

@@ -1821,26 +1821,30 @@ class TestDistributions(DistributionsTestCase):
 
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
+        devices = ["cpu"]
+        if TEST_CUDA:
+            devices.append("cuda")
 
-        for count_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=count_dtype)
-            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
+        for device in devices:
+            for count_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for count.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
-        for prob_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=torch.float)
-            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+            for prob_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for prob.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
@@ -4805,7 +4809,7 @@ class TestRsample(DistributionsTestCase):
                         "expected_grad: %.5g" % expected_grad,  # noqa: UP031
                         "actual_grad: %.5g" % actual_grad,  # noqa: UP031
                         "error = %.2g"  # noqa: UP031
-                        % torch.abs(expected_grad - actual_grad).max(),  # noqa: UP031
+                        % torch.abs(expected_grad - actual_grad).max(),
                     ]
                 ),
             )
@@ -4889,7 +4893,7 @@ class TestDistributionShapes(DistributionsTestCase):
                     expected_shape = (
                         dist.batch_shape if dist.batch_shape else torch.Size()
                     )
-                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"  # noqa: B950
+                    message = f"{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}"
                     self.assertEqual(actual_shape, expected_shape, msg=message)
                 except NotImplementedError:
                     continue

@@ -15,6 +15,7 @@ import signal
 import sys
 import tempfile
 import time
+import unittest
 from collections.abc import Callable
 from itertools import product
 from unittest import mock
@@ -35,6 +36,7 @@ from torch.distributed.elastic.multiprocessing.api import (
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -42,6 +44,7 @@ from torch.testing._internal.common_utils import (
     skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -447,6 +450,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
+        @unittest.skipIf(
+            TEST_WITH_ROCM,
+            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        )
         def test_function_raise(self):
             """
             run 2x copies of echo2, raise an exception on the first
@@ -716,6 +723,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                                 [f"hello stderr from {i}"], results.stderrs[i]
                             )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/163230",
+        )
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",

@@ -16,6 +16,7 @@
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
@@ -134,8 +135,11 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = new StableIValue(
-          from_ivalue(inner_type, ivalue, extension_build_version));
+      const StableIValue value =
+          from_ivalue(inner_type, ivalue, extension_build_version);
+      StableIValue* sivp = nullptr;
+      TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
+      *sivp = value;
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
@@ -244,10 +248,10 @@ static c10::IValue to_ivalue(
           torch::stable::detail::_from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp = torch::stable::detail::_to<StableIValue*>(
+      StableIValue* sivp = torch::stable::detail::_to<StableIValue*>(
           stable_ivalue, extension_build_version);
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
-      delete sivp;
+      TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
       return ival;
     }
     case c10::TypeKind::ListType: {
@@ -699,4 +703,88 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     }
     *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
   });
+}
+
+// Tag getter shims — see torch/csrc/stable/c/shim.h
+#define TORCH_TAG_IMPL(name, enum_val) \
+  int32_t torch_tag_##name() {         \
+    return (int32_t)at::Tag::enum_val; \
+  }
+
+TORCH_TAG_IMPL(core, core)
+TORCH_TAG_IMPL(cudagraph_unsafe, cudagraph_unsafe)
+TORCH_TAG_IMPL(data_dependent_output, data_dependent_output)
+TORCH_TAG_IMPL(dynamic_output_shape, dynamic_output_shape)
+TORCH_TAG_IMPL(flexible_layout, flexible_layout)
+TORCH_TAG_IMPL(generated, generated)
+TORCH_TAG_IMPL(inplace_view, inplace_view)
+TORCH_TAG_IMPL(maybe_aliasing_or_mutating, maybe_aliasing_or_mutating)
+TORCH_TAG_IMPL(needs_contiguous_strides, needs_contiguous_strides)
+TORCH_TAG_IMPL(needs_exact_strides, needs_exact_strides)
+TORCH_TAG_IMPL(needs_fixed_stride_order, needs_fixed_stride_order)
+TORCH_TAG_IMPL(nondeterministic_bitwise, nondeterministic_bitwise)
+TORCH_TAG_IMPL(nondeterministic_seeded, nondeterministic_seeded)
+TORCH_TAG_IMPL(out_variant, out_variant)
+TORCH_TAG_IMPL(pointwise, pointwise)
+TORCH_TAG_IMPL(pt2_compliant_tag, pt2_compliant_tag)
+TORCH_TAG_IMPL(reduction, reduction)
+TORCH_TAG_IMPL(view_copy, view_copy)
+#undef TORCH_TAG_IMPL
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
+    TorchLibraryHandle self,
+    const char* schema,
+    const int32_t* tags,
+    int32_t num_tags) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<at::Tag> tag_vec;
+    tag_vec.reserve(num_tags);
+    for (int32_t i = 0; i < num_tags; i++) {
+      tag_vec.push_back(static_cast<at::Tag>(tags[i]));
+    }
+    reinterpret_cast<torch::Library*>(self)->def(
+        torch::schema(schema), tag_vec, torch::_RegisterOrVerify::REGISTER);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->set_python_module(
+        pymodule, context);
+  });
+}
+
+AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value) {
+  // Check if ret_value can be dereferenced, if not it is a failure.
+  if (ret_value == nullptr) {
+    return AOTI_TORCH_FAILURE;
+  }
+  // Ensure the ret_value is set to a nullptr in case the allocation fails.
+  *ret_value = nullptr;
+
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_value = new StableIValue(0); });
+}
+
+AOTITorchError torch_delete_stable_ivalue(StableIValue* value) {
+  if (value == nullptr) {
+    // Freeing a nullptr is invalid.
+    return AOTI_TORCH_FAILURE;
+  } else {
+    delete value;
+    return AOTI_TORCH_SUCCESS;
+  }
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what() {
+  return torch::csrc::shim::details ::get_torch_exception_what().c_str();
+}
+
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
+  return torch::csrc::shim::details ::
+      get_torch_exception_what_without_backtrace()
+          .c_str();
 }

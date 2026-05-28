@@ -7,6 +7,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
@@ -44,6 +45,7 @@
 #include <ATen/ops/_wrapped_linear_prepack.h>
 #include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
@@ -74,6 +76,18 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   }
 }
 } // namespace
+
+namespace torch::aot_inductor {
+const char* get_last_error() {
+  const auto& error_msg =
+      torch::csrc::shim::details::get_torch_exception_what();
+  return error_msg.empty() ? nullptr : error_msg.c_str();
+}
+
+void set_last_error(const char* msg) {
+  torch::csrc::shim::details::set_torch_exception_what(msg ? msg : "");
+}
+} // namespace torch::aot_inductor
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
@@ -252,10 +266,11 @@ AOTITorchError aoti_torch_strlist_to_ivalue(
     C10IValueHandle* ivalue) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::string> vec;
-    for (int64_t i = 0; i < len; i++) {
-      vec.push_back(std::string(val[i]));
+    vec.reserve(len);
+    for (const auto i : c10::irange(len)) {
+      vec.emplace_back(val[i]);
     }
-    c10::IValue* t = new c10::IValue(vec);
+    c10::IValue* t = new c10::IValue(std::move(vec));
     *ivalue = reinterpret_cast<C10IValueHandle>(t);
   });
 }
@@ -1123,7 +1138,7 @@ AOTITorchError aoti_record_function_start(
     }
 
     std::vector<c10::IValue> recordInputs(n_inputs);
-    for (size_t i = 0; i < n_inputs; i++) {
+    for (const auto i : c10::irange(n_inputs)) {
       recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
@@ -1190,7 +1205,7 @@ AOTITorchError aoti_torch_index_put_out(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
-    for (size_t i = 0; i < num_indices; i++) {
+    for (const auto i : c10::irange(num_indices)) {
       indices_.emplace_back(
           pointer_to_optional(tensor_handle_to_tensor_pointer(indices[i])));
     }
@@ -1307,8 +1322,9 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
       // (similar for max) Skip printing min/max value for complex type tensors
       // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
-      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+      auto [min_t, max_t] = at::aminmax(t->to(float_dtype));
+      std::cout << "Min value: " << min_t.item() << '\n';
+      std::cout << "Max value: " << max_t.item() << '\n';
     } else {
       // Set the numel threshold to print as 256 to avoid printing out too much
       // More info for aten native cuda kernel for "min_all_cuda" implementation

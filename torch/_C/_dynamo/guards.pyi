@@ -308,9 +308,11 @@ class GuardManager:
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
-    def add_dynamic_indices_guard(
+    def add_dimension_marking_guard(
         self,
-        value: set[Any],
+        expected_attrs: dict[str, set[int]],
+        absent_attrs: list[str],
+        dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -330,6 +332,13 @@ class GuardManager:
     def add_type_match_guard(
         self,
         value: int,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def add_fake_script_type_match_guard(
+        self,
+        fake_script_object_type: type,
+        type_id: int,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -490,6 +499,7 @@ def assert_alignment(
     alignment: int,
     op_name: str | None = None,
 ) -> None: ...
+def copy_if_misaligned(item: torch.Tensor) -> torch.Tensor: ...
 def check_obj_id(obj: object, expected: int) -> bool: ...
 def check_type_id(obj: object, expected: int) -> bool: ...
 def dict_version(d: dict[Any, Any]) -> int: ...

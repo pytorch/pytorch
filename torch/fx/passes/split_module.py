@@ -1,24 +1,24 @@
-# mypy: allow-untyped-defs
 import inspect
 import logging
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from collections.abc import Callable
 from typing import Any
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx._lazy_graph_module import _LazyGraphModule, _make_graph_module
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 
 
-__all__ = ["Partition", "split_module"]
+__all__ = ["Partition", "split_module", "split_module_simple"]
 log = _LOGGER = logging.getLogger(__name__)
 
 
 @compatibility(is_backward_compatible=True)
 class Partition:
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name: str = name
         self.submod_name = f"submod_{name}"
         self.node_names: list[str] = []
@@ -62,7 +62,8 @@ def split_module(
     keep_original_input_name: bool = True,
     *,
     partition_affix: str | None = None,
-):
+    tuple_return: bool = False,
+) -> GraphModule:
     """
     Creates subgraphs out of main graph
 
@@ -86,6 +87,9 @@ def split_module(
             have the same input names as the original graph.
         partition_affix: Optional[str]: If specified, the submodules' names will contain
             the affix, e.g. "submod_<affix>_<idx>".
+        tuple_return: bool: If True, submodule outputs are always wrapped in a tuple,
+            even when there is only a single output value.  This makes all subgraphs
+            conform to the convention expected by ``torch._inductor.compile_fx``.
 
     Returns:
         GraphModule: the module after split.
@@ -172,7 +176,7 @@ def split_module(
         node: Node,
         base_mod_env: dict[str, Node],
         base_mod_attrs: dict[str, torch.fx.graph_module.GraphModule],
-    ):
+    ) -> tuple[dict[str, Node], dict[str, torch.fx.graph_module.GraphModule]]:
         if node.op == "placeholder":
             default_value = (
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
@@ -209,7 +213,7 @@ def split_module(
     orig_nodes: dict[str, Node] = {}
     symbol_to_node: dict[sympy.Symbol, Node] = {}
 
-    def record_cross_partition_use(def_node: Node, use_node: Node | None):
+    def record_cross_partition_use(def_node: Node, use_node: Node | None) -> None:
         from torch.fx.experimental.symbolic_shapes import free_symbols
 
         defined = getattr(def_node, "_fx_partition", None)
@@ -258,7 +262,7 @@ def split_module(
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
-    def instantiate_node_partition_mapping(node):
+    def instantiate_node_partition_mapping(node: Node) -> None:
         partition_idx = split_callback(node)
         partition_name = str(partition_idx)
         if partition_affix is not None:
@@ -406,7 +410,7 @@ def split_module(
             )
             torch.fx.graph.map_arg(
                 node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
-            )  # noqa: B950
+            )
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
@@ -457,12 +461,30 @@ def split_module(
 
         counter = 0
 
+        # Process inputs that become placeholders before inputs that become
+        # get_attr nodes, so that all placeholders precede get_attr in the
+        # submodule graph.
+        placeholder_inputs: list[str] = []
+        get_attr_inputs: list[str] = []
         for inp in partition.inputs:
+            orig_node = orig_nodes[inp]
+            if (
+                orig_node.op == "get_attr"
+                and isinstance(orig_node.target, str)
+                and isinstance(
+                    _get_attr_from_qualname(m, orig_node.target), torch.nn.Module
+                )
+            ):
+                get_attr_inputs.append(inp)
+            else:
+                placeholder_inputs.append(inp)
+
+        for inp in placeholder_inputs + get_attr_inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
 
-            def add_placeholder():
+            def add_placeholder() -> Node:
                 if keep_original_input_name:
                     name = inp
                 else:
@@ -603,15 +625,10 @@ def split_module(
             partition.environment[orig_nodes[name]] for name in partition.outputs
         )
 
-        # skip output node generation if there are no output values
-        num_output_vals = len(output_vals)
-        if num_output_vals == 1:
+        if len(output_vals) == 1 and not tuple_return:
             partition.graph.output(output_vals[0])
-        elif num_output_vals > 1:
-            partition.graph.output(output_vals)
         else:
-            # Invariant - Graph should always have an output node.
-            partition.graph.output(())
+            partition.graph.output(output_vals)
 
         if keep_original_order:
             # first get the attr nodes required by this partition
@@ -638,9 +655,9 @@ def split_module(
                 )
                 already_constructed_attr_nodes.add(node)
 
-        base_mod_attrs[partition.submod_name] = torch.fx.graph_module.GraphModule(
+        base_mod_attrs[partition.submod_name] = _make_graph_module(
             partition.targets, partition.graph
-        )  # noqa: B950
+        )
 
         # Emit call in base graph to this submodule
         output_val = base_mod_graph.call_module(
@@ -649,8 +666,8 @@ def split_module(
         )
 
         num_outputs = len(partition.outputs)
-        if num_outputs > 1:
-            # Unpack multiple return values from submodule
+        if num_outputs > 1 or (num_outputs == 1 and tuple_return):
+            # Unpack return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
@@ -672,11 +689,344 @@ def split_module(
         if node.op == "output":
             base_mod_graph.output(
                 torch.fx.graph.map_arg(node.args[0], lambda n: base_mod_env[n.name])
-            )  # noqa: B950
+            )
 
-    ret = torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
+    ret = _make_graph_module(base_mod_attrs, base_mod_graph)
     log.debug(
         "%s",
         lazy_format_graph_code("post split_module", ret, colored=True),
     )
     return ret
+
+
+def _decompose_size_nodes(m: GraphModule) -> None:
+    """Decompose x.size() into per-dim sym_size.int calls.
+
+    torch.Size objects cannot cross split boundaries because aot_autograd
+    cannot handle them as submodule outputs. This replaces each size() call
+    with individual sym_size.int(x, dim) nodes:
+      - Dynamic dims (SymInt) -> new sym_size.int node
+      - Static dims (plain int) -> inlined as literal constant
+    """
+    # Collect upfront since we mutate the graph during iteration.
+    size_nodes = list(m.graph.find_nodes(op="call_method", target="size"))
+
+    for node in size_nodes:
+        # Skip size(dim) calls -- only decompose full size() with no dim argument.
+        if len(node.args) > 1 or node.kwargs:
+            continue
+        tensor_node = node.args[0]
+        ev = tensor_node.meta.get("example_value")
+        if ev is None:
+            continue
+
+        dims: list[Node | int] = []
+        with m.graph.inserting_after(tensor_node):
+            for i, dim_val in enumerate(ev.shape):
+                if isinstance(dim_val, torch.SymInt):
+                    dn = m.graph.call_function(
+                        torch.ops.aten.sym_size.int, args=(tensor_node, i)
+                    )
+                    dn.meta["example_value"] = dim_val
+                    dims.append(dn)
+                elif isinstance(dim_val, int):
+                    dims.append(dim_val)
+
+        for user in list(node.users):
+            new_args = []
+            for arg in user.args:
+                if arg is node:
+                    new_args.extend(dims)
+                else:
+                    new_args.append(arg)
+            user.args = tuple(new_args)
+        m.graph.erase_node(node)
+
+
+def _make_lite_graph_module(
+    graph: torch.fx.graph.Graph,
+    modules: dict[str, GraphModule] | None = None,
+) -> GraphModule:
+    """Construct a lightweight GraphModule that bypasses expensive init overhead.
+
+    Creates a ``_LazyGraphModule`` instance without going through
+    ``GraphModule.__new__`` (MRO traversal + per-instance class creation),
+    ``nn.Module.__init__`` (17+ container allocations), or
+    ``GraphModule.__init__`` (node iteration + ``recompile()`` codegen).
+    Per-instance classes are still created for lazy forward dispatch.
+
+    Only suitable for parameterless graph containers (no parameters, buffers,
+    or ``get_attr``/``call_module`` targets to copy from a root module).
+
+    The dict entries below mirror nn.Module.__init__ (torch/nn/modules/module.py).
+    Update in lockstep if nn.Module adds or removes instance attributes.
+    """
+    cls = type("GraphModuleImpl", (_LazyGraphModule,), {})
+    inst = object.__new__(cls)
+    d = inst.__dict__
+    d["training"] = False
+    d["_parameters"] = dict[str, Any]()
+    d["_buffers"] = dict[str, Any]()
+    d["_modules"] = modules if modules is not None else dict[str, Any]()
+    d["_non_persistent_buffers_set"] = set[str]()
+    d["_backward_pre_hooks"] = OrderedDict()
+    d["_backward_hooks"] = OrderedDict()
+    d["_is_full_backward_hook"] = None
+    d["_forward_hooks"] = OrderedDict()
+    d["_forward_hooks_with_kwargs"] = OrderedDict()
+    d["_forward_hooks_always_called"] = OrderedDict()
+    d["_forward_pre_hooks"] = OrderedDict()
+    d["_forward_pre_hooks_with_kwargs"] = OrderedDict()
+    d["_state_dict_hooks"] = OrderedDict()
+    d["_state_dict_pre_hooks"] = OrderedDict()
+    d["_load_state_dict_pre_hooks"] = OrderedDict()
+    d["_load_state_dict_post_hooks"] = OrderedDict()
+    d["_graph"] = graph
+    d["meta"] = dict[str, Any]()
+    graph.owning_module = inst
+    cls.forward = _LazyGraphModule._lazy_forward  # type: ignore[attr-defined]
+    return inst
+
+
+def _detect_dependencies(
+    m: GraphModule,
+    node_to_partition: dict[Node, int],
+) -> tuple[
+    dict[int, torch.fx.graph.Graph],
+    dict[int, dict[str, Node]],
+    dict[int, dict[str, Node]],
+    list[int],
+]:
+    """Assign nodes to partitions and detect cross-partition dependencies.
+
+    Returns:
+        partition_graphs: Maps partition ID to its Graph.
+        partition_inputs: Maps partition ID to ordered dict of input names -> source nodes.
+        partition_outputs: Maps partition ID to ordered dict of output names -> source nodes.
+        seen_partitions: Partition IDs in order of first appearance.
+    """
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import free_symbols
+
+    partition_graphs: dict[int, torch.fx.graph.Graph] = {}
+    partition_inputs: dict[int, dict[str, Node]] = defaultdict(dict)
+    partition_outputs: dict[int, dict[str, Node]] = defaultdict(dict)
+    symbol_to_node: dict[sympy.Symbol, Node] = {}
+    seen_partitions: list[int] = []
+    seen_partitions_set: set[int] = set()
+
+    def _record_output_dep(
+        n: Node,
+        _outputs: dict[int, dict[str, Node]] = partition_outputs,
+    ) -> Node:
+        if hasattr(n, "_fx_partition"):
+            _outputs[n._fx_partition].setdefault(n.name, n)
+        return n
+
+    for node in m.graph.nodes:
+        # Track SymInt symbol bindings (prefer earlier bindings).
+        val = node.meta.get("example_value")
+        if val is not None and hasattr(val, "node") and hasattr(val.node, "expr"):
+            s0 = val.node.expr
+            if isinstance(s0, sympy.Symbol) and s0 not in symbol_to_node:
+                symbol_to_node[s0] = node
+
+        if node.op == "placeholder":
+            continue
+
+        if node.op == "output":
+            torch.fx.graph.map_arg(node.args[0], _record_output_dep)
+            continue
+
+        pid = node_to_partition[node]
+        node._fx_partition = pid
+
+        if pid not in seen_partitions_set:
+            seen_partitions.append(pid)
+            seen_partitions_set.add(pid)
+            partition_graphs[pid] = torch.fx.graph.Graph()
+
+        def _record_cross_dep(
+            def_node: Node,
+            use_pid: int = pid,
+            _inputs: dict[int, dict[str, Node]] = partition_inputs,
+            _outputs: dict[int, dict[str, Node]] = partition_outputs,
+            _sym: dict[sympy.Symbol, Node] = symbol_to_node,
+        ) -> Node:
+            def_pid = getattr(def_node, "_fx_partition", None)
+            if def_pid != use_pid:
+                if def_pid is not None:
+                    _outputs[def_pid].setdefault(def_node.name, def_node)
+                _inputs[use_pid].setdefault(def_node.name, def_node)
+
+                def_val = def_node.meta.get("example_value")
+                if def_val is not None and _sym:
+                    for s in sorted(free_symbols(def_val), key=str):
+                        s_node = _sym.get(s)
+                        if s_node is None:
+                            continue
+                        _inputs[use_pid].setdefault(s_node.name, s_node)
+                        if s_node.op != "placeholder":
+                            s_pid = getattr(s_node, "_fx_partition", None)
+                            if s_pid is not None:
+                                _outputs[s_pid].setdefault(s_node.name, s_node)
+            return def_node
+
+        torch.fx.graph.map_arg(node.args, _record_cross_dep)
+        torch.fx.graph.map_arg(node.kwargs, _record_cross_dep)
+
+    return partition_graphs, partition_inputs, partition_outputs, seen_partitions
+
+
+def _clone_nodes_into_partitions(
+    m: GraphModule,
+    partition_graphs: dict[int, torch.fx.graph.Graph],
+    partition_inputs: dict[int, dict[str, Node]],
+    partition_outputs: dict[int, dict[str, Node]],
+    seen_partitions: list[int],
+) -> dict[int, dict[Node, Node]]:
+    """Create placeholders, clone nodes, and set outputs for each partition.
+
+    Returns:
+        partition_env: Maps partition ID to {original_node: cloned_node} dict.
+    """
+    partition_env: dict[int, dict[Node, Node]] = defaultdict(dict)
+
+    # Create placeholders for cross-partition inputs
+    for pid in seen_partitions:
+        g = partition_graphs[pid]
+        env = partition_env[pid]
+        for inp_name, orig_node in partition_inputs[pid].items():
+            placeholder = g.placeholder(inp_name, type_expr=orig_node.type)
+            placeholder.meta = orig_node.meta.copy()
+            env[orig_node] = placeholder
+
+    # Clone operational nodes
+    for node in m.graph.nodes:
+        if not hasattr(node, "_fx_partition"):
+            continue
+        pid = node._fx_partition
+        g = partition_graphs[pid]
+        env = partition_env[pid]
+
+        gathered_args = torch.fx.graph.map_arg(node.args, env.__getitem__)
+        gathered_kwargs = torch.fx.graph.map_arg(node.kwargs, env.__getitem__)
+
+        new_node = g.create_node(
+            op=node.op,
+            target=node.target,
+            args=gathered_args,
+            kwargs=gathered_kwargs,
+            type_expr=node.type,
+        )
+        new_node.meta = node.meta.copy()
+        env[node] = new_node
+
+    # Set output nodes
+    for pid in seen_partitions:
+        g = partition_graphs[pid]
+        env = partition_env[pid]
+        out_nodes = partition_outputs[pid]
+        output_vals = tuple(env[orig_node] for orig_node in out_nodes.values())
+        if len(output_vals) == 1:
+            g.output(output_vals[0])
+        elif len(output_vals) > 1:
+            g.output(output_vals)
+        else:
+            g.output(())
+
+    return partition_env
+
+
+def _build_stitching_graph(
+    m: GraphModule,
+    partition_graphs: dict[int, torch.fx.graph.Graph],
+    partition_inputs: dict[int, dict[str, Node]],
+    partition_outputs: dict[int, dict[str, Node]],
+    seen_partitions: list[int],
+    partition_affix: str | None = None,
+) -> GraphModule:
+    """Build the outer stitching graph that calls each partition submodule."""
+    base_graph = torch.fx.graph.Graph()
+    base_env: dict[str, Node] = {}
+    base_modules: dict[str, GraphModule] = {}
+
+    for node in m.graph.nodes:
+        if node.op == "placeholder":
+            p = base_graph.placeholder(
+                node.target,
+                type_expr=node.type,
+            )
+            p.meta = node.meta.copy()
+            base_env[node.name] = p
+
+    for pid in seen_partitions:
+        if partition_affix is not None:
+            submod_name = f"submod_{partition_affix}_{pid}"
+        else:
+            submod_name = f"submod_{pid}"
+        base_modules[submod_name] = _make_lite_graph_module(partition_graphs[pid])
+
+        input_nodes = tuple(base_env[name] for name in partition_inputs[pid])
+        output_val = base_graph.call_module(submod_name, input_nodes)
+
+        out_names = list(partition_outputs[pid].keys())
+        if len(out_names) > 1:
+            output_val_proxy = torch.fx.proxy.Proxy(output_val)
+            for i, name in enumerate(out_names):
+                base_env[name] = output_val_proxy[i].node  # type: ignore[index]
+        elif len(out_names) == 1:
+            base_env[out_names[0]] = output_val
+
+    for node in m.graph.nodes:
+        if node.op == "output":
+            base_graph.output(
+                torch.fx.graph.map_arg(node.args[0], lambda n: base_env[n.name])
+            )
+
+    return _make_lite_graph_module(base_graph, modules=base_modules)
+
+
+@compatibility(is_backward_compatible=False)
+def split_module_simple(
+    m: GraphModule,
+    node_to_partition: dict[Node, int],
+    *,
+    partition_affix: str | None = None,
+) -> GraphModule:
+    """Lightweight graph splitter for simple partition patterns.
+
+    A faster alternative to :func:`split_module` for inference-only graphs
+    from ``torch.compile``/Dynamo. Because these graphs have no autocast/grad
+    regions, no ``get_attr`` nodes, and no non-linear partition dependencies,
+    we can skip the topological sort, autocast tracking, and ``get_attr``
+    special-casing that ``split_module`` performs. More importantly, we
+    construct partition submodules as lightweight ``_LazyGraphModule``
+    instances that bypass ``nn.Module.__init__`` and defer ``recompile()``
+    codegen — this eliminates the dominant cost when creating 70-100+
+    partition submodules for large models.
+
+    Args:
+        m: Graph module to split.
+        node_to_partition: Maps each operational node to a partition ID.
+            Placeholders, get_attr, and output nodes should NOT be included.
+        partition_affix: If set, submodule names become
+            ``submod_{affix}_{idx}`` instead of ``submod_{idx}``.
+    """
+    partition_graphs, partition_inputs, partition_outputs, seen_partitions = (
+        _detect_dependencies(m, node_to_partition)
+    )
+
+    _clone_nodes_into_partitions(
+        m, partition_graphs, partition_inputs, partition_outputs, seen_partitions
+    )
+
+    return _build_stitching_graph(
+        m,
+        partition_graphs,
+        partition_inputs,
+        partition_outputs,
+        seen_partitions,
+        partition_affix,
+    )

@@ -1,21 +1,6 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
-# Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
-# sometimes makes XCode C compiler gets detected as "Clang", even when the C++
-# one is detected as "AppleClang".
-cmake_policy(SET CMP0010 NEW)
-cmake_policy(SET CMP0025 NEW)
 cmake_policy(SET CMP0126 OLD)
-
-# Enables CMake to set LTO on compilers other than Intel.
-cmake_policy(SET CMP0069 NEW)
-# Enable the policy for CMake subprojects. protobuf currently causes issues
-# set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
-
-# Suppress warning flags in default MSVC configuration.  It's not mandatory that
-# we do this (and we don't if cmake is old), but it's nice when it's possible,
-# and it's possible on our Windows configs.
-cmake_policy(SET CMP0092 NEW)
 # Don't remove the FindCUDA module
 cmake_policy(SET CMP0146 OLD)
 
@@ -26,6 +11,23 @@ endif()
 
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
+
+# When built via scikit-build-core, Python_EXECUTABLE is already set.
+# For standalone cmake invocations, find it via find_package.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# Forward environment variables to CMake variables, replicating the behavior
+# previously handled by setup.py / tools/setup_helpers/cmake.py.
+# When built via setup.py, these are already set as -D flags; the module
+# skips variables that are already defined, so it is safe to include
+# unconditionally.
+include(cmake/EnvVarForwarding.cmake)
+
+# Pre-build steps: submodule init, NCCL checkout.
+# When built via setup.py, these are handled by build_deps() in setup.py;
+# the module checks for existing state, so it is safe to include
+# unconditionally.
+include(cmake/PreBuildSteps.cmake)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
@@ -61,6 +63,18 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   message(
     FATAL_ERROR
       "GCC-11.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+  )
+endif()
+
+# --- [ Check that minimal clang version is 16+
+# Older clangs (e.g. clang-14) fail to compile C++20 ranges adaptors such as
+# `std::views::filter` over associative containers when paired with libstdc++,
+# see https://github.com/pytorch/pytorch/issues/184630. AppleClang uses its
+# own versioning scheme and is excluded from this check.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+  message(
+    FATAL_ERROR
+      "Clang-16 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
 
@@ -116,8 +130,6 @@ if(APPLE)
                        CLANG_VERSION_STRING ${clang_full_version_string})
   message(STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING})
 
-  # RPATH stuff
-  set(CMAKE_MACOSX_RPATH ON)
   if(NOT IOS)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
@@ -232,6 +244,7 @@ option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
                        ON "BUILD_TEST" OFF)
+option(USE_RELATIVE_PATHS "Use relative paths in generated files for ccache friendliness" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
@@ -246,15 +259,17 @@ else()
   set(_USE_CUDA_EXPLICITLY_SET FALSE)
 endif()
 
-option(USE_CUDA "Use CUDA" ON)
+# CUDA is incompatible with TSAN
+cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 option(USE_XPU "Use XPU" ON)
+option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
-option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
+cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -279,7 +294,6 @@ cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -291,7 +305,7 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
-                       OFF "USE_CUDA" OFF)
+                       ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
@@ -590,7 +604,7 @@ if(MSVC)
   # https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -685,8 +699,11 @@ endif(MSVC)
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 # Set linker max-page-size to 64KiB on AArch64 Linux
+# And stub group size to 32MiB to workaround R_AARCH64_CALL26
+# relocation errors
 if(LINUX AND CPU_AARCH64)
   add_link_options_if_supported("-z,max-page-size=0x10000")
+  add_link_options_if_supported("--stub-group-size=0x2000000")
 endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -731,13 +748,6 @@ if(ANDROID
     # initialization.
     string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
   endif()
-endif()
-
-if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
-    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
-      set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
-    endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
@@ -870,7 +880,7 @@ if(NOT IOS
   # CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed
   # the cmake compiler check for cross-compiling
   set(protoc_build_command
-      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1"
+      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1 -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
   )
   # We write to a temp scriptfile because CMake COMMAND dislikes double quotes
   # in commands
@@ -961,10 +971,6 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-
-# Set USE_MSLK to ON for CUDA build on SM100.
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
@@ -1181,6 +1187,12 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   endif()
+  # aarch64 C++ stack unwinding uses frame-pointer chain walking, so frame
+  # pointers must be present in all build types.  The cost is negligible on
+  # aarch64 (31 GPRs vs x86-64's 16, so dedicating x29 rarely spills).
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    append_cxx_flag_if_supported("-fno-omit-frame-pointer" CMAKE_CXX_FLAGS)
+  endif()
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
@@ -1229,10 +1241,11 @@ if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_OBJCXX_FLAGS " --coverage -fprofile-abs-path")
   elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
-    string(APPEND CMAKE_CXX_FLAGS
-           " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
       ERROR
@@ -1334,11 +1347,6 @@ if((NOT USE_GLOG)
                   "generate files that are not well tested.")
 endif()
 
-if(USE_CUDA OR USE_ROCM)
-  # TODO: check if we should include other cuda dependency libraries to the
-  # interface as well.
-
-endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies will
 # also become interface libraries, and as a result if there are any dependency
@@ -1453,6 +1461,20 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# File mirroring: copy source files into torchgen/packaged/, vendored
+# inductor templates, and symlink-replacement copies.  Previously handled
+# by setup.py; now consolidated here for both scikit-build-core and
+# setuptools builds.
+include(cmake/FileMirroring.cmake)
+
+# Package data: install non-Python data files (type stubs, templates,
+# headers, etc.) into the torch package.  Previously declared via
+# setup.py package_data; now consolidated here for both scikit-build-core
+# and setuptools builds.
+include(cmake/PackageData.cmake)
+
+include(cmake/PostBuildSteps.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()

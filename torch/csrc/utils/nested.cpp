@@ -61,7 +61,7 @@ at::Tensor nested_tensor_ctor(
       PythonArgs elem_r(r);
       std::array<PyObject*, 6> elem_args = {
           elem.get(), // data
-          r.args[1], // dtpye
+          r.args[1], // dtype
           nullptr, // device (cpu)
           nullptr, // no pinned memory
           r.args[4], // requires grad
