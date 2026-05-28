@@ -118,6 +118,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const std::string& msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
   throw ::c10::Error({func, file, line}, msg);
 }
 
@@ -126,6 +127,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const char* msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
   throw ::c10::Error({func, file, line}, msg);
 }
 
