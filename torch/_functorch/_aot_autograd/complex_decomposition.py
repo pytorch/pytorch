@@ -15,7 +15,6 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
-import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.complex_tensor import ComplexTensor, WrapComplexMode
@@ -60,6 +59,79 @@ def _has_complex(gm: fx.GraphModule, flat_args: list[Any]) -> bool:
     return False
 
 
+def _aliased_input_indices(op: torch._ops.OpOverload) -> list[int]:
+    schema = op._schema
+    ret_aliases = set()
+    idxs = []
+
+    for ret in schema.returns:
+        ret_alias = ret.alias_info
+        if ret_alias is None:
+            continue
+        ret_aliases.update(ret_alias.before_set)
+
+    if len(ret_aliases) == 0:
+        return idxs
+
+    for i, arg in enumerate(schema.arguments):
+        if arg.alias_info is None:
+            continue
+        if not arg.alias_info.before_set.isdisjoint(ret_aliases):
+            idxs.append(i)
+
+    return idxs
+
+
+def _collect_storage_aliases(node: fx.Node) -> set[fx.Node]:
+    seen: set[fx.Node] = set()
+    stack: list[fx.Node] = [node]
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if not isinstance(n.target, torch._ops.OpOverload):
+            continue
+        idxs = _aliased_input_indices(n.target)
+        for idx in idxs:
+            src = n.args[idx]
+            if isinstance(src, fx.Node):
+                stack.append(src)
+    return seen
+
+
+def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
+    # view_as_real decomposes to torch.stack (a copy) under complex_wrapper,
+    # so the result no longer aliases its input. If any storage that aliases
+    # a view_as_real input is also mutated (aten.copy_.default epilogue, the
+    # only mutating op post-functionalization), the compiled graph would
+    # silently diverge from eager. Fail loudly instead.
+    from torch._subclasses.complex_tensor._ops.common import INCORRECT_ALIASING_OPS
+
+    # Output nodes always have an iterable `.args[0]`
+    mutated: set[fx.Node] = {*gm.graph.output_node().args[0]}  # type: ignore[not-iterable]
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            mutated.add(n)
+        if (
+            isinstance(n.target, torch._ops.OpOverload)
+            and n.target.overloadpacket == torch.ops.aten.copy_
+        ):
+            mutated.add(n.arg[0])
+
+    poisoned: set[fx.Node] = set()
+    for n in gm.graph.nodes:
+        if isinstance(n.target, torch._ops.OpOverload) and (
+            n.target.overloadpacket in INCORRECT_ALIASING_OPS
+            or n.target in INCORRECT_ALIASING_OPS
+        ):
+            poisoned.update(_collect_storage_aliases(n))
+    if not mutated.isdisjoint(poisoned):
+        raise RuntimeError(
+            "torch.view_as_real or torch.view_as_complex was called on a complex tensor, and its storage is also mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
+        )
+
+
 def decompose_complex_in_graph(
     gm: fx.GraphModule,
     flat_args: list[Any],
@@ -67,6 +139,7 @@ def decompose_complex_in_graph(
 ) -> fx.GraphModule:
     if not _has_complex(gm, flat_args):
         return gm
+    _assert_no_incorrect_aliasing_mutation(gm)
 
     def wrapper(*args: Any) -> Any:
         wrapped = tuple(_maybe_wrap(a) for a in args)
@@ -74,5 +147,4 @@ def decompose_complex_in_graph(
             result = fx.Interpreter(gm).run(*wrapped)
         return pytree.tree_map(_maybe_unwrap, result)
 
-    with fx_traceback.preserve_node_meta():
-        return make_fx(wrapper, decomposition_table=decompositions)(*flat_args)
+    return make_fx(wrapper, decomposition_table=decompositions)(*flat_args)

@@ -20,16 +20,6 @@ class ComplexTensor(Tensor):
     _re: Tensor
     _im: Tensor
 
-    # NOTE: aliasing
-    # ComplexTensor intentionally does not preserve aliasing between the
-    # wrapper and its real/imag parts (e.g. view_as_real produces a copy via
-    # torch.stack, not a true view). This is safe because the pass runs
-    # post-functionalization -- there are no mutations in the graph -- and
-    # Inductor will re-establish any required aliasing in the final output.
-    # For the same reason we do not track conj/neg bit flags on the wrapper:
-    # conj and neg are decomposed at the op level into arithmetic on the
-    # real/imag parts.
-
     def __new__(
         cls,
         real: Tensor,
@@ -44,6 +34,32 @@ class ComplexTensor(Tensor):
         real = real.contiguous()
         imag = imag.contiguous()
 
+        # NOTE conj/neg (hameerabbasi):
+        # All of the following follows from two rules (`!=` represents XOR):
+        # 1. `x.real.is_neg() := x.is_neg()`
+        # 2. `x.imag.is_neg() := (x.is_conj() != x.is_neg())`
+        #
+        # Or, in words:
+        # 1. The negative flag affects both the real and imaginary parts
+        # 2. The conjugate flag affects the only the imaginary part
+        neg_flag = real.is_neg()
+        conj_flag = neg_flag != imag.is_neg()
+
+        # TODO (hameerabbasi):
+        # What should we do with dtype?
+        # We could convert to the complex type (float32 -> complex64), but we
+        # can't use that model for say `bfloat16` which does not have a
+        # corresponding complex dtype.
+        # If we want to support this complex rep using any float type (see
+        # https://github.com/pytorch/pytorch/issues/95100)
+        # We either need to:
+        # 1) add the complex types for say `complexbf32`, knowing they can't really be used anywhere
+        #    else.
+        # 2) We use the real float dtype here, and it is up to the user to know
+        #    that dtype=float<size> here really means complex<2xSize> with dtype
+        #    matching that of re/im parts alone
+        # I'm going with 1 for now, so that I can make gradcheck and some complex
+        # ops work properly, but might want to discuss this in the RFP.
         dtype = REAL_TO_COMPLEX.get(real.dtype)
         if dtype is None:
             raise TypeError(
@@ -81,6 +97,9 @@ class ComplexTensor(Tensor):
         )
         res._re = real.detach()
         res._im = imag.detach()
+        # See "NOTE conj/neg (hameerabbasi)"
+        torch._C._set_conj(res, conj_flag)
+        torch._C._set_neg(res, neg_flag)
 
         return res
 
@@ -89,10 +108,12 @@ class ComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
+        # See "NOTE conj/neg (hameerabbasi)"
         return self._re
 
     @property
     def im(self) -> Tensor:
+        # See "NOTE conj/neg (hameerabbasi)"
         return self._im
 
     @property

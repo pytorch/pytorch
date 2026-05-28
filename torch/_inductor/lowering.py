@@ -2560,7 +2560,9 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 def _warn_complex_not_supported():
     import torch._functorch.config as config
 
-    if not config.enable_complex_wrapper:
+    if config.enable_complex_wrapper:
+        _warn_experimental_complex_wrapper()
+    else:
         _warn_bare_complex_not_supported()
 
 
@@ -2568,6 +2570,13 @@ def _warn_complex_not_supported():
 def _warn_bare_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
+
+
+@functools.cache
+def _warn_experimental_complex_wrapper():
+    warnings.warn(
+        "torch._functorch.config.enable_complex_wrapper is experimental. Performance may be worse than eager."
     )
 
 
