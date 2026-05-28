@@ -101,7 +101,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    RangeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
