@@ -52,11 +52,9 @@ install_ubuntu() {
       # Use the rocm-sdk CLI helper to discover install paths
       ROCM_HOME="$(rocm-sdk path --root)"
       ROCM_BIN="$(rocm-sdk path --bin)"
-      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
 
       echo "ROCM_HOME=${ROCM_HOME}"
       echo "ROCM_BIN=${ROCM_BIN}"
-      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
 
       # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
       ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
@@ -66,25 +64,19 @@ install_ubuntu() {
 
       # Write environment file (sourced by CI scripts and interactive shells)
       cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths (dynamically discovered from rocm-sdk)
+# ROCm paths discovered from rocm-sdk. Keep this list short: PyTorch's
+# LoadHIP.cmake derives CMake package paths, MAGMA_HOME, ROCM_SOURCE_DIR, and
+# the TheRock device library path from ROCM_PATH when those env vars are unset.
 export ROCM_PATH="${ROCM_HOME}"
 export ROCM_HOME="${ROCM_HOME}"
-export ROCM_SOURCE_DIR="${ROCM_HOME}"
-export ROCM_BIN="${ROCM_BIN}"
-export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
 export PATH="${ROCM_BIN}:\${PATH}"
-export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_HOME}/lib:\${LD_LIBRARY_PATH:-}"
-# Device library paths
-export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
-export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
 # theRock system dependencies (libdrm, liblzma, etc.)
 export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
 export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
 export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LD_LIBRARY_PATH}"
 export LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LIBRARY_PATH:-}"
-export MAGMA_HOME="${ROCM_HOME}/magma"
 # Disable MSLK for theRock nightly (not yet supported)
 export USE_MSLK=0
 ROCM_ENV
