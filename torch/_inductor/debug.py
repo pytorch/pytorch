@@ -23,6 +23,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._functorch import config as functorch_config
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
@@ -58,11 +59,20 @@ ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+_RAW_DOT_GRAPH_FORMATS = OrderedSet(["dot", "raw"])
 
 
 @functools.cache
 def has_dot() -> bool:
     return shutil.which("dot") is not None
+
+
+def _get_graph_output_format(fname: str | None) -> str:
+    if fname is not None:
+        _, ext = os.path.splitext(fname)
+        if ext:
+            return ext.lstrip(".")
+    return functorch_config.torch_compile_graph_format
 
 
 def draw_buffers(
@@ -71,9 +81,10 @@ def draw_buffers(
     fname: str | None = None,
 ) -> None:
     """
-    Draw a graph in fname.svg.
+    Draw a graph in fname.
     """
-    if not has_dot():
+    graph_format = _get_graph_output_format(fname)
+    if graph_format not in _RAW_DOT_GRAPH_FORMATS and not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
         return
 
@@ -578,7 +589,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # don't try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors
@@ -622,7 +633,10 @@ class DebugFormatter:
         return buf.getvalue()
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
-        draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+        draw_buffers(
+            nodes,
+            fname=self.filename(f"graph_diagram.{config.trace.graph_diagram_format}"),
+        )
 
     def draw_orig_fx_graph(
         self,
@@ -632,7 +646,9 @@ class DebugFormatter:
         annotate_orig_fx_with_snodes(gm, nodes)
         draw_graph(
             gm,
-            fname=self.filename("orig_fx_graph_diagram.svg"),
+            fname=self.filename(
+                f"orig_fx_graph_diagram.{config.trace.orig_fx_graph_diagram_format}"
+            ),
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
@@ -873,6 +889,14 @@ def record_and_log_graph_execution_order() -> Iterator[None]:
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
     device: torch.device
+
+
+@dataclasses.dataclass
+class SymExprMetadataHolder:
+    pytype: str
+    expr: Any
+    hint: int | float | bool | None
+    symbol_hints: dict[str, int | float | bool]
 
 
 save_args_cnt = itertools.count()
@@ -1206,15 +1230,62 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     if not os.path.exists(folder):
         os.mkdir(folder)
 
+    def python_value(value: Any) -> int | float | bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        # SymPy numbers expose is_integer as a tri-state property.
+        if getattr(value, "is_integer", None) is False:
+            return float(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return float(value)
+
+    def handle_sym_expr(x: Any, pytype: str) -> SymExprMetadataHolder:
+        node = x.node
+        shape_env = node.shape_env
+        symbol_hints: dict[str, int | float | bool] = {}
+        if shape_env is not None:
+            for symbol in node.expr.free_symbols:
+                hint = shape_env.backed_var_to_val.get(symbol)
+                if hint is not None:
+                    python_hint = python_value(hint)
+                    if python_hint is not None:
+                        symbol_hints[str(symbol)] = python_hint
+        return SymExprMetadataHolder(
+            pytype,
+            node.expr,
+            python_value(node.hint),
+            symbol_hints,
+        )
+
     def handle_tensor(x: Any) -> Any:
         """
-        Pickle FakeTensor will result in error:
+        Pickle FakeTensor/SymInt will result in errors like:
         AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
 
-        Convert all Tensor to metadata. This may also makes pickle faster.
+        Convert tensors and symbolic values to metadata. This may also make
+        pickle faster.
         """
+        if isinstance(x, GraphModule):
+            gm = copy.deepcopy(x)
+            for node in gm.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return gm
         if isinstance(x, torch.Tensor):
-            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
+            return TensorMetadataHolder(
+                tree_map(handle_tensor, _extract_tensor_metadata(x)), x.device
+            )
+        elif isinstance(x, torch.SymInt):
+            return handle_sym_expr(x, "int")
+        elif isinstance(x, torch.SymFloat):
+            return handle_sym_expr(x, "float")
+        elif isinstance(x, torch.SymBool):
+            return handle_sym_expr(x, "bool")
         else:
             return x
 
@@ -1242,23 +1313,76 @@ load_args_and_run_compile_fx_inner({path!r})
 
 
 def load_args_and_run_compile_fx_inner(path: str) -> Any:
+    from torch._dynamo.source import ConstantSource
     from torch._inductor.compile_fx import compile_fx_inner
+    from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
     with open(path, "rb") as f:
         args, kwargs = pickle.load(f)
 
+    shape_env = ShapeEnv()
+    symbol_cache: dict[str, Any] = {}
+
+    def restore_sym_expr(x: SymExprMetadataHolder) -> Any:
+        expr = x.expr
+        if isinstance(expr, str):
+            import sympy
+
+            import torch.utils._sympy.functions as sympy_functions
+
+            expr = sympy.sympify(expr, locals=sympy_functions.__dict__)
+        replacements = {}
+        for symbol in expr.free_symbols:
+            symbol_name = str(symbol)
+            if symbol_name not in symbol_cache:
+                hint = x.symbol_hints.get(symbol_name)
+                if hint is None:
+                    if x.hint is not None and expr == symbol:
+                        hint = x.hint
+                    else:
+                        symbol_cache[symbol_name] = shape_env.create_unbacked_symint(
+                            ConstantSource(symbol_name)
+                        ).node.expr
+                        replacements[symbol] = symbol_cache[symbol_name]
+                        continue
+                symbol_cache[symbol_name] = shape_env.create_symbol(
+                    hint,
+                    ConstantSource(symbol_name),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                )
+            replacements[symbol] = symbol_cache[symbol_name]
+        expr = expr.xreplace(replacements)
+        if x.pytype == "int":
+            return shape_env.create_symintnode(expr, hint=x.hint)
+        elif x.pytype == "float":
+            return shape_env.create_symfloatnode(expr, hint=x.hint)
+        elif x.pytype == "bool":
+            return shape_env.create_symboolnode(expr)
+        else:
+            raise AssertionError(f"Unexpected symbolic expression type: {x.pytype}")
+
     def handle_tensor(x: Any) -> Any:
-        if isinstance(x, TensorMetadataHolder):
+        if isinstance(x, GraphModule):
+            for node in x.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return x
+        elif isinstance(x, TensorMetadataHolder):
+            tensor_metadata = tree_map(handle_tensor, x.tensor_metadata)
             return torch._dynamo.testing.rand_strided(
-                x.tensor_metadata.shape,
-                x.tensor_metadata.stride,
-                x.tensor_metadata.dtype,
+                tensor_metadata.shape,
+                tensor_metadata.stride,
+                tensor_metadata.dtype,
                 x.device,
             )
+        elif isinstance(x, SymExprMetadataHolder):
+            return restore_sym_expr(x)
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True, shape_env=shape_env
+    )
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
