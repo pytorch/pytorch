@@ -87,7 +87,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
-        std::to_string(attn_mask.has_value());
+        std::to_string(attn_mask.has_value()) + ":" + std::to_string(scale_factor);
     auto cachedGraph =
         LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
           auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
@@ -256,12 +256,14 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   scale_factor);
 
       if (has_mask) {
-        int nd = mask_.value().dim();
-        uint kv_seq_stride = (nd >= 1 && mask_.value().size(nd - 1) > 1) ? mask_.value().stride(nd - 1) : 0;
-        uint q_seq_stride = (nd >= 2 && mask_.value().size(nd - 2) > 1) ? mask_.value().stride(nd - 2) : 0;
-        uint head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
+        auto mask = mask_.value();
+        int nd = mask.dim();
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
         mtl_setArgs<9>(
-            computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
       mtl_setArgs<11>(computeEncoder,
                       std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
@@ -353,12 +355,14 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   scale_factor);
 
       if (has_mask) {
-        Tensor mask = mask_.value();
+        auto mask = mask_.value();
         int nd = mask.dim();
-        uint kv_seq_stride = (nd >= 1 && mask.size(nd - 1) > 1) ? mask.stride(nd - 1) : 0;
-        uint q_seq_stride = (nd >= 2 && mask.size(nd - 2) > 1) ? mask.stride(nd - 2) : 0;
-        uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
-        mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
+        mtl_setArgs<11>(
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
       mtl_setArgs<13>(computeEncoder,
                       std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
@@ -695,6 +699,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(value_.scalar_type()),
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               value_.scalar_type());
+  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0f, "scaled_dot_product_attention for MPS does not support dropout.");
   const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
   const auto all_contiguous =
       query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
