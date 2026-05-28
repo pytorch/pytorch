@@ -74,12 +74,6 @@ inline BoxedKernel BoxedKernel::makeAmbiguousAutogradOther() {
       &ambiguous_autogradother_kernel);
 }
 
-inline BoxedKernel BoxedKernel::makeNamedNotSupported() {
-  return BoxedKernel(
-      nullptr, // no functor_ object
-      &named_not_supported_kernel);
-}
-
 template <class KernelFunctor>
 inline BoxedKernel BoxedKernel::makeFromFunctor(
     std::unique_ptr<KernelFunctor> kernelFunctor) {
