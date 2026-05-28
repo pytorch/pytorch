@@ -5165,9 +5165,6 @@ class CommonTemplate:
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
     )
     def test_low_memory_max_pool(self, dilation: int, dim: int, use_block_ptr: bool):
-        if config.cpp_wrapper and use_block_ptr:
-            raise unittest.SkipTest("block pointer variant times out under cpp_wrapper")
-
         prims = torch.ops.prims
 
         def fn(x):

@@ -12,7 +12,6 @@ import logging
 import math
 import operator
 import os
-import re
 import textwrap
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
@@ -258,20 +257,15 @@ def _bound_triton_expr(expr: sympy.Expr) -> ValueRanges[Any]:
 def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
     if expr.is_integer:
         bounds = _bound_triton_expr(expr)
-        if not (
-            getattr(bounds.lower, "is_infinite", False)
-            or getattr(bounds.upper, "is_infinite", False)
-        ) and not _range_expressible_in_32_bits(bounds):
+        if getattr(bounds.lower, "is_infinite", False) or getattr(
+            bounds.upper, "is_infinite", False
+        ):
+            return True
+        if not _range_expressible_in_32_bits(bounds):
             return True
 
         if expr.is_Integer:
             return not _val_expressible_in_32_bits(expr)
-
-    if getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False):
-        return any(
-            isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
-            for arg in expr.args
-        )
 
     return any(
         isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
@@ -2508,18 +2502,17 @@ class TritonKernelOverrides(TritonOverrides):
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
         operand_dtype = dtype
         result_dtype = dtype
-        if is_predicate or (dtype == torch.bool and expr.is_integer):
+        needs_int_widening = (
+            is_predicate
+            or (dtype == torch.bool and expr.is_integer)
+            or (dtype.is_floating_point and expr.is_integer)
+        )
+        if needs_int_widening:
             expr_requires_int64 = _integer_expr_requires_int64(expr)
             operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
             result_dtype = torch.bool if is_predicate else operand_dtype
-        elif dtype.is_floating_point and expr.is_integer:
-            expr_requires_int64 = _integer_expr_requires_int64(expr)
-            operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
-            result_dtype = operand_dtype
 
-        index_str = cls._cast_expr_vars_to(
-            indexing.index, indexing.index_str, operand_dtype
-        )
+        index_str = cls._value_expr_index_str(indexing, operand_dtype)
         var = cls._emit_expr_indexing(
             expr,
             indexing,
@@ -2546,18 +2539,34 @@ class TritonKernelOverrides(TritonOverrides):
         return var
 
     @classmethod
-    def _cast_expr_vars_to(
-        cls, index: sympy.Expr, index_str: str, dtype: torch.dtype
+    def _value_expr_index_str(
+        cls, indexing: IndexingOptions, dtype: torch.dtype
     ) -> str:
+        index = cls._cast_expr_vars_to(indexing.index, dtype)
+        index_dtype = V.kernel._index_dtype
+        V.kernel._index_dtype = dtype
+        try:
+            index_str = V.kernel.index_to_str(index)
+        finally:
+            V.kernel._index_dtype = index_dtype
+        if is_sympy_integer_like(indexing.index):
+            return f"tl.full({indexing.expand_str}, {index_str}, {triton_type(dtype)})"
+        if indexing.expand_str is not None:
+            return f"tl.broadcast_to({index_str}, {indexing.expand_str})"
+        return index_str
+
+    @classmethod
+    def _cast_expr_vars_to(cls, index: sympy.Expr, dtype: torch.dtype) -> sympy.Expr:
         """
         Emit CSE'd casts to ``dtype`` of each symbolic variable referenced
-        by ``index`` and return ``index_str`` rewritten to use them.
+        by ``index`` and return a new expression that references the casted
+        temporaries.
 
         Casting at least one operand forces Triton to perform the surrounding
         arithmetic at ``dtype``'s width, which is what callers want when the
         expression participates in value computation rather than indexing.
         """
-        replacements: dict[str, str] = {}
+        replacements: dict[sympy.Symbol, sympy.Symbol] = {}
         triton_dtype = triton_type(dtype)
         scalar_int_types = (
             SymT.INDEX,
@@ -2589,6 +2598,8 @@ class TritonKernelOverrides(TritonOverrides):
                 src_dtype = torch.float64
             else:
                 continue
+            if is_integer_dtype(dtype) and src_dtype.is_floating_point:
+                continue
             if src_dtype in (dtype, torch.bool):
                 continue
 
@@ -2598,13 +2609,10 @@ class TritonKernelOverrides(TritonOverrides):
                 dtype=dtype,
                 shape=shape,
             )
-            replacements[name] = str(cast_var)
+            replacements[sym] = sympy.Symbol(str(cast_var))
         if not replacements:
-            return index_str
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(k) for k in replacements) + r")\b"
-        )
-        return pattern.sub(lambda m: replacements[m.group(0)], index_str)
+            return index
+        return sympy_subs(index, replacements)
 
     @staticmethod
     def masked(mask, body, other):
