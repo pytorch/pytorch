@@ -6536,6 +6536,7 @@
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
+    MPS: _s_dirichlet_mps
   autogen: _sample_dirichlet.out
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
