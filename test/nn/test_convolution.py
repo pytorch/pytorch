@@ -41,30 +41,27 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     floating_types_and,
 )
-from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
+from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
-    GRADCHECK_NONDET_TOL,
-    IS_ARM64,
-    IS_LINUX,
-    MACOS_VERSION,
-    MI300_ARCH,
-    TEST_SCIPY,
-    TEST_WITH_ROCM,
     download_file,
     dtype2prec_DONTUSE,
     gradcheck,
+    GRADCHECK_NONDET_TOL,
     gradgradcheck,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_LINUX,
+    MACOS_VERSION,
+    parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
-    skipIfRocmArch,
     subtest,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
     xfailIf,
 )
-from torch.testing._internal.common_utils import (
-    parametrize as parametrize_test,
-)
+
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -3332,9 +3329,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output_cpu = model_cpu(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
-    @skipIfRocmArch(MI300_ARCH)
     @onlyAccelerator
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3365,9 +3361,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
-    @skipIfRocmArch(MI300_ARCH)
     @onlyAccelerator
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
