@@ -760,7 +760,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     }
     auto ones_size = input.sym_sizes().vec();
     ones_size[dim] = 1;
-    const Tensor ones = make_subclass_aware_ones(ones_size);
+    const Tensor ones = at::ones({1}, grad.options()).expand_symint(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
