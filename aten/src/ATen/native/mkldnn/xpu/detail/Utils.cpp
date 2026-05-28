@@ -340,7 +340,8 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   // the src and weight must have at least one of the axes
   // m or k and n or k contiguous (i.e., stride=1) respectively.
   if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
-    return false;
+    if (!(tensor_dim == 2 && (sizes[0] == 1 || sizes[1] == 1)))
+      return false;
 
   if (!onednn_strides_check(tensor))
     return false;

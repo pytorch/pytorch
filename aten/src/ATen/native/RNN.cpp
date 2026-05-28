@@ -745,7 +745,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       bool pre_compute_input = false) const override {
     const auto& [hx, cx] = hidden;
 
-    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -754,6 +754,15 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       // applying projections if w_hr is defined
       auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
+      return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+    }
+
+    if (input.is_xpu()) {
+      auto igates = pre_compute_input ? input : params.linear_ih(input);
+      auto hgates = params.matmul_hh(hx);
+      auto result = at::_thnn_fused_lstm_cell(
+          igates, hgates, cx, {}, params.b_hh());
+      auto hy = params.matmul_hr(std::get<0>(result));
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
     }
 
@@ -781,13 +790,21 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
       auto result = at::_thnn_fused_gru_cell(
           igates, hgates, hidden, params.b_ih(), params.b_hh());
       // Slice off the workspace argument (it's needed only for AD).
+      return std::move(std::get<0>(result));
+    }
+
+    if (input.is_xpu()) {
+      auto igates = pre_compute_input ? input : params.linear_ih(input);
+      auto hgates = params.matmul_hh(hidden);
+      auto result = at::_thnn_fused_gru_cell(
+          igates, hgates, hidden, {}, params.b_hh());
       return std::move(std::get<0>(result));
     }
     const auto chunked_igates = pre_compute_input
@@ -860,7 +877,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const Tensor& inputs,
       const hidden_type& input_hidden,
       const cell_params& params) const override {
-    if (inputs.device().is_cpu()) {
+    if (inputs.device().is_cpu() || inputs.is_xpu()) {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
@@ -892,7 +909,7 @@ struct FullBidirectionalLayer
       const hidden_type& input_hidden,
       const param_type& params) const override {
     std::vector<Tensor> step_inputs;
-    if (input.device().is_cpu()) {
+    if (input.device().is_cpu() || input.is_xpu()) {
       auto input_w = params.first.linear_ih(input);
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
@@ -954,7 +971,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     const Tensor* input_ptr = &input.data;
     bool pre_compute_input = false;
     Tensor input_w;
-    if (input.data.device().is_cpu()) {
+    if (input.data.device().is_cpu() || input.data.is_xpu()) {
       input_w = params.linear_ih(input.data);
       input_ptr = &input_w;
       pre_compute_input = true;
@@ -1013,7 +1030,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     const Tensor* input_ptr = &input.data;
     bool pre_compute_input = false;
     Tensor input_w;
-    if (input.data.device().is_cpu()) {
+    if (input.data.device().is_cpu() || input.data.is_xpu()) {
       input_w = params.linear_ih(input.data);
       input_ptr = &input_w;
       pre_compute_input = true;
