@@ -1350,6 +1350,26 @@ class DecompOneOffTests(TestCase):
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
+class SliceDecompTest(TestCase):
+    def test_slice_forward_unbacked_dim_size(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            ShapeEnv,
+        )
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True):
+            u0 = shape_env.create_unbacked_symint()
+            _constrain_range_for_size(u0, min=0)
+            x = torch.empty((u0,), device="cpu")
+
+            out = torch._decomp.decompositions.slice_forward(x, 0, 0, 800, 1)
+
+        self.assertEqual(out.storage_offset(), 0)
+        self.assertEqual(str(out.shape), "torch.Size([Min(800, u0)])")
+
+
 class HasDecompTest(TestCase):
     def setUp(self):
         super().setUp()
