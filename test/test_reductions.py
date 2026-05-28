@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyNativeDeviceTypes, onlyAccelerator, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
