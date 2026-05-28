@@ -181,9 +181,6 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
 
-  device_prop->last_level_cache_size =
-      raw_device.get_info<device::global_mem_cache_size>();
-
   device_prop->platform_name =
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
