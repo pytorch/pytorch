@@ -557,24 +557,3 @@ kernel void standard_gamma_grad(
 REGISTER_GAMMA_GRAD(float);
 REGISTER_GAMMA_GRAD(half);
 REGISTER_GAMMA_GRAD(bfloat);
-
-// Dirichlet normalization: divide gamma samples by their row sums and clamp to
-// the valid Dirichlet output range [FLT_MIN, 1 - eps]. gamma_sum must be
-// pre-expanded to the same shape as gamma (same numel, repeated row sums).
-template <typename T>
-kernel void dirichlet_normalize(
-    device T* gamma [[buffer(0)]],
-    device const T* gamma_sum [[buffer(1)]],
-    uint tid [[thread_position_in_grid]]) {
-  float val =
-      static_cast<float>(gamma[tid]) / static_cast<float>(gamma_sum[tid]);
-  gamma[tid] = static_cast<T>(::metal::clamp(val, FLT_MIN, 1.0f - eps));
-}
-
-#define REGISTER_DIRICHLET_NORMALIZE(DTYPE)                         \
-  template [[host_name("dirichlet_normalize_" #DTYPE)]] kernel void \
-  dirichlet_normalize<DTYPE>(device DTYPE*, device const DTYPE*, uint)
-
-REGISTER_DIRICHLET_NORMALIZE(float);
-REGISTER_DIRICHLET_NORMALIZE(half);
-REGISTER_DIRICHLET_NORMALIZE(bfloat);
