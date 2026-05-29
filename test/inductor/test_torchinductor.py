@@ -7290,10 +7290,9 @@ class CommonTemplate:
 
         self.assertEqual(o1, o2)
 
+    @requires_cuda_and_triton
+    @skipCPUIf(True, "Triton signature repro requires CUDA")
     def test_view_as_complex_non_contiguous_unsupported_dtype_error(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("Triton signature repro requires CUDA")
-
         def fn(x):
             y = x.transpose(1, 2)
             z = y.reshape(2, 8, 4, -1, 2)
