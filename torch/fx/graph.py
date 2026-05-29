@@ -21,16 +21,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
-import sympy
-
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
-from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
-from torch.utils._sympy.reference import PythonReferenceAnalysis
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -43,7 +39,10 @@ log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
+
 if TYPE_CHECKING:
+    import sympy
+
     from ._symbolic_trace import Tracer
     from .graph_module import GraphModule
 
@@ -2056,9 +2055,15 @@ class Graph:
         ``with graph.inserting_before(graph.output_node()):`` so the new
         nodes land in the body.
         """
+        # Local imports keep sympy off the ``import torch`` path; the helper
+        # is only invoked from passes that already depend on symbolic shapes.
+        import sympy
+
+        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
+        from torch.utils._sympy.reference import PythonReferenceAnalysis
+
         # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
         # calls.
-
         # Probe the graph's meta-key convention once -- in practice a graph
         # uses either "val" (export / proxy_tensor) or "example_value"
         # (dynamo) uniformly, not a mix.

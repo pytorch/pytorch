@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
@@ -4734,6 +4735,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
         check("val")
         check("example_value")
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "expectedInline graph differs under TorchFunctionMode")
     def test_materialize_symints_basic(self):
         """``Graph.materialize_symints`` lowers each SymInt input into an FX
         subgraph rooted at existing symbol producers."""
@@ -4807,6 +4809,7 @@ graph():
         with self.assertRaisesRegex(AssertionError, "no producer for"):
             empty_graph.materialize_symints([h])
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "expectedInline graph differs under TorchFunctionMode")
     def test_materialize_symints_symint_placeholder(self):
         """When the symbol is produced by a top-level SymInt placeholder, the
         placeholder itself is used as the symbol's producer — no
