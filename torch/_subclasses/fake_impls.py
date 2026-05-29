@@ -1793,6 +1793,13 @@ def conv(
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
+        elif input_.dim() == k - 1:
+            # Unbatched input: eager routes directly to the slow dilated
+            # backward kernels, which produce contiguous gradients and bypass
+            # the channels-last backend-memory-format selection. Mirror that
+            # here; _select_conv_backend would also reject the missing batch
+            # dim.
+            mem_fmt = None
         else:
             # convolution has "bias" but not "bias_sizes"; convolution_backward
             # has "bias_sizes" but not "bias". .get() handles both with one call.
