@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch._dynamo.test_case
@@ -15,10 +16,12 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
+    repro_minify,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
@@ -115,6 +118,41 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
 
             self.assertIsInstance(restored, torch.SymInt)
             self.assertTrue(restored.node.expr.has(ModularIndexing))
+
+    def test_repro_minify_disables_repro_after(self):
+        seen_repro_after = object()
+
+        def fake_repro_common(options, mod, load_args):
+            def f(x):
+                return (x,)
+
+            args = [torch.randn(1)]
+            return make_fx(f)(*args), args
+
+        def fake_minifier(*args, **kwargs):
+            nonlocal seen_repro_after
+            seen_repro_after = torch._dynamo.config.repro_after
+
+        options = SimpleNamespace(
+            accuracy="accuracy",
+            check_str=None,
+            isolate=False,
+            save_dir=None,
+            tracing_mode="real",
+            offload_to_disk=False,
+            skip_saving_eager_intermediates=False,
+            skip_sanity=False,
+            max_granularity=None,
+        )
+
+        with (
+            torch._dynamo.config.patch(repro_after="aot"),
+            patch("torch._dynamo.repro.after_aot.repro_common", fake_repro_common),
+            patch("functorch.compile.minifier", fake_minifier),
+        ):
+            repro_minify(options, torch.nn.Identity(), lambda reader: None)
+
+        self.assertIsNone(seen_repro_after)
 
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
@@ -496,6 +534,102 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
                 0,
                 f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
             )
+
+
+class TupleOut(torch.nn.Module):
+    def forward(self, x):
+        return (x,)
+
+
+class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
+    def test_synchronize_called_for_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.repro.after_aot import wrap_compiler_debug
+
+        called = []
+
+        def fake_compiler(gm, inputs, **kwargs):
+            def compiled(real_inputs):
+                return [inp + 1 for inp in real_inputs if isinstance(inp, torch.Tensor)]
+
+            return compiled
+
+        wrapped = wrap_compiler_debug(fake_compiler, "test_backend")
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with torch._dynamo.config.patch(repro_after="aot", repro_level=2):
+            with patch(
+                "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+            ):
+                compiled_fn = wrapped(gm, inputs)
+                compiled_fn(inputs)
+
+        self.assertGreater(len(called), 0)
+
+    def test_inductor_fails_syncs_on_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.repro.after_aot import inductor_fails
+
+        called = []
+
+        def fake_compile_fx_inner(gm, args, **kwargs):
+            def compiled(real_args):
+                return gm(*real_args)
+
+            return compiled
+
+        gm = torch.fx.symbolic_trace(TupleOut())
+        args = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+        ):
+            with patch(
+                "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+            ):
+                inductor_fails(gm, args)
+
+        self.assertGreater(len(called), 0)
+
+    def test_repro_run_syncs_on_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        import argparse
+
+        from torch._dynamo.repro.after_aot import repro_run
+
+        called = []
+        gm = torch.fx.symbolic_trace(TupleOut())
+        args = [torch.randn(4, device=device)]
+
+        def fake_compile_fx_inner(gm, compile_args, **kwargs):
+            def compiled(real_args):
+                return [gm(*real_args)]
+
+            return compiled
+
+        with patch(
+            "torch._dynamo.repro.after_aot.repro_common", return_value=(gm, args)
+        ):
+            with patch(
+                "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+            ):
+                with patch(
+                    "torch.accelerator.synchronize",
+                    side_effect=lambda: called.append(1),
+                ):
+                    repro_run(argparse.Namespace(accuracy=""), None, None)
+
+        self.assertGreater(len(called), 0)
+
+
+instantiate_device_type_tests(TestWrapCompilerDebugSync, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

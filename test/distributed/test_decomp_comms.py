@@ -199,6 +199,178 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         )
         self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
 
+    def test_no_transform_non_decomposable_shape(self):
+        """
+        mm(X, X.T) where X is (N, N) square: Gram output (N, N) depends
+        on the gathered dim, so the decomposition is NOT shape-correct.
+        Pass must not transform.
+        """
+        group_name = "0"
+        world_size = 2
+        ns_steps = 3
+
+        def square_gram(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0] * world_size)
+
+            for _ in range(ns_steps):
+                # mm(X, X.T): output is (N, N) where N = gathered rows
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))
+                X = aten.add.Tensor(X, aten.mm.default(A, X))
+
+            chunks = aten.split.Tensor(X, x_shard.shape[0], 0)
+            return operator.getitem(chunks, 0)
+
+        with FakeTensorMode():
+            # Shard (32, 64), gathered (64, 64) -- square.
+            # Gram = mm(X, X.T) = (64, 64), depends on gathered dim.
+            x_shard = torch.randn(32, 64, device=self.device)
+            traced = make_fx(square_gram)(x_shard)
+
+        decomp_gram_matrix_all_gather(traced)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default),
+            1,
+            "all_gather should remain for non-decomposable Gram shape",
+        )
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
+
+    def test_no_transform_single_gram_mm(self):
+        """
+        Single Gram mm doesn't meet the _MIN_GRAM_MMS=2 threshold.
+        Pass must not transform (likely forward/backward, not iterative optimizer).
+        """
+        group_name = "0"
+        world_size = 2
+
+        def single_gram(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0] * world_size)
+
+            Xt = aten.transpose.int(X, -2, -1)
+            gram = aten.mm.default(Xt, X)
+            out = aten.mm.default(X, gram)
+
+            chunks = aten.split.Tensor(out, x_shard.shape[0], 0)
+            return operator.getitem(chunks, 0)
+
+        with FakeTensorMode():
+            x_shard = torch.randn(64, 32, device=self.device)
+            traced = make_fx(single_gram)(x_shard)
+
+        decomp_gram_matrix_all_gather(traced)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default),
+            1,
+            "all_gather should remain with only 1 Gram mm (below threshold)",
+        )
+        self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
+
+    def test_padded_shard_trimming(self):
+        """
+        FSDP padding: shard is padded for divisibility but the final getitem
+        output is unpadded. The pass should insert a slice to trim the shard.
+        """
+        group_name = "0"
+        world_size = 2
+        ns_steps = 3
+        shard_size = 64
+        unpadded_size = 60
+
+        def padded_step(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0] * world_size)
+
+            X = aten.transpose.int(X, -2, -1)
+
+            for _ in range(ns_steps):
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))
+                X = aten.add.Tensor(X, aten.mm.default(A, X))
+
+            X = aten.transpose.int(X, -2, -1)
+
+            # Split into shard-sized chunks, but getitem output is trimmed
+            # to unpadded size via a subsequent slice
+            chunks = aten.split.Tensor(X, shard_size, 0)
+            chunk = operator.getitem(chunks, 0)
+            return aten.slice.Tensor(chunk, 0, 0, unpadded_size)
+
+        with FakeTensorMode():
+            x_shard = torch.randn(shard_size, 32, device=self.device)
+            traced = make_fx(padded_step)(x_shard)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 1
+        )
+
+        decomp_gram_matrix_all_gather(traced)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 0
+        )
+        self.assertGreaterEqual(
+            _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
+        )
+
+    def test_multiple_getitem_users(self):
+        """
+        When split produces multiple getitems with users (e.g., multi-rank
+        simulation), the pass should still work -- it picks one getitem
+        for shape inference.
+        """
+        group_name = "0"
+        world_size = 2
+        ns_steps = 3
+
+        def multi_user_step(x_shard):
+            gathered = c10d.all_gather_into_tensor.default(
+                x_shard, world_size, group_name
+            )
+            waited = c10d.wait_tensor.default(gathered)
+            X = aten.slice.Tensor(waited, 0, 0, x_shard.shape[0] * world_size)
+
+            X = aten.transpose.int(X, -2, -1)
+
+            for _ in range(ns_steps):
+                A = aten.mm.default(X, aten.transpose.int(X, -2, -1))
+                X = aten.add.Tensor(X, aten.mm.default(A, X))
+
+            X = aten.transpose.int(X, -2, -1)
+
+            chunks = aten.split.Tensor(X, x_shard.shape[0], 0)
+            # Both getitems have users
+            c0 = operator.getitem(chunks, 0)
+            c1 = operator.getitem(chunks, 1)
+            return aten.add.Tensor(c0, c1)
+
+        with FakeTensorMode():
+            x_shard = torch.randn(64, 32, device=self.device)
+            traced = make_fx(multi_user_step)(x_shard)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 1
+        )
+
+        decomp_gram_matrix_all_gather(traced)
+
+        self.assertEqual(
+            _count_ops(traced.graph, c10d.all_gather_into_tensor.default), 0
+        )
+        self.assertGreaterEqual(
+            _count_ops(traced.graph, c10d.all_reduce.default), ns_steps
+        )
+
 
 if __name__ == "__main__":
     run_tests()
