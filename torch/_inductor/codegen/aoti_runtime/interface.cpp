@@ -390,10 +390,23 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
-  return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
-          constant_map_handle,
-          /*use_inactive*/ true,
-          /*validate_full_update*/ true);
+  return AOTInductorModelContainerUpdateConstantBuffer(
+      container_handle,
+      constant_map_handle,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  return AOTInductorModelContainerUpdateConstantBufferPairs(
+      container_handle,
+      pairs,
+      num_pairs,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
 }
 
 AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
