@@ -585,6 +585,11 @@ User code traceback:
 
             return Foo
 
+        def post_munge(s):
+            # Python 3.11+ column metadata can identify the whole class
+            # definition span, including the indented body line.
+            return re.sub(r"\n        pass(?=\n|\Z)", "", s)
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
@@ -600,6 +605,7 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
+            post_munge=post_munge,
         )
 
     @skipIfNotPy312
