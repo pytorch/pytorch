@@ -265,7 +265,10 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 
 
 class AnnotateTestsDevice(torch._dynamo.test_case.TestCase):
-    @skipCUDAIf(not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED, "requires CUDA SM>=8.0 and Triton")
+    @skipCUDAIf(
+        not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "requires CUDA SM>=8.0 and Triton",
+    )
     @skipXPUIf(not IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED, "requires XPU and Triton")
     def test_ac_flex_attention(self, device):
         def _squared(score, b, h, m, n):
@@ -361,7 +364,10 @@ class AnnotateTestsDevice(torch._dynamo.test_case.TestCase):
 ('call_function', 'getitem_5', {'compile_inductor': 0})""",
         )
 
-    @skipCUDAIf(not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED, "requires CUDA SM>=8.0 and Triton")
+    @skipCUDAIf(
+        not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "requires CUDA SM>=8.0 and Triton",
+    )
     @skipXPUIf(not IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED, "requires XPU and Triton")
     def test_flex_attention_backward_tag_does_not_leak(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
