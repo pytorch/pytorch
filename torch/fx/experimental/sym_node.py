@@ -553,6 +553,13 @@ class SymNode:
     def guard_int(self, file: builtins.str, line: int) -> int:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        if self.shape_env is not None and getattr(
+            self.shape_env, "_error_on_guard_int", False
+        ):
+            sloc = f" at {file}:{line}" if file else ""
+            raise RuntimeError(
+                f"guard_int attempted on symbolic value{sloc}: {self.expr}"
+            )
         r = self.evaluate()
         try:
             return int(r)

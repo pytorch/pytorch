@@ -4032,6 +4032,7 @@ class ShapeEnv:
         self.log.info("create_env")
         self.frozen = False
         self._error_on_new_guards = False
+        self._error_on_guard_int = False
         self.runtime_asserts_frozen = False
         self.dim_constraints: DimConstraints | None = None
         self.counter: Counter[str] = collections.Counter()
@@ -4621,6 +4622,16 @@ class ShapeEnv:
         finally:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
+
+    @contextmanager
+    def error_on_guard_int(self) -> Generator[None, None, None]:
+        """Context manager that raises if a symbolic value is concretized to int."""
+        old_error = self._error_on_guard_int
+        self._error_on_guard_int = True
+        try:
+            yield
+        finally:
+            self._error_on_guard_int = old_error
 
     def _get_key(self) -> tuple[int, int, int, int]:
         """

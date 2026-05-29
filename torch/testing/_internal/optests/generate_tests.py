@@ -95,8 +95,13 @@ def safe_fake_check(
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
     if copy_inputs:
-        args, kwargs = deepcopy_tensors((args, kwargs))
-    return fake_check(op, args, kwargs)
+        normal_args, normal_kwargs = deepcopy_tensors((args, kwargs))
+        symbolic_args, symbolic_kwargs = deepcopy_tensors((args, kwargs))
+    else:
+        normal_args, normal_kwargs = args, kwargs
+        symbolic_args, symbolic_kwargs = args, kwargs
+    fake_check(op, normal_args, normal_kwargs)
+    return fake_check(op, symbolic_args, symbolic_kwargs, check_symbolic_guards=True)
 
 
 def safe_aot_autograd_check(
