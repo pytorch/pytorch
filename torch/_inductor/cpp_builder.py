@@ -550,19 +550,22 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
     try:
         result = subprocess.run(
-            [cpp_compiler, "/help"], 
-            stdout=subprocess.PIPE, 
+            [cpp_compiler, "/help"],
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False 
+            check=False
         )
-        
+
         output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
         lines = output_msg.splitlines()
-        
+
         return bool(lines) and "Microsoft" in lines[0]
-        
+
     except FileNotFoundError:
         return False
+
+    # pyrefly: ignore [unreachable]
+    return False
 
 @functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
