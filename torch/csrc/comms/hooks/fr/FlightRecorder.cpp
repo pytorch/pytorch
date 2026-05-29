@@ -58,10 +58,13 @@ inline std::string pickle_str(const c10::IValue& v) {
 
 namespace {
 
-// Static registration of the torchcomms_fr_trace_json handler
+// Static registration of the torch_comms_fr_trace_json handler. The name is
+// distinct from the standalone torchcomms package's "torchcomms_fr_trace_json"
+// handler so the two can coexist in one process (e.g. when both are installed
+// in CI) without a duplicate-registration abort.
 // NOLINTNEXTLINE(facebook-avoid-non-const-global-variables)
 c10d::control_plane::RegisterHandler torchcommsFrTraceJsonRegistration(
-    "torchcomms_fr_trace_json",
+    "torch_comms_fr_trace_json",
     [](const c10d::control_plane::Request& req,
        c10d::control_plane::Response& res) {
       const auto& params = req.params();
