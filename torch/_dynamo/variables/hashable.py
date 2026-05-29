@@ -17,11 +17,11 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 def raise_unhashable(
-    arg: VariableTracker, tx: "InstructionTranslator | None" = None
+    arg: VariableTracker, tx: "InstructionTranslatorBase | None" = None
 ) -> None:
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
