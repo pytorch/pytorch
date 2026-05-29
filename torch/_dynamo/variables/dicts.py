@@ -20,7 +20,7 @@ in sets.py.
 import collections
 import functools
 import types
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from typing import Any, TYPE_CHECKING, Union
 
 from torch.utils._pytree import MappingKey
@@ -41,12 +41,14 @@ from ..source import (
     is_from_local_source,
 )
 from ..utils import (
+    _item_debug_repr,
     cmp_name_to_op_mapping,
     dict_items,
     dict_keys,
     dict_values,
     istype,
     raise_args_mismatch,
+    tracked_repr,
 )
 from .base import (
     AttributeMutationExisting,
@@ -57,7 +59,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable
+from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .sets import SetVariable
 
 
@@ -77,6 +79,15 @@ if TYPE_CHECKING:
 def pydict_check(obj: VariableTracker) -> bool:
     # This is a simplified version of the CPython's PyDict_Check function:
     return issubclass(obj.python_type(), dict)
+
+
+def _is_set_or_dictview(obj: VariableTracker) -> bool:
+    """PyAnySet_Check(other) || PyDictViewSet_Check(other)"""
+    try:
+        t = obj.python_type()
+    except NotImplementedError:
+        return False
+    return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
 class ConstDictVariable(VariableTracker):
@@ -160,8 +171,8 @@ class ConstDictVariable(VariableTracker):
     def debug_repr(self) -> str:
         items: list[str] = []
         for k, v in self.items.items():
-            key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-            val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+            key_str = _item_debug_repr(k.vt)
+            val_str = _item_debug_repr(v)
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
@@ -170,6 +181,13 @@ class ConstDictVariable(VariableTracker):
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
         }
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        items = [
+            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
+            for key, value in self.items.items()
+        ]
+        return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
         self.install_dict_keys_match_guard()
@@ -196,7 +214,7 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         other_dicts: list[ConstDictVariable] = []
@@ -246,7 +264,7 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -510,7 +528,6 @@ class ConstDictVariable(VariableTracker):
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
         from . import DictBuiltinVariable
-        from .builder import SourcelessBuilder
 
         Hashable = HashableTracker
 
@@ -566,28 +583,6 @@ class ConstDictVariable(VariableTracker):
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
-        elif name == "__setitem__" and self.is_mutable():
-            self.install_dict_keys_match_guard()
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            tx.output.side_effects.mutation(self)
-            self.items[Hashable(args[0])] = args[1]
-            return ConstantVariable.create(None)
-        elif name == "__delitem__" and self.is_mutable():
-            arg_hashable = args and is_hashable(args[0])
-            if arg_hashable:
-                self.install_dict_keys_match_guard()
-                self.should_reconstruct_all = True
-                tx.output.side_effects.mutation(self)
-                self.items.__delitem__(Hashable(args[0]))
-                return ConstantVariable.create(None)
-            else:
-                return super().call_method(tx, name, args, kwargs)
         elif name == "get":
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
@@ -705,20 +700,6 @@ class ConstDictVariable(VariableTracker):
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x
-        elif name == "__eq__" and istype(
-            self, ConstDictVariable
-        ):  # don't let Set use this function
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-
-            return SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-                tx, [self, args[0]], {}
-            )
-        elif name == "__ne__":
-            return VariableTracker.build(
-                tx,
-                not self.call_method(tx, "__eq__", args, kwargs).value,  # type: ignore[attr-defined]
-            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -748,6 +729,31 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
         self.call_method(tx, "update", [other], {})
         return self
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict_ass_sub)
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+
+        # value=None signals delete (CPython NULL sentinel).
+        if not is_hashable(key):
+            raise_unhashable(key, tx)
+        self.install_dict_keys_match_guard()
+        hkey = HashableTracker(key)
+        tx.output.side_effects.mutation(self)
+        if value is None:
+            if hkey not in self.items:
+                raise_observed_exception(KeyError, tx, args=[key.as_python_constant()])
+            self.should_reconstruct_all = True
+            del self.items[hkey]
+        else:
+            self.items[hkey] = value
+        return ConstantVariable.create(None)
 
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Mapping length for dict objects."""
@@ -790,6 +796,33 @@ class ConstDictVariable(VariableTracker):
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
+
+    def richcompare_impl(self, tx, other, op):
+        # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
+        # Only supports eq/ne; returns NotImplemented for ordering.
+        from .builder import SourcelessBuilder
+        from .user_defined import UserDefinedDictVariable
+
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other, ConstDictVariable):
+            # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
+            # This is correct because CPython's dict_equal operates on the
+            # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
+            # -- it never calls __getitem__ or __len__ on dict subclasses.
+            # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+            if isinstance(other, UserDefinedDictVariable):
+                if other._base_vt is None:
+                    raise AssertionError("expected _base_vt to be set")
+                other = other._base_vt
+            else:
+                return ConstantVariable.create(NotImplemented)
+        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
+            tx, [self, other], {}
+        )
+        if op == "__ne__":
+            return VariableTracker.build(tx, not eq_result.as_python_constant())
+        return eq_result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__class__":
@@ -900,6 +933,13 @@ class MappingProxyVariable(VariableTracker):
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.dv_dict.mp_length(tx)
 
+    def richcompare_impl(self, tx, other, op):
+        # mappingproxy_richcompare delegates to the underlying mapping:
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1436
+        from .object_protocol import generic_richcompare
+
+        return generic_richcompare(tx, self.dv_dict, other, op)
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -977,16 +1017,18 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__repr__":
-            return VariableTracker.build(tx, self.debug_repr())
-        return super().call_method(tx, name, args, kwargs)
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        if self.kv == "keys":
+            items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
+            return VariableTracker.build(tx, f"dict_keys([{items}])")
+        if self.kv == "values":
+            items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
+            return VariableTracker.build(tx, f"dict_values([{items}])")
+        items = ", ".join(
+            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+            for key, value in self.view_items
+        )
+        return VariableTracker.build(tx, f"dict_items([{items}])")
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for dict view objects."""
@@ -1047,17 +1089,37 @@ class DictKeysVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k in self.view_items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
+                key_str = _item_debug_repr(k.vt)
                 items.append(key_str)
-            return "dict_keys([" + ",".join(items) + "])"
+            return "dict_keys([" + ", ".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return self.dv_dict.sq_contains(tx, item)
+
+    def richcompare_impl(self, tx, other, op):
+        # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+        # Uses a polyfill with len() and ``in`` so that Dynamo traces through
+        # sq_length/sq_contains, matching CPython's use of PyObject_Size and
+        # PySequence_Contains.
+        from .builder import SourcelessBuilder
+
+        if not _is_set_or_dictview(other):
+            return ConstantVariable.create(NotImplemented)
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_richcompare
+        ).call_function(
+            tx,
+            [
+                SourcelessBuilder.create(tx, cmp_name_to_op_mapping[op]),
+                self,
+                other,
+            ],
+            {},
+        )
 
     def call_method(
         self,
@@ -1076,21 +1138,6 @@ class DictKeysVariable(DictViewVariable):
             m = getattr(self.set_items, name)
             r = m(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(r)
-        elif name in cmp_name_to_op_mapping:
-            if not isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    variables.UserDefinedSetVariable,
-                    DictItemsVariable,
-                    DictKeysVariable,
-                ),
-            ):
-                return VariableTracker.build(tx, NotImplemented)
-            return VariableTracker.build(
-                tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1140,15 +1187,21 @@ class DictValuesVariable(DictViewVariable):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
 
+    def richcompare_impl(self, tx, other, op):
+        # dict_values has no tp_richcompare (inherits object's).
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def debug_repr(self) -> str:
         if not self.view_items:
             return "dict_values([])"
         else:
             items: list[str] = []
             for v in self.view_items:
-                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                val_str = _item_debug_repr(v)
                 items.append(val_str)
-            return "dict_values([" + ",".join(items) + "])"
+            return "dict_values([" + ", ".join(items) + "])"
 
 
 class DictItemsVariable(DictViewVariable):
@@ -1178,12 +1231,10 @@ class DictItemsVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k, v in self.view_items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
-                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                key_str = _item_debug_repr(k.vt)
+                val_str = _item_debug_repr(v)
                 items.append(f"({key_str}, {val_str})")
-            return "dict_items([" + ",".join(items) + "])"
+            return "dict_items([" + ", ".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -1205,6 +1256,28 @@ class DictItemsVariable(DictViewVariable):
 
         return iter_contains(self.view_items_vt, item, tx)
 
+    def richcompare_impl(self, tx, other, op):
+        # dictview_richcompare: accepts set/frozenset and dict_keys/dict_items.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+        # Uses a polyfill with len() and ``in`` so that Dynamo traces through
+        # sq_length/sq_contains, matching CPython's use of PyObject_Size and
+        # PySequence_Contains.
+        from .builder import SourcelessBuilder
+
+        if not _is_set_or_dictview(other):
+            return ConstantVariable.create(NotImplemented)
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_richcompare
+        ).call_function(
+            tx,
+            [
+                SourcelessBuilder.create(tx, cmp_name_to_op_mapping[op]),
+                self,
+                other,
+            ],
+            {},
+        )
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         from .iter import DictItemsIterator
 
@@ -1219,28 +1292,7 @@ class DictItemsVariable(DictViewVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # TODO(guilhermeleobas): This should actually check if args[0]
-        # implements the mapping protocol.
-        if name == "__eq__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            if isinstance(args[0], DictItemsVariable):
-                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
-            elif isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    variables.UserDefinedSetVariable,
-                    DictItemsVariable,
-                    DictKeysVariable,
-                ),
-            ):
-                return VariableTracker.build(
-                    tx,
-                    len(self.set_items ^ args[0].set_items) == 0,
-                )
-            return ConstantVariable.create(False)
-        elif name in (
+        if name in (
             "__and__",
             "__iand__",
             "__xor__",
@@ -1250,21 +1302,6 @@ class DictItemsVariable(DictViewVariable):
             fn_hdl = getattr(self.set_items, name)
             ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(ret_val)
-        elif name in cmp_name_to_op_mapping:
-            if not isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    variables.UserDefinedSetVariable,
-                    DictItemsVariable,
-                    DictKeysVariable,
-                ),
-            ):
-                return VariableTracker.build(tx, NotImplemented)
-            return VariableTracker.build(
-                tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
