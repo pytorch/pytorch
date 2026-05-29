@@ -15498,6 +15498,24 @@ def forward(self, x, y):
             FooModel(), (Foo(torch.ones(4, 4), torch.ones(4, 4)),), strict=False
         )
 
+    def test_register_constant_enum(self):
+        class Color(enum.Enum):
+            RED = 1
+            GREEN = 2
+            BLUE = 3
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, col):
+                return x + col.value
+
+        register_constant(Color)
+        try:
+            x = torch.ones(4, 4)
+            ep = torch.export.export(Foo(), (x, Color.RED), strict=False)
+            self.assertEqual(ep.module()(x, Color.RED), Foo()(x, Color.RED))
+        finally:
+            pytree._deregister_pytree_node(Color)
+
     def test_custom_pytree_run_decompositions(self):
         class MyContainer:
             def __init__(self, t1, t2):

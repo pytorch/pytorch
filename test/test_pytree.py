@@ -1356,6 +1356,20 @@ if "optree" in sys.modules:
         self.assertEqual(elements, [])
         self.assertEqual(spec.context.value, config)
 
+    def test_constant_enum(self):
+        class Color(enum.Enum):
+            RED = 1
+            GREEN = 2
+            BLUE = 3
+
+        python_pytree.register_constant(Color)
+        try:
+            elements, spec = python_pytree.tree_flatten(Color.RED)
+            self.assertEqual(elements, [])
+            self.assertIs(python_pytree.tree_unflatten(elements, spec), Color.RED)
+        finally:
+            python_pytree._deregister_pytree_node(Color)
+
     def test_constant_default_eq_error(self):
         class Config:
             def __init__(self, norm: str):

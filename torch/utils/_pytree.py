@@ -433,6 +433,8 @@ def register_constant(cls: type[Any]) -> None:
 
     Args:
         cls: the type to register as a constant. This type must be hashable.
+            Enum subclasses are accepted even if they use the default
+            identity-based `__eq__`.
 
     Example:
 
@@ -450,7 +452,8 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
-    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+    is_enum_subclass = isinstance(cls, type) and issubclass(cls, Enum)
+    if cls.__eq__ is object.__eq__ and not is_enum_subclass:  # type: ignore[comparison-overlap]
         raise TypeError(
             "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
         )
