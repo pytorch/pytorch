@@ -248,8 +248,9 @@ def _bound_triton_expr(expr: sympy.Expr) -> ValueRanges[Any]:
             continue
         if node := V.kernel.range_tree_nodes.get(sym):
             upper = node.length - 1
-            if not isinstance(upper, sympy.Expr) or upper.is_number:
-                ranges[sym] = ValueRanges(0, upper)
+            if isinstance(upper, sympy.Expr) and not upper.is_number:
+                upper = V.graph.sizevars.shape_env.bound_sympy(upper).upper
+            ranges[sym] = ValueRanges(0, upper)
         elif symbol_is_type(sym, SymT.TMP):
             ranges[sym] = V.kernel.cse.varname_map[sym.name].bounds
     return bound_sympy(expr, ranges)

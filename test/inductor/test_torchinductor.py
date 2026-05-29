@@ -18029,12 +18029,16 @@ if RUN_GPU:
 
         def test_value_expr_dynamic_shape_bounds(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
+                torch._check(x.shape[0] <= 100)
                 idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
                 return idx.to(torch.float32)
 
             fn_opt = torch.compile(fn, backend="inductor", dynamic=True)
             x = torch.empty(8, device=GPU_TYPE)
             torch._dynamo.mark_dynamic(x, 0)
+            code = run_and_get_triton_code(fn_opt, x)
+            self.assertFalse("to(tl.int64)" in code)
+
             self.assertEqual(fn_opt(x), fn(x))
 
         def test_searchsorted_boundary_index_no_int64_cast(self):

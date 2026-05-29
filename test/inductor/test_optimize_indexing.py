@@ -1,10 +1,12 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+from unittest import mock
 
 import sympy
 
 import torch
+import torch._inductor.optimize_indexing as optimize_indexing
 from torch._inductor.codegen.common import deduce_output_dtype_by_name
 from torch._inductor.optimize_indexing import convert_index_expr_to_value_expr
 from torch.fx import Graph
@@ -315,7 +317,7 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(index_expr.target, "value_expr")
         self.assertEqual(index_expr.args[2], torch.float32)
 
-    def test_index_expr_masked_subblock_mixed_use_stays_indexing(self):
+    def test_index_expr_masked_subblock_mixed_use_prefers_value(self):
         graph = Graph()
         ops = graph.placeholder("ops")
         mask = graph.placeholder("mask")
@@ -355,9 +357,86 @@ class TestOptimizeIndexing(TestCase):
 
         convert_index_expr_to_value_expr(loop_body)
 
-        self.assertEqual(masked.args[1].target, "index_expr")
+        self.assertEqual(masked.args[1].target, "value_expr")
         output_node = next(n for n in subgraph.nodes if n.op == "output")
-        self.assertEqual(output_node.args[0].target, "index_expr")
+        self.assertEqual(output_node.args[0].target, "value_expr")
+
+    def test_mixed_value_op_clones_value_path(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        add = graph.call_method("add", (ops, index_expr, index_expr))
+        load = graph.call_method("load", (ops, "arg0", add))
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, add, None))
+        graph.output((load, store))
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 1),
+                add: ValueRanges(0, 2),
+                load: ValueRanges(0, 1),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        value_adds = [
+            n
+            for n in graph.nodes
+            if n.target == "add" and any(arg.target == "value_expr" for arg in n.args)
+        ]
+        self.assertEqual(len(value_adds), 1)
+        value_add = value_adds[0]
+        self.assertEqual(load.args[2], add)
+        self.assertEqual(store.args[3], value_add)
+        self.assertEqual(add.args[1], index_expr)
+        self.assertEqual(add.args[2], index_expr)
+        self.assertEqual(index_expr.target, "index_expr")
+
+    def test_shared_value_only_ancestors_are_rewritten_once(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        bounds = {index_expr: ValueRanges(0, 1)}
+
+        value = index_expr
+        for _ in range(14):
+            value = graph.call_method("add", (ops, value, value))
+            bounds[value] = ValueRanges(0, 1)
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, value, None))
+        graph.output(store)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            bounds,
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        original_map_arg = optimize_indexing.map_arg
+        map_arg_calls = 0
+
+        def counting_map_arg(*args, **kwargs):
+            nonlocal map_arg_calls
+            map_arg_calls += 1
+            return original_map_arg(*args, **kwargs)
+
+        with mock.patch.object(
+            optimize_indexing, "map_arg", side_effect=counting_map_arg
+        ):
+            convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(index_expr.target, "value_expr")
+        self.assertLess(map_arg_calls, 200)
 
 
 if __name__ == "__main__":

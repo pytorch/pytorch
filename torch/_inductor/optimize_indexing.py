@@ -538,8 +538,6 @@ def _compute_graph_uses(
         if demand & _VALUE_DEMAND and node.target != "load":
             if rule is None:
                 continue
-            if _is_masked_subblock(node) and demand & _INDEXING_DEMAND:
-                continue
             if rule.value_inputs is not None:
                 for arg in rule.value_inputs:
                     mark_rule_arg(node, arg, _VALUE_DEMAND)
@@ -578,15 +576,11 @@ def _graph_output_contexts(
                 continue
 
             child_is_indexing = node in indexing_use
-            # Policy choice for this pass: if the same masked-subblock result
-            # is both index-used and value-used, keep its body on the indexing
-            # path instead of cloning the subblock for a separate value result.
-            child_is_value = node in value_use and not child_is_indexing
+            child_is_value = node in value_use
             old_is_indexing, old_is_value = contexts.get(subblock_graph, (False, False))
-            new_is_indexing = old_is_indexing or child_is_indexing
             new_context = (
-                new_is_indexing,
-                (old_is_value or child_is_value) and not new_is_indexing,
+                old_is_indexing or child_is_indexing,
+                old_is_value or child_is_value,
             )
             if new_context != (old_is_indexing, old_is_value):
                 contexts[subblock_graph] = new_context
@@ -720,11 +714,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 continue
             if rule.value_sinks:
                 rewrite_rule_args(node, rule.value_sinks)
-            if (
-                _is_masked_subblock(node)
-                and node in value_use
-                and node not in indexing_use
-            ):
+            if _is_masked_subblock(node) and node in value_use:
                 value_inputs = rule.value_inputs
                 assert value_inputs is not None
                 rewrite_rule_args(node, value_inputs)
