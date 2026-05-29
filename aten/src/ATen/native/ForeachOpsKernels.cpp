@@ -38,9 +38,9 @@
 #include <ATen/ops/_foreach_log2_native.h>
 #include <ATen/ops/_foreach_log_native.h>
 #include <ATen/ops/_foreach_max_native.h>
+#include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_maximum_native.h>
 #include <ATen/ops/_foreach_minimum_native.h>
-#include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_neg_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
@@ -573,4 +573,5 @@ std::vector<Tensor> foreach_tensor_mm_list_kernel_slow(
   }
   return result;
 }
+
 } // namespace at::native
