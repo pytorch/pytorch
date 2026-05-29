@@ -160,16 +160,14 @@ def _normalize_cuda_arch(arch: str) -> str:
 
 def _cuda_arch_number(arch: str) -> int:
     arch = _normalize_cuda_arch(arch)
-    match = re.fullmatch(r"(\d+)[a-z]?", arch)
-    assert match is not None
-    return int(match.group(1))
+    if arch[-1].isalpha():
+        arch = arch[:-1]
+    return int(arch)
 
 
 def _cuda_arch_suffix(arch: str) -> str:
     arch = _normalize_cuda_arch(arch)
-    match = re.fullmatch(r"\d+([a-z]?)", arch)
-    assert match is not None
-    return match.group(1)
+    return arch[-1] if arch[-1].isalpha() else ""
 
 
 def _cuda_arch_same_generation(arch: str, other: str) -> bool:
@@ -192,6 +190,8 @@ def _aoti_cuda_target_arch() -> str:
         if config.cuda.arch is not None
         else _nvcc_arch_as_compile_option()
     )
+    # Triton cc overrides are numeric compute capabilities. The suffix is only
+    # used for native nvcc compilation, not for the PTX AOTI packages here.
     return str(_cuda_arch_number(arch))
 
 
@@ -237,7 +237,9 @@ def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[st
         from torch.utils.cpp_extension import _get_cuda_arch_flags
 
         for kind, arch in _parse_gencode_options(_get_cuda_arch_flags([])):
-            if _cuda_arch_is_compatible_with_current(arch, current_arch):
+            if kind == "sm" and _cuda_arch_is_compatible_with_current(
+                arch, current_arch
+            ):
                 options.add((kind, arch))
 
     if not any(

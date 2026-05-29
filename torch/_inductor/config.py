@@ -2176,6 +2176,9 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
 
+    # Enable lightweight line tables for profiling tools (e.g. strobelight)
+    enable_line_tables = os.environ.get("AOT_INDUCTOR_ENABLE_LINE_TABLES", "1") == "1"
+
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
     compile_wrapper_opt_level = os.environ.get(
