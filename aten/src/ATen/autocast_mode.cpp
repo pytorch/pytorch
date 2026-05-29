@@ -54,7 +54,7 @@ thread_local int nesting = 0;
 // The order of this array MUST exactly match the definition order of DeviceType
 // in c10/core/DeviceType.h.
 static_assert(
-    at::COMPILE_TIME_MAX_DEVICE_TYPES == 21,
+    at::COMPILE_TIME_MAX_DEVICE_TYPES == 23,
     "The definition of the default autocast data type per device backend doesn't match with the definition of the device type.");
 thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     autocast_dtype = {
@@ -79,6 +79,8 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::kHalf, // Graphcore IPU
         at::kHalf, // Meta training and inference devices
         at::kHalf, // PrivateUse1 device
+        at::kHalf, // PrivateUse2 device
+        at::kHalf, // PrivateUse3 device
 };
 
 // should we enabled the cache inside autocast.

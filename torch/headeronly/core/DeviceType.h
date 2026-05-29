@@ -16,7 +16,6 @@ namespace c10 {
 
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
-// This is most backends except PrivateUse2 and PrivateUse3
 #define C10_FORALL_BACKEND_DEVICE_TYPES(_, extra) \
   _(CPU, extra)                                   \
   _(CUDA, extra)                                  \
@@ -30,7 +29,9 @@ namespace c10 {
   _(Lazy, extra)                                  \
   _(Meta, extra)                                  \
   _(MTIA, extra)                                  \
-  _(PrivateUse1, extra)
+  _(PrivateUse1, extra)                           \
+  _(PrivateUse2, extra)                           \
+  _(PrivateUse3, extra)
 
 enum class DeviceType : int8_t {
   CPU = 0,
@@ -54,11 +55,13 @@ enum class DeviceType : int8_t {
   IPU = 18, // Graphcore IPU
   MTIA = 19, // Meta training and inference devices
   PrivateUse1 = 20, // PrivateUse1 device
+  PrivateUse2 = 21, // PrivateUse2 device
+  PrivateUse3 = 22, // PrivateUse3 device
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in c10/core/DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 21,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 23,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -78,13 +81,15 @@ constexpr DeviceType kLazy = DeviceType::Lazy;
 constexpr DeviceType kIPU = DeviceType::IPU;
 constexpr DeviceType kMTIA = DeviceType::MTIA;
 constexpr DeviceType kPrivateUse1 = DeviceType::PrivateUse1;
+constexpr DeviceType kPrivateUse2 = DeviceType::PrivateUse2;
+constexpr DeviceType kPrivateUse3 = DeviceType::PrivateUse3;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 
 static_assert(
-    COMPILE_TIME_MAX_DEVICE_TYPES <= 21,
+    COMPILE_TIME_MAX_DEVICE_TYPES <= 32,
     "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
     "for this constant to reflect the actual number of DeviceTypes we support "
     "in PyTorch; it's important that this number is not too large as we "
@@ -121,6 +126,8 @@ using c10::kMetal;
 using c10::kMPS;
 using c10::kMTIA;
 using c10::kPrivateUse1;
+using c10::kPrivateUse2;
+using c10::kPrivateUse3;
 using c10::kVE;
 using c10::kVulkan;
 using c10::kXLA;

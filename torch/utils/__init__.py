@@ -14,6 +14,7 @@ from torch.utils import (
 )
 from torch.utils.backend_registration import (
     generate_methods_for_privateuse1_backend,
+    register_backend,
     rename_privateuse1_backend,
 )
 from torch.utils.cpp_backtrace import get_cpp_backtrace

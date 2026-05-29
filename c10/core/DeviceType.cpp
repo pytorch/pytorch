@@ -4,10 +4,100 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <cstddef>
 #include <mutex>
-#include <string_view>
+#include <optional>
 
 namespace c10 {
+namespace {
+
+constexpr std::array<DeviceType, 3> kPrivateUseDeviceTypes = {
+    DeviceType::PrivateUse1,
+    DeviceType::PrivateUse2,
+    DeviceType::PrivateUse3};
+
+constexpr std::array<const char*, 3> kPrivateUseDefaultBackendNames = {
+    "privateuseone",
+    "privateusetwo",
+    "privateusethree"};
+
+std::optional<size_t> privateuse_backend_index(DeviceType device_type) {
+  switch (device_type) {
+    case DeviceType::PrivateUse1:
+      return 0;
+    case DeviceType::PrivateUse2:
+      return 1;
+    case DeviceType::PrivateUse3:
+      return 2;
+    default:
+      return std::nullopt;
+  }
+}
+
+bool is_reserved_privateuse_backend_name(const std::string& backend_name) {
+  static const std::array<std::string, 6> types = {
+      "cpu", "cuda", "hip", "mps", "xpu", "mtia"};
+  return std::find(types.begin(), types.end(), backend_name) != types.end();
+}
+
+bool is_in_tree_device_name(const std::string& backend_name) {
+  static const std::array<std::string, 20> types = {
+      "cpu",   "cuda", "mkldnn", "opengl", "opencl", "ideep", "hip",
+      "ve",    "fpga", "maia",   "xla",    "lazy",   "mps",   "vulkan",
+      "metal", "xpu",  "meta",   "hpu",    "ipu",    "mtia"};
+  return std::find(types.begin(), types.end(), backend_name) != types.end();
+}
+
+static std::array<std::atomic<bool>, 3> privateuse_backend_name_set{};
+static std::array<std::string, 3> privateuse_backend_names;
+static std::mutex privateuse_lock;
+
+void register_privateuse_backend_locked(
+    DeviceType device_type,
+    const std::string& backend_name,
+    const char* api_name) {
+  const auto idx = privateuse_backend_index(device_type);
+  TORCH_CHECK(
+      idx, "Expected a private-use device type, but got: ", device_type);
+
+  TORCH_CHECK(
+      !privateuse_backend_name_set[*idx].load() ||
+          privateuse_backend_names[*idx] == backend_name,
+      "torch.",
+      api_name,
+      "() has already been set! Current backend: ",
+      privateuse_backend_names[*idx]);
+
+  TORCH_CHECK(
+      !is_reserved_privateuse_backend_name(backend_name),
+      "Cannot register privateuse backend with in-tree device name: ",
+      backend_name);
+
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    TORCH_CHECK(
+        i == *idx || backend_name != kPrivateUseDefaultBackendNames[i],
+        "Cannot register privateuse backend with another private-use slot name: ",
+        backend_name);
+    TORCH_CHECK(
+        i == *idx || !privateuse_backend_name_set[i].load() ||
+            privateuse_backend_names[i] != backend_name,
+        "Private-use backend has already been registered with device type ",
+        kPrivateUseDeviceTypes[i],
+        ": ",
+        backend_name);
+  }
+
+  if (privateuse_backend_name_set[*idx].load()) {
+    return;
+  }
+  privateuse_backend_names[*idx] = backend_name;
+  // Invariant: once this flag is set, privateuse_backend_names[idx] is NEVER
+  // written to again.
+  privateuse_backend_name_set[*idx].store(true, std::memory_order_release);
+}
+
+} // namespace
 
 std::string DeviceTypeName(DeviceType d, bool lower_case) {
   switch (d) {
@@ -54,7 +144,9 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     case DeviceType::MTIA:
       return lower_case ? "mtia" : "MTIA";
     case DeviceType::PrivateUse1:
-      return get_privateuse1_backend(/*lower_case=*/lower_case);
+    case DeviceType::PrivateUse2:
+    case DeviceType::PrivateUse3:
+      return get_privateuse_backend(d, /*lower_case=*/lower_case);
     default:
       TORCH_CHECK(
           false,
@@ -96,6 +188,8 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::IPU:
     case DeviceType::MTIA:
     case DeviceType::PrivateUse1:
+    case DeviceType::PrivateUse2:
+    case DeviceType::PrivateUse3:
       return true;
     default:
       return false;
@@ -119,47 +213,103 @@ std::ostream& operator<<(std::ostream& stream, DeviceType type) {
 //     set this variable at the same time that another thread is print the
 //     device name. We could reuse the same mutex, but reading the atomic will
 //     be much faster.
-static std::atomic<bool> privateuse1_backend_name_set;
-static std::string privateuse1_backend_name;
-static std::mutex privateuse1_lock;
-
-std::string get_privateuse1_backend(bool lower_case) {
+std::string get_privateuse_backend(DeviceType device_type, bool lower_case) {
+  const auto idx = privateuse_backend_index(device_type);
+  TORCH_CHECK(
+      idx, "Expected a private-use device type, but got: ", device_type);
   // Applying the same atomic read memory ordering logic as in Note [Memory
   // ordering on Python interpreter tag].
   auto name_registered =
-      privateuse1_backend_name_set.load(std::memory_order_acquire);
-  // Guaranteed that if the flag is set, then privateuse1_backend_name has been
-  // set, and will never be written to.
-  auto backend_name =
-      name_registered ? privateuse1_backend_name : "privateuseone";
+      privateuse_backend_name_set[*idx].load(std::memory_order_acquire);
+  // Guaranteed that if the flag is set, then privateuse_backend_names[idx] has
+  // been set, and will never be written to.
+  auto backend_name = name_registered ? privateuse_backend_names[*idx]
+                                      : kPrivateUseDefaultBackendNames[*idx];
   auto op_case = lower_case ? ::tolower : ::toupper;
   std::ranges::transform(backend_name, backend_name.begin(), op_case);
   return backend_name;
 }
 
-void register_privateuse1_backend(const std::string& backend_name) {
-  std::lock_guard<std::mutex> guard(privateuse1_lock);
-  TORCH_CHECK(
-      !privateuse1_backend_name_set.load() ||
-          privateuse1_backend_name == backend_name,
-      "torch.register_privateuse1_backend() has already been set! Current backend: ",
-      privateuse1_backend_name);
+std::string get_privateuse1_backend(bool lower_case) {
+  return get_privateuse_backend(DeviceType::PrivateUse1, lower_case);
+}
 
-  static constexpr auto types = std::to_array<std::string_view>(
-      {"cpu", "cuda", "hip", "mps", "xpu", "mtia"});
+void register_privateuse1_backend(const std::string& backend_name) {
+  std::lock_guard<std::mutex> guard(privateuse_lock);
+  register_privateuse_backend_locked(
+      DeviceType::PrivateUse1, backend_name, "register_privateuse1_backend");
+}
+
+DeviceType register_privateuse_backend(const std::string& backend_name) {
+  std::lock_guard<std::mutex> guard(privateuse_lock);
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    if (privateuse_backend_name_set[i].load() &&
+        privateuse_backend_names[i] == backend_name) {
+      return kPrivateUseDeviceTypes[i];
+    }
+  }
+
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    if (backend_name == kPrivateUseDefaultBackendNames[i]) {
+      register_privateuse_backend_locked(
+          kPrivateUseDeviceTypes[i],
+          backend_name,
+          "register_privateuse_backend");
+      return kPrivateUseDeviceTypes[i];
+    }
+  }
+
   TORCH_CHECK(
-      std::ranges::find(types, backend_name) == types.end(),
-      "Cannot register privateuse1 backend with in-tree device name: ",
+      !is_in_tree_device_name(backend_name),
+      "Cannot register privateuse backend with in-tree device name: ",
       backend_name);
 
-  privateuse1_backend_name = backend_name;
-  // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
-  // to.
-  privateuse1_backend_name_set.store(true, std::memory_order_release);
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    if (!privateuse_backend_name_set[i].load()) {
+      register_privateuse_backend_locked(
+          kPrivateUseDeviceTypes[i],
+          backend_name,
+          "register_privateuse_backend");
+      return kPrivateUseDeviceTypes[i];
+    }
+  }
+
+  TORCH_CHECK(
+      false,
+      "No private-use backend slots are available. PyTorch supports at most ",
+      kPrivateUseDeviceTypes.size(),
+      " registered private-use backends in a single process.");
 }
 
 bool is_privateuse1_backend_registered() {
-  return privateuse1_backend_name_set.load(std::memory_order_acquire);
+  return is_privateuse_backend_registered(DeviceType::PrivateUse1);
+}
+
+bool is_privateuse_backend(DeviceType device_type) {
+  return privateuse_backend_index(device_type).has_value();
+}
+
+bool is_privateuse_backend_registered(DeviceType device_type) {
+  const auto idx = privateuse_backend_index(device_type);
+  TORCH_CHECK(
+      idx, "Expected a private-use device type, but got: ", device_type);
+  return privateuse_backend_name_set[*idx].load(std::memory_order_acquire);
+}
+
+std::optional<DeviceType> get_privateuse_backend_device_type(
+    const std::string& backend_name) {
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    if (backend_name == kPrivateUseDefaultBackendNames[i]) {
+      return kPrivateUseDeviceTypes[i];
+    }
+  }
+  for (size_t i = 0; i < kPrivateUseDeviceTypes.size(); ++i) {
+    if (privateuse_backend_name_set[i].load(std::memory_order_acquire) &&
+        get_privateuse_backend(kPrivateUseDeviceTypes[i]) == backend_name) {
+      return kPrivateUseDeviceTypes[i];
+    }
+  }
+  return std::nullopt;
 }
 
 } // namespace c10

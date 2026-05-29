@@ -28,6 +28,7 @@
     :nosignatures:
 
     generate_methods_for_privateuse1_backend
+    register_backend
     rename_privateuse1_backend
 ```
 

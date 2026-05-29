@@ -835,7 +835,22 @@ static PyObject* THModule_rename_privateuse1_backend(
       THPUtils_typename(arg));
   const std::string backend_name = THPUtils_unpackString(arg);
   c10::register_privateuse1_backend(backend_name);
+  at::accelerator::setCurrentAccelerator(c10::DeviceType::PrivateUse1);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_register_privateuse_backend(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkString(arg),
+      "_register_privateuse_backend expects a str, but got ",
+      THPUtils_typename(arg));
+  const std::string backend_name = THPUtils_unpackString(arg);
+  const auto device_type = c10::register_privateuse_backend(backend_name);
+  return THPDevice_New(c10::Device(device_type));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2181,6 +2196,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
+     METH_O,
+     nullptr},
+    {"_register_privateuse_backend",
+     THModule_register_privateuse_backend,
      METH_O,
      nullptr},
     {"_get_privateuse1_backend_name",

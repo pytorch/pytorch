@@ -197,7 +197,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("VE", c10::DeviceType::VE)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("IPU", c10::DeviceType::IPU)
-      .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+      .value("PrivateUse1", c10::DeviceType::PrivateUse1)
+      .value("PrivateUse2", c10::DeviceType::PrivateUse2)
+      .value("PrivateUse3", c10::DeviceType::PrivateUse3);
 
   using torch::autograd::CreationMeta;
   py::enum_<CreationMeta>(m, "CreationMeta")
@@ -330,8 +332,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "activity_type",
           [](const KinetoEvent& e) {
+#ifdef USE_KINETO
             return libkineto::toString(
                 static_cast<libkineto::ActivityType>(e.activityType()));
+#else
+            return std::to_string(e.activityType());
+#endif
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
       // Like shapes/strides, but also contains TensorList input shapes.

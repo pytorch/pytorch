@@ -18,6 +18,14 @@ void initModule(PyObject* module) {
     }
   });
 
+  m.def("_accelerator_setAccelerator", [](c10::Device device) {
+    TORCH_CHECK(
+        !device.has_index(),
+        "Expected a device type without an index for accelerator selection, but got ",
+        device);
+    at::accelerator::setCurrentAccelerator(device.type());
+  });
+
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
     // If device index is negative, no-op
     if (device_index < 0) {

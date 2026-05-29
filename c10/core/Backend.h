@@ -47,10 +47,14 @@ enum class Backend {
   SparseVE,
   SparseXPU,
   SparsePrivateUse1,
+  SparsePrivateUse2,
+  SparsePrivateUse3,
   SparseCsrHIP,
   SparseCsrVE,
   SparseCsrXPU,
   SparseCsrPrivateUse1,
+  SparseCsrPrivateUse2,
+  SparseCsrPrivateUse3,
   MAIA,
   XLA,
   Vulkan,
@@ -60,6 +64,8 @@ enum class Backend {
   QuantizedCUDA,
   QuantizedXPU,
   QuantizedPrivateUse1,
+  QuantizedPrivateUse2,
+  QuantizedPrivateUse3,
   Undefined,
   MkldnnCPU,
   MPS,
@@ -67,6 +73,8 @@ enum class Backend {
   Lazy,
   MTIA,
   PrivateUse1,
+  PrivateUse2,
+  PrivateUse3,
   NumOptions
 };
 
@@ -109,6 +117,10 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseVE;
   } else if (t == DispatchKey::SparsePrivateUse1) {
     return Backend::SparsePrivateUse1;
+  } else if (t == DispatchKey::SparsePrivateUse2) {
+    return Backend::SparsePrivateUse2;
+  } else if (t == DispatchKey::SparsePrivateUse3) {
+    return Backend::SparsePrivateUse3;
   } else if (t == DispatchKey::SparseCsrCPU) {
     return Backend::SparseCsrCPU;
   } else if (t == DispatchKey::SparseCsrCUDA) {
@@ -119,6 +131,10 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCsrVE;
   } else if (t == DispatchKey::SparseCsrPrivateUse1) {
     return Backend::SparseCsrPrivateUse1;
+  } else if (t == DispatchKey::SparseCsrPrivateUse2) {
+    return Backend::SparseCsrPrivateUse2;
+  } else if (t == DispatchKey::SparseCsrPrivateUse3) {
+    return Backend::SparseCsrPrivateUse3;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
@@ -137,6 +153,10 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::QuantizedPrivateUse1) {
     return Backend::QuantizedPrivateUse1;
+  } else if (t == DispatchKey::QuantizedPrivateUse2) {
+    return Backend::QuantizedPrivateUse2;
+  } else if (t == DispatchKey::QuantizedPrivateUse3) {
+    return Backend::QuantizedPrivateUse3;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
   } else if (t == DispatchKey::MTIA || t == DispatchKey::AutogradMTIA) {
@@ -144,6 +164,12 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
   } else if (
       t == DispatchKey::PrivateUse1 || t == DispatchKey::AutogradPrivateUse1) {
     return Backend::PrivateUse1;
+  } else if (
+      t == DispatchKey::PrivateUse2 || t == DispatchKey::AutogradPrivateUse2) {
+    return Backend::PrivateUse2;
+  } else if (
+      t == DispatchKey::PrivateUse3 || t == DispatchKey::AutogradPrivateUse3) {
+    return Backend::PrivateUse3;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -191,6 +217,10 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseVE;
     case Backend::SparsePrivateUse1:
       return DispatchKey::SparsePrivateUse1;
+    case Backend::SparsePrivateUse2:
+      return DispatchKey::SparsePrivateUse2;
+    case Backend::SparsePrivateUse3:
+      return DispatchKey::SparsePrivateUse3;
     case Backend::SparseCsrCPU:
       return DispatchKey::SparseCsrCPU;
     case Backend::SparseCsrCUDA:
@@ -201,6 +231,10 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCsrVE;
     case Backend::SparseCsrPrivateUse1:
       return DispatchKey::SparseCsrPrivateUse1;
+    case Backend::SparseCsrPrivateUse2:
+      return DispatchKey::SparseCsrPrivateUse2;
+    case Backend::SparseCsrPrivateUse3:
+      return DispatchKey::SparseCsrPrivateUse3;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -215,6 +249,10 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::QuantizedCUDA;
     case Backend::QuantizedPrivateUse1:
       return DispatchKey::QuantizedPrivateUse1;
+    case Backend::QuantizedPrivateUse2:
+      return DispatchKey::QuantizedPrivateUse2;
+    case Backend::QuantizedPrivateUse3:
+      return DispatchKey::QuantizedPrivateUse3;
     case Backend::Undefined:
       return DispatchKey::Undefined;
     case Backend::MPS:
@@ -225,6 +263,10 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MTIA;
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
+    case Backend::PrivateUse2:
+      return DispatchKey::PrivateUse2;
+    case Backend::PrivateUse3:
+      return DispatchKey::PrivateUse3;
     default:
       TORCH_CHECK(false, "Unknown backend");
   }
@@ -289,6 +331,16 @@ inline DeviceType backendToDeviceType(Backend b) {
     case Backend::SparseCsrPrivateUse1:
     case Backend::QuantizedPrivateUse1:
       return DeviceType::PrivateUse1;
+    case Backend::PrivateUse2:
+    case Backend::SparsePrivateUse2:
+    case Backend::SparseCsrPrivateUse2:
+    case Backend::QuantizedPrivateUse2:
+      return DeviceType::PrivateUse2;
+    case Backend::PrivateUse3:
+    case Backend::SparsePrivateUse3:
+    case Backend::SparseCsrPrivateUse3:
+    case Backend::QuantizedPrivateUse3:
+      return DeviceType::PrivateUse3;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -336,6 +388,10 @@ inline const char* toString(Backend b) {
       return "SparseXPU";
     case Backend::SparsePrivateUse1:
       return "SparsePrivateUse1";
+    case Backend::SparsePrivateUse2:
+      return "SparsePrivateUse2";
+    case Backend::SparsePrivateUse3:
+      return "SparsePrivateUse3";
     case Backend::SparseCsrCPU:
       return "SparseCsrCPU";
     case Backend::SparseCsrCUDA:
@@ -348,6 +404,10 @@ inline const char* toString(Backend b) {
       return "SparseCsrXPU";
     case Backend::SparseCsrPrivateUse1:
       return "SparseCsrPrivateUse1";
+    case Backend::SparseCsrPrivateUse2:
+      return "SparseCsrPrivateUse2";
+    case Backend::SparseCsrPrivateUse3:
+      return "SparseCsrPrivateUse3";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -364,12 +424,20 @@ inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::QuantizedPrivateUse1:
       return "QuantizedPrivateUse1";
+    case Backend::QuantizedPrivateUse2:
+      return "QuantizedPrivateUse2";
+    case Backend::QuantizedPrivateUse3:
+      return "QuantizedPrivateUse3";
     case Backend::HPU:
       return "HPU";
     case Backend::MTIA:
       return "MTIA";
     case Backend::PrivateUse1:
       return "PrivateUseOne";
+    case Backend::PrivateUse2:
+      return "PrivateUseTwo";
+    case Backend::PrivateUse3:
+      return "PrivateUseThree";
     default:
       return "UNKNOWN_BACKEND";
   }
@@ -384,6 +452,8 @@ inline bool isSparse(Backend b) {
     case Backend::SparseHIP:
     case Backend::SparseVE:
     case Backend::SparsePrivateUse1:
+    case Backend::SparsePrivateUse2:
+    case Backend::SparsePrivateUse3:
       return true;
     default:
       return false;
@@ -398,6 +468,8 @@ inline bool isSparseCsr(Backend b) {
     case Backend::SparseCsrHIP:
     case Backend::SparseCsrVE:
     case Backend::SparseCsrPrivateUse1:
+    case Backend::SparseCsrPrivateUse2:
+    case Backend::SparseCsrPrivateUse3:
       return true;
     default:
       return false;

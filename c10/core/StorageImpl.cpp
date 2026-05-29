@@ -19,10 +19,12 @@ bool StorageImpl::try_incref_pyobject() const noexcept {
 static std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;
 
-// A allowlist of device type, currently available is PrivateUse1
+// A allowlist of device type, currently available is PrivateUse1/2/3
 static ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
   static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
-      DeviceType::PrivateUse1};
+      DeviceType::PrivateUse1,
+      DeviceType::PrivateUse2,
+      DeviceType::PrivateUse3};
   return DeviceTypeAllowList;
 }
 
@@ -68,7 +70,7 @@ void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   TORCH_CHECK(
       DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
       "It is only allowed to register the storageImpl create method ",
-      "for PrivateUse1. ",
+      "for PrivateUse1, PrivateUse2, or PrivateUse3. ",
       "If you have related storageImpl requirements, ",
       "please expand the allowlist");
   // Register function pointer.
