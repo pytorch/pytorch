@@ -268,9 +268,19 @@ AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
 
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateInactiveConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateInactiveConstantBuffer.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
 
 // Free the inactive constant buffer in model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
