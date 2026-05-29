@@ -630,9 +630,9 @@ def get_runner_prefix(
             # literal "ALL" (or empty) makes every workflow eligible. Entries
             # prefixed with "-" are exclusions that take priority, so
             # "ALL,-foo" enables every workflow except "foo".
-            workflow_entries = parse_workflow_list(experiment_settings.workflows)
-            excluded = {e[1:] for e in workflow_entries if e.startswith("-")}
-            included = {e for e in workflow_entries if not e.startswith("-")}
+            workflow_list = parse_workflow_list(experiment_settings.workflows)
+            excluded = {e[1:] for e in workflow_list if e.startswith("-")}
+            included = {e for e in workflow_list if not e.startswith("-")}
             eligible = (
                 not included
                 or WORKFLOW_ALLOWLIST_ALL in included
