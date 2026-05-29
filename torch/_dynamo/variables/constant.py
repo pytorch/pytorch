@@ -143,6 +143,9 @@ class ConstantVariable(VariableTracker):
     def is_python_constant(self) -> Literal[True]:
         return True
 
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        return ConstantVariable.create(repr(self.value))
+
     def is_symnode_like(self) -> bool:
         return isinstance(self.value, (int, bool))
 
