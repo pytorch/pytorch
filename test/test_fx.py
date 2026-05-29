@@ -4849,7 +4849,10 @@ graph():
         keypath to emit the right accessor (``aten.sym_size.int``)."""
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        gm = make_fx(torch.nonzero, tracing_mode="symbolic")(torch.randn(10))
+        def f(x):
+            return torch.nonzero(x)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         nonzero_node = next(
             n
             for n in gm.graph.nodes
