@@ -849,7 +849,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        device_idx = self.codegen_device_idx(device, device_id)
         if buffer_if_can_stack_allocate is not None:
             self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
             cpp_type = DTYPE_TO_CPP[dtype]
