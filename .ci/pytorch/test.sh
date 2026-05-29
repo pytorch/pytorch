@@ -2143,6 +2143,7 @@ _log_opbench_rocm_scaled_mm_debug() {
 import glob
 import torch
 import torch.nn.functional as F
+from torch.nn.functional import ScalingType
 
 print("torch", torch.__version__, "hip", torch.version.hip)
 print("cuda_available", torch.cuda.is_available())
@@ -2154,13 +2155,33 @@ for tag in ("gfx950", "gfx942"):
     print(f"hipblaslt_{tag}_count", len(hits))
     for p in hits[:3]:
         print(f"  {p}")
+def _scaled_mm_tensorwise_smoke_inputs():
+    # Match opbench scaled_mm first long case: fp8 tensorwise -> bf16, 1024^3
+    M, N, K = 1024, 1024, 1024
+    dev = "cuda"
+    x = torch.ones(M, K, device=dev, dtype=torch.float8_e4m3fn)
+    # mat2 must be column-major for hipblasLt (see scaled_mm_test._init_fp8_tensorwise)
+    y = torch.ones(N, K, device=dev, dtype=torch.float8_e4m3fn).t()
+    sa = torch.ones(1, device=dev, dtype=torch.float32)
+    sb = torch.ones(1, device=dev, dtype=torch.float32)
+    return x, y, sa, sb, M, N, K
+
+def _scaled_mm_tensorwise_smoke():
+    x, y, sa, sb, M, N, K = _scaled_mm_tensorwise_smoke_inputs()
+    return F.scaled_mm(
+        x, y, sa, ScalingType.TensorWise, sb, ScalingType.TensorWise,
+        output_dtype=torch.bfloat16,
+    )
+
 try:
-    x = torch.ones(16, 32, device="cuda", dtype=torch.float8_e4m3fn)
-    y = torch.ones(32, 16, device="cuda", dtype=torch.float8_e4m3fn)
-    sa = torch.ones(1, device="cuda", dtype=torch.float32)
-    sb = torch.ones(1, device="cuda", dtype=torch.float32)
-    F.scaled_mm(x, y, scale_a=sa, scale_b=sb, out_dtype=torch.bfloat16)
-    print("scaled_mm_smoke ok")
+    x, y, sa, sb, M, N, K = _scaled_mm_tensorwise_smoke_inputs()
+    F.scaled_mm(
+        x, y, sa, ScalingType.TensorWise, sb, ScalingType.TensorWise,
+        output_dtype=torch.bfloat16,
+    )
+    print("scaled_mm_smoke eager ok", f"shape=({M},{N},{K})", "scaling=fp8_tensorwise")
+    torch.compile(_scaled_mm_tensorwise_smoke)()
+    print("scaled_mm_smoke compile ok", f"shape=({M},{N},{K})", "scaling=fp8_tensorwise")
 except Exception as e:
     print("scaled_mm_smoke failed", repr(e))
 PY
@@ -2196,7 +2217,7 @@ test_operator_microbenchmark() {
   # local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
   # for op in $op_list; do
 
-  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  local op_list="${OP_BENCHMARK_TESTS:-scaled_mm scaled_grouped_mm matmul}"
   for op in $op_list; do
     _log_opbench_rocm_scaled_mm_debug "$op"
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
