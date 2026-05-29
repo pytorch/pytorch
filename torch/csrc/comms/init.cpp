@@ -8,7 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/comms/gloo/TorchCommGloo.hpp>
-#if defined(USE_CUDA) && defined(USE_NCCL)
+#if defined(USE_CUDA) && defined(USE_NCCL) && !defined(USE_ROCM)
 #include <torch/csrc/comms/nccl/TorchCommNCCL.hpp>
 #endif
 
@@ -16,7 +16,7 @@
 // global namespace, matching the translation units that define them.
 void init_comms_bindings(py::module_& m);
 void init_comms_gloo_bindings(py::module_& m);
-#if defined(USE_CUDA) && defined(USE_NCCL)
+#if defined(USE_CUDA) && defined(USE_NCCL) && !defined(USE_ROCM)
 void init_comms_nccl_bindings(py::module_& m);
 #endif
 
@@ -47,7 +47,7 @@ PyObject* comms_init(PyObject* /* unused */, PyObject* /* unused */) {
   init_comms_gloo_bindings(gloo_m);
   register_gloo_backend();
 
-#if defined(USE_CUDA) && defined(USE_NCCL)
+#if defined(USE_CUDA) && defined(USE_NCCL) && !defined(USE_ROCM)
   auto nccl_m = m.def_submodule("_comms_nccl", "NCCL backend bindings");
   init_comms_nccl_bindings(nccl_m);
   register_nccl_backend();

@@ -582,8 +582,10 @@ if(USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
   endif()
-  # torch.comms nccl backend implementation + CUDA device helpers.
-  if(USE_TORCH_COMMS AND USE_NCCL)
+  # torch.comms nccl backend implementation + CUDA device helpers. CUDA-only:
+  # the nccl backend uses CUDA-specific APIs (e.g. CUDART_CB) that do not hipify,
+  # and rccl is out of scope, so it is not built for ROCm.
+  if(USE_TORCH_COMMS AND USE_NCCL AND NOT USE_ROCM)
     append_filelist("libtorch_cuda_comms_sources" Caffe2_GPU_SRCS)
   endif()
   if(USE_DISTRIBUTED)
