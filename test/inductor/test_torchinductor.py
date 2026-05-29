@@ -17386,7 +17386,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn,
             (
                 torch.randn(10, 20, 30, device=self.device),
-                torch.tensor(5.0, device=self.device),
+                torch.tensor(0.25, device=self.device),
             ),
         )
 

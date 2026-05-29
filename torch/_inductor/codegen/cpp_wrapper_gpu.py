@@ -146,12 +146,15 @@ class DeferredTritonCallWrapper:
         self, name: str, arg_type: Any, signature: dict[str, str] | None = None
     ) -> str:
         """Get the C++ parameter declaration for a given arg type."""
+        sig_type = signature.get(name) if signature else None
         if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
             # TMA descriptors need non-const references since their fields
             # are passed as void* pointers to kernel launch args
-            if signature and signature_is_tma_desc(signature.get(name)):
+            if signature_is_tma_desc(sig_type):
                 return f"{name}_type_& {name}"
             return f"const {name}_type_& {name}"
+        elif sig_type in ("fp32", "fp64"):
+            return f"{TRITON_SIGNATURE_TO_CPP[sig_type]} {name}"
         elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
             return f"int64_t {name}"
         elif arg_type is float:
@@ -249,7 +252,13 @@ class DeferredTritonCallWrapper:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
         # Write wrapper function signature
-        self._write_wrapper_signature(prefix, wrapper, def_args, arg_types)
+        self._write_wrapper_signature(
+            prefix,
+            wrapper,
+            def_args,
+            arg_types,
+            params["triton_meta"]["signature"],
+        )
 
         with prefix.indent():
             if V.graph.aot_mode:

@@ -2595,7 +2595,13 @@ class TritonKernelOverrides(TritonOverrides):
             if not isinstance(sym, sympy.Symbol):
                 continue
 
-            if symbol_is_type(sym, TritonSymbols.block_types):
+            if symbol_is_type(sym, scalar_float_types):
+                continue
+            if symbol_is_type(sym, scalar_int_types):
+                name = V.kernel.index_to_str(sym)
+                shape = ()
+                src_dtype = torch.int64
+            elif symbol_is_type(sym, TritonSymbols.block_types):
                 name = sym.name
                 shape = TritonSymbols.get_block_shape(sym)
                 src_dtype = V.kernel.get_index_dtype_as_torch_dtype()
@@ -2604,14 +2610,6 @@ class TritonKernelOverrides(TritonOverrides):
                 shape = src_var.shape
                 src_dtype = src_var.dtype
                 name = sym.name
-            elif symbol_is_type(sym, scalar_int_types):
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-                src_dtype = torch.int64
-            elif symbol_is_type(sym, scalar_float_types):
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-                src_dtype = torch.float64
             else:
                 continue
             if is_integer_dtype(dtype) and src_dtype.is_floating_point:
