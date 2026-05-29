@@ -1414,8 +1414,6 @@ class TestTransformers(NNTestCase):
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
         encoder.train()
-
-        encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
         mask = torch.nn.Transformer.generate_square_subsequent_mask(
