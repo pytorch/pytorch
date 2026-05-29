@@ -98,10 +98,6 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
 
-    def rand4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="rand" using Philox 4x output."""
-        raise NotImplementedError
-
     def rand_eager(
         self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
     ) -> T:
@@ -110,10 +106,6 @@ class OpsHandler(Generic[T]):
 
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
-        raise NotImplementedError
-
-    def randn4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="randn" using Philox 4x output."""
         raise NotImplementedError
 
     def randint64(self, seed: T, offset: T, low: T, high: T) -> T:
