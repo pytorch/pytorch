@@ -86,10 +86,50 @@ class TestOnlineSoftmax(TestCase):
 
     @parametrize("V", [2048, 50304])
     @parametrize("use_log_softmax", [False, True])
+    @inductor_config.patch(large_non_online_softmax=True)
     def test_codegen_online_softmax(self, use_log_softmax, V):
         wrapper_code = self.get_softmax_wrapper(use_log_softmax=use_log_softmax, V=V)
 
-        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+        if V >= inductor_config.large_non_online_softmax_min_rnumel:
+            self.assertNotIn("online_softmax_reduce", wrapper_code)
+            self.assertEqual(wrapper_code.count("for r0_offset in"), 3)
+        else:
+            self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+
+    @parametrize("fn", [torch.softmax, torch.log_softmax])
+    @inductor_config.patch(large_non_online_softmax=True)
+    def test_codegen_huge_softmax_uses_non_online(self, fn):
+        @torch.compile
+        def f(x):
+            return fn(x, dim=-1)
+
+        x = torch.randn(1024, 8192, dtype=torch.bfloat16, device=GPU_TYPE)
+        _out, (code,) = run_and_get_code(f, x)
+        self.assertNotIn("online_softmax_reduce", code)
+        self.assertEqual(code.count("for r0_offset in"), 3)
+
+    @inductor_config.patch(large_non_online_softmax=False)
+    def test_codegen_huge_softmax_can_force_online(self):
+        @torch.compile
+        def f(x):
+            return torch.softmax(x, dim=-1)
+
+        x = torch.randn(1024, 8192, dtype=torch.bfloat16, device=GPU_TYPE)
+        _out, (code,) = run_and_get_code(f, x)
+        self.assertIn("online_softmax_reduce", code)
+        self.assertEqual(code.count("for r0_offset in"), 2)
+
+    @inductor_config.patch(large_non_online_softmax=True)
+    def test_codegen_huge_softmax_with_final_sum_uses_non_online(self):
+        @torch.compile
+        def f(x):
+            return torch.softmax(x, dim=-1).sum()
+
+        x = torch.randn(1024, 8192, dtype=torch.bfloat16, device=GPU_TYPE)
+        _out, codes = run_and_get_code(f, x)
+        code = "\n".join(codes)
+        self.assertNotIn("online_softmax_reduce", code)
+        self.assertIn("triton_helpers.max2", code)
 
     def test_no_online_softmax_for_cpu(self):
         code = self.get_softmax_wrapper(V=2048, device="cpu")

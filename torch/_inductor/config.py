@@ -218,6 +218,21 @@ cpp_cache_precompile_headers: bool = (
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
+large_non_online_softmax = (
+    os.environ.get("TORCHINDUCTOR_LARGE_NON_ONLINE_SOFTMAX", "1") == "1"
+)
+large_non_online_softmax_min_xnumel = int(
+    os.environ.get("TORCHINDUCTOR_LARGE_NON_ONLINE_SOFTMAX_MIN_XNUMEL", "1024")
+)
+large_non_online_softmax_min_rnumel = int(
+    os.environ.get("TORCHINDUCTOR_LARGE_NON_ONLINE_SOFTMAX_MIN_RNUMEL", "8192")
+)
+large_non_online_softmax_max_input_numel = int(
+    os.environ.get(
+        "TORCHINDUCTOR_LARGE_NON_ONLINE_SOFTMAX_MAX_INPUT_NUMEL", str(1 << 31)
+    )
+)
+
 apply_gumbel_max_trick = (
     os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
 )
