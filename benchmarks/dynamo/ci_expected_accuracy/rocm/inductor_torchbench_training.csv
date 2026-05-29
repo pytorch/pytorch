@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,pass,7
 
 
 
@@ -86,19 +86,19 @@ llava,model_fail_to_load,0
 
 
 
-maml_omniglot,pass,7
+maml_omniglot,fail_accuracy,8
 
 
 
-microbench_unbacked_tolist_sum,pass,9
+microbench_unbacked_tolist_sum,pass,10
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,8
 
 
 
-mobilenet_v2,pass,6
+mobilenet_v2,pass,7
 
 
 
@@ -106,15 +106,15 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,8
 
 
 
-moco,pass,13
+moco,pass,15
 
 
 
-nanogpt,pass,7
+nanogpt,pass,8
 
 
 
@@ -153,7 +153,7 @@ resnet18,pass,6
 
 
 
-resnet50,pass,6
+resnet50,pass,7
 
 
 
@@ -201,11 +201,11 @@ tts_angular,pass,9
 
 
 
-vgg16,pass,0
+vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,fail_to_run,39
 
 
 

@@ -2,11 +2,11 @@ name,accuracy,graph_breaks
 
 
 
-adv_inception_v3,pass,6
+adv_inception_v3,pass,7
 
 
 
-beit_base_patch16_224,pass,7
+beit_base_patch16_224,pass,8
 
 
 
@@ -18,11 +18,11 @@ deit_base_distilled_patch16_224,pass,7
 
 
 
-deit_tiny_patch16_224.fb_in1k,pass,7
+deit_tiny_patch16_224.fb_in1k,fail_accuracy,7
 
 
 
-dm_nfnet_f0,pass,6
+dm_nfnet_f0,pass,7
 
 
 
@@ -30,7 +30,7 @@ ghostnet_100,pass,6
 
 
 
-inception_v3,pass,6
+inception_v3,pass,7
 
 
 
@@ -42,7 +42,7 @@ mobilenetv3_large_100,pass,7
 
 
 
-mobilevit_s,pass,6
+mobilevit_s,pass,7
 
 
 
@@ -54,7 +54,7 @@ repvgg_a2,pass,7
 
 
 
-swin_base_patch4_window7_224,pass,7
+swin_base_patch4_window7_224,fail_accuracy,7
 
 
 
