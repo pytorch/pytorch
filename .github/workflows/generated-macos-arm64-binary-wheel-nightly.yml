@@ -39,7 +39,7 @@ jobs:
   wheel-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-26-xlarge
-    timeout-minutes: 240
+    timeout-minutes: 280
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
