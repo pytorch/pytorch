@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import collections
 import functools
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -42,6 +42,83 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+
+def _safe_metadata_repr(obj: object, visited: set[int] | None = None) -> str:
+    if visited is None:
+        visited = set()
+
+    obj_id = id(obj)
+    if obj_id in visited:
+        return "..."
+
+    if is_dataclass(obj) and not isinstance(obj, type):
+        visited.add(obj_id)
+        try:
+            field_reprs = []
+            for obj_field in fields(obj):
+                if obj_field.repr:
+                    try:
+                        field_value = getattr(obj, obj_field.name)
+                    except AttributeError:
+                        field_reprs.append(f"{obj_field.name}=<missing>")
+                        continue
+                    except Exception as e:
+                        try:
+                            exc_str = str(e)
+                        except Exception:
+                            exc_str = "<exception str() failed>"
+                        field_reprs.append(
+                            f"{obj_field.name}=<unprintable field: "
+                            f"{type(e).__name__}: {exc_str}>"
+                        )
+                        continue
+                    field_reprs.append(
+                        f"{obj_field.name}={_safe_metadata_repr(field_value, visited)}"
+                    )
+            return f"{type(obj).__name__}({', '.join(field_reprs)})"
+        finally:
+            visited.remove(obj_id)
+
+    if isinstance(obj, list):
+        visited.add(obj_id)
+        try:
+            return f"[{', '.join(_safe_metadata_repr(x, visited) for x in obj)}]"
+        finally:
+            visited.remove(obj_id)
+
+    if isinstance(obj, tuple):
+        visited.add(obj_id)
+        try:
+            elems = [_safe_metadata_repr(x, visited) for x in obj]
+            if len(elems) == 1:
+                return f"({elems[0]},)"
+            return f"({', '.join(elems)})"
+        finally:
+            visited.remove(obj_id)
+
+    if isinstance(obj, dict):
+        visited.add(obj_id)
+        try:
+            return (
+                "{"
+                + ", ".join(
+                    f"{_safe_metadata_repr(k, visited)}: {_safe_metadata_repr(v, visited)}"
+                    for k, v in obj.items()
+                )
+                + "}"
+            )
+        finally:
+            visited.remove(obj_id)
+
+    try:
+        return repr(obj)
+    except Exception as e:
+        try:
+            exc_str = str(e)
+        except Exception:
+            exc_str = "<exception str() failed>"
+        return f"<unprintable {type(obj).__name__}: {type(e).__name__}: {exc_str}>"
 
 
 OutputType = Enum(
@@ -279,6 +356,9 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+
+    def __repr__(self) -> str:
+        return _safe_metadata_repr(self)
 
     def compute_outer_size_and_stride(
         self,
@@ -553,6 +633,9 @@ class ViewAndMutationMeta:
 
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
+
+    def __repr__(self) -> str:
+        return _safe_metadata_repr(self)
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
@@ -885,6 +968,9 @@ class SubclassMeta:
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
+
+    def __repr__(self) -> str:
+        return _safe_metadata_repr(self)
 
 
 # This class exists because:
