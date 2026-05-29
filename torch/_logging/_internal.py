@@ -1060,6 +1060,8 @@ class _StderrHandler(logging.StreamHandler):
     """A StreamHandler that always writes to the current sys.stderr."""
 
     def __init__(self) -> None:
+        # StreamHandler.__init__(stream=None) snapshots sys.stderr, which can
+        # later be a closed pytest capture stream.
         logging.Handler.__init__(self)
         self.stream = None
 
