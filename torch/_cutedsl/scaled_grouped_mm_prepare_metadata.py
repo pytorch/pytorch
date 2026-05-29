@@ -4,7 +4,9 @@ from torch._cutedsl._compile_with_safe_names import _compile_with_safe_names
 
 
 @functools.cache
-def _compile_scaled_grouped_mm_prepare_metadata(a_is_2d: bool, b_is_2d: bool):
+def _compile_scaled_grouped_mm_prepare_metadata(
+    a_is_2d: bool, b_is_2d: bool, threads_per_block: int
+):
     import cuda.bindings.driver as cuda
     import cutlass
     import cutlass.cute as cute
@@ -267,7 +269,7 @@ def _compile_scaled_grouped_mm_prepare_metadata(a_is_2d: bool, b_is_2d: bool):
         out_strides_abc: cute.Tensor,
         out_nclusters: cute.Tensor,
         num_blocks: cutlass.Int32,
-        threads_per_block: cutlass.Int32,
+        threads_per_block: cutlass.Constexpr[int],
         stream: cuda.CUstream,
     ):
         _scaled_grouped_mm_prepare_metadata_kernel(
@@ -359,7 +361,7 @@ def _compile_scaled_grouped_mm_prepare_metadata(a_is_2d: bool, b_is_2d: bool):
             out_strides_abc=fake_strides_abc,
             out_nclusters=fake_nclusters,
             num_blocks=1,
-            threads_per_block=1,
+            threads_per_block=threads_per_block,
             stream=fake_stream,
             options="--enable-assertions --enable-tvm-ffi",
         )

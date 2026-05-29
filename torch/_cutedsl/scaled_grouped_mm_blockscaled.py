@@ -956,7 +956,7 @@ def scaled_grouped_mm_blockscaled(
         cluster_tile_m = cta_tile_m * config.cluster_shape_mn[0]
         cluster_tile_n = config.mma_tile_mn[1] * config.cluster_shape_mn[1]
     scaled_grouped_mm_prepare_metadata_compiled = (
-        _compile_scaled_grouped_mm_prepare_metadata(a_is_2d, b_is_2d)
+        _compile_scaled_grouped_mm_prepare_metadata(a_is_2d, b_is_2d, threads_per_block)
     )
 
     import cuda.bindings.driver as cuda_driver
@@ -1026,7 +1026,6 @@ def scaled_grouped_mm_blockscaled(
         strides_abc,
         total_num_clusters,
         num_blocks,
-        threads_per_block,
         stream,
     )
 
