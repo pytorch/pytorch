@@ -708,7 +708,7 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
  torch._dynamo.replay('{exc.record_filename}').\n"
         )
 
-    if not config.verbose and hasattr(exc, "real_stack"):
+    if not config.verbose and real_stack is not None:
         msg += (
             "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
             "(please do this especially if you're reporting a bug to PyTorch). "
@@ -733,6 +733,8 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     old_msg = augment_exc_message_with_hop_name(exc, old_msg)
+    if msg == "\n":
+        msg = ""
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]

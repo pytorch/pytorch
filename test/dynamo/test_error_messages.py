@@ -14,7 +14,12 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
+from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    ResumePrologueTracingError,
+    TorchRuntimeError,
+    Unsupported,
+)
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
@@ -1080,6 +1085,30 @@ from user code:
 
 """,
         )
+
+    def test_backend_compiler_failed_no_verbose_hint(self):
+        def bad_backend(gm, example_inputs):
+            raise TypeError("'NoneType' object is not iterable")
+
+        def fn(x):
+            return x + 1
+
+        # assertRaises suppresses the traceback, so manually catch
+        e = None
+        try:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(1))
+        except BackendCompilerFailed as exn:
+            e = exn
+        finally:
+            torch._dynamo.reset()
+
+        self.assertIsNotNone(e)
+
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        self.assertIn("BackendCompilerFailed: backend='bad_backend' raised:", msg)
+        self.assertIn("TypeError: 'NoneType' object is not iterable", msg)
+        self.assertIn("in bad_backend", msg)
+        self.assertNotIn("TORCHDYNAMO_VERBOSE=1", msg)
 
     @make_logging_test(graph_breaks=True)
     def test_graph_break_in_loop(self, records):
