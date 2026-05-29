@@ -784,6 +784,8 @@ class SideEffects:
         base_cls_vt: VariableTracker,
         cls_vt: VariableTracker,
         init_args: list[VariableTracker],
+        *,
+        tx: "InstructionTranslatorBase | None" = None,
     ) -> VariableTracker:
         """
         Creates a UserDefinedObjectVariable (or its subclass) variable tracker
@@ -798,12 +800,16 @@ class SideEffects:
         variable_cls = self.get_variable_cls(user_cls)
         obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
 
+        kwargs: dict[str, Any] = {}
+        if tx is not None:
+            kwargs["tx"] = tx
         variable = variable_cls(
             obj,
             cls_source=cls_vt.source,
             base_cls_vt=base_cls_vt,
             init_args=init_args,
             mutation_type=AttributeMutationNew(cls_source),
+            **kwargs,
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)

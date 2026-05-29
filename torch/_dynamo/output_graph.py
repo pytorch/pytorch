@@ -1670,7 +1670,7 @@ class OutputGraph(OutputGraphCommon):
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
                 return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
-                    proxy, fake_script_obj, **options
+                    proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
             # HACKY CODE REGION END
