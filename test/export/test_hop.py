@@ -89,6 +89,7 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/178177")
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
@@ -106,6 +107,7 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/178077")
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_serialize_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
