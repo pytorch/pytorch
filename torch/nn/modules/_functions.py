@@ -50,7 +50,7 @@ class SyncBatchNorm(Function):
         else:
             # for empty input, set stats and the count to zero. The stats with
             # zero count will be filtered out later when computing global mean
-            # & invstd, but they still needs to participate the all_gather
+            # & invstd, but they still need to participate in the all_gather
             # collective communication to unblock other peer processes.
             combined = torch.zeros(
                 2 * num_channels + 1, dtype=input.dtype, device=input.device

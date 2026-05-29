@@ -1672,7 +1672,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """

@@ -101,7 +101,7 @@ class ConstantFolder(torch.fx.Interpreter):
         self.skip_folding_node_fn = skip_folding_node_fn
 
     def _support_dynamic_shape(self) -> bool:
-        # ConstantFolder not support dynamic shape now
+        # ConstantFolder does not support dynamic shape now
         return False
 
     def _deduce_value(self, node: torch.fx.Node) -> Any:

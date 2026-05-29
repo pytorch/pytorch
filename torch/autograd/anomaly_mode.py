@@ -17,7 +17,7 @@ class detect_anomaly:
     - Running the forward pass with detection enabled will allow the backward
       pass to print the traceback of the forward operation that created the failing
       backward function.
-    - If ``check_nan`` is ``True``, any backward computation that generate "nan"
+    - If ``check_nan`` is ``True``, any backward computation that generates "nan"
       value will raise an error. Default ``True``.
 
     .. warning::
@@ -107,7 +107,7 @@ class set_detect_anomaly:
         mode (bool): Flag whether to enable anomaly detection (``True``),
                      or disable (``False``).
         check_nan (bool): Flag whether to raise an error when the backward
-                          generate "nan"
+                          generates "nan"
 
     """
 

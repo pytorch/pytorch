@@ -180,7 +180,7 @@ class ModTracker:
                 # pyrefly: ignore [bad-assignment]
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
-                    "The module hierarchy tracking maybe be messed up."
+                    "The module hierarchy tracking may be messed up."
                     " Please file a bug to PyTorch, if it is the case.",
                     stacklevel=2,
                 )

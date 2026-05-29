@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
-# Python GC has done its job to delete those RRefs. This is could result in bad
+# Python GC has done its job to delete those RRefs. This could result in bad
 # debugging experiences especially when for large applications. Therefore, by
 # default, we are going to ignore RRef leaks during shutdown. This is usually
 # fine as shutdown means applications have done training and no longer care
@@ -239,7 +239,7 @@ def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
         # Signal and RPC timeout use the same timeout
         signal_timeout = rpc_timeout = timeout
 
-    # Phase 1: Followers send it's object to the leader
+    # Phase 1: Followers send its object to the leader
     if is_leader:
         _gather_to_leader(sequence_id, self_name, obj, worker_names)
     else:
@@ -432,7 +432,7 @@ def get_worker_info(worker_name=None):
     expensive string on every invocation.
 
     Args:
-        worker_name (str): the string name of a worker. If ``None``, return the
+        worker_name (str): the string name of a worker. If ``None``, return
                            the id of the current worker. (default ``None``)
 
     Returns:

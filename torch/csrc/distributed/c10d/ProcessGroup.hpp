@@ -112,7 +112,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       case BackendType::CUSTOM:
         return "custom";
       default:
-        TORCH_CHECK(false, "THis should never happen!");
+        TORCH_CHECK(false, "This should never happen!");
     }
   }
 
@@ -217,7 +217,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     int64_t,
                     bool,
                     int64_t)>();
-    // It's awakward to unbox the opts here and box them again in the custom C++
+    // It's awkward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
     auto work = std::get<1>(op.call(

@@ -399,7 +399,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
 
     Args:
         module (nn.Module): module into which to inject the property
-        tensor_name (str): name of the name of the property to create
+        tensor_name (str): name of the property to create
     """
     # We check the precondition.
     # This should never fire if register_parametrization is correctly implemented
@@ -759,9 +759,9 @@ def remove_parametrizations(
                         raise RuntimeError(
                             "Calling remove_parametrizations() with leave_parametrized=True "
                             "for a parameter that is an instance of a tensor subclass requires "
-                            "set_() to be implemented correctly for the tensor subclass."
-                            "Alternatively, one can opt into the swap_tensors path"
-                            "Either set leave_parametrized=False or provide a working implementation"
+                            "set_() to be implemented correctly for the tensor subclass. "
+                            "Alternatively, one can opt into the swap_tensors path. "
+                            "Either set leave_parametrized=False or provide a working implementation "
                             "for set_() in the tensor subclass or set "
                             "torch.__future__.set_swap_module_params_on_conversion(True)."
                         ) from e

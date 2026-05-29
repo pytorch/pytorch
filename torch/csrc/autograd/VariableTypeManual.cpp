@@ -254,7 +254,7 @@ const Tensor& resize_(
   }
 
   if (self._fw_grad(/* level */ 0).defined()) {
-    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
+    TORCH_CHECK(false, "cannot resize variables that have a forward grad");
   }
 
   return self;
@@ -281,7 +281,7 @@ const Tensor& resize_as_(
 
   // Handle fw grad
   if (self._fw_grad(/* level */ 0).defined()) {
-    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
+    TORCH_CHECK(false, "cannot resize variables that have a forward grad");
   }
 
   return self;

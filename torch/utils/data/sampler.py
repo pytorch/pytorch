@@ -34,7 +34,7 @@ class Sampler(Generic[_T_co]):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> class AccedingSequenceLengthSampler(Sampler[int]):
+        >>> class AscendingSequenceLengthSampler(Sampler[int]):
         >>>     def __init__(self, data: List[str]) -> None:
         >>>         self.data = data
         >>>
@@ -45,7 +45,7 @@ class Sampler(Generic[_T_co]):
         >>>         sizes = torch.tensor([len(x) for x in self.data])
         >>>         yield from torch.argsort(sizes).tolist()
         >>>
-        >>> class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
+        >>> class AscendingSequenceLengthBatchSampler(Sampler[List[int]]):
         >>>     def __init__(self, data: List[str], batch_size: int) -> None:
         >>>         self.data = data
         >>>         self.batch_size = batch_size
