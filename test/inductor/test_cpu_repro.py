@@ -387,6 +387,28 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_comp.grad, grad_x_eager)
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
+    def test_compile_dynamic_grad_conv_transpose2d(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181175
+        batch_norm = torch.nn.BatchNorm2d(5).eval()
+        conv_transpose = torch.nn.ConvTranspose2d(5, 2, 3)
+        max_pool = torch.nn.MaxPool2d(2)
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 5, 14, 15)
+
+        def fn(x):
+            y = batch_norm(x)
+            y = conv_transpose(y)
+            y = max_pool(y)
+            return torch.softmax(y, dim=0).mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        result = compiled(x)
+        torch.testing.assert_close(result, expected)
+
     @config.patch(freezing=True)
     @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
@@ -5360,7 +5382,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(37)
+        x = torch.rand(31)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
