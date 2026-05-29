@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Stores the last error message from a failed AOTI runtime call so that
@@ -57,6 +58,21 @@ struct AOTINoGradGuard {
   AOTINoGradGuard& operator=(AOTINoGradGuard&&) noexcept = delete;
   bool prev_mode{aoti_torch_grad_mode_is_enabled()};
 };
+
+namespace {
+
+std::unordered_map<std::string, AtenTensorHandle> constant_map_from_pairs(
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  std::unordered_map<std::string, AtenTensorHandle> input_map;
+  input_map.reserve(num_pairs);
+  for (size_t i = 0; i < num_pairs; ++i) {
+    input_map.emplace(pairs[i].name, pairs[i].handle);
+  }
+  return input_map;
+}
+
+} // namespace
 
 extern "C" {
 
@@ -313,6 +329,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->update_constant_buffer(
         *input_map, use_inactive, validate_full_update);
+  })
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = constant_map_from_pairs(pairs, num_pairs);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map, use_inactive, validate_full_update);
   })
 }
 
