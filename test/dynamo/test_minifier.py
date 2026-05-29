@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+from unittest.mock import MagicMock, patch
+
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -178,6 +180,73 @@ class Repro(torch.nn.Module):
         return (x_20,)""",
         )
 
+
+class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
+    def _make_options(
+        self, accuracy="", autocast=False, backend="eager", only_fwd=True
+    ):
+        import argparse
+
+        return argparse.Namespace(
+            accuracy=accuracy,
+            autocast=autocast,
+            backend=backend,
+            only_fwd=only_fwd,
+        )
+
+    def test_repro_minify_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_minify
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options()
+
+        def fake_compiler(gm, example_inputs, compiler_name=None):
+            return gm.forward
+
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=fake_compiler,
+            ),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_minify(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+    def test_repro_run_accuracy_branch_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_run
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options(accuracy="strict")
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch(
+                "torch._dynamo.repro.after_dynamo.same_two_models", return_value=True
+            ),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_run(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+
+instantiate_device_type_tests(TestAutocastDeviceDetection, globals(), allow_xpu=True)
 
 instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)
 
