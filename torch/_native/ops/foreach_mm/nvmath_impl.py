@@ -38,48 +38,69 @@ def _set_attr(setter, handle, attr, val, ctype):
 
 
 class ForeachMMCublasLt:
-    """Cached cublasLt grouped GEMM for repeated same-shape calls."""
+    """Cached cublasLt grouped GEMM. Supports uniform or mixed shapes per group."""
 
     def __init__(
         self,
-        M,
-        N,
-        K,
+        shapes,
         G,
         a_row_major=True,
         b_row_major=True,
         dtype=torch.bfloat16,
         device="cuda",
     ):
+        """
+        Args:
+            shapes: tuple of (M, N, K) triples, one per group
+            G: number of groups (must equal len(shapes))
+        """
         if dtype != torch.bfloat16:
             raise ValueError(f"ForeachMMCublasLt only supports bf16, got {dtype}")
 
         self.G = G
-        self.M, self.N = M, N
-        elem_size = 2  # bf16
+        self._dtype = dtype
+        elem_size = dtype.itemsize
         alignment = 16 // elem_size
-        self.N_padded = (N + alignment - 1) // alignment * alignment
-        self._out_stride_bytes = M * self.N_padded * elem_size
 
-        # cuBLAS col-major: we compute C^T = mat2^T * self^T
+        # cuBLAS col-major: C^T = mat2^T * self^T
         # cuBLAS-A = mat2, cuBLAS-B = self
-        # Row-major matrix seen as col-major without transpose -> OP_N
-        # Col-major matrix seen as col-major transposed -> OP_T
         opa = Operation.N if b_row_major else Operation.T
         opb = Operation.N if a_row_major else Operation.T
-        lda = N if b_row_major else K
-        ldb = K if a_row_major else M
 
-        # Device-side dim arrays (constant across calls)
+        # Per-group dimensions
+        Ms, Ns, Ks = zip(*shapes)
+        ldas = [n if b_row_major else k for n, k in zip(Ns, Ks)]
+        ldbs = [k if a_row_major else m for m, k in zip(Ms, Ks)]
+        N_paddeds = [(n + alignment - 1) // alignment * alignment for n in Ns]
+
+        for vals in (Ms, Ns, Ks, ldas, ldbs, N_paddeds):
+            for v in vals:
+                if v > 2**31 - 1:
+                    raise ValueError(
+                        f"ForeachMMCublasLt: dimension {v} exceeds int32 range"
+                    )
+
+        # Per-group output layout: allocate one contiguous buffer with
+        # max(M) x max(N_padded) per group, then narrow each slice to actual (M, N)
+        self._out_Ns = Ns
+        self._out_Ms = Ms
+        self._out_N_paddeds = N_paddeds
+        self._max_M = max(Ms)
+        self._max_N_padded = max(N_paddeds)
+        self._out_stride_bytes = self._max_M * self._max_N_padded * elem_size
+        self._uniform = len(set(Ms)) == 1 and len(set(Ns)) == 1
+        # ldd must match the physical stride in the contiguous output buffer
+        N_paddeds = [self._max_N_padded] * G
+
+        # Device-side dim arrays (6 x G)
         # cublas_m=N, cublas_n=M, cublas_k=K
-        dims = (
-            torch.tensor(
-                [N, M, K, lda, ldb, self.N_padded] * G,
-                dtype=torch.int32,
-                device=device,
-            )
-            .reshape(G, 6)
-            .T.contiguous()
+        cublas_ms = list(Ns)
+        cublas_ns = list(Ms)
+        cublas_ks = list(Ks)
+        dims = torch.tensor(
+            [cublas_ms, cublas_ns, cublas_ks, ldas, ldbs, N_paddeds],
+            dtype=torch.int32,
+            device=device,
         )
         d_m, d_n, d_k, d_lda, d_ldb, d_ldd = [dims[i] for i in range(6)]
 
@@ -142,10 +163,13 @@ class ForeachMMCublasLt:
             CUBLASLT_WORKSPACE_BYTES,
             ctypes.c_uint64,
         )
+        avg_N = sum(Ns) // G
+        avg_M = sum(Ms) // G
+        avg_K = sum(Ks) // G
         for attr, val in [
-            (Attr.GROUPED_DESC_D_AVERAGE_ROWS, N),
-            (Attr.GROUPED_DESC_D_AVERAGE_COLS, M),
-            (Attr.GROUPED_AVERAGE_REDUCTION_DIM, K),
+            (Attr.GROUPED_DESC_D_AVERAGE_ROWS, avg_N),
+            (Attr.GROUPED_DESC_D_AVERAGE_COLS, avg_M),
+            (Attr.GROUPED_AVERAGE_REDUCTION_DIM, avg_K),
         ]:
             _set_attr(
                 cublasLt.matmul_preference_set_attribute,
@@ -179,14 +203,19 @@ class ForeachMMCublasLt:
 
         # Cached pointer offsets into _dev_ptrs
         base = self._dev_ptrs.data_ptr()
+        ptr_size = torch.int64.itemsize
         self._dev_Aptr = base
-        self._dev_Bptr = base + G * 8
-        self._dev_Dptr = base + 2 * G * 8
+        self._dev_Bptr = base + G * ptr_size
+        self._dev_Dptr = base + 2 * G * ptr_size
 
     def __call__(self, self_list, mat2_list):
         G = self.G
+        max_M = self._max_M
+        max_Np = self._max_N_padded
+
+        # Single contiguous allocation, sliced per group
         out_buf = torch.empty(
-            G, self.M, self.N_padded, dtype=torch.bfloat16, device=self._dev_ptrs.device
+            G, max_M, max_Np, dtype=self._dtype, device=self._dev_ptrs.device
         )
 
         # Fill pinned host buffer with device pointers, async copy to GPU
@@ -218,10 +247,15 @@ class ForeachMMCublasLt:
             torch.cuda.current_stream().cuda_stream,
         )
 
+        # unbind is a single C++ call creating all G views at once.
+        # Narrow only when output shape differs from the buffer slot size.
         results = out_buf.unbind(0)
-        if self.N != self.N_padded:
-            return [r.narrow(1, 0, self.N) for r in results]
-        return list(results)
+        if self._uniform:
+            M, N = self._out_Ms[0], self._out_Ns[0]
+            if M != self._max_M or N != self._max_N_padded:
+                return [r[:M, :N] for r in results]
+            return list(results)
+        return [r[: self._out_Ms[i], : self._out_Ns[i]] for i, r in enumerate(results)]
 
     def __del__(self):
         for attr in ("_Dd", "_Bd", "_Ad"):

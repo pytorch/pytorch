@@ -22,6 +22,7 @@ Dispatch:
 import warnings
 
 import torch
+from torch._prims_common import is_non_overlapping_and_dense_or_false
 
 from ... import registry
 from ...common_utils import _unavailable_reason
@@ -63,30 +64,29 @@ def _foreach_mm_cond(
         return False
     if first_a.dtype != torch.bfloat16 or first_b.dtype != torch.bfloat16:
         return False
-    # Must be either row-major (stride(-1)==1) or column-major (stride(0)==1)
-    if not (first_a.stride(0) == 1 or first_a.stride(1) == 1):
-        return False
-    if not (first_b.stride(0) == 1 or first_b.stride(1) == 1):
-        return False
-
     props = torch.cuda.get_device_properties(first_a.device)
     if props.major < 9:
         return False
 
-    # All tensors must have the same shape, stride, dtype, and device
-    M, K = first_a.shape
-    if first_b.size(0) != K:
-        return False
-    for i in range(1, len(self)):
+    first_a_rm = first_a.stride(-1) == 1
+    first_b_rm = first_b.stride(-1) == 1
+
+    for i in range(len(self)):
         a, b = self[i], mat2[i]
-        if a.shape != first_a.shape or b.shape != first_b.shape:
+        if a.size(1) != b.size(0):
             return False
-        if a.stride() != first_a.stride() or b.stride() != first_b.stride():
+        # cuBLAS errors on self-overlapping memory
+        if not is_non_overlapping_and_dense_or_false(a):
             return False
-        if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
+        if not is_non_overlapping_and_dense_or_false(b):
             return False
-        if a.device != first_a.device or b.device != first_b.device:
-            return False
+        if i > 0:
+            if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
+                return False
+            if a.device != first_a.device or b.device != first_b.device:
+                return False
+            if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
+                return False
 
     return True
 
@@ -117,15 +117,14 @@ def _foreach_mm_impl_nvmath(
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
     G = len(self)
-    first_a, first_b = self[0], mat2[0]
-    M, K = first_a.shape
-    N = first_b.size(1)
+    first_a = self[0]
     a_row_major = first_a.stride(-1) == 1
-    b_row_major = first_b.stride(-1) == 1
-    key = (M, N, K, G, a_row_major, b_row_major, first_a.device)
+    b_row_major = mat2[0].stride(-1) == 1
+    shapes = tuple((a.size(0), b.size(1), a.size(1)) for a, b in zip(self, mat2))
+    key = (shapes, a_row_major, b_row_major, first_a.device)
     if key not in _nvmath_cache:
         _nvmath_cache[key] = _get_nvmath_cls()(
-            M, N, K, G, a_row_major=a_row_major, b_row_major=b_row_major
+            shapes, G, a_row_major=a_row_major, b_row_major=b_row_major
         )
     return _nvmath_cache[key](self, mat2)  # pyrefly: ignore[not-callable]
 
