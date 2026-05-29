@@ -115,19 +115,24 @@ def check_perf_csv(
         eager_peak_mem = _read_optional_float(row, "eager_peak_mem")
         dynamo_peak_mem = _read_optional_float(row, "dynamo_peak_mem")
 
-        perf_summary = f"{model_name:34}"
+        perf_details = []
         if speedup is not None:
-            perf_summary += f" speedup={speedup:.3f}x"
+            perf_details.append(f"speedup={speedup:.3f}x")
         if abs_latency is not None:
-            perf_summary += f", latency={abs_latency:.1f} ms/iter"
+            perf_details.append(f"latency={abs_latency:.1f} ms/iter")
         if compilation_latency is not None:
-            perf_summary += f", compile={compilation_latency:.3f}s"
+            perf_details.append(f"compile={compilation_latency:.3f}s")
         if compression_ratio is not None and compression_ratio != 0:
-            perf_summary += f", mem_ratio={1 / compression_ratio:.2f}x"
+            memory_summary = f"mem_ratio={1 / compression_ratio:.2f}x"
             if eager_peak_mem is not None and dynamo_peak_mem is not None:
-                perf_summary += (
+                memory_summary += (
                     f" (eager={eager_peak_mem:.1f} GB, dynamo={dynamo_peak_mem:.1f} GB)"
                 )
+            perf_details.append(memory_summary)
+
+        perf_summary = f"{model_name:34}"
+        if perf_details:
+            perf_summary += f" {', '.join(perf_details)}"
 
         if metric == "speedup":
             if metric_value < regression_bound:

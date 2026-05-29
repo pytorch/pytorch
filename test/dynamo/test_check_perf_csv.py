@@ -31,26 +31,25 @@ CSV_COLUMNS = [
 
 
 @contextlib.contextmanager
-def _perf_csv(speedup, abs_latency=10.0):
+def _perf_csv(speedup, abs_latency=10.0, columns=CSV_COLUMNS):
     fd, path = tempfile.mkstemp(suffix=".csv")
     os.close(fd)
     try:
         with open(path, "w", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
+            writer = csv.DictWriter(csv_file, fieldnames=columns)
             writer.writeheader()
-            writer.writerow(
-                {
-                    "dev": "cpu",
-                    "name": "test_model",
-                    "batch_size": 1,
-                    "speedup": speedup,
-                    "abs_latency": abs_latency,
-                    "compilation_latency": 0.1,
-                    "compression_ratio": 1.0,
-                    "eager_peak_mem": 1.0,
-                    "dynamo_peak_mem": 1.0,
-                }
-            )
+            row = {
+                "dev": "cpu",
+                "name": "test_model",
+                "batch_size": 1,
+                "speedup": speedup,
+                "abs_latency": abs_latency,
+                "compilation_latency": 0.1,
+                "compression_ratio": 1.0,
+                "eager_peak_mem": 1.0,
+                "dynamo_peak_mem": 1.0,
+            }
+            writer.writerow({column: row[column] for column in columns})
         yield path
     finally:
         os.remove(path)
@@ -128,6 +127,31 @@ class CheckPerfCsvTest(TestCase):
         )
         self.assertIn("performance regressed", regression)
         self.assertIn("performance improved", improvement)
+
+    def test_latency_summary_without_speedup_column_has_no_leading_comma(self):
+        output = io.StringIO()
+        with (
+            _perf_csv(
+                speedup=1.0,
+                abs_latency=10.0,
+                columns=[column for column in CSV_COLUMNS if column != "speedup"],
+            ) as path,
+            contextlib.redirect_stdout(output),
+        ):
+            check_perf_csv(
+                path,
+                10.0,
+                0.99,
+                metric="abs_latency",
+                fail_on_improvement=True,
+            )
+
+        self.assertIn(
+            "test_model                         latency=10.0 ms/iter", output.getvalue()
+        )
+        self.assertNotIn(
+            "test_model                         , latency", output.getvalue()
+        )
 
 
 if __name__ == "__main__":

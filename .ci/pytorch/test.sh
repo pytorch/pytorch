@@ -1402,9 +1402,13 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
-  MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+  local models_speedup_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+  if [[ -n "${USE_ARC:-}" ]]; then
+    models_speedup_target=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu_osdc.csv
+  fi
 
-  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
+  echo "Using CPU TorchBench smoketest targets from $models_speedup_target"
+  grep -v '^ *#' < "$models_speedup_target" | while IFS=',' read -r -a model_cfg
   do
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
@@ -1551,6 +1555,9 @@ test_libtorch_profiler() {
 
   # Run all other tests
   python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
+
+  # Tests for torch/csrc/profiler/collection.cpp.
+  python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 }
 
 test_libtorch_api() {
