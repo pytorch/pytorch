@@ -561,7 +561,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
         return bool(lines) and "Microsoft" in lines[0]
 
-    except (FileNotFoundError, OSError):
+    except OSError:
         return False
 
 
