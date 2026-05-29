@@ -367,6 +367,26 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = constant_map_from_pairs(pairs, num_pairs);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map,
+        use_inactive,
+        validate_full_update,
+        /*user_managed=*/false,
+        /*allow_h2d_copy=*/true);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
