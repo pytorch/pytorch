@@ -1911,6 +1911,20 @@ def is_invalid_cancel(
     )
 
 
+def is_out_of_tree_l3(check: JobCheckState, drci_classifications: Any) -> bool:
+    name = check.name
+    job_id = check.job_id
+    if not name or not drci_classifications:
+        return False
+
+    # Consult the list of out-of-tree failures from Dr.CI
+    return any(
+        (name == oot["name"] or (job_id and job_id in oot["job_id"]))
+        and "(non blocking)" in name.lower()
+        for oot in drci_classifications.get("OUT_OF_TREE", [])
+    )
+
+
 def get_classifications(
     pr_num: int,
     project: str,
@@ -2003,6 +2017,18 @@ def get_classifications(
                 check.url,
                 check.status,
                 "INVALID_CANCEL",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        elif is_out_of_tree_l3(name, check.status, drci_classifications):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "OUT_OF_TREE",
                 check.job_id,
                 check.title,
                 check.summary,
