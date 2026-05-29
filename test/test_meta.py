@@ -1159,6 +1159,20 @@ class TestMeta(TestCase):
 
         return _fn
 
+    def test_random_from_to_validates_meta_bounds(self):
+        cases = (
+            ((torch.iinfo(torch.int64).min, -42), "from is out of bounds"),
+            ((0, 3), "to - 1 is out of bounds"),
+            ((1, 0), "random_ expects 'from' to be less than 'to'"),
+        )
+        for size in (0, 10):
+            for args, error in cases:
+                with self.assertRaisesRegex(RuntimeError, error):
+                    torch.empty(size, dtype=torch.bool, device="meta").random_(*args)
+
+            t = torch.empty(size, dtype=torch.bool, device="meta")
+            self.assertIs(t.random_(0, 2), t)
+
     @skipIfCrossRef
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
