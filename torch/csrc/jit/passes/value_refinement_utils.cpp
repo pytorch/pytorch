@@ -91,8 +91,8 @@ void joinIfRefinements(
   IfView if_n(if_node);
   Block* b = if_node->owningBlock();
 
-  bool true_block_throws = throwing_blocks.count(if_n.thenBlock());
-  bool false_block_throws = throwing_blocks.count(if_n.elseBlock());
+  bool true_block_throws = throwing_blocks.contains(if_n.thenBlock());
+  bool false_block_throws = throwing_blocks.contains(if_n.elseBlock());
 
   // if one block throws, the refinements for the other block
   // become present in the current block, and all bool outputs
@@ -114,7 +114,7 @@ void joinIfRefinements(
     Block* non_throwing_block =
         true_block_throws ? if_node->blocks().at(1) : if_node->blocks().at(0);
     for (const auto i : c10::irange(if_n.outputs().size())) {
-      if (boolean_value_refinements.count(
+      if (boolean_value_refinements.contains(
               non_throwing_block->outputs().at(i))) {
         boolean_value_refinements[if_node->outputs().at(i)] =
             boolean_value_refinements[non_throwing_block->outputs().at(i)];
@@ -130,8 +130,8 @@ void joinIfRefinements(
     Value* true_v = if_n.thenOutputs().at(i);
     Value* false_v = if_n.elseOutputs().at(i);
 
-    if (!boolean_value_refinements.count(true_v) &&
-        !boolean_value_refinements.count(false_v) &&
+    if (!boolean_value_refinements.contains(true_v) &&
+        !boolean_value_refinements.contains(false_v) &&
         !constant_as<bool>(true_v) && !constant_as<bool>(false_v)) {
       return;
     }
@@ -182,8 +182,8 @@ void joinIfRefinements(
             true_block_refinements));
       }
     } else if (
-        boolean_value_refinements.count(true_v) &&
-        boolean_value_refinements.count(false_v)) {
+        boolean_value_refinements.contains(true_v) &&
+        boolean_value_refinements.contains(false_v)) {
       out = boolean_value_refinements[true_v].intersectBooleanRefinementMapping(
           boolean_value_refinements[false_v]);
     }
@@ -202,7 +202,7 @@ bool handleCommonRefinentOperators(
   if (n->kind() == aten::__not__ &&
       n->inputs().at(0)->type()->cast<BoolType>()) {
     // __not__(inp) -> reverse refinements
-    if (info.count(n->input())) {
+    if (info.contains(n->input())) {
       auto& input_ref = info[n->input()];
       info[n->output()] = BooleanRefinementMapping(
           input_ref.false_refine(), input_ref.true_refine());
@@ -217,7 +217,7 @@ bool handleCommonRefinentOperators(
       }
       auto const_input = constant_as<bool>(n->input(const_index)).value();
       auto non_const_input = n->input(1 - const_index);
-      if (!info.count(non_const_input)) {
+      if (!info.contains(non_const_input)) {
         continue;
       }
       // value == False / value != True -> equivalent to __not__ value

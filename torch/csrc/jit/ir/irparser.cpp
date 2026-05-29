@@ -798,7 +798,7 @@ void IRParser::parseList(
 }
 
 Value* IRParser::findValueInVMap(const std::string& name) {
-  if (!vmap.count(name)) {
+  if (!vmap.contains(name)) {
     throw(
         ErrorReport(L.cur().range)
         << "Cannot find a variable with name '" << name << "'");
