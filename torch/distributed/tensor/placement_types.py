@@ -4,6 +4,7 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import cast, TypeGuard, TypeVar
 
 import torch
@@ -44,6 +45,12 @@ def _raise_error(method_name, _):
 Placement.__eq__ = functools.partial(_raise_error, method_name="__eq__")
 Placement.__hash__ = functools.partial(_raise_error, method_name="__hash__")
 Placement.__fx_repr__ = functools.partial(_raise_error, method_name="__fx_repr__")
+
+
+class _StridedShardOffsetMode(IntEnum):
+    FIRST = 0
+    ALL = 1
+    NONE = 2
 
 
 class Shard(torch._C._distributed.Shard):
@@ -448,6 +455,13 @@ class Shard(torch._C._distributed.Shard):
                     f"narrow unexpectedly changed concrete size on dim {self.dim}: "
                     f"{orig_size} -> {local_tensor.size(self.dim)}"
                 )
+
+        # narrow/unpad on a non-leading dim leaves the tensor non-contiguous,
+        # which leaks out to callers that expect a Replicate() result to have
+        # a contiguous local tensor (e.g. downstream view ops in TP linear).
+        # Use unconditional .contiguous() to avoid guarding on symbolic strides
+        # under torch.compile with unbacked symints.
+        local_tensor = local_tensor.contiguous()
 
         return local_tensor
 
@@ -1111,10 +1125,10 @@ class _StridedShard(torch._C._distributed.StridedShard):
         curr_local_size: int,
         num_chunks: int,
         rank: RankType,
-        return_first_offset: bool = True,
-    ) -> tuple[int, int | list[int]]:
+        offset_mode: _StridedShardOffsetMode = _StridedShardOffsetMode.FIRST,
+    ) -> tuple[int, int | list[int] | None]:
         return self.local_shard_size_and_offset(
-            curr_local_size, num_chunks, rank, return_first_offset
+            curr_local_size, num_chunks, rank, offset_mode
         )
 
     @maybe_run_for_local_tensor
@@ -1123,8 +1137,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         curr_local_size: IntLikeType,
         num_chunks: int,
         rank: RankType,
-        return_first_offset: bool = True,
-    ) -> tuple[int, list[int] | int]:
+        offset_mode: _StridedShardOffsetMode = _StridedShardOffsetMode.FIRST,
+    ) -> tuple[int, list[int] | int | None]:
         """
         Compute the local shard size and offset(s) for a _StridedShard placement.
 
@@ -1137,16 +1151,19 @@ class _StridedShard(torch._C._distributed.StridedShard):
             curr_local_size (int): The current size of the tensor dimension to be sharded.
             num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
             rank (RankType): The rank index to compute the shard for.
-            return_first_offset (bool): If True, return only the first offset as an int. If False,
-                return all offsets as a list. Defaults to True.
+            offset_mode (_StridedShardOffsetMode): Controls offset materialization.
+                FIRST returns only the first offset as an int, ALL returns all offsets
+                as a list, and NONE skips offset materialization. Defaults to FIRST.
 
         Returns:
             tuple: A tuple containing:
-                - local_shard_size (int): The number of elements in the local shard for this rank.
-                - offset (int | list[int]): If return_first_offset is True, returns the first offset
-                  as an int. If False or if the shard size is 0, returns a list of all offsets
-                  (which may be empty for empty shards).
+                - local_shard_size (int): The number of elements in the local shard
+                  for this rank.
+                - offset (int | list[int] | None): Determined by offset_mode. FIRST
+                  returns the first offset as an int, ALL returns a list of all offsets,
+                  and NONE returns None.
         """
+        offset_mode = _StridedShardOffsetMode(offset_mode)
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -1165,12 +1182,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
+        if offset_mode is _StridedShardOffsetMode.NONE:
+            # Avoid .tolist() which creates unbacked SymInts under FakeTensorMode.
+            return local_shard_size, None
         if local_shard_size > 0:
             offsets = sharded_indices[rank].tolist()
         else:
             offsets = []
 
-        if return_first_offset:
+        if offset_mode is _StridedShardOffsetMode.FIRST:
             # Always return an int for consistency across ranks.
             # For empty shards, return -1 as an invalid offset indicator.
             offsets = offsets[0] if len(offsets) > 0 else -1
