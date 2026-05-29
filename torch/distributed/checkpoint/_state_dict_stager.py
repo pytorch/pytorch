@@ -386,7 +386,7 @@ class StateDictStager:
                                     f"Unexpected pickle protocol return value length: {len(rv)}"
                                 )
 
-        # If is its own copy, don't memoize.
+        # If it is its own copy, don't memoize.
         if y is not x:
             memo[d] = y
             self._keep_alive(x, memo)  # Make sure x lives at least as long as d

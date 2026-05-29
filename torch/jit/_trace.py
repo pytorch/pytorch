@@ -501,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget call .eval() on your model? Nodes:\n"
+                    "Did you forget to call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
