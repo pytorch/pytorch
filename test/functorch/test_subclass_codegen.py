@@ -124,6 +124,116 @@ def inner_fn(args):
     return (_out_15,)""",
         )
 
+    def test_view_and_mutation_meta_repr_handles_bad_subclass_repr(self):
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+            SubclassMeta,
+            ViewAndMutationMeta,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torchgen.utils import dataclass_repr
+
+        class ReprHostileTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                out = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    dtype=elem.dtype,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+                out.elem = elem
+                return out
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError(f"dispatch during tensor repr: {func}")
+
+        class BadReprTensor(ReprHostileTensor):
+            def __repr__(self):
+                raise RuntimeError("bad subclass repr")
+
+        class MissingReprTensor(ReprHostileTensor):
+            pass
+
+        for tensor_type in (BadReprTensor, MissingReprTensor):
+            with self.subTest(tensor_type=tensor_type):
+                meta = ViewAndMutationMeta(
+                    [],
+                    [],
+                    0,
+                    False,
+                    [tensor_type(torch.ones(2))],
+                    [],
+                    [],
+                    [],
+                    [],
+                )
+
+                meta_repr = repr(meta)
+
+                self.assertIn("ViewAndMutationMeta(", meta_repr)
+                self.assertIn(f"<unprintable {tensor_type.__name__}", meta_repr)
+
+        class BadReprTwoTensor(TwoTensor):
+            def __repr__(self):
+                raise RuntimeError("bad subclass repr")
+
+        with FakeTensorMode() as fake_mode:
+            fake_inner = fake_mode.from_tensor(torch.ones(2))
+            bad_subclass = BadReprTwoTensor(fake_inner, fake_inner.clone())
+            subclass_creation_meta = SubclassCreationMeta(
+                0,
+                2,
+                False,
+                {"a": PlainTensorMeta(0), "b": PlainTensorMeta(1)},
+                bad_subclass.size(),
+                bad_subclass.stride(),
+                None,
+                bad_subclass,
+            )
+
+        meta = ViewAndMutationMeta(
+            [],
+            [],
+            0,
+            False,
+            [],
+            [],
+            [subclass_creation_meta],
+            [],
+            [],
+        )
+
+        meta_repr = repr(meta)
+
+        self.assertIn("ViewAndMutationMeta(", meta_repr)
+        self.assertIn("<unprintable BadReprTwoTensor", meta_repr)
+
+        subclass_meta = SubclassMeta()
+        subclass_meta.fw_metadata = ViewAndMutationMeta(
+            [],
+            [],
+            0,
+            False,
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        subclass_meta.grad_input_metas = [subclass_creation_meta]
+
+        subclass_meta_repr = dataclass_repr(subclass_meta)
+        subclass_creation_meta_repr = dataclass_repr(subclass_creation_meta)
+
+        self.assertIn("SubclassMeta(", subclass_meta_repr)
+        self.assertIn("<unprintable BadReprTwoTensor", subclass_meta_repr)
+        self.assertIn("SubclassCreationMeta(", subclass_creation_meta_repr)
+        self.assertIn("<unprintable BadReprTwoTensor", subclass_creation_meta_repr)
+
     def test_trailing_args_forwarded(self):
         """Extra trailing args (e.g. rng seed/offset) are forwarded to compiled_fn."""
         # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
