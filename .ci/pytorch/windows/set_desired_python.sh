@@ -44,16 +44,34 @@ case "$DESIRED_PYTHON" in
 esac
 
 INSTALLER="$WIN_CI_DIR/python-amd64.exe"
+INSTALLER_W="$(cygpath -w "$INSTALLER")"
 PYDIR="$WIN_CI_DIR/Python"
 PYDIR_W="$(cygpath -w "$PYDIR")"
+
+# Build PowerShell -ArgumentList in array form so each option lands as a
+# distinct argument to the installer.
+PS_INSTALL_ARGS="'/quiet','InstallAllUsers=1','PrependPath=0','Include_test=0'"
+if [[ -n "$ADDITIONAL_OPTIONS" ]]; then
+    PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'${ADDITIONAL_OPTIONS}'"
+fi
+PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'TargetDir=${PYDIR_W}'"
 
 rm -f "$INSTALLER"
 attempts=3
 for ((i = 1; i <= attempts; i++)); do
-    # shellcheck disable=SC2086  # ADDITIONAL_OPTIONS is space-free or empty
+    # The python.org wrapper .exe returns to its caller while the
+    # underlying installer keeps running asynchronously. Direct
+    # invocation from bash deadlocks: bash's wait() blocks only for the
+    # immediate child, so when the wrapper returns we proceed while the
+    # actual install processes are still alive — observed concretely as
+    # the wheel-build job hanging in set_desired_python.sh for ~6h and
+    # the runner finding two leftover python-amd64.exe processes at
+    # cleanup. PowerShell's Start-Process -Wait blocks for the process
+    # *and its descendants*, matching what `start /wait` did in the
+    # legacy cmd-native chain.
     if curl --retry 3 -kL "$PYTHON_INSTALLER_URL" --output "$INSTALLER" \
-        && "$INSTALLER" /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 \
-            $ADDITIONAL_OPTIONS "TargetDir=${PYDIR_W}"
+        && powershell -NoProfile -NonInteractive -Command \
+            "\$p = Start-Process -FilePath '${INSTALLER_W}' -ArgumentList ${PS_INSTALL_ARGS} -Wait -NoNewWindow -PassThru; exit \$p.ExitCode"
     then
         break
     fi
