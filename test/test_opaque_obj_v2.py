@@ -30,8 +30,10 @@ from torch._functorch.aot_autograd import (
 )
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.virtualized import V
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
@@ -4017,6 +4019,35 @@ class GraphModule(torch.nn.Module):
         restored_real = restored_opaque.meta["example_value"].real_obj
         self.assertIsInstance(restored_real, HoistedString)
         self.assertEqual(restored_real.val, "double")
+
+    def test_opaque_returned_from_compiled_custom_op(self):
+        @torch.library.custom_op("mylib::make_counter", mutates_args=())
+        def make_counter(start: int) -> Counter:
+            return Counter(start, start + 1)
+
+
+        @make_counter.register_fake
+        def _(start: int) -> Counter:
+            return Counter(start, start + 1)
+
+
+        with FakeTensorMode() as fake_mode:
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = fake_mode.from_tensor(torch.zeros(1))
+            output_node = graph.output(x)
+
+            updater = FakeTensorUpdater(graph)
+            # simulating the `reinplace_inplaceable_ops` code that edits the graph
+            # after the FakeTensorUpdater has been created
+            with graph.inserting_before(output_node):
+                counter_node = graph.call_function(
+                    torch.ops.mylib.make_counter.default, args=(0,)
+                )
+            counter_node.meta["val"] = Counter(0, 1)
+
+            with V.set_fake_mode(fake_mode):
+                updater.incremental_update()
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
