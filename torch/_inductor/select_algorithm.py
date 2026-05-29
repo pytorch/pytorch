@@ -387,6 +387,9 @@ class SubgraphInfo:
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
+    # These names mirror the fixed integer placeholders used by flex_attention
+    # templates. New fixed index placeholders should be added here so their
+    # dtype metadata survives subgraph lowering.
     _fixed_integer_inputs = (
         "b",
         "h",

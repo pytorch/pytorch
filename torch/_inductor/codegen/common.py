@@ -328,6 +328,12 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
+
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
@@ -1003,7 +1009,11 @@ class OpDecompositions:
                     zero_result = neg_one
                     if dtype == torch.int64:
                         zero_result = ops.where(
-                            ops.lt(a, zero), neg_one, ops.constant(2**32 - 1, dtype)
+                            ops.lt(a, zero),
+                            neg_one,
+                            # Matches CUDA's positive int64 remainder-by-zero
+                            # sentinel.
+                            ops.constant(2**32 - 1, dtype),
                         )
                 b_zero = ops.eq(b, zero)
                 safe_b = ops.where(b_zero, one, b)
