@@ -38,9 +38,9 @@
 #include <ATen/ops/_foreach_log2_native.h>
 #include <ATen/ops/_foreach_log_native.h>
 #include <ATen/ops/_foreach_max_native.h>
-#include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_maximum_native.h>
 #include <ATen/ops/_foreach_minimum_native.h>
+#include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_neg_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
@@ -559,7 +559,7 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   return result;
 }
 
-std::vector<Tensor> foreach_tensor_mm_list_kernel_slow(
+std::vector<Tensor> _foreach_mm(
     TensorList self,
     TensorList mat2) {
   TORCH_CHECK(self.size() > 0, "_foreach_mm requires non-empty tensor lists");

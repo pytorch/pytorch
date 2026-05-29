@@ -1928,5 +1928,61 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
 instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 
 
+_FOREACH_MM_SHAPES = [
+    # (label, [(M, N, K)] * G)
+    ("uniform_1024_G16", [(1024, 1024, 1024)] * 16),
+    ("uniform_2048_G8", [(2048, 2048, 2048)] * 8),
+    ("uniform_4096_G4", [(4096, 4096, 4096)] * 4),
+    ("mixed_small", [(128, 64, 256), (256, 128, 512), (64, 32, 128)]),
+    ("mixed_muon", [(1024, 1024, 1024), (1024, 1024, 2752), (1024, 2752, 1024)]),
+]
+
+
+class TestForeachMM(TestCase):
+    def _check(self, shapes, dtype, device):
+        A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
+        B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
+        ref = [torch.mm(a, b) for a, b in zip(A, B)]
+        out = torch._foreach_mm(A, B)
+        atol = 1e-4 if dtype == torch.float32 else 1.0
+        rtol = 1e-4 if dtype == torch.float32 else 0.1
+        for i, (r, o) in enumerate(zip(ref, out)):
+            self.assertEqual(r.shape, o.shape)
+            self.assertTrue(torch.allclose(r, o, atol=atol, rtol=rtol), msg=f"at {i}")
+
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_cpu(self, label, shapes):
+        self._check(shapes, torch.float32, "cpu")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_cuda_bf16(self, label, shapes):
+        self._check(shapes, torch.bfloat16, "cuda")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    def test_foreach_mm_cuda_fp32(self):
+        self._check([(256, 256, 256)] * 4, torch.float32, "cuda")
+
+    def test_foreach_mm_gradcheck(self):
+        shapes = [(32, 32, 32)] * 4
+        A = [
+            torch.randn(M, K, dtype=torch.float64, requires_grad=True)
+            for M, _, K in shapes
+        ]
+        B = [
+            torch.randn(K, N, dtype=torch.float64, requires_grad=True)
+            for _, N, K in shapes
+        ]
+        gradcheck(torch._foreach_mm, (A, B))
+
+
 if __name__ == "__main__":
     run_tests()

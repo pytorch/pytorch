@@ -3,16 +3,17 @@ Python override for aten::_foreach_mm.
 
 Dispatch:
 
-  nvmath available (nvmath-python installed, cublasLt >= 13.2 runtime)?
+  nvmath available?
   |
-  |-- YES --> nvmath cublasLt grouped GEMM
-  |           Cached descriptors, pinned async H2D, no data copy.
-  |           Best path: matches or beats C++ CUTLASS at all sizes.
+  |-- YES --> nvmath cublasLt grouped GEMM (all sizes)
   |
-  |-- NO  --> cond returns False, C++ CompositeImplicitAutograd
-              fallback runs (loop of at::mm).
-              Exception: min(M,N,K) < 2048 uses torch.stack -> _grouped_mm
-              (CUTLASS 3D path) which gives 2-6x over loop at small dims.
+  |-- NO  --> min(M, N, K) < 2048?
+              |
+              |-- YES --> torch.stack -> _grouped_mm (CUTLASS 3D)
+              |           2-6x faster than loop at small dims.
+              |
+              |-- NO  --> C++ fallback (loop of at::mm)
+                          At large dims each mm saturates the GPU.
 """
 
 import warnings
