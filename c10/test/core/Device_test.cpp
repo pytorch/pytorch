@@ -59,7 +59,48 @@ TEST(DeviceTypeTest, PrivateUseOneRegister) {
   ASSERT_THROW(c10::register_privateuse1_backend("cpu"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("cuda"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("hip"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("metal"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("mps"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("xpu"), c10::Error);
   ASSERT_THROW(c10::register_privateuse1_backend("mtia"), c10::Error);
+}
+
+// The canonical printed representation of a device constructed from "metal"
+// remains "mps" for backward compatibility during the transition.
+TEST(DeviceTest, MetalAliasStrReturnsMps) {
+  c10::Device d("metal");
+  ASSERT_EQ(d.str(), "mps");
+
+  // Verify C++ ostream operator<< support
+  std::stringstream ss;
+  ss << d;
+  ASSERT_EQ(ss.str(), "mps");
+}
+
+TEST(DeviceTest, MetalAliasParsesToMPS) {
+  c10::Device device_lowercase("metal");
+  EXPECT_EQ(device_lowercase.type(), c10::DeviceType::MPS);
+  EXPECT_EQ(device_lowercase.index(), -1);
+
+  c10::Device device_with_index("metal:0");
+  EXPECT_EQ(device_with_index.type(), c10::DeviceType::MPS);
+  EXPECT_EQ(device_with_index.index(), 0);
+}
+
+TEST(DeviceTest, ErrorMessageIncludesMetal) {
+  try {
+    c10::Device bad("notadevice");
+    FAIL() << "Expected c10::Error";
+  } catch (const c10::Error& e) {
+    ASSERT_NE(std::string(e.what()).find("metal"), std::string::npos)
+        << "Error message should list 'metal' as an accepted device string";
+  }
+}
+
+TEST(DeviceTest, MetalPrefixedGarbageIsRejected) {
+  auto make = [](const std::string& s) { return c10::Device(s); };
+  EXPECT_THROW(make("metalx"), c10::Error);
+  EXPECT_THROW(make("metal:"), c10::Error);
+  EXPECT_THROW(make("metal:01"), c10::Error);
+  EXPECT_THROW(make("metal:-1"), c10::Error);
 }

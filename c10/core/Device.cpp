@@ -41,6 +41,18 @@ DeviceType parse_type(const std::string& device_string) {
         "'mkldnn' is no longer used as device type. So torch.device('mkldnn') will be "
         "deprecated and removed in the future. Please use other valid device types instead.");
   }
+  // "metal" is accepted as an alias for "mps" (DeviceType::MPS).  The MPS
+  // backend is increasingly implemented via custom Metal kernels rather than
+  // Metal Performance Shaders, so "metal" is the preferred long-term name.
+  // "mps" remains the canonical string returned by DeviceTypeName() and
+  // device.type during the transition.  See gh-173225.
+  //
+  // NOTE: This string is explicitly intercepted here instead of being added to
+  // the 'types' array below to avoid overflowing COMPILE_TIME_MAX_DEVICE_TYPES
+  // and silently colliding with the dormant DeviceType::Metal enum value.
+  if (device_string == "metal") {
+    return DeviceType::MPS;
+  }
   if (device_string == get_privateuse1_backend()) {
     return DeviceType::PrivateUse1;
   }
@@ -59,6 +71,9 @@ DeviceType parse_type(const std::string& device_string) {
       device_names.push_back(it.first);
     }
   }
+  // Include "metal" in the list of accepted device strings.
+  // Handled explicitly above to avoid over-allocating COMPILE_TIME_MAX_DEVICE_TYPES.
+  device_names.push_back("metal");
   TORCH_CHECK(
       false,
       "Expected one of ",
