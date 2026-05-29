@@ -16,8 +16,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/cat_native.h>
-#include <ATen/ops/topk.h>
-#include <ATen/ops/topk_native.h>
 #endif
 
 namespace at::native {
@@ -29,22 +27,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #endif
 
 namespace mps {
-
-// Produces a shape with the `dim` dimension set to 0.
-static std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
-  const int sz = sizes.size();
-  if (sz == 0) {
-    return {0};
-  }
-  const int64_t dim = maybe_wrap_dim(dim_, sz);
-  std::vector<int64_t> numbers(sz);
-
-  for (int i = 0; i < sz; i++) {
-    const int64_t sz_i = i != dim ? sizes[i] : 0;
-    numbers[i] = sz_i;
-  }
-  return numbers;
-}
 
 static void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
   int first_dims = first.dim();
@@ -172,87 +154,6 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
   }
 }
 } // namespace mps
-
-// topk
-TORCH_IMPL_FUNC(topk_out_mps)
-(const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted, const Tensor& values, const Tensor& indices) {
-  using namespace mps;
-  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  TORCH_CHECK(k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1), "selected index k out of range");
-
-  if (self.dim() == 0 && self.numel() == 1) {
-    values.copy_(self);
-    indices.zero_();
-    return;
-  }
-
-  // Handle empty tensors
-  if (self.numel() == 0) {
-    values.copy_(self);
-    indices.copy_(values.toType(at::ScalarType::Long));
-    return;
-  }
-  // Handle k == 0 case. Needed because MPSGraph does not support k == 0.
-  if (k == 0) {
-    const auto out_shape = getTopK0Shape(self.sizes(), dim);
-    values.resize_(out_shape);
-    indices.copy_(values.toType(at::ScalarType::Long));
-    return;
-  }
-
-  // issue #154890, raising error to prevent crash within MPSGraph until
-  // workaround is implemented.
-  TORCH_CHECK(self.dim() - dim <= 4, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890");
-
-  MPSStream* stream = getCurrentMPSStream();
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *selfTensor = nil, *valuesTensor = nil, *indicesTensor = nil;
-  };
-
-  // MPSGraph topK is always sorted.
-  @autoreleasepool {
-    // Input as placeholders
-    MPSShape* input_shape = getMPSShape(self);
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string key = std::string("topk:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" +
-        std::to_string(k) + ":dim" + std::to_string(dim_) + ":largest" + std::to_string(largest);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
-
-      MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
-      MPSDataType dataType = getMPSDataType(self);
-      // #issue 104398441 sortWithTensor and argsortWithTensor
-      if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
-        dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
-        castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
-      }
-      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
-                                                         axis:(NSUInteger)dim
-                                                   descending:largest
-                                                         name:nil];
-      sortedTensor = [mpsGraph sliceTensor:sortedTensor
-                                 dimension:(NSUInteger)dim
-                                     start:((NSUInteger)0)length:k
-                                      name:nil];
-      MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
-                                                               axis:(NSInteger)dim
-                                                         descending:largest
-                                                               name:@"argmax_out"];
-      argSortedTensor = [mpsGraph sliceTensor:argSortedTensor dimension:dim start:((NSUInteger)0)length:k name:nil];
-      newCachedGraph->valuesTensor = sortedTensor;
-      newCachedGraph->indicesTensor = argSortedTensor;
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->selfTensor, self);
-    // Outputs as placeholders
-    Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
-    Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
-    // Create dictionary of inputs and outputs
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    auto results = dictionaryFromPlaceholders(valuesPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
-}
 
 TORCH_IMPL_FUNC(cat_out_mps)
 (const ITensorListRef& inputs,
