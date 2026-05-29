@@ -1863,6 +1863,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch.compile(mod, backend="eager")
 
         self.assertIs(opt_mod["a"], mod["a"])
+        self.assertEqual(len(opt_mod), 1)
         self.assertEqual(list(opt_mod), ["a"])
         self.assertIn("a", opt_mod)
         self.assertNotIn("b", opt_mod)
@@ -1887,6 +1888,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(TypeError, "object is not iterable"):
             iter(opt_mod)
+
+        with self.assertRaisesRegex(TypeError, "not subscriptable"):
+            opt_mod["a"]
 
         with self.assertRaisesRegex(TypeError, "not iterable"):
             self.assertIn("a", opt_mod)
