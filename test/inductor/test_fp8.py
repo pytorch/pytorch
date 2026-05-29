@@ -706,7 +706,8 @@ class TestFP8Lowering(TestCase):
         self._test_scaled_mm_preserves_strides_impl("cpu")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    # TODO: fails with "RuntimeError: mat2 must be col_major, got stride (64, 1)".
+    # TODO (eellison): fails with:
+    # "RuntimeError: mat2 must be col_major, got stride (64, 1)".
     @unittest.expectedFailure
     @onlyOn(["cuda", "xpu"])
     def test_scaled_mm_preserves_strides(self, device):
