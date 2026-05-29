@@ -5406,6 +5406,28 @@ class TestCustomOpFastPath(TestCase):
             "fast path was not taken; call went through the C++ dispatcher",
         )
 
+    @contextlib.contextmanager
+    def _assert_fast_path_not_taken(self, opdef):
+        """Assert that neither fast-path counter incremented (call went to C++)."""
+        import torch._ops
+
+        if TEST_WITH_CROSSREF:
+            yield
+            return
+        hits_before = opdef._fast_path_hits
+        redispatch_before = torch._ops._fast_redispatch_count
+        yield
+        self.assertEqual(
+            opdef._fast_path_hits,
+            hits_before,
+            "fast path was unexpectedly taken",
+        )
+        self.assertEqual(
+            torch._ops._fast_redispatch_count,
+            redispatch_before,
+            "fast redispatch counter unexpectedly incremented",
+        )
+
     def test_fast_path_basic(self):
         @torch.library.custom_op("_torch_testing::fp_add", mutates_args=())
         def fp_add(x: Tensor, y: Tensor) -> Tensor:
@@ -5453,27 +5475,6 @@ class TestCustomOpFastPath(TestCase):
                 torch.ops._torch_testing.fp_multi.with_bias(x, bias),
                 x * 2 + bias,
             )
-
-    @unittest.skip(
-        "OpOverloadPacket fast path for multi-overload ops not yet implemented"
-    )
-    def test_fast_path_multiple_overloads_via_packet(self):
-        @torch.library.custom_op("_torch_testing::fp_multi", mutates_args=())
-        def fp_multi(x: Tensor) -> Tensor:
-            return x * 2
-
-        @torch.library.custom_op("_torch_testing::fp_multi.with_bias", mutates_args=())
-        def fp_multi_bias(x: Tensor, bias: Tensor) -> Tensor:
-            return x * 2 + bias
-
-        x = torch.randn(3)
-        bias = torch.randn(3)
-
-        # Calling via the packet dispatches to the correct overload
-        with self._assert_fast_path_taken(fp_multi):
-            self.assertEqual(torch.ops._torch_testing.fp_multi(x), x * 2)
-        with self._assert_fast_path_taken(fp_multi_bias):
-            self.assertEqual(torch.ops._torch_testing.fp_multi(x, bias), x * 2 + bias)
 
     def test_fast_path_counter(self):
         @torch.library.custom_op("_torch_testing::fp_counter", mutates_args=())
@@ -5624,9 +5625,10 @@ class TestCustomOpFastPath(TestCase):
             return x.clone()
 
         # inference_mode excludes autograd keys; fast path bails to C++ dispatcher
-        with torch.inference_mode():
-            x = torch.randn(3)
-            result = fp_im(x)
+        with self._assert_fast_path_not_taken(fp_im):
+            with torch.inference_mode():
+                x = torch.randn(3)
+                result = fp_im(x)
         self.assertEqual(result, x)
 
     def test_fast_path_falls_back_for_autocast(self):
@@ -5672,9 +5674,10 @@ class TestCustomOpFastPath(TestCase):
                 return func(*args, **(kwargs or {}))
 
         x = torch.randn(3)
-        with ReplaceMode():
-            self.assertIs(fp_tfm(x), sentinel)
-            self.assertIs(torch.ops._torch_testing.fp_tfm(x), sentinel)
+        with self._assert_fast_path_not_taken(fp_tfm):
+            with ReplaceMode():
+                self.assertIs(fp_tfm(x), sentinel)
+                self.assertIs(torch.ops._torch_testing.fp_tfm(x), sentinel)
 
     def test_fast_path_catches_aliasing(self):
         @torch.library.custom_op("_torch_testing::fp_alias", mutates_args=())
@@ -5805,7 +5808,8 @@ class TestCustomOpFastPath(TestCase):
         x = torch.randn(3)
         self.assertEqual(fp_functorch(x), x)
 
-        result = torch.vmap(fp_functorch)(x.unsqueeze(0))
+        with self._assert_fast_path_not_taken(fp_functorch):
+            result = torch.vmap(fp_functorch)(x.unsqueeze(0))
         self.assertEqual(result, x.unsqueeze(0))
 
     def test_fast_path_falls_back_for_kwargs(self):
@@ -5814,8 +5818,9 @@ class TestCustomOpFastPath(TestCase):
             return x + y
 
         x, y = torch.randn(3), torch.randn(3)
-        self.assertEqual(fp_kw(x, y=y), x + y)
-        self.assertEqual(torch.ops._torch_testing.fp_kw(x, y=y), x + y)
+        with self._assert_fast_path_not_taken(fp_kw):
+            self.assertEqual(fp_kw(x, y=y), x + y)
+            self.assertEqual(torch.ops._torch_testing.fp_kw(x, y=y), x + y)
 
     def test_fast_path_falls_back_for_sparse(self):
         @torch.library.custom_op("_torch_testing::fp_sparse", mutates_args=())
@@ -5823,7 +5828,8 @@ class TestCustomOpFastPath(TestCase):
             return x.to_dense().clone()
 
         x = torch.randn(3, 3).to_sparse()
-        result = fp_sparse(x)
+        with self._assert_fast_path_not_taken(fp_sparse):
+            result = fp_sparse(x)
         self.assertEqual(result, x.to_dense())
 
     def test_fast_path_falls_back_for_nested_tensor(self):
@@ -5832,8 +5838,9 @@ class TestCustomOpFastPath(TestCase):
             return x.clone()
 
         nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
-        with self.assertRaisesRegex(NotImplementedError, "NestedTensorCPU"):
-            fp_nested(nt)
+        with self._assert_fast_path_not_taken(fp_nested):
+            with self.assertRaisesRegex(NotImplementedError, "NestedTensorCPU"):
+                fp_nested(nt)
 
     def test_fast_path_falls_back_for_meta(self):
         @torch.library.custom_op("_torch_testing::fp_meta", mutates_args=())
@@ -5845,7 +5852,8 @@ class TestCustomOpFastPath(TestCase):
             return torch.empty_like(x)
 
         x = torch.randn(3, device="meta")
-        result = fp_meta(x)
+        with self._assert_fast_path_not_taken(fp_meta):
+            result = fp_meta(x)
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(result.device, x.device)
 
@@ -5918,7 +5926,8 @@ class TestCustomOpFastPath(TestCase):
             )
 
             tt = TwoTensor(torch.randn(3), torch.randn(3))
-            fp_dispatch_sub(tt)
+            with self._assert_fast_path_not_taken(fp_dispatch_sub):
+                fp_dispatch_sub(tt)
             self.assertTrue(called)
 
     @requires_compile
