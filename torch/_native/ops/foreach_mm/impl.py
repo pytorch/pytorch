@@ -9,14 +9,10 @@ Dispatch:
   |           Cached descriptors, pinned async H2D, no data copy.
   |           Best path: matches or beats C++ CUTLASS at all sizes.
   |
-  |-- NO  --> min(M, N, K) >= 2048?
-              |
-              |-- YES --> [torch.mm(a, b) for a, b in zip(self, mat2)]
-              |           At large dims each cuBLAS mm saturates the GPU.
-              |           torch.stack copy would cost more than batching saves.
-              |
-              |-- NO  --> torch.stack -> _grouped_mm (CUTLASS 3D path)
-                          Grouped GEMM gives 2-6x over loop at small dims.
+  |-- NO  --> cond returns False, C++ CompositeImplicitAutograd
+              fallback runs (loop of at::mm).
+              Exception: min(M,N,K) < 2048 uses torch.stack -> _grouped_mm
+              (CUTLASS 3D path) which gives 2-6x over loop at small dims.
 """
 
 import warnings
@@ -88,6 +84,13 @@ def _foreach_mm_cond(
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
 
+    # At dim >= 2048, individual cuBLAS mm calls saturate the GPU.
+    # Let the C++ CompositeImplicitAutograd loop handle it.
+    M, K = first_a.shape
+    N = first_b.size(1)
+    if min(M, N, K) >= 2048 and not _check_nvmath_cublaslt():
+        return False
+
     return True
 
 
@@ -95,6 +98,13 @@ def _foreach_mm_impl_stack(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
+    # stack requires uniform shapes; fall back to loop for mixed
+    first_a_shape = self[0].shape
+    first_b_shape = mat2[0].shape
+    if any(a.shape != first_a_shape for a in self) or any(
+        b.shape != first_b_shape for b in mat2
+    ):
+        return [torch.mm(a, b) for a, b in zip(self, mat2)]
     out_3d = torch._grouped_mm(torch.stack(self), torch.stack(mat2))
     return list(out_3d.unbind(0))
 
@@ -151,15 +161,6 @@ def _foreach_mm_impl(
                 f"using slower fallback.",
                 stacklevel=3,
             )
-
-    # At dim >= 2048, individual cuBLAS mm calls already saturate the GPU
-    # and the torch.stack data copy in the _grouped_mm path hurts more
-    # than the kernel launch savings help.
-    M = self[0].size(0)
-    K = self[0].size(1)
-    N = mat2[0].size(1)
-    if min(M, N, K) >= 2048:
-        return [torch.mm(a, b) for a, b in zip(self, mat2)]
 
     return _foreach_mm_impl_stack(self, mat2)
 
