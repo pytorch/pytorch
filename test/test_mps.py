@@ -6319,6 +6319,29 @@ class TestMPS(TestCaseMPS):
 
         helper(3, 3)
 
+    @staticmethod
+    def _k_for_frac(n, k_frac):
+        return {"lo": 1, "mid": max(1, n // 2), "hi": n}[k_frac]
+
+    def _check_kthvalue_matches_cpu(self, cpu, dim, k_frac):
+        mps = cpu.to("mps")
+        k = self._k_for_frac(cpu.size(dim), k_frac)
+        cv, _ = torch.kthvalue(cpu, k, dim=dim)
+        mv, mi = torch.kthvalue(mps, k, dim=dim)
+        self.assertEqual(cv, mv.cpu(), atol=0, rtol=0)
+        # indices may differ for duplicates, re-fetch values via indices
+        gathered = torch.gather(cpu, dim, mi.cpu().unsqueeze(dim)).squeeze(dim)
+        self.assertEqual(gathered, cv, atol=0, rtol=0)
+
+    def _check_topk_matches_cpu(self, cpu, dim, largest, k_frac):
+        mps = cpu.to("mps")
+        k = self._k_for_frac(cpu.size(dim), k_frac)
+        cv, _ = torch.topk(cpu, k, dim=dim, largest=largest)
+        mv, mi = torch.topk(mps, k, dim=dim, largest=largest)
+        self.assertEqual(cv, mv.cpu(), atol=0, rtol=0)
+        # indices may differ for duplicate values, validate them via gather
+        self.assertEqual(torch.gather(cpu, dim, mi.cpu()), mv.cpu(), atol=0, rtol=0)
+
     def test_sort(self):
         for SIZE in (4, 2049):
             device = 'mps'
@@ -6342,12 +6365,18 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_single_block(self, dtype, descending, dup):
+    @parametrize("mode", ["sort", "kth", "topk"])
+    @parametrize("k_frac", ["lo", "mid", "hi"])
+    def test_sort_single_block(self, dtype, descending, dup, mode, k_frac):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
         # dup=True uses a small value range so many elements collide; this exercises
         # the tie-break path in the bitonic sort (equal values must still produce
         # valid index permutations).
+        if mode == "sort" and k_frac != "lo":
+            self.skipTest("k_frac only applies to kth/topk")
+        if mode == "kth" and descending:
+            self.skipTest("kthvalue has no descending parameter")
         max_ss = 1024 if dtype == torch.int64 else 4096
         lo, hi = (0, 5) if dup else (-1000, 1000)
 
@@ -6358,6 +6387,12 @@ class TestMPS(TestCaseMPS):
 
         for cpu in [make((4, 4)), make((8, max_ss)), make((16, 32, 64)),
                     make((8, 2048))[:, ::2], make((1024, 8)).t()]:
+            if mode == "kth":
+                self._check_kthvalue_matches_cpu(cpu, dim=-1, k_frac=k_frac)
+                continue
+            if mode == "topk":
+                self._check_topk_matches_cpu(cpu, dim=-1, largest=descending, k_frac=k_frac)
+                continue
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=-1, descending=descending)
             mv, mi = torch.sort(mps, dim=-1, descending=descending)
@@ -6404,8 +6439,14 @@ class TestMPS(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_multi_block(self, dtype, descending, dup):
+    @parametrize("mode", ["sort", "kth", "topk"])
+    @parametrize("k_frac", ["lo", "mid", "hi"])
+    def test_sort_multi_block(self, dtype, descending, dup, mode, k_frac):
         # shapes chosen to hit the metal multi block merge path
+        if mode == "sort" and k_frac != "lo":
+            self.skipTest("k_frac only applies to kth/topk")
+        if mode == "kth" and descending:
+            self.skipTest("kthvalue has no descending parameter")
         cases = {
             2: [((1, 4096), -1), ((2, 3000), -1)],
             4: [((1, 2049), -1), ((1, 8192), -1), ((2, 16384), -1),
@@ -6426,6 +6467,12 @@ class TestMPS(TestCaseMPS):
             return torch.randint(lo, hi, shape, dtype=dtype)
 
         def check(cpu, dim=-1):
+            if mode == "kth":
+                self._check_kthvalue_matches_cpu(cpu, dim=dim, k_frac=k_frac)
+                return
+            if mode == "topk":
+                self._check_topk_matches_cpu(cpu, dim=dim, largest=descending, k_frac=k_frac)
+                return
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=dim, descending=descending)
             mv, mi = torch.sort(mps, dim=dim, descending=descending)
@@ -6447,10 +6494,18 @@ class TestMPS(TestCaseMPS):
                            torch.int16, torch.int8, torch.uint8, torch.bool])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
-    def test_sort_radix(self, dtype, descending, dup):
+    @parametrize("mode", ["sort", "kth", "topk"])
+    @parametrize("k_frac", ["lo", "mid", "hi"])
+    def test_sort_radix(self, dtype, descending, dup, mode, k_frac):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
         # small_tg (RTPTG=512) variant. Strided cases exercise non-contiguous input.
+        if mode == "sort" and k_frac != "lo":
+            self.skipTest("k_frac only applies to kth/topk")
+        if mode == "kth" and descending:
+            self.skipTest("kthvalue has no descending parameter")
+        if mode in ("kth", "topk") and dtype == torch.bool:
+            self.skipTest("kthvalue/topk not supported for bool")
         if torch.tensor([], dtype=dtype).element_size() == 4:
             cases = [((4, 65536), -1), ((1, 1048576), -1), ((8, 131072), -1),
                      ((4, 8, 65536), 2), ((2, 65536, 4), 1)]
@@ -6467,6 +6522,12 @@ class TestMPS(TestCaseMPS):
             return torch.randint(lo, hi, shape).to(dtype)
 
         def check(cpu, dim=-1):
+            if mode == "kth":
+                self._check_kthvalue_matches_cpu(cpu, dim=dim, k_frac=k_frac)
+                return
+            if mode == "topk":
+                self._check_topk_matches_cpu(cpu, dim=dim, largest=descending, k_frac=k_frac)
+                return
             mps = cpu.to("mps")
             cv, _ = torch.sort(cpu, dim=dim, descending=descending)
             mv, mi = torch.sort(mps, dim=dim, descending=descending)
@@ -10032,12 +10093,16 @@ class TestTopK(TestCase):
                     self._test_topk(shape, largest_val)
 
     def test_topk_gt_4d(self):
-        a = torch.ones(5, 4, 3, 2, 1, dtype=torch.float).to('mps')
-        try:
-            t_mps = torch.ops.aten.topk(a, k=5, dim=0)
-        except Exception as e:
-            e_string = str(e)
-            self.assertEqual(e_string, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890")
+        # The Metal topk handles any dim. The old MPSGraph path crashed when
+        # ndims - dim > 4 (issue #154890)
+        cpu = torch.randn(5, 4, 3, 2, 6)
+        mps = cpu.to('mps')
+        for dim in range(cpu.ndim):
+            for largest in (True, False):
+                cv, ci = torch.topk(cpu, k=2, dim=dim, largest=largest)
+                mv, mi = torch.topk(mps, k=2, dim=dim, largest=largest)
+                self.assertEqual(cv, mv.cpu())
+                self.assertEqual(ci, mi.cpu())
 
 class TestNNMPS(NNTestCase):
 
@@ -14594,6 +14659,13 @@ class TestConsistency(TestCaseMPS):
                 keep_dim = mps_sample.args[2] if len(mps_sample.args) > 2 else False
                 values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
+
+            if op.name == "topk":
+                # Tied values give non-unique indices; gather-validate them instead of comparing.
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                dim = mps_sample.kwargs.get("dim", mps_sample.args[1] if len(mps_sample.args) > 1 else -1)
+                self.assertEqual(torch.gather(mps_sample.input, dim, mps_out[1]), mps_out[0], atol=atol, rtol=rtol)
                 continue
 
             if op.name in self.RANDOM_OP_NAMES:
