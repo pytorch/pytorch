@@ -49,8 +49,10 @@ from ..bytecode_transformation import (
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     _UserAssertionError,
+    assertion_error_originates_in_dynamo,
     raise_observed_exception,
     raise_type_error,
+    raise_user_assertion_error,
     unimplemented,
 )
 from ..guards import GuardBuilder, install_guard
@@ -165,7 +167,7 @@ class SuperVariable(VariableTracker):
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            # Dont call getattr, just check the __dict__ of the class
+            # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
@@ -534,6 +536,13 @@ class TracebackVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -541,10 +550,7 @@ class TracebackVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            # Two traceback variables are only equal if they are the same object
-            return VariableTracker.build(tx, self is args[0])
-        elif name == "__setattr__":
+        if name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
 
@@ -616,6 +622,13 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
@@ -725,6 +738,10 @@ class ExceptionVariable(VariableTracker):
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
 
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        return VariableTracker.build(tx, self.debug_repr())
+
 
 class UnknownVariable(VariableTracker):
     """
@@ -770,7 +787,11 @@ class ComptimeVariable(VariableTracker):
         except AssertionError as e:
             if isinstance(e, _UserAssertionError):
                 raise
-            raise _UserAssertionError(*e.args).with_traceback(e.__traceback__) from None
+            if not assertion_error_originates_in_dynamo(e):
+                raise _UserAssertionError(*e.args).with_traceback(
+                    e.__traceback__
+                ) from None
+            raise
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
@@ -1350,7 +1371,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 if not (tx.one_graph or tx.error_on_graph_break):
-                    raise AssertionError(
+                    raise_user_assertion_error(
                         "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                     )
                 # queue_callback is a method-wrapper, no need to insert a guard.
@@ -1477,6 +1498,29 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import generic_richcompare
+
+        try:
+            resolved = self.obj.var_getattr(tx, self.name)
+        except NotImplementedError:
+            resolved = None
+        if resolved is None or isinstance(resolved, GetAttrVariable):
+            if self.obj.is_python_constant():
+                val = getattr(self.obj.as_python_constant(), self.name)
+                resolved = VariableTracker.build(tx, val)
+            else:
+                unimplemented(
+                    gb_type="Unresolved GetAttrVariable comparison",
+                    context=f"richcompare_impl {self} {op}",
+                    explanation=f"Cannot compare {self} because the attribute "
+                    f"could not be resolved to a concrete value.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        return generic_richcompare(tx, resolved, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1544,6 +1588,13 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
 
 class TypingVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
@@ -1566,6 +1617,18 @@ class TypingVariable(VariableTracker):
         new_typing = self.value[key.as_python_constant()]
         return TypingVariable(new_typing)
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        if op in ("__eq__", "__ne__"):
+            if istype(other, TypingVariable):
+                result = self.value == other.value
+                if op == "__ne__":
+                    result = not result
+                return ConstantVariable.create(result)
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(NotImplemented)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1573,10 +1636,6 @@ class TypingVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            if len(args) == 1 and not kwargs:
-                result = istype(args[0], TypingVariable) and self.value == args[0].value
-                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
@@ -2183,6 +2242,13 @@ class ConstantLikeVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.value), False
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2502,6 +2568,13 @@ class WeakRefVariable(VariableTracker):
         from .object_protocol import generic_hash_impl
 
         return generic_hash_impl(tx, self.referent_vt)
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):

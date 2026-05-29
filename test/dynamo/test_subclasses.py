@@ -2434,7 +2434,7 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.reset()
             out_ref = f(view)
             if expects_raises:
-                with self.assertRaises(AssertionError):
+                with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
                     out_test = compiled_f(view)
             else:
                 out_test = compiled_f(view)

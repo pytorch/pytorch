@@ -2139,6 +2139,10 @@ def _compile(
             if isinstance(e, _UserAssertionError):
                 raise AssertionError(*e.args).with_traceback(e.__traceback__) from None
             if isinstance(
+                e, AssertionError
+            ) and not exc.assertion_error_originates_in_dynamo(e):
+                raise
+            if isinstance(
                 e,
                 (
                     Unsupported,

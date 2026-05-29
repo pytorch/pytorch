@@ -54,6 +54,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import graph_break_hints, variables
 from ..exc import (
     ObservedException,
+    raise_user_assertion_error,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -2284,6 +2285,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2368,7 +2374,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
                 if i != len(args):
-                    raise AssertionError(
+                    raise_user_assertion_error(
                         "did not provide the right number of non-keyword args"
                     )
                 args.append(v)
@@ -4692,6 +4698,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
@@ -5712,7 +5723,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                     seen_none += 1
                 else:
                     if seen_none != 0:
-                        raise AssertionError(
+                        raise_user_assertion_error(
                             "Tracing local_map is only currently supported with None placements last."
                         )
             return seen_none
@@ -5728,7 +5739,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
         }
         if local_map_kwargs["device_mesh"] is None:
-            raise AssertionError(
+            raise_user_assertion_error(
                 "Not yet implemented, please manually provide a device_mesh to local_map."
             )
         mesh = local_map_kwargs["device_mesh"]
@@ -5743,7 +5754,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             ", but found {actual}. Please ensure the count matches for eager. "
         )
         if len(in_placements.value) != len(user_args):  # type: ignore[attr-defined]
-            raise AssertionError(
+            raise_user_assertion_error(
                 template.format(
                     expected=len(in_placements.value),  # type: ignore[attr-defined]
                     inputs_or_outputs="inputs",
@@ -5764,7 +5775,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             if not vt.is_tensor():
                 if placements is not None:
-                    raise AssertionError(
+                    raise_user_assertion_error(
                         "Expected placements to be None for non-tensor input"
                     )
                 continue
@@ -5838,11 +5849,11 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             )
 
         if expected_num_inputs != actual_num_inputs:
-            raise AssertionError(
+            raise_user_assertion_error(
                 make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
             )
         if expected_num_outputs != actual_num_outputs:
-            raise AssertionError(
+            raise_user_assertion_error(
                 make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
             )
 
@@ -5890,13 +5901,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         outs = out.items if isinstance(out, TupleVariable) else [out]
         if len(outs) != len(out_placements.value):  # type: ignore[attr-defined]
-            raise AssertionError(
+            raise_user_assertion_error(
                 "Number of outputs must match number of out_placements"
             )
         for placements, vt in zip(out_placements.value, outs):  # type: ignore[attr-defined]
             if not vt.is_tensor():  # type: ignore[attr-defined]
                 if placements is not None:
-                    raise AssertionError(
+                    raise_user_assertion_error(
                         "Expected placements to be None for non-tensor output"
                     )
                 continue
