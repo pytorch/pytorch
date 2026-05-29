@@ -96,6 +96,22 @@ to_radix_key(T val, bool desc) {
   return uint(result);
 }
 
+// Inverse of to_radix_key for floats (same `desc`): recovers the value at the
+// keyed merge's final store. Exact for non-NaN; NaN maps to a canonical NaN.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> from_radix_key(
+    typename radix_bits<T>::type key,
+    bool desc) {
+  using U = typename radix_bits<T>::type;
+  constexpr uint nbits = sizeof(T) * 8;
+  constexpr U sign_bit = U(1) << (nbits - 1);
+  U r = desc ? U(~key) : key;
+  // top bit set => original non-negative (only sign flipped); clear => all
+  // flipped.
+  U mask = (r & sign_bit) ? sign_bit : U(~U(0));
+  return as_type<T>(U(r ^ mask));
+}
+
 template <typename T, short RTPTG, short EPT, short RBITS>
 kernel void radix_count(
     const device T* input [[buffer(0)]],

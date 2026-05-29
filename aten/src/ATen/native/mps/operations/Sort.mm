@@ -66,22 +66,26 @@ static int select_tptg(int sort_size, size_t elem_size, int n_rows) {
 
   int tptg = std::clamp<int>(std::bit_ceil(static_cast<unsigned>(std::max(potential_tptg, 1))), 32, 1024);
 
-  // 8-byte types: tgmem stages 8 bytes (value) + 4 bytes (uint index) per
-  // element, i.e. ELEMS_PER_TG * 12 bytes. At TPTG=1024 that's 48 KB, over
-  // the 32 KB tgmem budget. Clamp to 256 (12 KB, leaves room for 2 TGs/core)
+  // 8-byte types: 12 B/elem tgmem, so TPTG=1024 (48 KB) busts the 32 KB budget.
+  // 512 (24 KB) cuts a merge round for few rows; 256 gives 2 TGs/core for many.
   if (elem_size > 4) {
-    tptg = std::min(tptg, 256);
+    tptg = std::min(tptg, n_rows <= 256 ? 512 : 256);
   }
-  // TPTG=1024 uses ~24KB tgmem which limits occupancy, drop to 512 (~12KB) when rows hide the extra merge
-  const int tptg1024_n_blocks = at::ceil_div(sort_size, 1024 * ILP);
-  if (tptg == 1024 && tptg1024_n_blocks > 1 && n_rows >= 8) {
-    tptg = 512;
-  }
+  // <=4-byte: TPTG=1024 beats 512 over large segments - halving the block count
+  // drops a merge round, outweighing occupancy even at high row counts (measured).
   return tptg;
 }
 
-static bool should_use_radix(int sort_size, size_t elem_size, int elems_per_tg) {
+static bool should_use_radix(int sort_size, size_t elem_size, int elems_per_tg, bool is_fp, int n_rows) {
   if (elem_size > 4)
+    return false;
+  // 2-byte floats: radix is only 2 passes and skips the NaN-aware float compare,
+  // so always prefer it. 4-byte floats use the keyed merge, judged below.
+  if (is_fp && elem_size == 2 && sort_size >= 2048)
+    return true;
+  // Radix is a fixed 4-pass scan; merge (keyed for float32) hides its rounds across
+  // rows and wins ~1.8x once rows saturate the GPU. Radix only in the few-row regime.
+  if (n_rows >= 256)
     return false;
   int n_blocks_merge = at::ceil_div(sort_size, elems_per_tg);
   int merge_rounds = 0;
@@ -291,7 +295,8 @@ static void sort_multi_block(const Tensor& input,
                              int64_t stride_seg,
                              int tptg,
                              bool stable,
-                             TopKParams sel = {}) {
+                             TopKParams sel = {},
+                             bool keyed = false) {
   const bool sel_mode = sel.count > 0;
   const int elems_per_tg = tptg * static_cast<int>(c10::metal::ILP_PER_THREAD);
   const int n_rows = static_cast<int>(input.numel() / sort_size);
@@ -309,8 +314,14 @@ static void sort_multi_block(const Tensor& input,
   // write long indices straight to output, skipping a widen copy.
   // count==1 flat-maps to the output for any dim; count>1 is last-dim by construction.
   const bool direct_final = !need_permute || sel.count == 1;
+  // Keyed float path sorts to_radix_key(value) as an integer key (branch-free vs
+  // the float compare); the final fkey kernel inverts on store, so needs direct_final.
+  TORCH_INTERNAL_ASSERT(!keyed || (direct_final && n_blocks > 1));
   const bool use_u16 = direct_final && sort_size <= 65536;
-  auto opts_val = values.options();
+  // 2-byte value -> 2-byte integer key; 4-byte value -> 4-byte key.
+  const bool key16 = values.element_size() == 2;
+  const auto key_dtype = key16 ? at::kShort : at::kInt;
+  auto opts_val = keyed ? at::TensorOptions().dtype(key_dtype).device(values.device()) : values.options();
   auto opts_idx = use_u16 ? at::TensorOptions().dtype(at::kShort).device(values.device())
                           : at::TensorOptions().dtype(at::kInt).device(values.device());
 
@@ -322,11 +333,21 @@ static void sort_multi_block(const Tensor& input,
   const auto type_str = scalarToMetalTypeString(values);
   const char* u16_sfx = use_u16 ? "_u16" : "";
   const char* stable_sfx = stable ? "_stable" : "";
-  // mb_sort_block has stable variants; mb_merge doesn't (stable on stable input).
-  const auto block_fn = fmt::format("mb_sort_block_{}_tptg{}{}{}", type_str, tptg, u16_sfx, stable_sfx);
-  const auto merge_fn = fmt::format("mb_merge_{}_tptg{}{}", type_str, tptg, u16_sfx);
+  const std::string_view key_type = key16 ? "ushort" : "uint";
   const std::string_view final_sel_sfx = sel_mode ? "_topk" : "";
-  const auto final_fn = fmt::format("mb_merge_final{}_{}_tptg{}{}", final_sel_sfx, type_str, tptg, u16_sfx);
+  // Keyed reuses the same mb_merge on the integer key; only block load and final
+  // store differ. Non-keyed merges the value type directly.
+  const std::string_view merge_ty = keyed ? key_type : std::string_view(type_str);
+  const auto merge_fn = fmt::format("mb_merge_{}_tptg{}{}", merge_ty, tptg, u16_sfx);
+  std::string block_fn, final_fn;
+  if (keyed) {
+    block_fn = fmt::format("mb_sort_block_fkey_{}_tptg{}{}", type_str, tptg, u16_sfx);
+    final_fn = fmt::format("mb_merge_final{}_fkey_{}_tptg{}{}", final_sel_sfx, type_str, tptg, u16_sfx);
+  } else {
+    // mb_sort_block has stable variants; mb_merge doesn't (stable on stable input).
+    block_fn = fmt::format("mb_sort_block_{}_tptg{}{}{}", type_str, tptg, u16_sfx, stable_sfx);
+    final_fn = fmt::format("mb_merge_final{}_{}_tptg{}{}", final_sel_sfx, type_str, tptg, u16_sfx);
+  }
 
   int total_rounds = 0;
   for (int m = 2; (m / 2) < n_blocks; m *= 2)
@@ -359,13 +380,16 @@ static void sort_multi_block(const Tensor& input,
           auto pso = is_last ? final_pso : merge_pso;
           ping = !ping;
 
+          // Final keyed merge inverts keys with the real direction; intermediate
+          // keyed merges sort keys ascending (direction already baked into the key).
+          const bool stage_desc = (keyed && !is_last) ? false : descending;
           getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in});
           [enc setComputePipelineState:pso];
           const auto dims = std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks};
           if (is_last && sel_mode) {
-            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, descending, std::array<int32_t, 2>{sel.offset, sel.count});
+            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc, std::array<int32_t, 2>{sel.offset, sel.count});
           } else {
-            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, descending);
+            mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc);
           }
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
           getMPSProfiler().endProfileKernel(pso);
@@ -425,7 +449,12 @@ static void sort_out_mps_impl(const Tensor& self,
   const bool is_last_dim = (dim == self.ndimension() - 1);
   const bool stable_kernel = stable.value_or(false);
 
-  const bool use_radix = should_use_radix(sort_size, self.element_size(), elems_per_tg);
+  const bool use_radix =
+      should_use_radix(sort_size, self.element_size(), elems_per_tg, self.is_floating_point(), n_rows);
+  // float32 uses the comparator-free keyed merge wherever the heuristic picks
+  // merge over radix (multi-block, direct-final).
+  const bool direct_final = is_last_dim || sel.count == 1;
+  const bool keyed = self.scalar_type() == at::kFloat && !use_radix && sort_size > elems_per_tg && direct_final;
 
   if (use_radix) {
     sort_radix(self, out_vals, out_inds, dim, descending, sort_size, sel);
@@ -474,7 +503,8 @@ static void sort_out_mps_impl(const Tensor& self,
                        stride_seg,
                        tptg,
                        stable_kernel,
-                       sel);
+                       sel,
+                       keyed);
     }
   }
 
@@ -506,6 +536,7 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
                     indices,
                     TopKParams{/*offset=*/static_cast<int>(k - 1), /*count=*/1});
 }
+
 } // namespace
 
 TORCH_IMPL_FUNC(sort_stable_out_mps)(const Tensor& self,

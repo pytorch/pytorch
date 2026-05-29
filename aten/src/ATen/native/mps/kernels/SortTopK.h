@@ -68,6 +68,109 @@ kernel void mb_merge_final_topk(
   }
 }
 
+// Float keyed merge: sort to_radix_key(value) as an integer key (branch-free vs
+// the NaN-aware float compare). desc is baked into the key, so only load/store
+// transform.
+template <typename T, typename KeyT, typename IdxT, short TPTG, short TN>
+kernel void mb_sort_block_fkey(
+    const device T* inp [[buffer(0)]],
+    device KeyT* dv [[buffer(1)]],
+    device IdxT* di [[buffer(2)]],
+    constant int& size [[buffer(3)]],
+    constant long2& strides [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  const long stride_sort = strides.x;
+  const long stride_seg = strides.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  long seg = tid.y * stride_seg;
+  int blk = tid.x * ELEMS_PER_TG;
+  threadgroup KeyT tgv[ELEMS_PER_TG];
+  threadgroup IdxT tgi[ELEMS_PER_TG];
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = blk + i;
+    tgv[i] = g < size ? KeyT(to_radix_key(inp[seg + g * stride_sort], desc))
+                      : sort_init<KeyT>(false);
+    tgi[i] = g < size ? IdxT(g) : ~IdxT(0);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  block_merge_sort<KeyT, IdxT, TPTG, TN, false>(tgv, tgi, lid.x, false);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  int row = tid.y * size;
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = blk + i;
+    if (g < size) {
+      dv[row + g] = tgv[i];
+      di[row + g] = tgi[i];
+    }
+  }
+}
+
+template <typename T, typename KeyT, typename InIdxT, short TPTG, short TN>
+kernel void mb_merge_final_fkey(
+    const device KeyT* vi [[buffer(0)]],
+    const device InIdxT* ii [[buffer(1)]],
+    device T* vo [[buffer(2)]],
+    device long* io [[buffer(3)]],
+    constant int3& dims [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  const int size = dims.x;
+  const int merge_tiles = dims.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  vi += tid.y * size;
+  ii += tid.y * size;
+  vo += tid.y * size;
+  io += tid.y * size;
+  threadgroup KeyT tgv[ELEMS_PER_TG];
+  threadgroup InIdxT tgi[ELEMS_PER_TG];
+  mb_merge_body<KeyT, InIdxT, TPTG, TN>(
+      vi, ii, tgv, tgi, size, merge_tiles, tid.x, false, lid.x);
+  int base = tid.x * ELEMS_PER_TG;
+  for (int i = lid.x; i < ELEMS_PER_TG; i += TPTG) {
+    int g = base + i;
+    if (g < size) {
+      vo[g] = from_radix_key<T>(tgv[i], desc);
+      io[g] = long(tgi[i]);
+    }
+  }
+}
+
+template <typename T, typename KeyT, typename InIdxT, short TPTG, short TN>
+kernel void mb_merge_final_topk_fkey(
+    const device KeyT* vi [[buffer(0)]],
+    const device InIdxT* ii [[buffer(1)]],
+    device T* vo [[buffer(2)]],
+    device long* io [[buffer(3)]],
+    constant int3& dims [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    constant int2& sel [[buffer(6)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  const int size = dims.x;
+  const int merge_tiles = dims.y;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  vi += tid.y * size;
+  ii += tid.y * size;
+  threadgroup KeyT tgv[ELEMS_PER_TG];
+  threadgroup InIdxT tgi[ELEMS_PER_TG];
+  mb_merge_body<KeyT, InIdxT, TPTG, TN>(
+      vi, ii, tgv, tgi, size, merge_tiles, tid.x, false, lid.x);
+  const int offset = sel.x;
+  const int count = sel.y;
+  const int base = int(tid.x) * ELEMS_PER_TG;
+  long base_out = long(tid.y) * long(count);
+  for (int local = int(lid.x); local < ELEMS_PER_TG; local += TPTG) {
+    int g = base + local;
+    if (g >= offset && g < offset + count && g < size) {
+      vo[base_out + (g - offset)] = from_radix_key<T>(tgv[local], desc);
+      io[base_out + (g - offset)] = long(tgi[local]);
+    }
+  }
+}
+
 template <
     typename T,
     typename InIdxT,
@@ -259,3 +362,79 @@ INSTANTIATE_TOPK_RADIX_TPTG512(half);
 INSTANTIATE_TOPK_RADIX_TPTG512(bfloat);
 INSTANTIATE_TOPK_RADIX_TPTG512(short);
 INSTANTIATE_TOPK_RADIX_TPTG512(ushort);
+
+// Keyed float merge: instantiated only for large-segment TPTGs ({512, 1024}),
+// where the host-side keyed gate (sort_size >= 8192) lands; 256 is a safety
+// margin.
+#define INSTANTIATE_FKEY(T, KeyT, TPTG, TN)                                   \
+  template [[host_name("mb_sort_block_fkey_" #T "_tptg" #TPTG)]]              \
+  kernel void mb_sort_block_fkey<T, KeyT, uint, TPTG, TN>(                    \
+      const device T*,                                                        \
+      device KeyT*,                                                           \
+      device uint*,                                                           \
+      constant int&,                                                          \
+      constant long2&,                                                        \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_sort_block_fkey_" #T "_tptg" #TPTG "_u16")]]       \
+  kernel void mb_sort_block_fkey<T, KeyT, ushort, TPTG, TN>(                  \
+      const device T*,                                                        \
+      device KeyT*,                                                           \
+      device ushort*,                                                         \
+      constant int&,                                                          \
+      constant long2&,                                                        \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_merge_final_fkey_" #T "_tptg" #TPTG)]]             \
+  kernel void mb_merge_final_fkey<T, KeyT, uint, TPTG, TN>(                   \
+      const device KeyT*,                                                     \
+      const device uint*,                                                     \
+      device T*,                                                              \
+      device long*,                                                           \
+      constant int3&,                                                         \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_merge_final_fkey_" #T "_tptg" #TPTG "_u16")]]      \
+  kernel void mb_merge_final_fkey<T, KeyT, ushort, TPTG, TN>(                 \
+      const device KeyT*,                                                     \
+      const device ushort*,                                                   \
+      device T*,                                                              \
+      device long*,                                                           \
+      constant int3&,                                                         \
+      constant bool&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_merge_final_topk_fkey_" #T "_tptg" #TPTG)]]        \
+  kernel void mb_merge_final_topk_fkey<T, KeyT, uint, TPTG, TN>(              \
+      const device KeyT*,                                                     \
+      const device uint*,                                                     \
+      device T*,                                                              \
+      device long*,                                                           \
+      constant int3&,                                                         \
+      constant bool&,                                                         \
+      constant int2&,                                                         \
+      uint3,                                                                  \
+      uint3);                                                                 \
+  template [[host_name("mb_merge_final_topk_fkey_" #T "_tptg" #TPTG "_u16")]] \
+  kernel void mb_merge_final_topk_fkey<T, KeyT, ushort, TPTG, TN>(            \
+      const device KeyT*,                                                     \
+      const device ushort*,                                                   \
+      device T*,                                                              \
+      device long*,                                                           \
+      constant int3&,                                                         \
+      constant bool&,                                                         \
+      constant int2&,                                                         \
+      uint3,                                                                  \
+      uint3);
+
+#define INSTANTIATE_FKEY_ALL(T, KeyT) \
+  INSTANTIATE_FKEY(T, KeyT, 256, 4)   \
+  INSTANTIATE_FKEY(T, KeyT, 512, 4)   \
+  INSTANTIATE_FKEY(T, KeyT, 1024, 4)
+
+INSTANTIATE_FKEY_ALL(float, uint);
+INSTANTIATE_FKEY_ALL(half, ushort);
+INSTANTIATE_FKEY_ALL(bfloat, ushort);
