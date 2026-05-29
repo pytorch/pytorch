@@ -497,7 +497,7 @@ class Optimizer:
 
         When python tracing is enabled the profiler will hook into this
         function at the CPython level to inspect the optimizer's parameters and
-        param groups. It is called it after `step()` since many optimizers
+        param groups. It is called after `step()` since many optimizers
         lazily initialize state.
 
         This is a workaround due to lack of a proper step hook on the optimizer,
