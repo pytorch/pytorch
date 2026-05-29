@@ -155,7 +155,7 @@ size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
   return i;
 }
 
-double CUDAAllocatorConfig::parsePerProcessMemoryFraction(
+size_t CUDAAllocatorConfig::parsePerProcessMemoryFraction(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
