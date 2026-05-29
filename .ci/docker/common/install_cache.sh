@@ -78,10 +78,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
-# intercept assembly (.s) compilation and fail because the assembler does not
-# produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
+# Skip all sccache wrapping for Python-wheel ROCm installs: sccache PATH
+# wrappers intercept assembly (.s) compilation and fail because the assembler
+# does not produce the .d dependency file that sccache expects.
+if [[ "$ROCM_VERSION" != "nightly" && "$ROCM_VERSION" != 7.13* ]]; then
   write_sccache_stub cc
   write_sccache_stub c++
   write_sccache_stub gcc
