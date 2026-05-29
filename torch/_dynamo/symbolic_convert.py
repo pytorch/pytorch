@@ -2964,6 +2964,10 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)
@@ -4034,7 +4038,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -4185,12 +4189,8 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval == 0 or inst.argval == 1 to be true"
             )
-        if inst.argval == 0:
-            new_argval = "is"
-        else:
-            new_argval = "is not"
-        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
-        self.COMPARE_OP(new_inst)
+        argval = "is" if inst.argval == 0 else "is not"
+        self.push(compare_op_handlers[argval](self, self.popn(2), {}))
 
     def CONTAINS_OP(self, inst: Instruction) -> None:
         if not (inst.argval == 0 or inst.argval == 1):
@@ -6112,7 +6112,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )  # type: ignore[assignment]
             else:
                 fglobals_value = _import_module(module_name)
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
@@ -6123,7 +6123,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
