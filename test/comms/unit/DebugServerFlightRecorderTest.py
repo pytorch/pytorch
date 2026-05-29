@@ -18,7 +18,6 @@ running collective operations through TorchComms.
 import os
 import socket
 import time
-import unittest
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -34,7 +33,7 @@ import torch.distributed as dist
 import torch.distributed.debug as debug_module
 from torch.comms.hooks import FlightRecorderHook
 from torch.distributed.debug import start_debug_server, stop_debug_server
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 session = requests.Session()
@@ -49,7 +48,7 @@ def _reset_debug_server_state() -> None:
     debug_module._DEBUG_SERVER_PROC = None
 
 
-class TestDebugServerFlightRecorder(unittest.TestCase):
+class TestDebugServerFlightRecorder(TestCase):
     """Test that TorchComms FlightRecorder endpoints work with the debug server.
 
     This test validates the end-to-end flow:

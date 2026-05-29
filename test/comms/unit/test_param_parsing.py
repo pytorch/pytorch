@@ -3,9 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 import os
-import unittest
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
@@ -22,7 +21,7 @@ from torch.comms.functional.param_parsing import (
 
 
 @skip_if_torch_compile_not_supported_or_enabled()
-class TestParamSpec(unittest.TestCase):
+class TestParamSpec(TestCase):
     def test_has_default_true(self):
         spec = ParamSpec("x", ParamKind.INPUT, "Tensor", default_value=None)
         self.assertTrue(spec.has_default())
@@ -51,7 +50,7 @@ class TestParamSpec(unittest.TestCase):
 
 
 @skip_if_torch_compile_not_supported_or_enabled()
-class TestParsedArgs(unittest.TestCase):
+class TestParsedArgs(TestCase):
     def setUp(self):
         self.object_param = ParamSpec("self", ParamKind.CLASS_OBJECT, "MyClass")
         self.tensor_param = ParamSpec("tensor", ParamKind.INPUT, "Tensor", mutable=True)
@@ -255,7 +254,7 @@ except ImportError:
 
 
 @skip_if_torch_compile_not_supported_or_enabled()
-class TestCollectiveParamSchema(unittest.TestCase):
+class TestCollectiveParamSchema(TestCase):
     def test_from_raw_specs_basic(self):
         param_specs = [
             ParamSpec("tensor", ParamKind.INPUT, torch.Tensor, mutable=True),

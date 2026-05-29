@@ -3,14 +3,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 import os
-import unittest
 
 from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestSkipIfTorchCompileNotSupportedOrEnabled(unittest.TestCase):
+class TestSkipIfTorchCompileNotSupportedOrEnabled(TestCase):
     def setUp(self):
         # Save original env vars
         self._orig_patch = os.environ.get("TORCHCOMMS_PATCH_FOR_COMPILE")

@@ -4,17 +4,16 @@
 
 import copy
 import os
-import unittest
 
 from integration.helpers.TorchCommTestHelpers import TorchCommTestWrapper
 
 import torch
 from torch._C._comms import ReduceOp
 from torch.comms import new_comm
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestReduceOpCopy(unittest.TestCase):
+class TestReduceOpCopy(TestCase):
     """Tests for ReduceOp copy/deepcopy."""
 
     def test_reduceop_copy(self):
@@ -44,7 +43,7 @@ class TestReduceOpCopy(unittest.TestCase):
         self.assertIs(result, sentinel)
 
 
-class TestCommCopy(unittest.TestCase):
+class TestCommCopy(TestCase):
     """Tests for TorchComm copy/deepcopy using the dummy backend."""
 
     def setUp(self):
@@ -79,7 +78,7 @@ class TestCommCopy(unittest.TestCase):
         self.assertIs(result, sentinel)
 
 
-class TestWindowCopy(unittest.TestCase):
+class TestWindowCopy(TestCase):
     """Tests for TorchCommWindow copy/deepcopy.
 
     These tests require a backend that supports windows (e.g., nccl).

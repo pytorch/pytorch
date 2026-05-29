@@ -3,7 +3,6 @@
 # pyre-unsafe
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import unittest
 
 import torch
 import torch.comms
@@ -13,10 +12,10 @@ from torch._C._comms import (
     OpName,
     RemovableHandle,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestHooks(unittest.TestCase):
+class TestHooks(TestCase):
     def _create_comm(self, name: str) -> torch.comms.TorchComm:
         """Create a communicator using the fake backend."""
         return torch.comms.new_comm("fake", torch.device("cpu"), name=name)

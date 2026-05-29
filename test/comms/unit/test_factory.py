@@ -4,14 +4,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 import os
-import unittest
 
 import torch
 import torch.comms
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestFactory(unittest.TestCase):
+class TestFactory(TestCase):
     def test_factory(self):
         print(torch.comms)
         print(dir(torch.comms))

@@ -9,13 +9,11 @@ collectives through TorchComm so that pre/post hooks registered on the
 underlying TorchComm fire.
 """
 
-import unittest
-
 import torch
 import torch.comms
 import torch.distributed as dist
 from torch._C._comms import _BackendWrapper, OpName
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _make_wrapped_pg(name: str) -> tuple[torch.comms.TorchComm, dist.ProcessGroup]:
@@ -36,7 +34,7 @@ def _make_wrapped_pg(name: str) -> tuple[torch.comms.TorchComm, dist.ProcessGrou
     return comm, pg
 
 
-class TestBackendWrapperHooks(unittest.TestCase):
+class TestBackendWrapperHooks(TestCase):
     def test_hooks_fire_when_invoked_through_backend_wrapper(self) -> None:
         """Pre/post hooks on TorchComm fire when collectives go through the wrapper."""
         comm, pg = _make_wrapped_pg("test_hooks_fire")

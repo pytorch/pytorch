@@ -4,13 +4,12 @@
 
 import logging
 import operator
-import unittest
 
 import torch
 import torch.fx
 from torch._higher_order_ops.effects import with_effects
 from torch.library import Library
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +57,7 @@ def _get_output_node(gm: torch.fx.GraphModule):
     return None
 
 
-class TestReinplacementPass(unittest.TestCase):
+class TestReinplacementPass(TestCase):
     def test_reinplacement_basic(self):
         from torch.comms.functional.passes import reinplacement_pass
 
@@ -99,7 +98,7 @@ class TestReinplacementPass(unittest.TestCase):
         torch.testing.assert_close(actual, expected)
 
 
-class TestStripWithEffectsPass(unittest.TestCase):
+class TestStripWithEffectsPass(TestCase):
     def test_strip_with_effects_no_op_on_empty_graph(self):
         from torch.comms.functional.passes import strip_with_effects_pass
 
@@ -220,7 +219,7 @@ class TestStripWithEffectsPass(unittest.TestCase):
         self.assertTrue(_has_node_with_pattern(result_gm, "with_effects"))
 
 
-class TestPassesIntegration(unittest.TestCase):
+class TestPassesIntegration(TestCase):
     def test_passes_can_be_chained(self):
         from torch.comms.functional.passes import (
             reinplacement_pass,

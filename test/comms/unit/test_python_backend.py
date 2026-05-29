@@ -3,12 +3,11 @@
 # pyre-unsafe
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import unittest
 
 import torch
 import torch.comms
 from torch._C._comms import TorchCommBackend
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DummyWork:
@@ -121,7 +120,7 @@ class AsyncAllReduceBackend(DummyPyBackend):
         return work
 
 
-class TestPythonBackend(unittest.TestCase):
+class TestPythonBackend(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         torch.comms.register_backend("dummy_py", DummyPyBackend)
