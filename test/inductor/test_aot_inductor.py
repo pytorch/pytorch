@@ -6755,6 +6755,30 @@ class AOTInductorTestsTemplate:
         all_ops = [event.key for event in prof.key_averages()]
         self.assertTrue(not any("aten::contiguous" in op for op in all_ops))
 
+    @requires_multigpu()
+    def test_cuda_to_cuda_device_copy(self):
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("This test requires CUDA")
+
+        device0 = torch.device(type=GPU_TYPE, index=0)
+        device1 = torch.device(type=GPU_TYPE, index=1)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x, x.to(device1)
+
+        model = Model().to(device0)
+        x = torch.randn(10, device=device0)
+        package_path = AOTIRunnerUtil.compile(model, (x,))
+        aoti_model = torch._inductor.aoti_load_package(package_path, device_index=0)
+
+        expected = model(x)
+        actual = aoti_model(x)
+
+        self.assertEqual(actual[0].device, device0)
+        self.assertEqual(actual[1].device, device1)
+        self.assertEqual(actual, expected)
+
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
