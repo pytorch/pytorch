@@ -149,6 +149,160 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_sparse_spdiags(self):
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
+
+        self.assertIsInstance(out, FakeTensor)
+        self.assertEqual(out.layout, torch.sparse_coo)
+        self.assertEqual(out.shape, (2, 3))
+
+    def test_sparse_spdiags_compressed_layouts(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors does not support sparse strides")
+
+        real_offsets = torch.tensor([0, -1])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, real_offsets, make_constant=True
+            )
+            csr_out = torch.sparse.spdiags(
+                torch.randn(2, 3),
+                offsets,
+                (2, 3),
+                layout=torch.sparse_csr,
+            )
+            csc_out = torch.sparse.spdiags(
+                torch.randn(2, 3),
+                offsets,
+                (2, 3),
+                layout=torch.sparse_csc,
+            )
+            dynamic_offsets = torch.tensor([-1, -2])
+            dynamic_csr_out = torch.sparse.spdiags(
+                torch.randn(2, 100),
+                dynamic_offsets,
+                (100, 2),
+                layout=torch.sparse_csr,
+            )
+            dynamic_csc_out = torch.sparse.spdiags(
+                torch.randn(2, 100),
+                dynamic_offsets,
+                (100, 2),
+                layout=torch.sparse_csc,
+            )
+
+        self.assertEqual(csr_out.layout, torch.sparse_csr)
+        self.assertEqual(csc_out.layout, torch.sparse_csc)
+        self.assertEqual(dynamic_csr_out.layout, torch.sparse_csr)
+        self.assertEqual(dynamic_csc_out.layout, torch.sparse_csc)
+        self.assertEqual(dynamic_csr_out.crow_indices().shape, (101,))
+        self.assertEqual(
+            dynamic_csr_out.col_indices().shape, dynamic_csr_out.values().shape
+        )
+        self.assertEqual(dynamic_csc_out.ccol_indices().shape, (3,))
+        self.assertEqual(
+            dynamic_csc_out.row_indices().shape, dynamic_csc_out.values().shape
+        )
+
+    def test_sparse_spdiags_dynamic_nnz_bound(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors resolves the real nnz")
+
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            out = torch.sparse.spdiags(
+                torch.randn(2, 100), torch.tensor([-1, -2]), (100, 2)
+            )
+
+        nnz = out._values().shape[0]
+        nnz_range = mode.shape_env.var_to_range[nnz.node.expr]
+        self.assertEqual(nnz_range.lower, 0)
+        self.assertEqual(nnz_range.upper, 200)
+
+    def test_sparse_spdiags_coalesced_metadata(self):
+        zero_nnz_offsets = torch.tensor([3])
+        one_nnz_offsets = torch.tensor([0])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            zero_nnz_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, zero_nnz_offsets, make_constant=True
+            )
+            one_nnz_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, one_nnz_offsets, make_constant=True
+            )
+            zero_nnz = torch.sparse.spdiags(torch.randn(1, 3), zero_nnz_offsets, (3, 3))
+            one_nnz = torch.sparse.spdiags(torch.randn(1, 1), one_nnz_offsets, (1, 1))
+            two_nnz = torch.sparse.spdiags(torch.randn(1, 2), one_nnz_offsets, (2, 2))
+
+        self.assertTrue(zero_nnz.is_coalesced())
+        self.assertTrue(one_nnz.is_coalesced())
+        self.assertFalse(two_nnz.is_coalesced())
+
+    def test_sparse_spdiags_zero_dim_static_offsets(self):
+        duplicate_offsets = torch.tensor([0, 0])
+        out_of_range_offsets = torch.tensor([4])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            duplicate_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, duplicate_offsets, make_constant=True
+            )
+            out_of_range_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, out_of_range_offsets, make_constant=True
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Offset tensor contains duplicate values"
+            ):
+                torch.sparse.spdiags(torch.randn(2, 3), duplicate_offsets, (0, 3))
+
+            out = torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (0, 3))
+
+        self.assertEqual(out.layout, torch.sparse_coo)
+        self.assertEqual(out.shape, (0, 3))
+        self.assertTrue(out.is_coalesced())
+
+    def test_sparse_spdiags_static_offset_errors(self):
+        duplicate_offsets = torch.tensor([0, 0])
+        out_of_range_offsets = torch.tensor([4])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            duplicate_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, duplicate_offsets, make_constant=True
+            )
+            out_of_range_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, out_of_range_offsets, make_constant=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "Offset tensor contains duplicate values"
+            ):
+                torch.sparse.spdiags(torch.randn(2, 3), duplicate_offsets, (2, 3))
+
+            with self.assertRaisesRegex(RuntimeError, "negative dimension"):
+                torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (3, 3))
+
+    def test_sparse_spdiags_cuda_not_supported(self):
+        with FakeTensorMode() as fake_mode:
+            diagonals = FakeTensor(
+                fake_mode, torch.empty(2, 3, device="meta"), torch.device("cuda")
+            )
+            offsets = FakeTensor(
+                fake_mode,
+                torch.empty(2, dtype=torch.long, device="meta"),
+                torch.device("cuda"),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "_spdiags is only implemented for CPU tensors"
+            ):
+                torch.sparse.spdiags(diagonals, offsets, (2, 3))
+
+    def test_sparse_spdiags_compile_backend_eager(self):
+        def fn():
+            diags = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            return torch.sparse.spdiags(
+                diags,
+                offsets=torch.tensor([0, -1]),
+                shape=(diags.size(0), diags.size(1)),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), fn())
+
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 
