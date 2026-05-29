@@ -375,7 +375,9 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pip==26.0.1
+# Skip on Windows: pip cannot modify itself (the running pip.exe is locked),
+# so installing this pin fails with "To modify pip, please run ...".
+pip==26.0.1 ; platform_system != "Windows"
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
