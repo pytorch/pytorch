@@ -274,7 +274,14 @@ def has_unsupported_captured_scalars(
     score_mod_other_buffers: Sequence[Any],
     mask_mod_other_buffers: Sequence[Any],
 ) -> bool:
-    """Return True when FLASH captures dynamic scalars it cannot inline."""
+    """Return True when FLASH captures dynamic scalars it cannot inline.
+
+    With dynamic=True, captured Python scalars in score_mod or mask_mod may
+    become sympy symbols from LocalSource (captured ints) or 0-dim CPU tensors
+    (captured floats). Symbols from TensorPropertySource are allowed because
+    tensor size/stride values are resolved at runtime, but LocalSource symbols
+    cannot be inlined into the CuteDSL template.
+    """
     shape_env = V.graph.sizevars.shape_env
 
     for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
