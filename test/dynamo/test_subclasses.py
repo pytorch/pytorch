@@ -2469,8 +2469,19 @@ class GraphModule(torch.nn.Module):
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
             **kwargs: Any,
         ):
+            placeholders = list(gm.graph.find_nodes(op="placeholder"))
+            symint_idxs = [
+                i
+                for i, placeholder in enumerate(placeholders)
+                if isinstance(placeholder.meta.get("val"), torch.SymInt)
+            ]
+            self.assertTrue(set(symint_idxs).isdisjoint(static_input_idxs or ()))
+            for idx in static_input_idxs or ():
+                self.assertIsInstance(placeholders[idx].meta.get("val"), torch.Tensor)
+
             if dynamic:
-                self.assertEqual(static_input_idxs, [2, 3, 4])
+                self.assertTrue(symint_idxs)
+                self.assertEqual(static_input_idxs, [2, 3])
             else:
                 self.assertEqual(static_input_idxs, [1, 2])
             return gm
