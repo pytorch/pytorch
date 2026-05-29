@@ -636,6 +636,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             output_is_value=output_is_value,
         )
         value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
+        rewritten_value_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
         def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
             # Value-only chains can be rewritten in place. Mixed value/indexing
@@ -668,7 +669,9 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 if not value_inputs:
                     return node
                 if node not in indexing_use:
-                    rewrite_rule_args(node, value_inputs)
+                    if node not in rewritten_value_nodes:
+                        rewritten_value_nodes.add(node)
+                        rewrite_rule_args(node, value_inputs)
                     return node
 
                 if node not in value_clones:
@@ -684,8 +687,10 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 return value_clones[node]
 
             if node not in indexing_use:
-                node.args = map_arg(node.args, lambda n: value_version(n, node))
-                node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
+                if node not in rewritten_value_nodes:
+                    rewritten_value_nodes.add(node)
+                    node.args = map_arg(node.args, lambda n: value_version(n, node))
+                    node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
                 return node
 
             if node not in value_clones:
