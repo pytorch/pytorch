@@ -30,6 +30,19 @@ c10d = torch.ops._c10d_functional
 logger = logging.getLogger(__name__)
 
 
+def _get_fake_mode(node: fx.Node) -> torch._subclasses.fake_tensor.FakeTensorMode:
+    """Get FakeTensorMode: V.fake_mode during compilation, from node meta in tests."""
+    mode = V.fake_mode
+    if isinstance(mode, torch._subclasses.fake_tensor.FakeTensorMode):
+        return mode
+    # Standalone call (tests) -- extract from node metadata
+    for inp in node.all_input_nodes:
+        val = inp.meta.get("val")
+        if isinstance(val, torch._subclasses.fake_tensor.FakeTensor):
+            return val.fake_mode
+    raise RuntimeError(f"No FakeTensorMode available for {node.name}")
+
+
 def _retrace_node_meta(node: fx.Node) -> None:
     """Recompute node.meta["val"] by running the op on input FakeTensors."""
     if node.op != "call_function":
@@ -37,13 +50,10 @@ def _retrace_node_meta(node: fx.Node) -> None:
     valid, args, kwargs = get_fake_args_kwargs(node)
     if not valid:
         return
-    try:
-        target = node.target
-        assert callable(target)
-        with V.fake_mode:
-            node.meta["val"] = target(*args, **kwargs)
-    except Exception as e:
-        logger.debug("_retrace_node_meta: failed for %s: %s", node.name, e)
+    target = node.target
+    assert callable(target)
+    with _get_fake_mode(node):
+        node.meta["val"] = target(*args, **kwargs)
 
 
 def _is_2d_transpose(node: fx.Node) -> bool:
@@ -147,48 +157,46 @@ def find_all_gather_ancestor(
     return None
 
 
+def _select_getitem(split_node: fx.Node, rank: int | None) -> fx.Node | None:
+    """Pick getitem from a split: by rank if known, else lowest-index with users."""
+    getitems = [
+        u
+        for u in split_node.users
+        if u.op == "call_function" and u.target is operator.getitem
+    ]
+    if not getitems:
+        return None
+    if rank is not None:
+        matches = [g for g in getitems if len(g.args) > 1 and g.args[1] == rank]
+        return matches[0] if matches else None
+    used = sorted(
+        (g for g in getitems if g.users),
+        key=lambda g: g.args[1] if len(g.args) > 1 else 0,
+    )
+    return used[0] if used else None
+
+
 def find_split_getitem(
     start: fx.Node, rank: int | None = None, max_search: int = 3000
 ) -> tuple[fx.Node, fx.Node] | None:
-    """Walk forward from start to find split(dim=0) -> getitem[rank].
-
-    If rank is provided, selects getitem[rank]; otherwise picks the
-    getitem with the lowest index among those with downstream users.
-    """
+    """Walk forward from start to find split(dim=0) -> getitem[rank]."""
     chain: OrderedSet[fx.Node] = OrderedSet([start])
     searched = 0
     node = start.next
     while node is not None and searched < max_search:
         searched += 1
-        if node.op != "call_function":
+        if node.op != "call_function" or not any(
+            inp in chain for inp in node.all_input_nodes
+        ):
             node = node.next
             continue
-        if not any(inp in chain for inp in node.all_input_nodes):
-            node = node.next
-            continue
-        if node.target is aten.split.Tensor:
-            split_dim = node.args[2] if len(node.args) > 2 else 0
-            if split_dim != 0:
-                return None
-            getitems = [
-                u
-                for u in node.users
-                if u.op == "call_function" and u.target is operator.getitem
-            ]
-            if not getitems:
-                return None
-            if rank is not None:
-                rank_getitems = [
-                    g for g in getitems if len(g.args) > 1 and g.args[1] == rank
-                ]
-                return (node, rank_getitems[0]) if rank_getitems else None
-            used_getitems = [g for g in getitems if len(g.users) > 0]
-            if not used_getitems:
-                return None
-            used_getitems.sort(key=lambda g: g.args[1] if len(g.args) > 1 else 0)
-            return node, used_getitems[0]
         if get_collective_type(node) != "" or is_wait_tensor(node):
             return None
+        if node.target is aten.split.Tensor:
+            if (node.args[2] if len(node.args) > 2 else 0) != 0:
+                return None
+            gi = _select_getitem(node, rank)
+            return (node, gi) if gi else None
         chain.add(node)
         node = node.next
     return None
@@ -356,10 +364,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         if len(ag_node.users) != 1 or len(info.wait_node.users) != 1:
             continue
 
-        try:
-            rank = _resolve_process_group(GroupName(info.group_name)).rank()
-        except Exception:
-            rank = None
+        rank = _resolve_process_group(GroupName(info.group_name)).rank()
         split_result = find_split_getitem(info.slice_node, rank=rank)
         if split_result is None:
             continue
