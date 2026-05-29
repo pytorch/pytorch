@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 
 import torch
+from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
@@ -249,6 +251,55 @@ op2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
+
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_debug_trace_bypasses_fx_graph_cache(self):
+        counters.clear()
+
+        def fn(a, b):
+            return torch.matmul(a + 1, b)
+
+        debug_root = tempfile.mkdtemp()
+        debug_paths = []
+        try:
+            with config.patch(
+                {
+                    "trace.debug_dir": debug_root,
+                    "fx_graph_cache": True,
+                    "fx_graph_remote_cache": False,
+                }
+            ):
+                for _ in range(2):
+                    compiled_fn = torch.compile(fn)
+                    with self.assertLogs(
+                        logging.getLogger("torch._inductor.debug"),
+                        level=logging.WARNING,
+                    ) as cm:
+                        compiled_fn(torch.randn(16, 16), torch.randn(16, 16))
+
+                    m = None
+                    for log_line in cm.output:
+                        m = re.match(r"WARNING.* debug trace: (.*)", log_line)
+                        if m:
+                            break
+                    self.assertTrue(m, "debug trace file path not found in logs")
+                    if m is None:
+                        raise AssertionError
+
+                    debug_path = Path(m.group(1))
+                    debug_paths.append(debug_path)
+                    self.assertTrue(debug_path.is_dir())
+                    self.assertGreater(filesize(debug_path / "fx_graph_readable.py"), 0)
+                    self.assertGreater(filesize(debug_path / "output_code.py"), 0)
+
+                    torch.compiler.reset()
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(len(set(debug_paths)), 2)
+        finally:
+            torch.compiler.reset()
+            shutil.rmtree(debug_root, ignore_errors=True)
 
     # AOT compiler have not supported windows yet.
     @skipIfWindows

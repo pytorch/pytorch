@@ -931,6 +931,10 @@ def _compile_fx_inner(
         use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
+            # Debug tracing writes artifacts during codegen.  Loading a
+            # CompiledFxGraph from cache skips codegen and leaves the freshly
+            # announced debug trace directory empty.
+            and not config.trace.enabled
             and not aot_mode
             and backends_support_caching
             and not torch._functorch.config.bundled_autograd_cache
