@@ -1381,8 +1381,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
         #   return [add, primals_1, le]
         #
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists before the saved tensors
+            expected_msg = "bw_donated_idxs=[2]"
+        else:
+            expected_msg = "bw_donated_idxs=[1]"
+
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
