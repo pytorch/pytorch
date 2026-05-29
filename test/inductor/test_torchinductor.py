@@ -8594,6 +8594,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
 
+    def test_remainder_negative_int(self):
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        for dtype in (torch.int32, torch.int64):
+            a = torch.arange(-32, 32, device=self.device, dtype=dtype)
+            for divisor in (2, 3, 7, -2, -3, -7):
+                b = torch.full_like(a, divisor)
+                self.common(fn, (a, b))
+
+    @skip_if_cpu
+    def test_remainder_div_by_zero_int(self):
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        # CUDA and HIP intentionally have different eager results for integral
+        # remainder by zero; compare against eager for the active backend.
+        for dtype in (torch.int32, torch.int64, torch.uint8):
+            a = torch.tensor([-3, -1, 0, 1, 3], device=self.device, dtype=dtype)
+            b = torch.zeros_like(a)
+            self.common(fn, (a, b))
+
     @skip_if_halide  # cpp-only RuntimeError contract
     @skip_if_pallas  # cpp-only RuntimeError contract
     @skip_if_triton_cpu  # cpp-only RuntimeError contract
