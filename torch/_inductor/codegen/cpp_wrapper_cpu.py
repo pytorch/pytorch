@@ -2161,6 +2161,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
 
+    def codegen_device_idx(self, device, device_id):
+        device_id = device_id.strip()
+        if not V.graph.aot_mode:
+            return device_id
+
+        if device.type == V.graph.device_type and device.index is not None:
+            # The primary compile-time device is relocatable via device_index at load.
+            # Other explicit device indices must stay intact for cross-device copies.
+            primary_device_idx = next(iter(V.graph.device_idxs), None)
+            if primary_device_idx is not None and device.index != primary_device_idx:
+                return device_id
+
+        return "this->device_idx_"
+
     def codegen_dtype(self, dtype):
         dtype_str = str(dtype).split(".")[-1]
         self.used_cached_dtypes.add(dtype_str)
@@ -2288,7 +2302,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        device_idx = self.codegen_device_idx(device, device_id)
 
         handle_name = f"{name}_handle"
         args = [
