@@ -1074,6 +1074,89 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("", result.prefix)
 
+    @patch("random.uniform", return_value=10)
+    def test_workflows_all_with_exclusion(self, mock_uniform: Mock) -> None:
+        """workflows: ALL,-excluded enables every workflow except the excluded one."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: ALL,-periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
+            ).prefix,
+        )
+
+    @patch("random.uniform", return_value=10)
+    def test_workflows_exclusion_name_with_space(self, mock_uniform: Mock) -> None:
+        """Exclusions match the github.workflow name verbatim, including spaces."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: ALL,-B200 Smoke Tests
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="B200 Smoke Tests"
+            ).prefix,
+        )
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+
+    @patch("random.uniform", return_value=10)
+    def test_workflows_exclusion_only_acts_as_denylist(
+        self, mock_uniform: Mock
+    ) -> None:
+        """workflows with only exclusions enables every non-excluded workflow."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: -periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        self.assertEqual(
+            "lf.",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+            ).prefix,
+        )
+        self.assertEqual(
+            "",
+            rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
+            ).prefix,
+        )
+
     def test_parse_workflows_setting(self) -> None:
         settings_text = """
         ```
