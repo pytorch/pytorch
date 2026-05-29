@@ -4350,17 +4350,15 @@ def _efficientzerotensor(
 ):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = torch.get_default_dtype() if dtype is None else decode_dtype(dtype)
-    with torch.utils._python_dispatch._disable_current_modes():
-        scalar = torch.zeros(
-            (),
-            dtype=dtype,
-            device=decode_device(device),
-            pin_memory=pin_memory,
-        )
-    return expand(
-        V.graph.add_tensor_constant(scalar),
-        size,
+    scalar = tensor_constructor(0)(
+        [],
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
     )
+    scalar.realize()
+    return expand(scalar, size)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
