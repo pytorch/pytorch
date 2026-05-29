@@ -17,6 +17,7 @@ from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -368,88 +369,203 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             self.assertEqual(wait_result.shape, x_gpu.shape)
             self.assertEqual(wait_result.device, x_gpu.device)
 
-    def test_pinned_empty_like_numa_restores_policy(self):
-        """Test that _pinned_empty_like_numa restores the thread's prior mempolicy.
-
-        Mocks the NUMA helpers so the test deterministically exercises
-        the bind-then-restore path on any host.
-        """
-        import ctypes
-        from unittest.mock import MagicMock, patch
-
+    def _has_numa_support(self):
+        """Check if real NUMA syscalls are available (Blackwell+ with NUMA topology)."""
+        if not SM100OrLater:
+            return False
         from torch._functorch._activation_offloading.offload_ops import (
-            _MPOL_BIND,
-            _pinned_empty_like_numa,
+            _gpu_numa_node,
+            _init_mempolicy,
         )
 
-        # Simulate a pre-existing MPOL_BIND to NUMA node 3
-        prior_mask = (ctypes.c_ulong * 1)(8)  # bit 3
-        saved_policy = (_MPOL_BIND, prior_mask, 64)
-        mock_get = MagicMock(return_value=saved_policy)
-        mock_set = MagicMock(return_value=True)
-        _ops = "torch._functorch._activation_offloading.offload_ops"
+        _gpu_numa_node.cache_clear()
+        result = _init_mempolicy() and _gpu_numa_node(0) is not None
+        _gpu_numa_node.cache_clear()
+        return result
 
-        x = torch.randn(64, device=GPU_TYPE)
-        with (
-            patch(f"{_ops}._init_mempolicy", return_value=True),
-            patch(f"{_ops}._gpu_numa_node", return_value=0),
-            patch(f"{_ops}._get_mempolicy", mock_get),
-            patch(f"{_ops}._set_mempolicy", mock_set),
-        ):
-            result = _pinned_empty_like_numa(x)
+    def _assert_policies_equal(self, before, after):
+        """Assert two mempolicy tuples (mode, nodemask, maxnode) are equal."""
+        self.assertIsNotNone(before)
+        self.assertIsNotNone(after)
+        self.assertEqual(after[0], before[0])
+        self.assertEqual(after[2], before[2])
+        min_len = min(len(before[1]), len(after[1]))
+        for i in range(min_len):
+            self.assertEqual(after[1][i], before[1][i])
 
-        self.assertEqual(result.device.type, "cpu")
-        self.assertEqual(mock_set.call_count, 2)
-        bind_call, restore_call = mock_set.call_args_list
-        # First call: bind to the GPU's NUMA node
-        self.assertEqual(bind_call.args[0], _MPOL_BIND)
-        # Second call: restore the original policy (not MPOL_DEFAULT)
-        self.assertEqual(restore_call.args[0], _MPOL_BIND)
-        self.assertIs(restore_call.args[1], prior_mask)
-        self.assertEqual(restore_call.args[2], 64)
+    def test_pinned_empty_like_numa_restores_policy(self):
+        """Verify _pinned_empty_like_numa restores the thread's prior mempolicy."""
+        if self._has_numa_support():
+            from torch._functorch._activation_offloading.offload_ops import (
+                _get_mempolicy,
+                _pinned_empty_like_numa,
+            )
+
+            policy_before = _get_mempolicy()
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            _pinned_empty_like_numa(x)
+            policy_after = _get_mempolicy()
+            self._assert_policies_equal(policy_before, policy_after)
+        else:
+            import ctypes
+            from unittest.mock import MagicMock, patch
+
+            from torch._functorch._activation_offloading.offload_ops import (
+                _MPOL_BIND,
+                _pinned_empty_like_numa,
+            )
+
+            prior_mask = (ctypes.c_ulong * 1)(8)
+            saved_policy = (_MPOL_BIND, prior_mask, 64)
+            mock_get = MagicMock(return_value=saved_policy)
+            mock_set = MagicMock(return_value=True)
+            _ops = "torch._functorch._activation_offloading.offload_ops"
+
+            x = torch.randn(64, device=GPU_TYPE)
+            with (
+                patch(f"{_ops}._init_mempolicy", return_value=True),
+                patch(f"{_ops}._gpu_numa_node", return_value=0),
+                patch(f"{_ops}._get_mempolicy", mock_get),
+                patch(f"{_ops}._set_mempolicy", mock_set),
+            ):
+                result = _pinned_empty_like_numa(x)
+
+            self.assertEqual(result.device.type, "cpu")
+            self.assertEqual(mock_set.call_count, 2)
+            bind_call, restore_call = mock_set.call_args_list
+            self.assertEqual(bind_call.args[0], _MPOL_BIND)
+            self.assertEqual(restore_call.args[0], _MPOL_BIND)
+            self.assertIs(restore_call.args[1], prior_mask)
+            self.assertEqual(restore_call.args[2], 64)
 
     def test_pinned_empty_like_numa_restores_policy_on_failure(self):
-        """Test that mempolicy is restored even when allocation raises.
+        """Verify mempolicy is restored even when allocation raises."""
+        if self._has_numa_support():
+            from unittest.mock import patch
 
-        Mocks _gpu_numa_node and _set_mempolicy/_get_mempolicy to
-        deterministically exercise the bind-then-restore path regardless
-        of whether the host has NUMA hardware.
-        """
-        import ctypes
-        from unittest.mock import MagicMock, patch
+            from torch._functorch._activation_offloading.offload_ops import (
+                _get_mempolicy,
+                _gpu_numa_node,
+                _pinned_empty_like_numa,
+            )
 
-        from torch._functorch._activation_offloading.offload_ops import (
-            _MPOL_BIND,
-            _pinned_empty_like_numa,
-        )
+            _gpu_numa_node.cache_clear()
+            policy_before = _get_mempolicy()
+            x = torch.randn(64, device=GPU_TYPE)
+            with patch("torch.empty_like", side_effect=RuntimeError("OOM")):
+                with self.assertRaises(RuntimeError):
+                    _pinned_empty_like_numa(x)
+            policy_after = _get_mempolicy()
+            self._assert_policies_equal(policy_before, policy_after)
+            _gpu_numa_node.cache_clear()
+        else:
+            import ctypes
+            from unittest.mock import MagicMock, patch
 
-        prior_mask = (ctypes.c_ulong * 1)(8)  # bit 3
-        saved_policy = (_MPOL_BIND, prior_mask, 64)
-        mock_get = MagicMock(return_value=saved_policy)
-        mock_set = MagicMock(return_value=True)
-        _ops = "torch._functorch._activation_offloading.offload_ops"
+            from torch._functorch._activation_offloading.offload_ops import (
+                _MPOL_BIND,
+                _pinned_empty_like_numa,
+            )
 
-        x = torch.randn(64, device=GPU_TYPE)
-        with (
-            patch(f"{_ops}._init_mempolicy", return_value=True),
-            patch(f"{_ops}._gpu_numa_node", return_value=0),
-            patch(f"{_ops}._get_mempolicy", mock_get),
-            patch(f"{_ops}._set_mempolicy", mock_set),
-            patch("torch.empty_like", side_effect=RuntimeError("OOM")),
-        ):
-            with self.assertRaises(RuntimeError):
-                _pinned_empty_like_numa(x)
+            prior_mask = (ctypes.c_ulong * 1)(8)
+            saved_policy = (_MPOL_BIND, prior_mask, 64)
+            mock_get = MagicMock(return_value=saved_policy)
+            mock_set = MagicMock(return_value=True)
+            _ops = "torch._functorch._activation_offloading.offload_ops"
 
-        # set_mempolicy must have been called twice: bind then restore
-        self.assertEqual(mock_set.call_count, 2)
-        bind_call, restore_call = mock_set.call_args_list
-        self.assertEqual(bind_call.args[0], _MPOL_BIND)
-        self.assertEqual(restore_call.args[0], _MPOL_BIND)
-        self.assertIs(restore_call.args[1], prior_mask)
-        self.assertEqual(restore_call.args[2], 64)
+            x = torch.randn(64, device=GPU_TYPE)
+            with (
+                patch(f"{_ops}._init_mempolicy", return_value=True),
+                patch(f"{_ops}._gpu_numa_node", return_value=0),
+                patch(f"{_ops}._get_mempolicy", mock_get),
+                patch(f"{_ops}._set_mempolicy", mock_set),
+                patch("torch.empty_like", side_effect=RuntimeError("OOM")),
+            ):
+                with self.assertRaises(RuntimeError):
+                    _pinned_empty_like_numa(x)
+
+            self.assertEqual(mock_set.call_count, 2)
+            bind_call, restore_call = mock_set.call_args_list
+            self.assertEqual(bind_call.args[0], _MPOL_BIND)
+            self.assertEqual(restore_call.args[0], _MPOL_BIND)
+            self.assertIs(restore_call.args[1], prior_mask)
+            self.assertEqual(restore_call.args[2], 64)
+
+    def test_pinned_empty_like_numa_placement(self):
+        """Verify pinned allocation lands on the correct NUMA node."""
+        if self._has_numa_support():
+            import os
+
+            from torch._functorch._activation_offloading.offload_ops import (
+                _gpu_numa_node,
+                _pinned_empty_like_numa,
+            )
+
+            if not os.path.exists("/proc/self/numa_maps"):
+                self.skipTest("/proc/self/numa_maps not available")
+
+            _gpu_numa_node.cache_clear()
+            numa_node = _gpu_numa_node(0)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            result = _pinned_empty_like_numa(x)
+            self.assertEqual(result.device.type, "cpu")
+            self.assertTrue(result.is_pinned())
+            self.assertEqual(result.shape, x.shape)
+
+            addr = result.data_ptr()
+            best_line = None
+            best_addr = -1
+            with open("/proc/self/numa_maps") as f:
+                for line in f:
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    line_addr = int(parts[0], 16)
+                    if line_addr <= addr and line_addr > best_addr:
+                        best_addr = line_addr
+                        best_line = parts
+
+            self.assertIsNotNone(
+                best_line, "VMA for pinned allocation not found in numa_maps"
+            )
+            found_expected_node = False
+            for part in best_line:
+                if part.startswith(f"N{numa_node}="):
+                    pages = int(part.split("=")[1])
+                    if pages > 0:
+                        found_expected_node = True
+            self.assertTrue(
+                found_expected_node,
+                f"No pages on expected NUMA node {numa_node}",
+            )
+            _gpu_numa_node.cache_clear()
+        else:
+            from unittest.mock import MagicMock, patch
+
+            from torch._functorch._activation_offloading.offload_ops import (
+                _MPOL_BIND,
+                _pinned_empty_like_numa,
+            )
+
+            mock_set = MagicMock(return_value=True)
+            _ops = "torch._functorch._activation_offloading.offload_ops"
+            x = torch.randn(64, device=GPU_TYPE)
+            with (
+                patch(f"{_ops}._init_mempolicy", return_value=True),
+                patch(f"{_ops}._gpu_numa_node", return_value=0),
+                patch(f"{_ops}._get_mempolicy", return_value=None),
+                patch(f"{_ops}._set_mempolicy", mock_set),
+            ):
+                result = _pinned_empty_like_numa(x)
+            self.assertEqual(result.device.type, "cpu")
+            self.assertTrue(result.is_pinned())
+            self.assertEqual(result.shape, x.shape)
+            self.assertEqual(mock_set.call_count, 2)
+            self.assertEqual(mock_set.call_args_list[0].args[0], _MPOL_BIND)
 
     def test_pinned_empty_like_numa_fallback(self):
-        """Test fallback to default pinned allocation when NUMA lookup fails."""
+        """Verify fallback to default pinned allocation when NUMA lookup fails."""
         from unittest.mock import patch
 
         from torch._functorch._activation_offloading.offload_ops import (
@@ -472,7 +588,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
 
         _gpu_numa_node.cache_clear()
         result = _gpu_numa_node(0)
-        # On any system with a GPU, result is either a valid node id or None
         if result is not None:
             self.assertGreaterEqual(result, 0)
         _gpu_numa_node.cache_clear()
