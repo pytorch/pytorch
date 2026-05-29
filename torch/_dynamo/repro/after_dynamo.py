@@ -455,8 +455,6 @@ def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[An
 
 
 def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
-    args = run_load_args(options, mod, load_args)
-
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
@@ -477,7 +475,16 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
-    with torch.amp.autocast("cuda", enabled=options.autocast):
+    args = run_load_args(options, mod, load_args)
+    device_type = next(
+        (
+            a.device.type
+            for a in args
+            if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+        ),
+        "cpu",
+    )
+    with torch.amp.autocast(device_type, enabled=options.autocast):
         opt_mod(*args)
 
 
@@ -488,9 +495,17 @@ def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         mod.eval()
         opt_mod.eval()  # type: ignore[union-attr]
 
-        with torch.amp.autocast("cuda", enabled=options.autocast):
+        args = run_load_args(options, mod, load_args)
+        device_type = next(
+            (
+                a.device.type
+                for a in args
+                if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+            ),
+            "cpu",
+        )
+        with torch.amp.autocast(device_type, enabled=options.autocast):
             # TODO: disable clone
-            args = run_load_args(options, mod, load_args)
             if not same_two_models(mod, mod, args):  # type: ignore[arg-type]
                 raise AssertionError("Eager itself failed")
             if not same_two_models(
@@ -502,8 +517,16 @@ def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
             ):
                 raise AccuracyError("Dynamo failed")
     else:
-        with torch.amp.autocast("cuda", enabled=options.autocast):
-            args = run_load_args(options, mod, load_args)
+        args = run_load_args(options, mod, load_args)
+        device_type = next(
+            (
+                a.device.type
+                for a in args
+                if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+            ),
+            "cpu",
+        )
+        with torch.amp.autocast(device_type, enabled=options.autocast):
             run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)  # type: ignore[arg-type]
             del args
 
@@ -594,13 +617,13 @@ default settings on this script:
             "--autocast",
             default=autocast,
             action="store_true",
-            help="use torch.cuda.amp.autocast",
+            help="use torch.amp.autocast",
         )
         parser.add_argument(
             "--no-autocast",
             dest="autocast",
             action="store_false",
-            help="don't use torch.cuda.amp.autocast",
+            help="don't use torch.amp.autocast",
         )
         parser.add_argument(
             "--backend",
