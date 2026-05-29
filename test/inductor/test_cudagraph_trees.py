@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -5052,6 +5053,10 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_SLOW,
+            "https://github.com/pytorch/pytorch/issues/176144",
+        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
