@@ -1119,7 +1119,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/csrc/jit/mobile/
 #
 # [mobile_android]
-# /android/
 # /test/mobile/custom_build/
 #
 # [mobile_delegates]
