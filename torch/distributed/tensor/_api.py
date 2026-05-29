@@ -195,7 +195,7 @@ def _placements_metadata_eq(
     rhs: Sequence[Placement],
 ) -> bool:
     return len(lhs) == len(rhs) and all(
-        _placement_metadata_eq(l, r) for l, r in zip(lhs, rhs)
+        _placement_metadata_eq(left, right) for left, right in zip(lhs, rhs)
     )
 
 

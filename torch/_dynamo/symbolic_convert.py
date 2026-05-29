@@ -161,6 +161,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    CO_VARARGS,
+    CO_VARKEYWORDS,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -5335,6 +5337,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
 
+            # Identify the names of `*args` / `**kwargs` parameters (if any)
+            # via the function's `co_flags`. The varargs param (if present)
+            # comes immediately after `co_argcount + co_kwonlyargcount`
+            # entries in `co_varnames`; the varkw param comes right after.
+            varargs_name: str | None = None
+            varkw_name: str | None = None
+            _vararg_idx = f_code.co_argcount + f_code.co_kwonlyargcount
+            if f_code.co_flags & CO_VARARGS:
+                varargs_name = f_code.co_varnames[_vararg_idx]
+                _vararg_idx += 1
+            if f_code.co_flags & CO_VARKEYWORDS:
+                varkw_name = f_code.co_varnames[_vararg_idx]
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
@@ -5347,6 +5362,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                             name,
                             is_input=True,
                             dynamism=local_dynamism,
+                            is_varargs=(name == varargs_name),
+                            is_varkw=(name == varkw_name),
                         ),
                     )
                     self.symbolic_locals[name] = var
@@ -6095,7 +6112,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )  # type: ignore[assignment]
             else:
                 fglobals_value = _import_module(module_name)
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
@@ -6106,7 +6123,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
