@@ -31,6 +31,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"lazy", DeviceType::Lazy},
           {"vulkan", DeviceType::Vulkan},
           {"mps", DeviceType::MPS},
+          {"metal", DeviceType::MPS},
           {"meta", DeviceType::Meta},
           {"hpu", DeviceType::HPU},
           {"mtia", DeviceType::MTIA},

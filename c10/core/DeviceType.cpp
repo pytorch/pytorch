@@ -37,7 +37,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     case DeviceType::Lazy:
       return lower_case ? "lazy" : "LAZY";
     case DeviceType::MPS:
-      return lower_case ? "mps" : "MPS";
+      return lower_case ? "metal" : "METAL";
     case DeviceType::Vulkan:
       return lower_case ? "vulkan" : "VULKAN";
     case DeviceType::Metal:
@@ -145,8 +145,8 @@ void register_privateuse1_backend(const std::string& backend_name) {
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
       privateuse1_backend_name);
 
-  static const std::array<std::string, 6> types = {
-      "cpu", "cuda", "hip", "mps", "xpu", "mtia"};
+  static const std::array<std::string, 7> types = {
+      "cpu", "cuda", "hip", "mps", "xpu", "mtia", "metal"};
   TORCH_CHECK(
       std::find(types.begin(), types.end(), backend_name) == types.end(),
       "Cannot register privateuse1 backend with in-tree device name: ",
