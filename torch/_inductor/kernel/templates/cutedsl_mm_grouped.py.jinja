@@ -1,5 +1,6 @@
 import functools
 
+from torch._inductor.ir import get_stride_order
 from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 from torch._inductor.runtime.runtime_utils import ceildiv
 from cutlass.utils import TensorMapUpdateMode
@@ -54,19 +55,11 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
-def _to_fake_cute_tensor(shape, dtype, assumed_align=16, dynamic=True, stride_order=None):
-    ndim = len(shape)
-    if dynamic:
-        dyn_shape = tuple(
-            s if isinstance(s, int) and s == 1 else cute.sym_int64()
-            for s in shape
-        )
-    else:
-        dyn_shape = tuple(int(s) for s in shape)
-    if stride_order is None:
-        stride_order = tuple(range(ndim - 1, -1, -1))
+def _to_fake_cute_tensor(t, assumed_align=16):
+    dyn_shape = tuple(map(int, t.shape))
+    stride_order = tuple(get_stride_order(t.stride()))
     return cute.runtime.make_fake_compact_tensor(
-        _TORCH_TO_CUTLASS_DTYPE[dtype], dyn_shape,
+        _TORCH_TO_CUTLASS_DTYPE[t.dtype], dyn_shape,
         stride_order=stride_order, assumed_align=assumed_align,
     )
 
@@ -254,7 +247,7 @@ def launch_build_group_ptrs_from_bases(
             base_A_u64=base_A_u64,
             base_B_u64=base_B_u64,
             base_C_u64=base_C_u64,
-            offs=_to_fake_cute_tensor(input_a_offs.shape, input_a_offs.dtype, assumed_align=4),
+            offs=_to_fake_cute_tensor(input_a_offs, assumed_align=4),
             G=int(G),
             K=int(K),
             N=int(N),
@@ -266,9 +259,9 @@ def launch_build_group_ptrs_from_bases(
             stride_Bn_elems=sB_n,
             stride_C_m_elems=sC_m,
             stride_C_n_elems=sC_n,
-            out_ptrs=_to_fake_cute_tensor(ptrs_t.shape, ptrs_t.dtype),
-            out_problem=_to_fake_cute_tensor(probs_t.shape, probs_t.dtype, assumed_align=4),
-            out_strides_abc=_to_fake_cute_tensor(strides_t.shape, strides_t.dtype, assumed_align=4),
+            out_ptrs=_to_fake_cute_tensor(ptrs_t),
+            out_problem=_to_fake_cute_tensor(probs_t, assumed_align=4),
+            out_strides_abc=_to_fake_cute_tensor(strides_t, assumed_align=4),
             stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
             options="--enable-tvm-ffi",
         )
@@ -315,15 +308,15 @@ def launch_build_group_ptrs_from_bases(
         c_unsq = {{get_output()}}.unsqueeze(-1)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_cute_tensor(a_unsq.shape, a_unsq.dtype),
-            _to_fake_cute_tensor(b_unsq.shape, b_unsq.dtype, stride_order=(2, 0, 1)),
-            _to_fake_cute_tensor(c_unsq.shape, c_unsq.dtype),
+            _to_fake_cute_tensor(a_unsq),
+            _to_fake_cute_tensor(b_unsq),
+            _to_fake_cute_tensor(c_unsq),
             G,
-            _to_fake_cute_tensor(probs_t.shape, probs_t.dtype, assumed_align=4, dynamic=False),
-            _to_fake_cute_tensor(strides_t.shape, strides_t.dtype, assumed_align=4, dynamic=False),
-            _to_fake_cute_tensor(ptrs_t.shape, ptrs_t.dtype, dynamic=False),
+            _to_fake_cute_tensor(probs_t, assumed_align=4),
+            _to_fake_cute_tensor(strides_t, assumed_align=4),
+            _to_fake_cute_tensor(ptrs_t),
             total_num_clusters,
-            _to_fake_cute_tensor(tensormap_workspace_t.shape, tensormap_workspace_t.dtype, dynamic=False),
+            _to_fake_cute_tensor(tensormap_workspace_t),
             max_active_clusters,
             cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
             options="--enable-tvm-ffi",
@@ -380,6 +373,26 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         shape_out, stride_out, dtype_out,
     )
 
+    # --- Build CPU proxy tensors from metadata ---
+    # Subprocess workers cannot allocate CUDA tensors, so we create CPU
+    # tensors with matching shape/stride/dtype for _to_fake_cute_tensor.
+    def _cpu_proxy(shape, stride, dtype):
+        return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+
+    # _main transposes then unsqueezes: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
+    # Replicate those stride transformations on CPU proxies.
+    proxy_a = _cpu_proxy(shape_a, stride_a, dtype_a).unsqueeze(-1)
+    proxy_b_transposed = _cpu_proxy(
+        trans_shape_b, trans_stride_b, dtype_b,
+    )
+    proxy_b_unsq = proxy_b_transposed[0].unsqueeze(-1)
+    proxy_out = _cpu_proxy(shape_out, stride_out, dtype_out).unsqueeze(-1)
+
+    proxy_offs = _cpu_proxy(shape_offs, (1,), torch.int32)
+    proxy_ptrs = _cpu_proxy((G, 3), (3, 1), torch.int64)
+    proxy_probs = _cpu_proxy((G, 4), (4, 1), torch.int32)
+    proxy_strides = _cpu_proxy((G, 3, 2), (6, 2, 1), torch.int32)
+
     # --- Compile prep_executor ---
     sizeof_element = torch.tensor(0, dtype=dtype_a).element_size()
     sA_m, sA_k = stride_a
@@ -391,7 +404,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         base_A_u64=0,
         base_B_u64=0,
         base_C_u64=0,
-        offs=_to_fake_cute_tensor(shape_offs, torch.int32, assumed_align=4),
+        offs=_to_fake_cute_tensor(proxy_offs, assumed_align=4),
         G=int(G),
         K=int(K),
         N=int(N),
@@ -403,9 +416,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         stride_Bn_elems=sB_n,
         stride_C_m_elems=sC_m,
         stride_C_n_elems=sC_n,
-        out_ptrs=_to_fake_cute_tensor((G, 3), torch.int64),
-        out_problem=_to_fake_cute_tensor((G, 4), torch.int32, assumed_align=4),
-        out_strides_abc=_to_fake_cute_tensor((G, 3, 2), torch.int32, assumed_align=4),
+        out_ptrs=_to_fake_cute_tensor(proxy_ptrs),
+        out_problem=_to_fake_cute_tensor(proxy_probs, assumed_align=4),
+        out_strides_abc=_to_fake_cute_tensor(proxy_strides, assumed_align=4),
         stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         options="--enable-tvm-ffi",
     )
@@ -429,6 +442,12 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         GroupedGemmKernel.num_tensormaps,
         GroupedGemmKernel.bytes_per_tensormap // 8,
     )
+
+    proxy_tensormap = _cpu_proxy(tensormap_shape, (
+        tensormap_shape[1] * tensormap_shape[2],
+        tensormap_shape[2],
+        1,
+    ), torch.int64)
 
     # Compute per-group problem sizes analytically from offsets
     offs_data = [sumM * (i + 1) // G for i in range(G)]
@@ -456,18 +475,17 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         tensormap_update_mode=TENSORMAP_UPDATE_MODE,
     )
 
-    # Unsqueezed shapes match _main: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_cute_tensor((sumM, K, 1), dtype_a),
-        _to_fake_cute_tensor((N, K, 1), dtype_b, stride_order=(2, 0, 1)),
-        _to_fake_cute_tensor((shape_out[0], shape_out[1], 1), dtype_out),
+        _to_fake_cute_tensor(proxy_a),
+        _to_fake_cute_tensor(proxy_b_unsq),
+        _to_fake_cute_tensor(proxy_out),
         G,
-        _to_fake_cute_tensor((G, 4), torch.int32, assumed_align=4, dynamic=False),
-        _to_fake_cute_tensor((G, 3, 2), torch.int32, assumed_align=4, dynamic=False),
-        _to_fake_cute_tensor((G, 3), torch.int64, dynamic=False),
+        _to_fake_cute_tensor(proxy_probs, assumed_align=4),
+        _to_fake_cute_tensor(proxy_strides, assumed_align=4),
+        _to_fake_cute_tensor(proxy_ptrs),
         total_num_clusters,
-        _to_fake_cute_tensor(tensormap_shape, torch.int64, dynamic=False),
+        _to_fake_cute_tensor(proxy_tensormap),
         max_active_clusters,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         options="--enable-tvm-ffi",

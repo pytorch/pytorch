@@ -1551,6 +1551,9 @@ test_libtorch_profiler() {
 
   # Run all other tests
   python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
+
+  # Tests for torch/csrc/profiler/collection.cpp.
+  python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 }
 
 test_libtorch_api() {
