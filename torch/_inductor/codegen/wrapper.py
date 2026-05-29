@@ -49,7 +49,7 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
-from ..stream_utils import get_stream_name
+from ..stream_utils import get_raw_stream_name, get_stream_name
 from ..utils import (
     cache_on_self,
     DeferredLineBase,
@@ -60,6 +60,7 @@ from ..utils import (
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
     LineContext,
+    make_codegen_buffer,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -1254,11 +1255,11 @@ class PythonWrapperCodegen(CodeGen):
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
         ] = {}
         self.imports = IndentedBuffer()
-        self.header = IndentedBuffer()
-        self.prefix = IndentedBuffer()
+        self.header = make_codegen_buffer()
+        self.prefix = make_codegen_buffer()
         self.suffix = IndentedBuffer()
         self.kernel_declarations = IndentedBuffer()
-        self.wrapper_call = IndentedBuffer()
+        self.wrapper_call = make_codegen_buffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
@@ -1740,7 +1741,7 @@ class PythonWrapperCodegen(CodeGen):
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         self.write_get_raw_stream_header()
-        name = f"stream{device_idx}"
+        name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 f"{name} = get_raw_stream({device_idx})"
@@ -1810,7 +1811,7 @@ class PythonWrapperCodegen(CodeGen):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
-                f"stream{device_idx} = get_raw_stream({device_idx})"
+                f"{get_raw_stream_name(device_idx)} = get_raw_stream({device_idx})"
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -4395,7 +4396,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             name = f"{current_stream_name}_raw"
             self.writeline(f"{name} = {current_stream_name}.cuda_stream")
         else:
-            name = f"stream{device_idx}"
+            name = get_raw_stream_name(device_idx)
             self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 

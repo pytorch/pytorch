@@ -364,6 +364,35 @@ kernel void sum_reduction(
   }
 }
 
+template <
+    typename TI,
+    typename TO,
+    uint NCHAINS = SUM_NCHAINS,
+    LoadMode MODE = LOAD_IDENTITY>
+kernel void sum_reduction_strided_pass1(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant NormParams<>& params [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  using TA = ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
+
+  const uint32_t E = params.reduction_size;
+  const uint32_t base_flat = tgid * E;
+
+  TA acc = 0;
+  for (uint32_t k = tid; k < E; k += tptg) {
+    acc += load_val<MODE>(input[get_input_offset(base_flat + k, 0u, params)]);
+  }
+
+  threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
+  TA total = c10::metal::threadgroup_sum(shared, acc, tid, tptg);
+  if (tid == 0) {
+    output[tgid] = static_cast<TO>(total);
+  }
+}
+
 // Specialized kernel for reducing a non-innermost dim of a contiguous 2D
 // tensor. Each thread handles one column, iterating over all rows with
 // coalesced reads. Multiple row-workers per threadgroup reduce via shared
@@ -589,11 +618,25 @@ REGISTER_SUM_INNER(half2, half2);
       uint simdgroup_id [[simdgroup_index_in_threadgroup]], \
       uint simdgroup_size [[threads_per_simdgroup]]);
 
-#define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
-#define REGISTER_NANSUM(TI, TO) \
-  REGISTER_SUM_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
-#define REGISTER_COUNT_NONZERO(TI) \
-  REGISTER_SUM_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
+#define REGISTER_SUM_STRIDED_IMPL(TI, TO, PREFIX, MODE)               \
+  template [[host_name(PREFIX "reduction_strided_" #TI "_" #TO)]]     \
+  kernel void sum_reduction_strided_pass1<TI, TO, SUM_NCHAINS, MODE>( \
+      constant TI * input [[buffer(0)]],                              \
+      device TO * output [[buffer(1)]],                               \
+      constant NormParams<> & params [[buffer(2)]],                   \
+      uint tid [[thread_position_in_threadgroup]],                    \
+      uint tptg [[threads_per_threadgroup]],                          \
+      uint tgid [[threadgroup_position_in_grid]]);
+
+#define REGISTER_SUM(TI, TO)                       \
+  REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY) \
+  REGISTER_SUM_STRIDED_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
+#define REGISTER_NANSUM(TI, TO)                          \
+  REGISTER_SUM_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO) \
+  REGISTER_SUM_STRIDED_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
+#define REGISTER_COUNT_NONZERO(TI)                            \
+  REGISTER_SUM_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO) \
+  REGISTER_SUM_STRIDED_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);

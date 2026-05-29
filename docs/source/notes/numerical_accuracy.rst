@@ -52,6 +52,15 @@ datatype. E.g.:
     a.norm() # produces tensor(inf)
     a.double().norm() # produces tensor(1.4142e+20, dtype=torch.float64), representable in fp32
 
+Different backends may use different algorithms, reduction orders, or accumulation
+precision for the same operation. As a result, finite inputs near the limits of a
+dtype may produce finite results on one backend and non-finite results, such as
+``inf`` or ``NaN``, on another backend, such as when moving a computation between
+CPU and CUDA. A value being representable in a dtype does not guarantee that all
+intermediate or output values of an operation will remain finite. For workflows
+that are sensitive to non-finite values, consider normalizing or clamping extremal
+inputs and using :func:`torch.isfinite` to detect them.
+
 .. _Linear Algebra Stability:
 
 Linear algebra (``torch.linalg``)

@@ -99,6 +99,12 @@ def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     return get_type_slots(obj_type)
 
 
+def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given sq slot."""
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, slot)
+
+
 def type_implements_sq_length(obj_type: type) -> bool:
     """Check whether obj_type implements __len__ as sequence protocol"""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
@@ -151,6 +157,12 @@ def type_implements_nb_negative(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_negative slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
+
+
+def type_implements_nb_positive(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_positive slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_POSITIVE)
 
 
 def type_implements_tp_iter(obj_type: type) -> bool:
@@ -485,6 +497,26 @@ def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
+def generic_pos(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyNumber_Positive.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1393
+
+    Algorithm:
+    1. If type has nb_positive slot, call obj.nb_positive_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_positive(obj_type):
+        return obj.nb_positive_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for unary +: '{obj.python_type_name()}'",
+    )
+
+
 def generic_getiter(
     tx: "InstructionTranslator", obj: VariableTracker
 ) -> "VariableTracker":
@@ -573,10 +605,10 @@ def binary_op1(
     v_slot = getattr(type(v), impl_attr, None)
     w_slot = getattr(type(w), impl_attr, None)
 
-    # Same class → only call once (CPython: slotw = NULL if same type)
+    # Same class -> only call once (CPython: slotw = NULL if same type)
     if v.python_type() is w.python_type():
         w_slot = None
-    # Same implementation (inherited) → skip w
+    # Same implementation (inherited) -> skip w
     elif v_slot is w_slot:
         w_slot = None
 
@@ -675,3 +707,52 @@ def binary_iop(
             f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
         )
     return result
+
+
+def generic_hash_impl(
+    tx: "InstructionTranslator", obj: VariableTracker
+) -> tuple[int, bool]:
+    """Internal API: compute hash as (value, is_fake).
+
+    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    the result in a VT), container hash_impls (which propagate is_fake),
+    and HashableTracker (which just needs the int).
+    """
+    return obj.hash_impl(tx)
+
+
+def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """User-facing API: mirrors PyObject_Hash, returns a VariableTracker.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1101-L1115
+
+    Wraps the result in ConstantVariable or FakeIdVariable depending on
+    whether the hash depends on a sourceless object's identity.
+    """
+    from .constant import ConstantVariable, FakeIdVariable
+
+    h, is_fake = generic_hash_impl(tx, obj)
+    if is_fake:
+        return FakeIdVariable(h)
+    return ConstantVariable.create(h)
+
+
+def generic_contains(
+    tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
+) -> "VariableTracker":
+    """
+    Implements PySequence_Contains semantics for VariableTracker objects.
+
+    If the object has sq_contains (i.e., __contains__), calls obj.sq_contains(tx, item).
+    Otherwise falls back to iterating over obj and comparing each element.
+    """
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
+    T = maybe_get_python_type(obj)
+    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONTAINS):
+        return obj.sq_contains(tx, item)
+    else:
+        # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
+        it = generic_getiter(tx, obj)
+        return VariableTracker.build(
+            tx, polyfills.impl_CONTAINS_OP_fallback
+        ).call_function(tx, [item, it], {})

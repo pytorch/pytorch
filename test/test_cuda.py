@@ -1915,7 +1915,7 @@ if __name__ == '__main__':
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -4589,6 +4589,14 @@ print(ret)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        # Regression check: no test in this class should leave the runtime
+        # expandable_segments knob mismatched against the suite's env-derived
+        # baseline. This is the only class that toggles it.
+        md = torch.cuda.memory._snapshot()["allocator_settings"]
+        self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -5133,6 +5141,11 @@ class TestCudaAllocator(TestCase):
             alloc(120)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
 
     @serialTest()
     def test_garbage_collect_expandable(self):
@@ -5165,6 +5178,11 @@ class TestCudaAllocator(TestCase):
             alloc(80)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -6819,6 +6837,38 @@ class TestMemPool(TestCase):
             self._teardown_mempool_limited_memory_test()
 
     @serialTest()
+    def test_mempool_release_cached_blocks_during_diversion(self):
+        # Regression test for the bug where allocations failing inside
+        # `torch.cuda.use_mem_pool(...)` would skip the OOM-time
+        # release_cached_blocks() retry, because the gate read
+        # `captures_underway.empty()` — which is non-empty during any
+        # private-pool diversion, even when no real cudaStreamBeginCapture
+        # is active. The fix uses a separate `num_active_captures_` counter
+        # tracked by CUDAGraph::capture_begin/end, so default-pool cached
+        # blocks can still be reclaimed during plain mempool diversion.
+        nelem_1mb = 1024 * 1024
+        device, dtype = self._setup_mempool_limited_memory_test(80)
+        try:
+            # Reserve 60 MB on the default pool, then free → cached but not
+            # returned to the driver. memory_reserved stays at 60 MB.
+            a = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            del a
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                # 60 MB into the private pool. Reservation budget remaining
+                # is only 20 MB (80 cap − 60 cached), so cudaMalloc must
+                # fail. The OOM retry needs to call release_cached_blocks()
+                # on the default pool to free the 60 MB and retry. Pre-fix,
+                # that path was gated off and this would raise.
+                b = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            self.assertEqual(b.numel(), 60 * nelem_1mb)
+            del b
+            del pool
+        finally:
+            self._teardown_mempool_limited_memory_test()
+
+    @serialTest()
     def test_mempool_no_split(self):
         torch.cuda.empty_cache()
 
@@ -7279,6 +7329,10 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     # expandable_segments not supported (PYTORCH_C10_DRIVER_API_SUPPORTED not defined for windows builds)
     @unittest.skipIf(
         IS_WINDOWS and SM89OrLater,
@@ -7288,7 +7342,6 @@ class TestMemPool(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.empty_cache()
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool = torch.cuda.MemPool(allocator.allocator())
 
@@ -7311,8 +7364,6 @@ class TestMemPool(TestCase):
         self.assertEqual(
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
-
-        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
     @serialTest()
     def test_mempool_ctx_multithread(self):

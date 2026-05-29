@@ -1084,8 +1084,7 @@ static PyObject* copy_if_misaligned(PyObject* dummy, PyObject* item) {
 
   if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
     // Already aligned – return the original tensor.
-    Py_INCREF(item);
-    return item;
+    return Py_NewRef(item);
   }
 
   // Misaligned – clone while preserving strides.

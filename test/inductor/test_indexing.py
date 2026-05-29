@@ -690,6 +690,125 @@ class TestPrecomputedSizeHinting(InductorTestCase):
         self.assertEqual(hint, 53)
 
 
+class TestHintDisproves(InductorTestCase):
+    """Tests for hint-disproves fast-path in statically_known_true."""
+
+    def test_hint_disproves_false_claim(self):
+        """If the hint says the expression is False, statically_known_true
+        should return False without expensive sympy reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 < 5 is False when s0=10
+        self.assertFalse(sizevars.statically_known_true(s0 < 5))
+
+    def test_hint_does_not_prove_true_claim(self):
+        """If the hint says True, statically_known_true should not
+        short-circuit — it must fall through to full reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 > 5 is True for hint=10, but not provably universal
+        # (statically_known_true may or may not return True depending
+        # on range info — we just verify it doesn't crash)
+        sizevars.statically_known_true(s0 > 5)
+
+    def test_hint_disproves_with_complex_expr(self):
+        """Hint fast-path works on multi-symbol expressions."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(160, source=ConstantSource("s0"))
+        s1 = sizevars.shape_env.create_symbol(200, source=ConstantSource("s1"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(160)
+        sizevars.backed_var_to_val[s1] = sympy.Integer(200)
+
+        # (s0 + s1) < 100 is False when hints sum to 360
+        self.assertFalse(sizevars.statically_known_true((s0 + s1) < 100))
+
+
+class TestWideExpressionThresholds(InductorTestCase):
+    """Verify that safe_gcd / free-symbols thresholds only affect WIDE
+    expressions.  Small expressions must still get full simplification."""
+
+    def test_safe_gcd_small_expressions(self):
+        from torch.utils._sympy.functions import safe_gcd
+
+        a, b, c = sympy.symbols("a b c", integer=True, positive=True)
+        self.assertEqual(safe_gcd(a + b + c, 3), sympy.gcd(a + b + c, 3))
+        self.assertEqual(safe_gcd(a * b, a), sympy.gcd(a * b, a))
+
+    def test_safe_gcd_wide_expressions_use_fallback(self):
+        from torch.utils._sympy.functions import safe_gcd, simple_floordiv_gcd
+
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        self.assertEqual(safe_gcd(wide, 160), simple_floordiv_gcd(wide, 160))
+
+    def test_is_multiple_of_structural_rules_on_wide(self):
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        # Rule 2 (Mul): const * wide_expr divisible by const
+        self.assertTrue(sizevars._is_multiple_of(4096 * wide, 4096))
+        self.assertTrue(sizevars._is_multiple_of(160 * wide, 32))
+        # Rule 2 (Mul): wide_expr * other_const divisible by other_const
+        self.assertTrue(sizevars._is_multiple_of(wide * 256, 256))
+        self.assertTrue(sizevars._is_multiple_of(wide * 256, 64))
+        # Rule 2 (Mul): nested — 4096 * (wide + 1) divisible by 4096
+        self.assertTrue(sizevars._is_multiple_of(4096 * (wide + 1), 4096))
+        # Rule 2 (Mul): wide * a * b divisible by a*b
+        self.assertTrue(sizevars._is_multiple_of(wide * 12 * 8, 96))
+        # Rule 4 (FloorDiv): FloorDiv(wide * 160, 160) divisible by 1
+        self.assertTrue(sizevars._is_multiple_of(FloorDiv(wide * 160, 160), 1))
+        # statically_known_multiple_of: symbolic self-division
+        self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
+        self.assertTrue(sizevars.statically_known_multiple_of(wide * 4, wide * 4))
+
+    def test_remove_zero_terms_still_works_small(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0", integer=True, nonneg=True)
+        i1 = sympy.Symbol("i1", integer=True, nonneg=True)
+        result = sizevars.simplify_with_ranges(FloorDiv(i0 + 128 * i1, 8192), {i0: 128})
+        self.assertEqual(result, FloorDiv(128 * i1, 8192))
+
+    def test_modular_indexing_simplification_small(self):
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 10, 1, 10),
+            ModularIndexing(i0, 1, 10),
+        )
+
+    def test_statically_known_multiple_of_equality(self):
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(30)), integer=True)
+        wide = sum(syms)
+        self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
+
+    def test_wide_modular_indexing_not_decomposed(self):
+        """ModularIndexing with a wide base should not enter the per-term
+        simplification loop (its result would feed into sympy.expand which
+        has combinatorial cost on wide Add expressions)."""
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(40)), integer=True)
+        wide = sum(syms) + 138560
+        result = ModularIndexing(wide, 160, 930)
+        # Wide base should be left unsimplified
+        self.assertIsInstance(result, ModularIndexing)
+        self.assertEqual(result.args[0], wide)
+
+    def test_wide_simplify_with_ranges(self):
+        """simplify_with_ranges on expressions containing wide shapes
+        should still return a valid expression (not hang or error)."""
+        sizevars = SizeVarAllocator()
+        syms = sympy.symbols(" ".join(f"s{i}" for i in range(40)), integer=True)
+        wide = sum(syms)
+        i0 = sympy.Symbol("i0", integer=True)
+        expr = ModularIndexing(wide, 1, 160) + 160 * FloorDiv(wide, 160)
+        result = sizevars.simplify_with_ranges(expr, {i0: 10})
+        self.assertIsInstance(result, sympy.Basic)
+
+
 class TestOptimizationHintZeroDivision(InductorTestCase):
     """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
 

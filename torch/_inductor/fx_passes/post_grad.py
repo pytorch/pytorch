@@ -159,7 +159,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
@@ -284,6 +284,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         spmd_check(gm)
 
     collectives_bucketing: bool = False
+
+    if config.dedup_reduce_scatters:
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
+            dedup_fsdp_reduce_scatter
+        )
 
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
@@ -1904,6 +1911,12 @@ class ConstructorMoverPass:
                 continue
 
             if node.kwargs.get("device") != torch.device("cpu"):
+                continue
+
+            if (
+                torch._inductor.config.fallback_random
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
                 continue
 
             constructors.append(node)

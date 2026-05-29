@@ -1,0 +1,274 @@
+name: operator-microbenchmark-compare
+
+on:
+  workflow_dispatch:
+    inputs:
+      operator:
+        type: choice
+        description: Operator to benchmark
+        options:
+          - matmul
+          - mm
+          - addmm
+          - bmm
+          - conv
+          - optimizer
+          - activation
+          - norm
+          - scaled_mm
+          - scaled_grouped_mm
+      gpu:
+        type: choice
+        description: GPU to run on
+        options:
+          - H100
+          - A100
+          - B200
+          - MI300X
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: github.repository_owner == 'pytorch'
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  # ---- CUDA build for H100 / A100 (sm80) ----
+  build-cuda:
+    if: github.repository_owner == 'pytorch' && (inputs.gpu == 'H100' || inputs.gpu == 'A100')
+    name: build-cuda
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '8.0 9.0'
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" }
+        ]}
+    secrets: inherit
+
+  test-cuda:
+    if: github.repository_owner == 'pytorch' && (inputs.gpu == 'H100' || inputs.gpu == 'A100')
+    name: test-cuda
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build-cuda
+    with:
+      timeout-minutes: 120
+      build-environment: ${{ needs.build-cuda.outputs.build-environment }}
+      docker-image: ${{ needs.build-cuda.outputs.docker-image }}
+      test-matrix: ${{ needs.build-cuda.outputs.test-matrix }}
+    secrets: inherit
+
+  # ---- CUDA build for B200 (sm100) ----
+  build-b200:
+    if: github.repository_owner == 'pytorch' && inputs.gpu == 'B200'
+    name: build-b200
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.dgx.b200" }
+        ]}
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
+    secrets: inherit
+
+  test-b200:
+    if: github.repository_owner == 'pytorch' && inputs.gpu == 'B200'
+    name: test-b200
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - build-b200
+      - get-label-type
+    with:
+      timeout-minutes: 120
+      build-environment: ${{ needs.build-b200.outputs.build-environment }}
+      docker-image: ${{ needs.build-b200.outputs.docker-image }}
+      test-matrix: ${{ needs.build-b200.outputs.test-matrix }}
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "12.8"
+    secrets: inherit
+
+  # ---- ROCm build for MI300X ----
+  build-rocm:
+    if: github.repository_owner == 'pytorch' && inputs.gpu == 'MI300X'
+    name: build-rocm
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-rocm-py3_10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" }
+        ]}
+    secrets: inherit
+
+  test-rocm:
+    if: github.repository_owner == 'pytorch' && inputs.gpu == 'MI300X'
+    name: test-rocm
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: build-rocm
+    with:
+      timeout-minutes: 120
+      build-environment: ${{ needs.build-rocm.outputs.build-environment }}
+      docker-image: ${{ needs.build-rocm.outputs.docker-image }}
+      test-matrix: ${{ needs.build-rocm.outputs.test-matrix }}
+    secrets: inherit
+
+  # ---- Compare PR wheel vs nightly baseline (both run in this workflow) and comment on PR ----
+  compare-and-comment:
+    if: >-
+      always() && (
+        needs.test-cuda.result == 'success' ||
+        needs.test-b200.result == 'success' ||
+        needs.test-rocm.result == 'success'
+      )
+    needs: [test-cuda, test-b200, test-rocm]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPERATOR: ${{ inputs.operator }}
+      GPU: ${{ inputs.gpu }}
+      S3_BUCKET: gha-artifacts
+      REPO: pytorch/pytorch
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: benchmarks/operator_benchmark
+
+      - name: Find PR number
+        id: pr
+        run: |
+          PR_NUM=$(gh pr list --head "${{ github.ref_name }}" --repo "$REPO" --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -z "$PR_NUM" ]; then
+            echo "::warning::No PR found for branch ${{ github.ref_name }}. Skipping comment."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine runner name for GPU
+        id: runner
+        run: |
+          case "$GPU" in
+            H100)   echo "runner=linux.aws.h100" >> "$GITHUB_OUTPUT" ;;
+            A100)   echo "runner=linux.aws.a100" >> "$GITHUB_OUTPUT" ;;
+            B200)   echo "runner=linux.dgx.b200" >> "$GITHUB_OUTPUT" ;;
+            MI300X) echo "runner=linux.rocm.gpu.gfx950.1" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Download PR and baseline results from S3
+        id: results
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/branch_results /tmp/baseline_results
+
+          RUN_ID="${{ github.run_id }}"
+          ATTEMPT="${{ github.run_attempt }}"
+          RUNNER="${{ steps.runner.outputs.runner }}"
+          BRANCH_CONFIG="operator_microbenchmark_${OPERATOR}_test"
+          BASELINE_CONFIG="operator_microbenchmark_${OPERATOR}_baseline"
+
+          JOBS=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${ATTEMPT}/jobs" --paginate -q '.jobs[]')
+
+          download_artifact() {
+            local config="$1" dest="$2" label="$3"
+            local job_id
+            job_id=$(echo "$JOBS" | jq -r "select(.name | contains(\"${config}\") and contains(\"${RUNNER}\")) | .id" | head -1)
+            if [ -z "$job_id" ] || [ "$job_id" = "null" ]; then
+              echo "::error::Could not find ${label} test job for config=${config} runner=${RUNNER}"
+              return 1
+            fi
+            local artifact="test-jsons-test-${config}-1-1-${RUNNER}_${job_id}.zip"
+            local url="https://${S3_BUCKET}.s3.amazonaws.com/${REPO}/${RUN_ID}/${ATTEMPT}/artifact/${artifact}"
+            echo "Downloading ${label} results: $url"
+            curl -sfSL "$url" -o "/tmp/${label}.zip"
+            (cd "$dest" && unzip -o "/tmp/${label}.zip")
+          }
+
+          download_artifact "$BRANCH_CONFIG"   /tmp/branch_results   branch
+          download_artifact "$BASELINE_CONFIG" /tmp/baseline_results baseline
+
+          echo "success=true" >> "$GITHUB_OUTPUT"
+
+      - name: Compare and generate report
+        id: compare
+        if: steps.results.outputs.success == 'true'
+        env:
+          BRANCH_REF: ${{ github.ref_name }}
+          BRANCH_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          comparison = subprocess.check_output([
+              sys.executable,
+              "benchmarks/operator_benchmark/compare_with_baseline.py",
+              "--branch-dir", "/tmp/branch_results",
+              "--baseline-dir", "/tmp/baseline_results",
+          ], text=True)
+
+          operator = os.environ["OPERATOR"]
+          gpu = os.environ["GPU"]
+          branch_ref = os.environ["BRANCH_REF"]
+          branch_sha = os.environ["BRANCH_SHA"][:7]
+          run_url = os.environ["RUN_URL"]
+
+          body = (
+              f"## Operator Microbenchmark: `{operator}` on {gpu}\n\n"
+              "| | |\n"
+              "|---|---|\n"
+              f"| **Branch** | `{branch_ref}` (`{branch_sha}`) |\n"
+              "| **Baseline** | latest `nightly` wheel, same runner |\n"
+              f"| **Workflow Run** | [link]({run_url}) |\n\n"
+              f"{comparison}"
+          )
+
+          with open("/tmp/pr_comment.md", "w") as f:
+              f.write(body)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("generated=true\n")
+          PY
+
+      - name: Post PR comment
+        if: steps.pr.outputs.found == 'true' && steps.compare.outputs.generated == 'true'
+        run: |
+          gh pr comment "${{ steps.pr.outputs.number }}" \
+            --repo "$REPO" \
+            --body-file /tmp/pr_comment.md

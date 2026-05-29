@@ -12,7 +12,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -202,21 +202,14 @@ def assert_nyi(cond: bool, msg: str) -> None:
         raise NotImplementedError(f"inductor does not support {msg}")
 
 
-def add_needs_realized_inputs(
-    fn: Collection[torch._ops.OpOverload | torch._ops.OpOverloadPacket]
-    | torch._ops.OpOverload
-    | torch._ops.OpOverloadPacket,
-) -> list[Any] | None:
+def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
-        # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
-    if isinstance(fn, torch._ops.OpOverload):
-        needs_realized_inputs.add(fn)
-    elif isinstance(fn, torch._ops.OpOverloadPacket):
+    needs_realized_inputs.add(fn)
+    if isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
             getattr(fn, overload) for overload in fn.overloads()
         )
-    return None
 
 
 def add_layout_constraint(
@@ -2157,17 +2150,14 @@ def cat(inputs, dim=0):
 
         return count
 
-    # as of inputs increase, possibility for register spilling also increases
-    # past a certain threshold of inputs we only fuse if the input kernels
-    # are simple
-    # not sure if we want to expose to users via config since logic may change in future
-    MAX_COMPLEX_POINTWISE_CAT = 8
+    # as inputs increase, possibility for register spilling also increases.
+    # Past a certain threshold we only fuse if the input kernels are simple.
     MAX_SIMPLE_OP_COUNT = 2
 
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
-    if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
+    if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
@@ -8752,12 +8742,10 @@ from . import quantized_lowerings
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
 
-from . import mkldnn_lowerings
-
-
-mkldnn_lowerings.register_onednn_fusion_ops()
-
-from . import jagged_lowerings
+from . import (
+    jagged_lowerings,
+    mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+)
 
 
 jagged_lowerings.register_jagged_ops()

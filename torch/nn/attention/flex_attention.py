@@ -422,7 +422,8 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
 def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
-    col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
+    with torch.fx.traceback.annotate({"fallback_to_eager": True}):
+        col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
         num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
         col_indices.to(torch.int32, memory_format=torch.contiguous_format),
@@ -1760,8 +1761,8 @@ def _apply_kernel_options(
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
         kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
-        if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports inference, and will not return lse
+        if any_inputs_on_cpu_device or any_inputs_on_mps_device:
+            # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
         if any_inputs_on_mps_device:
@@ -1777,11 +1778,10 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if any_inputs_on_cpu_device and output_max:
-        # CPU doesn't support returning max yet
-        # TODO: support CPU for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU.")
-        kernel_options["OUTPUT_MAX"] = False
+    if (any_inputs_on_cpu_device or any_inputs_on_mps_device) and output_max:
+        # CPU/MPS don't support returning max yet
+        # TODO: support CPU/MPS for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU/MPS.")
 
     return kernel_options
 

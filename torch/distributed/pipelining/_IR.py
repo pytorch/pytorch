@@ -582,7 +582,7 @@ class Pipe(torch.nn.Module):
 
         self.replicated_params: list[dict[str, str]] = [
             use_mapping
-            for _, use_mapping in params_to_users.items()
+            for use_mapping in params_to_users.values()
             if len(use_mapping) > 1
         ]
 

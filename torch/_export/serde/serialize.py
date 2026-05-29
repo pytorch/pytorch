@@ -895,7 +895,7 @@ class GraphModuleSerializer(metaclass=Final):
 
                 constexpr_keys = {p.name for p in kernel.params if p.is_constexpr}
                 found_constexpr = False
-                args_new = ()
+                inputs_new = []
                 i = 0
 
                 if not isinstance(node.kwargs["kwargs"], dict):
@@ -917,7 +917,13 @@ class GraphModuleSerializer(metaclass=Final):
 
                     if k in output_keys:
                         output_indices.append(i)
-                    args_new += (v,)  # type: ignore[assignment]
+                    inputs_new.append(
+                        NamedArgument(
+                            name=k,
+                            arg=self.serialize_input(v),
+                            kind=ArgumentKind.POSITIONAL,
+                        )
+                    )
                     i += 1
 
                 if not isinstance(node.kwargs["grid"], list):
@@ -982,7 +988,15 @@ class GraphModuleSerializer(metaclass=Final):
                 ex_node = Node(
                     name=node.name,
                     target=self.serialize_operator(node.target),
-                    inputs=self.serialize_hoo_inputs(args_new, kwargs_new),
+                    inputs=inputs_new
+                    + [
+                        NamedArgument(
+                            name=name,
+                            arg=self.serialize_input(a),
+                            kind=ArgumentKind.KEYWORD,
+                        )
+                        for name, a in kwargs_new.items()
+                    ],
                     outputs=self.serialize_hoo_outputs(node),
                     metadata=self.serialize_metadata(node),
                     is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
@@ -3059,10 +3073,10 @@ class GraphModuleDeserializer(metaclass=Final):
         args = []
         kwargs = {}
         for input_ in inputs:
-            if input_.name != "":
-                kwargs[input_.name] = self.deserialize_input(input_.arg)
-            else:
+            if input_.kind == ArgumentKind.POSITIONAL or input_.name == "":
                 args.append(self.deserialize_input(input_.arg))
+            else:
+                kwargs[input_.name] = self.deserialize_input(input_.arg)
         return (tuple(args), kwargs)
 
     def deserialize_input(self, inp: Argument) -> Any:

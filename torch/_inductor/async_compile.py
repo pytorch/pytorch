@@ -143,6 +143,27 @@ def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
         _triton_kernel_metrics[kernel_name] = info
 
 
+def _emit_triton_kernel_compile_metric(
+    kernel: CachingAutotuner,
+    kernel_name: str,
+    elapsed_us: int,
+) -> None:
+    """Emit per-kernel ``compile_time_us`` to both the dynamo
+    ``_triton_kernel_metrics`` map and the ``MetricsContext`` top-N.
+
+    Note: ``kernel.autotune_cache_info`` is only mutated in place when
+    non-empty; when ``None`` or ``{}`` the metric still reaches
+    ``_triton_kernel_metrics`` via a throwaway dict, but the kernel
+    attribute stays untouched.
+    """
+    info = kernel.autotune_cache_info or {}
+    info["compile_time_us"] = elapsed_us
+    _add_triton_kernel_info(kernel_name, info)
+    get_metrics_context().add_top_n(
+        "triton_kernel_compile_times_us", kernel_name, elapsed_us
+    )
+
+
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
@@ -468,12 +489,7 @@ class AsyncCompile:
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
-                info = kernel.autotune_cache_info or {}
-                info["compile_time_us"] = elapsed_us
-                _add_triton_kernel_info(kernel_name, info)
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
+                _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
             future = LambdaFuture(get_result, future=task)
@@ -499,12 +515,7 @@ class AsyncCompile:
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
-                    get_metrics_context().add_top_n(
-                        "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                    )
-                    info = kernel.autotune_cache_info or {}
-                    info["compile_time_us"] = elapsed_us
-                    _add_triton_kernel_info(kernel_name, info)
+                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                     return kernel
                 except Exception as e:
                     fail = str(e)

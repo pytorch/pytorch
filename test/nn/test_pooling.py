@@ -655,9 +655,9 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_errors(self, device):
         samples = torch.rand([0, 16, 3], device=device)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(0, output_size=[1, 1, 1], _random_samples=samples)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(
                 [0, 0, 0], output_size=[1, 1, 1], _random_samples=samples
             )
@@ -667,7 +667,7 @@ class TestPoolingNNDeviceType(NNTestCase):
                 kernel_size=9223372036854775803,
                 output_size=[1, 1, 1],
             )(samples)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(
                 kernel_size=-1,
                 output_size=[1, 1, 1],
@@ -676,7 +676,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10)
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
@@ -914,7 +914,7 @@ torch.cuda.synchronize()
         ).to(device)
         inp = torch.randn(3, 15, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             avgpool(inp)
 
     @onlyNativeDeviceTypes

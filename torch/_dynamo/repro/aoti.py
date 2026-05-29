@@ -72,7 +72,8 @@ def dump_to_minify(
     If command is "run":
         Dump exported_program to `cwd/repro.py`, with run command.
     """
-    assert command in ["minify", "run"]
+    if command not in ["minify", "run"]:
+        raise AssertionError(f"command must be 'minify' or 'run', got {command!r}")
 
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -158,8 +159,10 @@ def save_graph_repro_ep(
         raise AOTIMinifierError("If gm is defined, args should also be defined")
 
     if exported_program is None:
-        assert gm is not None
-        assert args is not None
+        if gm is None:
+            raise AssertionError("gm must not be None when exported_program is None")
+        if args is None:
+            raise AssertionError("args must not be None when exported_program is None")
         exported_program = torch.export.export(gm, args, strict=strict)
     elif gm is None:
         gm = exported_program.module(check_guards=False)
@@ -404,7 +407,10 @@ def repro_minify(
         mod, args, kwargs, options=config_patches
     )
     compiler_name = "aot_inductor"
-    assert options.minifier_export_mode in ["dynamo", "python"]
+    if options.minifier_export_mode not in ["dynamo", "python"]:
+        raise AssertionError(
+            f"minifier_export_mode must be 'dynamo' or 'python', got {options.minifier_export_mode!r}"
+        )
     strict = options.minifier_export_mode == "dynamo"
     skip_export_error = options.skip_export_error
 
@@ -434,7 +440,8 @@ def repro_minify(
         if gm is None:
             return False
 
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
 
         try:
             _aoti_compile_and_package_inner(

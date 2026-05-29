@@ -675,8 +675,7 @@ static PyObject* set_skip_guard_eval_unsafe(
 static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
   // New reference
   PyObject* callback = eval_frame_callback_get();
-  Py_INCREF(callback);
-  return callback;
+  return Py_NewRef(callback);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
@@ -698,8 +697,7 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
   if (!PyArg_ParseTuple(args, "OO", &obj1, &obj2)) {
     return NULL;
   }
-  Py_INCREF(obj2);
-  return obj2;
+  return Py_NewRef(obj2);
 }
 
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {

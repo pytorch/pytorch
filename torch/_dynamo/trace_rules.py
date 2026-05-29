@@ -181,6 +181,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.destroy_process_group": SkipFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
+    "torch._utils._maybe_view_chunk_cat": UserFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
@@ -693,6 +694,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._functionalization_reapply_views_tls",
         "torch._C._functorch._grad_decrement_nesting",
         "torch._C._functorch._grad_increment_nesting",
+        "torch._C._functorch.get_dynamic_layer_stack_depth",
         "torch._C._functorch.set_inplace_requires_grad_allowed",
         "torch._C._fuse_to_static_module",
         "torch._C._gather_out",
@@ -1705,7 +1707,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
+        "torch._scaled_mm_v2",
         "torch._scaled_grouped_mm",
+        "torch._scaled_grouped_mm_v2",
         "torch._shape_as_tensor",
         "torch._sobol_engine_draw",
         "torch._sobol_engine_ff_",
@@ -2424,13 +2428,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.predispatch._vmap_decrement_nesting",
         "torch._functorch.predispatch._add_batch_dim",
         "torch._functorch.predispatch._remove_batch_dim",
-        "torch._functorch.predispatch._jvp_increment_nesting",
-        "torch._functorch.predispatch._jvp_decrement_nesting",
         "torch._functorch.predispatch._unwrap_for_grad",
         "torch._functorch.predispatch._make_dual",
         "torch._functorch.predispatch._unpack_dual",
-        "torch._functorch.predispatch._enter_dual_level",
-        "torch._functorch.predispatch._exit_dual_level",
         "torch._guards.compile_context",
         "torch._guards.detect_fake_mode",
         "torch._guards.tracing",
@@ -3080,7 +3080,8 @@ def load_object(name: str) -> Any:
             obj = _load_obj_from_str(x[0])
             val = getattr(obj, x[1])
         else:
-            assert len(x) == 1, f"Invalid obj name {name}"
+            if len(x) != 1:
+                raise AssertionError(f"Invalid obj name {name}")
             val = _load_obj_from_str(x[0])
         val = unwrap_if_wrapper(val)
     except (AttributeError, ImportError):
@@ -3155,13 +3156,19 @@ class FunctionIdSet:
                 self.function_ids = set(value.keys())
                 self.function_names = value
             else:
-                assert isinstance(value, set)
+                if not isinstance(value, set):
+                    raise AssertionError(
+                        f"expected lazy_initializer to return a dict or set, got {type(value)}"
+                    )
                 self.function_ids = value
         return self.function_ids
 
     def get_name(self, idx: int, default: str) -> str:
         self()  # lazy init
-        assert self.function_names is not None
+        if self.function_names is None:
+            raise AssertionError(
+                "function_names is None; lazy_initializer returned a set, not a dict"
+            )
         return self.function_names.get(idx, default)
 
     def add(self, idx: int) -> None:
@@ -3216,6 +3223,7 @@ def _builtin_function_ids() -> dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
+    rv[id(builtins.__build_class__)] = "builtins.__build_class__"
     return rv
 
 
@@ -3278,8 +3286,10 @@ _lazy_module_init: dict[str, list[Callable[[], None]]] = defaultdict(list)
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
     """Register a module without eagerly importing it"""
     # If the module is already imported, eagerly run init
-    assert "." not in name, f"Expected a root module name, but got {name}"
-    assert name not in _lazy_module_init
+    if "." in name:
+        raise AssertionError(f"Expected a root module name, but got {name}")
+    if name in _lazy_module_init:
+        raise AssertionError(f"Module init function already registered for {name}")
     _lazy_module_init[name].append(init_func)
 
 
@@ -3515,7 +3525,8 @@ MOD_INLINELIST = [
     "torch.utils._pytree",
     "torch.utils.hooks",
 ]
-assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
+if sorted(set(MOD_INLINELIST)) != MOD_INLINELIST:
+    raise AssertionError("MOD_INLINELIST must be sorted with no duplicates")
 MOD_INLINELIST = set(MOD_INLINELIST)
 
 
@@ -3626,7 +3637,8 @@ MOD_SKIPLIST = [
     "torch.xpu",
 ]
 
-assert sorted(set(MOD_SKIPLIST)) == MOD_SKIPLIST
+if sorted(set(MOD_SKIPLIST)) != MOD_SKIPLIST:
+    raise AssertionError("MOD_SKIPLIST must be sorted with no duplicates")
 MOD_SKIPLIST = set(MOD_SKIPLIST)
 
 
@@ -3729,7 +3741,10 @@ def _recompile_re() -> None:
 def add(import_name: str) -> None:
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
-    assert isinstance(import_name, str)
+    if not isinstance(import_name, str):
+        raise AssertionError(
+            f"expected import_name to be a str, got {type(import_name)}"
+        )
     from importlib.util import find_spec
 
     module_spec = find_spec(import_name)
@@ -3923,7 +3938,8 @@ def check_verbose(
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         filename = getfile(obj)
-        assert filename is not None
+        if filename is None:
+            raise AssertionError(f"getfile returned None for function/method {obj}")
         fi = FunctionInfo(
             obj,
             obj.__name__,
@@ -3932,7 +3948,8 @@ def check_verbose(
         )
     else:
         filename = getfile(obj)
-        assert filename is not None
+        if filename is None:
+            raise AssertionError(f"getfile returned None for {type(obj)}")
         fi = FunctionInfo(obj, None, filename, None)
 
     # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
@@ -3944,7 +3961,10 @@ def check_verbose(
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    assert rule is not None
+    if rule is None:
+        raise AssertionError(
+            f"lookup_inner returned None for {fi.name} in {fi.filename}"
+        )
     if issubclass(
         rule,
         (
@@ -3957,7 +3977,8 @@ def check_verbose(
     elif issubclass(rule, TorchInGraphFunctionVariable):
         return SkipResult(False, reasons.pop())
     else:
-        assert rule == SkipFunctionVariable, rule
+        if rule != SkipFunctionVariable:
+            raise AssertionError(f"expected SkipFunctionVariable, got {rule}")
         return SkipResult(True, reasons.pop())
 
 
@@ -4069,7 +4090,10 @@ def lookup_inner(
     if config.dont_skip_tracing and result is SkipFunctionVariable:
         if filename is None:
             filename = getfile(obj)
-        assert filename is not None
+        if filename is None:
+            raise AssertionError(
+                f"getfile returned None for {type(obj)} in dont_skip_tracing path"
+            )
         filename = _as_posix_path(filename)
         torch_dir = _module_dir(torch)
         if torch_dir is not None:

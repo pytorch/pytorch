@@ -13,6 +13,7 @@ architectures:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -69,7 +70,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
@@ -77,7 +78,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -235,6 +236,41 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
+_RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
+
+
+def _read_dict_constant(path: Path, name: str) -> dict[str, dict[str, set[int]]]:
+    """Parse a top-level annotated `name: dict[...] = {...}` literal from a Python file."""
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            return ast.literal_eval(node.value)
+    raise RuntimeError(f"{name} not found in {path}")
+
+
+def validate_runtime_release_table_consistency() -> None:
+    """Ensure torch/cuda/__init__.py's recommendation table matches the build matrix.
+
+    PYTORCH_RELEASES_CODE_CC (runtime) and TORCH_CUDA_ARCH_LIST_TABLE (build)
+    use the same {cuda_version: {host_arch: set[cc_int]}} shape, so a direct
+    dict equality check catches any drift between them.
+    """
+    runtime = _read_dict_constant(_RUNTIME_CUDA_INIT, "PYTORCH_RELEASES_CODE_CC")
+    build = _read_dict_constant(_BUILD_ENV_SETUP, "TORCH_CUDA_ARCH_LIST_TABLE")
+    if runtime != build:
+        raise RuntimeError(
+            "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            f"runtime: {runtime}\nbuild:   {build}"
+        )
+
+
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
@@ -270,7 +306,7 @@ WHEEL_CONTAINER_IMAGES = {
 RELEASE = "release"
 DEBUG = "debug"
 
-FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -505,6 +541,7 @@ for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
 del arch_version
+validate_runtime_release_table_consistency()
 
 
 if __name__ == "__main__":

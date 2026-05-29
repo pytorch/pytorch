@@ -28,6 +28,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc
       opt_out_experiments: lf
 
   build:
@@ -44,15 +45,25 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.aws.a100", owners: ["oncall:pt2"] },
         ]}
+      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   test:
     name: cuda13.0-py3.10-gcc11-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: build
+    needs:
+      - build
+      - get-default-label-prefix
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
+      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit

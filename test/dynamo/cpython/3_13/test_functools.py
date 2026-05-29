@@ -206,13 +206,12 @@ class _TestPartial:
 
     def test_nested_optimization_bug(self):
         partial = self.partial
-        with torch._dynamo.error_on_graph_break(False):
-            class Builder:
-                def __call__(self, tag, *children, **attrib):
-                    return (tag, children, attrib)
+        class Builder:
+            def __call__(self, tag, *children, **attrib):
+                return (tag, children, attrib)
 
-                def __getattr__(self, tag):
-                    return partial(self, tag)
+            def __getattr__(self, tag):
+                return partial(self, tag)
 
         B = Builder()
         m = B.m
@@ -400,28 +399,26 @@ class _TestPartial:
 
     # Issue 6083: Reference counting bug
     def test_setstate_refcount(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSequence:
-                def __len__(self):
-                    return 4
-                def __getitem__(self, key):
-                    if key == 0:
-                        return max
-                    elif key == 1:
-                        return tuple(range(1000000))
-                    elif key in (2, 3):
-                        return {}
-                    raise IndexError
+        class BadSequence:
+            def __len__(self):
+                return 4
+            def __getitem__(self, key):
+                if key == 0:
+                    return max
+                elif key == 1:
+                    return tuple(range(1000000))
+                elif key in (2, 3):
+                    return {}
+                raise IndexError
 
         f = self.partial(object)
         self.assertRaises(TypeError, f.__setstate__, BadSequence())
 
     def test_partial_as_method(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                meth = self.partial(capture, 1, a=2)
-                cmeth = classmethod(self.partial(capture, 1, a=2))
-                smeth = staticmethod(self.partial(capture, 1, a=2))
+        class A:
+            meth = self.partial(capture, 1, a=2)
+            cmeth = classmethod(self.partial(capture, 1, a=2))
+            smeth = staticmethod(self.partial(capture, 1, a=2))
 
         a = A()
         self.assertEqual(A.meth(3, b=4), ((1, 3), {'a': 2, 'b': 4}))
@@ -474,11 +471,10 @@ class TestPartialC(_TestPartial, CPythonTestCase):
     def test_keystr_replaces_value(self):
         p = self.partial(capture)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MutatesYourDict(object):
-                def __str__(self):
-                    p.keywords[self] = ['sth2']
-                    return 'astr'
+        class MutatesYourDict(object):
+            def __str__(self):
+                p.keywords[self] = ['sth2']
+                return 'astr'
 
         # Replacing the value during key formatting should keep the original
         # value alive (at least long enough).
@@ -627,14 +623,13 @@ class TestPartialMethod(CPythonTestCase):
                          'functools.partialmethod({}, 3, b=4)'.format(capture))
 
     def test_abstract(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Abstract(abc.ABCMeta):
+        class Abstract(abc.ABCMeta):
 
-                @abc.abstractmethod
-                def add(self, x, y):
-                    pass
+            @abc.abstractmethod
+            def add(self, x, y):
+                pass
 
-                add5 = functools.partialmethod(add, 5)
+            add5 = functools.partialmethod(add, 5)
 
         self.assertTrue(Abstract.add.__isabstractmethod__)
         self.assertTrue(Abstract.add5.__isabstractmethod__)
@@ -838,22 +833,21 @@ class TestWraps(TestUpdateWrapper):
 
 class _TestReduce:
     def test_reduce(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Squares:
-                def __init__(self, max):
-                    self.max = max
-                    self.sofar = []
+        class Squares:
+            def __init__(self, max):
+                self.max = max
+                self.sofar = []
 
-                def __len__(self):
-                    return len(self.sofar)
+            def __len__(self):
+                return len(self.sofar)
 
-                def __getitem__(self, i):
-                    if not 0 <= i < self.max: raise IndexError
-                    n = len(self.sofar)
-                    while n <= i:
-                        self.sofar.append(n*n)
-                        n += 1
-                    return self.sofar[i]
+            def __getitem__(self, i):
+                if not 0 <= i < self.max: raise IndexError
+                n = len(self.sofar)
+                while n <= i:
+                    self.sofar.append(n*n)
+                    n += 1
+                return self.sofar[i]
         def add(x, y):
             return x + y
         self.assertEqual(self.reduce(add, ['a', 'b', 'c'], ''), 'abc')
@@ -869,45 +863,40 @@ class _TestReduce:
         self.assertEqual(self.reduce(add, Squares(10)), 285)
         self.assertEqual(self.reduce(add, Squares(10), 0), 285)
         self.assertEqual(self.reduce(add, Squares(0), 0), 0)
-        with torch._dynamo.error_on_graph_break(False):
-            self.assertRaises(TypeError, self.reduce)
-            self.assertRaises(TypeError, self.reduce, 42, 42)
-            self.assertRaises(TypeError, self.reduce, 42, 42, 42)
+        self.assertRaises(TypeError, self.reduce)
+        self.assertRaises(TypeError, self.reduce, 42, 42)
+        self.assertRaises(TypeError, self.reduce, 42, 42, 42)
         self.assertEqual(self.reduce(42, "1"), "1") # func is never called with one item
         self.assertEqual(self.reduce(42, "", "1"), "1") # func is never called with one item
-        with torch._dynamo.error_on_graph_break(False):
-            self.assertRaises(TypeError, self.reduce, 42, (42, 42))
-            self.assertRaises(TypeError, self.reduce, add, []) # arg 2 must not be empty sequence with no initial value
-            self.assertRaises(TypeError, self.reduce, add, "")
-            self.assertRaises(TypeError, self.reduce, add, ())
-            self.assertRaises(TypeError, self.reduce, add, object())
+        self.assertRaises(TypeError, self.reduce, 42, (42, 42))
+        self.assertRaises(TypeError, self.reduce, add, []) # arg 2 must not be empty sequence with no initial value
+        self.assertRaises(TypeError, self.reduce, add, "")
+        self.assertRaises(TypeError, self.reduce, add, ())
+        self.assertRaises(TypeError, self.reduce, add, object())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class TestFailingIter:
-                def __iter__(self):
-                    raise RuntimeError
+        class TestFailingIter:
+            def __iter__(self):
+                raise RuntimeError
         self.assertRaises(RuntimeError, self.reduce, add, TestFailingIter())
 
         self.assertEqual(self.reduce(add, [], None), None)
         self.assertEqual(self.reduce(add, [], 42), 42)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __getitem__(self, index):
-                    raise ValueError
+        class BadSeq:
+            def __getitem__(self, index):
+                raise ValueError
         self.assertRaises(ValueError, self.reduce, 42, BadSeq())
 
     # Test reduce()'s use of iterators.
     def test_iterator_usage(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class SequenceClass:
-                def __init__(self, n):
-                    self.n = n
-                def __getitem__(self, i):
-                    if 0 <= i < self.n:
-                        return i
-                    else:
-                        raise IndexError
+        class SequenceClass:
+            def __init__(self, n):
+                self.n = n
+            def __getitem__(self, i):
+                if 0 <= i < self.n:
+                    return i
+                else:
+                    raise IndexError
 
         from operator import add
         self.assertEqual(self.reduce(add, SequenceClass(5)), 10)
@@ -979,10 +968,9 @@ class _TestCmpToKey:
         with self.assertRaises(ZeroDivisionError):
             key(3) > key(1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadCmp:
-                def __lt__(self, other):
-                    raise ZeroDivisionError
+        class BadCmp:
+            def __lt__(self, other):
+                raise ZeroDivisionError
         def cmp1(x, y):
             return BadCmp()
         with self.assertRaises(ZeroDivisionError):
@@ -1052,15 +1040,14 @@ class TestCmpToKeyPy(_TestCmpToKey, CPythonTestCase):
 class TestTotalOrdering(CPythonTestCase):
 
     def test_total_ordering_lt(self):
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class A:
-                def __init__(self, value):
-                    self.value = value
-                def __lt__(self, other):
-                    return self.value < other.value
-                def __eq__(self, other):
-                    return self.value == other.value
+        @functools.total_ordering
+        class A:
+            def __init__(self, value):
+                self.value = value
+            def __lt__(self, other):
+                return self.value < other.value
+            def __eq__(self, other):
+                return self.value == other.value
         self.assertTrue(A(1) < A(2))
         self.assertTrue(A(2) > A(1))
         self.assertTrue(A(1) <= A(2))
@@ -1070,15 +1057,14 @@ class TestTotalOrdering(CPythonTestCase):
         self.assertFalse(A(1) > A(2))
 
     def test_total_ordering_le(self):
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class A:
-                def __init__(self, value):
-                    self.value = value
-                def __le__(self, other):
-                    return self.value <= other.value
-                def __eq__(self, other):
-                    return self.value == other.value
+        @functools.total_ordering
+        class A:
+            def __init__(self, value):
+                self.value = value
+            def __le__(self, other):
+                return self.value <= other.value
+            def __eq__(self, other):
+                return self.value == other.value
         self.assertTrue(A(1) < A(2))
         self.assertTrue(A(2) > A(1))
         self.assertTrue(A(1) <= A(2))
@@ -1088,15 +1074,14 @@ class TestTotalOrdering(CPythonTestCase):
         self.assertFalse(A(1) >= A(2))
 
     def test_total_ordering_gt(self):
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class A:
-                def __init__(self, value):
-                    self.value = value
-                def __gt__(self, other):
-                    return self.value > other.value
-                def __eq__(self, other):
-                    return self.value == other.value
+        @functools.total_ordering
+        class A:
+            def __init__(self, value):
+                self.value = value
+            def __gt__(self, other):
+                return self.value > other.value
+            def __eq__(self, other):
+                return self.value == other.value
         self.assertTrue(A(1) < A(2))
         self.assertTrue(A(2) > A(1))
         self.assertTrue(A(1) <= A(2))
@@ -1106,15 +1091,14 @@ class TestTotalOrdering(CPythonTestCase):
         self.assertFalse(A(2) < A(1))
 
     def test_total_ordering_ge(self):
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class A:
-                def __init__(self, value):
-                    self.value = value
-                def __ge__(self, other):
-                    return self.value >= other.value
-                def __eq__(self, other):
-                    return self.value == other.value
+        @functools.total_ordering
+        class A:
+            def __init__(self, value):
+                self.value = value
+            def __ge__(self, other):
+                return self.value >= other.value
+            def __eq__(self, other):
+                return self.value == other.value
         self.assertTrue(A(1) < A(2))
         self.assertTrue(A(2) > A(1))
         self.assertTrue(A(1) <= A(2))
@@ -1125,10 +1109,9 @@ class TestTotalOrdering(CPythonTestCase):
 
     def test_total_ordering_no_overwrite(self):
         # new methods should not overwrite existing
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class A(int):
-                pass
+        @functools.total_ordering
+        class A(int):
+            pass
         self.assertTrue(A(1) < A(2))
         self.assertTrue(A(2) > A(1))
         self.assertTrue(A(1) <= A(2))
@@ -1144,58 +1127,57 @@ class TestTotalOrdering(CPythonTestCase):
 
     def test_notimplemented(self):
         # Verify NotImplemented results are correctly handled
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class ImplementsLessThan:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsLessThan):
-                        return self.value == other.value
-                    return False
-                def __lt__(self, other):
-                    if isinstance(other, ImplementsLessThan):
-                        return self.value < other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsLessThan:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsLessThan):
+                    return self.value == other.value
+                return False
+            def __lt__(self, other):
+                if isinstance(other, ImplementsLessThan):
+                    return self.value < other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsLessThanEqualTo:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsLessThanEqualTo):
-                        return self.value == other.value
-                    return False
-                def __le__(self, other):
-                    if isinstance(other, ImplementsLessThanEqualTo):
-                        return self.value <= other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsLessThanEqualTo:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsLessThanEqualTo):
+                    return self.value == other.value
+                return False
+            def __le__(self, other):
+                if isinstance(other, ImplementsLessThanEqualTo):
+                    return self.value <= other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsGreaterThan:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsGreaterThan):
-                        return self.value == other.value
-                    return False
-                def __gt__(self, other):
-                    if isinstance(other, ImplementsGreaterThan):
-                        return self.value > other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsGreaterThan:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsGreaterThan):
+                    return self.value == other.value
+                return False
+            def __gt__(self, other):
+                if isinstance(other, ImplementsGreaterThan):
+                    return self.value > other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsGreaterThanEqualTo:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsGreaterThanEqualTo):
-                        return self.value == other.value
-                    return False
-                def __ge__(self, other):
-                    if isinstance(other, ImplementsGreaterThanEqualTo):
-                        return self.value >= other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsGreaterThanEqualTo:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsGreaterThanEqualTo):
+                    return self.value == other.value
+                return False
+            def __ge__(self, other):
+                if isinstance(other, ImplementsGreaterThanEqualTo):
+                    return self.value >= other.value
+                return NotImplemented
 
         self.assertIs(ImplementsLessThan(1).__le__(1), NotImplemented)
         self.assertIs(ImplementsLessThan(1).__gt__(1), NotImplemented)
@@ -1213,69 +1195,68 @@ class TestTotalOrdering(CPythonTestCase):
     def test_type_error_when_not_implemented(self):
         # bug 10042; ensure stack overflow does not occur
         # when decorated types return NotImplemented
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class ImplementsLessThan:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsLessThan):
-                        return self.value == other.value
-                    return False
-                def __lt__(self, other):
-                    if isinstance(other, ImplementsLessThan):
-                        return self.value < other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsLessThan:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsLessThan):
+                    return self.value == other.value
+                return False
+            def __lt__(self, other):
+                if isinstance(other, ImplementsLessThan):
+                    return self.value < other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsGreaterThan:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsGreaterThan):
-                        return self.value == other.value
-                    return False
-                def __gt__(self, other):
-                    if isinstance(other, ImplementsGreaterThan):
-                        return self.value > other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsGreaterThan:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsGreaterThan):
+                    return self.value == other.value
+                return False
+            def __gt__(self, other):
+                if isinstance(other, ImplementsGreaterThan):
+                    return self.value > other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsLessThanEqualTo:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsLessThanEqualTo):
-                        return self.value == other.value
-                    return False
-                def __le__(self, other):
-                    if isinstance(other, ImplementsLessThanEqualTo):
-                        return self.value <= other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsLessThanEqualTo:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsLessThanEqualTo):
+                    return self.value == other.value
+                return False
+            def __le__(self, other):
+                if isinstance(other, ImplementsLessThanEqualTo):
+                    return self.value <= other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ImplementsGreaterThanEqualTo:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ImplementsGreaterThanEqualTo):
-                        return self.value == other.value
-                    return False
-                def __ge__(self, other):
-                    if isinstance(other, ImplementsGreaterThanEqualTo):
-                        return self.value >= other.value
-                    return NotImplemented
+        @functools.total_ordering
+        class ImplementsGreaterThanEqualTo:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ImplementsGreaterThanEqualTo):
+                    return self.value == other.value
+                return False
+            def __ge__(self, other):
+                if isinstance(other, ImplementsGreaterThanEqualTo):
+                    return self.value >= other.value
+                return NotImplemented
 
-            @functools.total_ordering
-            class ComparatorNotImplemented:
-                def __init__(self, value):
-                    self.value = value
-                def __eq__(self, other):
-                    if isinstance(other, ComparatorNotImplemented):
-                        return self.value == other.value
-                    return False
-                def __lt__(self, other):
-                    return NotImplemented
+        @functools.total_ordering
+        class ComparatorNotImplemented:
+            def __init__(self, value):
+                self.value = value
+            def __eq__(self, other):
+                if isinstance(other, ComparatorNotImplemented):
+                    return self.value == other.value
+                return False
+            def __lt__(self, other):
+                return NotImplemented
 
         with self.subTest("LT < 1"), self.assertRaises(TypeError):
             ImplementsLessThan(-1) < 1
@@ -1328,27 +1309,26 @@ class TestTotalOrdering(CPythonTestCase):
 
 
     def test_total_ordering_for_metaclasses_issue_44605(self):
-        with torch._dynamo.error_on_graph_break(False):
-            @functools.total_ordering
-            class SortableMeta(type):
-                def __new__(cls, name, bases, ns):
-                    return super().__new__(cls, name, bases, ns)
+        @functools.total_ordering
+        class SortableMeta(type):
+            def __new__(cls, name, bases, ns):
+                return super().__new__(cls, name, bases, ns)
 
-                def __lt__(self, other):
-                    if not isinstance(other, SortableMeta):
-                        pass
-                    return self.__name__ < other.__name__
+            def __lt__(self, other):
+                if not isinstance(other, SortableMeta):
+                    pass
+                return self.__name__ < other.__name__
 
-                def __eq__(self, other):
-                    if not isinstance(other, SortableMeta):
-                        pass
-                    return self.__name__ == other.__name__
+            def __eq__(self, other):
+                if not isinstance(other, SortableMeta):
+                    pass
+                return self.__name__ == other.__name__
 
-            class B(metaclass=SortableMeta):
-                pass
+        class B(metaclass=SortableMeta):
+            pass
 
-            class A(metaclass=SortableMeta):
-                pass
+        class A(metaclass=SortableMeta):
+            pass
 
         self.assertTrue(A < B)
         self.assertFalse(A > B)
@@ -1684,9 +1664,8 @@ class _TestLRUU:
         self.assertEqual(cached((False,)), '(0,)')
         self.assertEqual(cached((0.0,)), '(0,)')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class T(tuple):
-                pass
+        class T(tuple):
+            pass
 
         self.assertEqual(cached(T((1,))), '(1,)')
         self.assertEqual(cached(T((True,))), '(1,)')
@@ -1841,17 +1820,16 @@ class _TestLRUU:
             'Used to demonstrate a reentrant lru_cache call within a single thread'
             return x
 
-        with torch._dynamo.error_on_graph_break(False):
-            class DoubleEq:
-                'Demonstrate a reentrant lru_cache call within a single thread'
-                def __init__(self, x):
-                    self.x = x
-                def __hash__(self):
-                    return self.x
-                def __eq__(self, other):
-                    if self.x == 2:
-                        test_func(DoubleEq(1))
-                    return self.x == other.x
+        class DoubleEq:
+            'Demonstrate a reentrant lru_cache call within a single thread'
+            def __init__(self, x):
+                self.x = x
+            def __hash__(self):
+                return self.x
+            def __eq__(self, other):
+                if self.x == 2:
+                    test_func(DoubleEq(1))
+                return self.x == other.x
 
         test_func(DoubleEq(1))                      # Load the cache
         test_func(DoubleEq(2))                      # Load the cache
@@ -1859,13 +1837,12 @@ class _TestLRUU:
                          DoubleEq(2))               # Verify the correct return value
 
     def test_lru_method(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class X(int):
-                f_cnt = 0
-                @self.module.lru_cache(2)
-                def f(self, x):
-                    self.f_cnt += 1
-                    return x*10+self
+        class X(int):
+            f_cnt = 0
+            @self.module.lru_cache(2)
+            def f(self, x):
+                self.f_cnt += 1
+                return x*10+self
         a = X(5)
         b = X(5)
         c = X(7)
@@ -1939,16 +1916,15 @@ class _TestLRUU:
         def test_function(x):
             return x
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @self.module.lru_cache
-                def test_method(self, x):
-                    return (self, x)
+        class A:
+            @self.module.lru_cache
+            def test_method(self, x):
+                return (self, x)
 
-                @staticmethod
-                @self.module.lru_cache
-                def test_staticmethod(x):
-                    return (self, x)
+            @staticmethod
+            @self.module.lru_cache
+            def test_staticmethod(x):
+                return (self, x)
 
         refs = [weakref.ref(test_function),
                 weakref.ref(A.test_method),
@@ -2049,15 +2025,14 @@ class TestSingleDispatch(CPythonTestCase):
         @functools.singledispatch
         def g(obj):
             return "base"
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                pass
-            class C(A):
-                pass
-            class B(A):
-                pass
-            class D(C, B):
-                pass
+        class A:
+            pass
+        class C(A):
+            pass
+        class B(A):
+            pass
+        class D(C, B):
+            pass
         def g_A(a):
             return "A"
         def g_B(b):
@@ -2141,9 +2116,8 @@ class TestSingleDispatch(CPythonTestCase):
         # MutableSequence below is registered directly on D. In other words, it
         # precedes MutableMapping which means single dispatch will always
         # choose MutableSequence here.
-        with torch._dynamo.error_on_graph_break(False):
-            class D(collections.defaultdict):
-                pass
+        class D(collections.defaultdict):
+            pass
         c.MutableSequence.register(D)
         bases = [c.MutableSequence, c.MutableMapping]
         for haystack in permutations(bases):
@@ -2156,10 +2130,9 @@ class TestSingleDispatch(CPythonTestCase):
         # Container and Callable are registered on different base classes and
         # a generic function supporting both should always pick the Callable
         # implementation if a C instance is passed.
-        with torch._dynamo.error_on_graph_break(False):
-            class C(collections.defaultdict):
-                def __call__(self):
-                    pass
+        class C(collections.defaultdict):
+            def __call__(self):
+                pass
         bases = [c.Sized, c.Callable, c.Container, c.Mapping]
         for haystack in permutations(bases):
             m = mro(C, haystack)
@@ -2264,20 +2237,19 @@ class TestSingleDispatch(CPythonTestCase):
     def test_c3_abc(self):
         c = collections.abc
         mro = functools._c3_mro
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                pass
-            class B(A):
-                def __len__(self):
-                    return 0   # implies Sized
-            @c.Container.register
-            class C(object):
-                pass
-            class D(object):
-                pass   # unrelated
-            class X(D, C, B):
-                def __call__(self):
-                    pass   # implies Callable
+        class A(object):
+            pass
+        class B(A):
+            def __len__(self):
+                return 0   # implies Sized
+        @c.Container.register
+        class C(object):
+            pass
+        class D(object):
+            pass   # unrelated
+        class X(D, C, B):
+            def __call__(self):
+                pass   # implies Callable
         expected = [X, c.Callable, D, C, c.Container, B, c.Sized, A, object]
         for abcs in permutations([c.Sized, c.Callable, c.Container]):
             self.assertEqual(mro(X, abcs=abcs), expected)
@@ -2287,21 +2259,20 @@ class TestSingleDispatch(CPythonTestCase):
 
     def test_false_meta(self):
         # see issue23572
-        with torch._dynamo.error_on_graph_break(False):
-            class MetaA(type):
-                def __len__(self):
-                    return 0
-            class A(metaclass=MetaA):
-                pass
-            class AA(A):
-                pass
-            @functools.singledispatch
-            def fun(a):
-                return 'base A'
-            @fun.register(A)
-            def _(a):
-                return 'fun A'
-            aa = AA()
+        class MetaA(type):
+            def __len__(self):
+                return 0
+        class A(metaclass=MetaA):
+            pass
+        class AA(A):
+            pass
+        @functools.singledispatch
+        def fun(a):
+            return 'base A'
+        @fun.register(A)
+        def _(a):
+            return 'fun A'
+        aa = AA()
         self.assertEqual(fun(aa), 'fun A')
 
     def test_mro_conflicts(self):
@@ -2309,11 +2280,10 @@ class TestSingleDispatch(CPythonTestCase):
         @functools.singledispatch
         def g(arg):
             return "base"
-        with torch._dynamo.error_on_graph_break(False):
-            class O(c.Sized):
-                def __len__(self):
-                    return 0
-            o = O()
+        class O(c.Sized):
+            def __len__(self):
+                return 0
+        o = O()
         self.assertEqual(g(o), "base")
         g.register(c.Iterable, lambda arg: "iterable")
         g.register(c.Container, lambda arg: "container")
@@ -2327,9 +2297,8 @@ class TestSingleDispatch(CPythonTestCase):
         c.Set.register(O)
         self.assertEqual(g(o), "set")     # because c.Set is a subclass of
                                           # c.Sized and c.Container
-        with torch._dynamo.error_on_graph_break(False):
-            class P:
-                pass
+        class P:
+            pass
         p = P()
         self.assertEqual(g(p), "base")
         c.Iterable.register(P)
@@ -2345,10 +2314,9 @@ class TestSingleDispatch(CPythonTestCase):
               "or <class 'collections.abc.Container'>")),
         )
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Q(c.Sized):
-                def __len__(self):
-                    return 0
+        class Q(c.Sized):
+            def __len__(self):
+                return 0
         q = Q()
         self.assertEqual(g(q), "sized")
         c.Iterable.register(Q)
@@ -2378,9 +2346,8 @@ class TestSingleDispatch(CPythonTestCase):
              ("Ambiguous dispatch: <class 'collections.abc.Sized'> "
               "or <class 'collections.abc.Container'>")),
         )
-        with torch._dynamo.error_on_graph_break(False):
-            class R(collections.defaultdict):
-                pass
+        class R(collections.defaultdict):
+            pass
         c.MutableSequence.register(R)
         @functools.singledispatch
         def i(arg):
@@ -2393,20 +2360,18 @@ class TestSingleDispatch(CPythonTestCase):
             return "sequence"
         r = R()
         self.assertEqual(i(r), "sequence")
-        with torch._dynamo.error_on_graph_break(False):
-            class S:
-                pass
-            class T(S, c.Sized):
-                def __len__(self):
-                    return 0
+        class S:
+            pass
+        class T(S, c.Sized):
+            def __len__(self):
+                return 0
         t = T()
         self.assertEqual(h(t), "sized")
         c.Container.register(T)
         self.assertEqual(h(t), "sized")   # because it's explicitly in the MRO
-        with torch._dynamo.error_on_graph_break(False):
-            class U:
-                def __len__(self):
-                    return 0
+        class U:
+            def __len__(self):
+                return 0
         u = U()
         self.assertEqual(h(u), "sized")   # implicit Sized subclass inferred
                                           # from the existence of __len__()
@@ -2421,10 +2386,9 @@ class TestSingleDispatch(CPythonTestCase):
              ("Ambiguous dispatch: <class 'collections.abc.Sized'> "
               "or <class 'collections.abc.Container'>")),
         )
-        with torch._dynamo.error_on_graph_break(False):
-            class V(c.Sized, S):
-                def __len__(self):
-                    return 0
+        class V(c.Sized, S):
+            def __len__(self):
+                return 0
         @functools.singledispatch
         def j(arg):
             return "base"
@@ -2560,29 +2524,27 @@ class TestSingleDispatch(CPythonTestCase):
 
         # Registering classes as callables doesn't work with annotations,
         # you need to pass the type explicitly.
-        with torch._dynamo.error_on_graph_break(False):
-            @i.register(str)
-            class _:
-                def __init__(self, arg):
-                    self.arg = arg
+        @i.register(str)
+        class _:
+            def __init__(self, arg):
+                self.arg = arg
 
-                def __eq__(self, other):
-                    return self.arg == other
+            def __eq__(self, other):
+                return self.arg == other
         self.assertEqual(i("str"), "str")
 
     def test_method_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def t(self, arg):
-                    self.arg = "base"
-                @t.register(int)
-                def _(self, arg):
-                    self.arg = "int"
-                @t.register(str)
-                def _(self, arg):
-                    self.arg = "str"
-            a = A()
+        class A:
+            @functools.singledispatchmethod
+            def t(self, arg):
+                self.arg = "base"
+            @t.register(int)
+            def _(self, arg):
+                self.arg = "int"
+            @t.register(str)
+            def _(self, arg):
+                self.arg = "str"
+        a = A()
 
         a.t(0)
         self.assertEqual(a.arg, "int")
@@ -2598,76 +2560,72 @@ class TestSingleDispatch(CPythonTestCase):
         self.assertFalse(hasattr(aa, 'arg'))
 
     def test_staticmethod_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                @staticmethod
-                def t(arg):
-                    return arg
-                @t.register(int)
-                @staticmethod
-                def _(arg):
-                    return isinstance(arg, int)
-                @t.register(str)
-                @staticmethod
-                def _(arg):
-                    return isinstance(arg, str)
-            a = A()
+        class A:
+            @functools.singledispatchmethod
+            @staticmethod
+            def t(arg):
+                return arg
+            @t.register(int)
+            @staticmethod
+            def _(arg):
+                return isinstance(arg, int)
+            @t.register(str)
+            @staticmethod
+            def _(arg):
+                return isinstance(arg, str)
+        a = A()
 
         self.assertTrue(A.t(0))
         self.assertTrue(A.t(''))
         self.assertEqual(A.t(0.0), 0.0)
 
     def test_slotted_class(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Slot:
-                __slots__ = ('a', 'b')
-                @functools.singledispatchmethod
-                def go(self, item, arg):
-                    pass
+        class Slot:
+            __slots__ = ('a', 'b')
+            @functools.singledispatchmethod
+            def go(self, item, arg):
+                pass
 
-                @go.register
-                def _(self, item: int, arg):
-                    return item + arg
+            @go.register
+            def _(self, item: int, arg):
+                return item + arg
 
-            s = Slot()
+        s = Slot()
         self.assertEqual(s.go(1, 1), 2)
 
     def test_classmethod_slotted_class(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Slot:
-                __slots__ = ('a', 'b')
-                @functools.singledispatchmethod
-                @classmethod
-                def go(cls, item, arg):
-                    pass
+        class Slot:
+            __slots__ = ('a', 'b')
+            @functools.singledispatchmethod
+            @classmethod
+            def go(cls, item, arg):
+                pass
 
-                @go.register
-                @classmethod
-                def _(cls, item: int, arg):
-                    return item + arg
+            @go.register
+            @classmethod
+            def _(cls, item: int, arg):
+                return item + arg
 
-            s = Slot()
+        s = Slot()
         self.assertEqual(s.go(1, 1), 2)
         self.assertEqual(Slot.go(1, 1), 2)
 
     def test_staticmethod_slotted_class(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                __slots__ = ['a']
-                @functools.singledispatchmethod
-                @staticmethod
-                def t(arg):
-                    return arg
-                @t.register(int)
-                @staticmethod
-                def _(arg):
-                    return isinstance(arg, int)
-                @t.register(str)
-                @staticmethod
-                def _(arg):
-                    return isinstance(arg, str)
-            a = A()
+        class A:
+            __slots__ = ['a']
+            @functools.singledispatchmethod
+            @staticmethod
+            def t(arg):
+                return arg
+            @t.register(int)
+            @staticmethod
+            def _(arg):
+                return isinstance(arg, int)
+            @t.register(str)
+            @staticmethod
+            def _(arg):
+                return isinstance(arg, str)
+        a = A()
 
         self.assertTrue(A.t(0))
         self.assertTrue(A.t(''))
@@ -2678,11 +2636,10 @@ class TestSingleDispatch(CPythonTestCase):
 
     def test_assignment_behavior(self):
         # see gh-106448
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def t(arg):
-                    return arg
+        class A:
+            @functools.singledispatchmethod
+            def t(arg):
+                return arg
 
         a = A()
         a.t.foo = 'bar'
@@ -2691,38 +2648,36 @@ class TestSingleDispatch(CPythonTestCase):
             a2.t.foo
 
     def test_classmethod_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __init__(self, arg):
-                    self.arg = arg
+        class A:
+            def __init__(self, arg):
+                self.arg = arg
 
-                @functools.singledispatchmethod
-                @classmethod
-                def t(cls, arg):
-                    return cls("base")
-                @t.register(int)
-                @classmethod
-                def _(cls, arg):
-                    return cls("int")
-                @t.register(str)
-                @classmethod
-                def _(cls, arg):
-                    return cls("str")
+            @functools.singledispatchmethod
+            @classmethod
+            def t(cls, arg):
+                return cls("base")
+            @t.register(int)
+            @classmethod
+            def _(cls, arg):
+                return cls("int")
+            @t.register(str)
+            @classmethod
+            def _(cls, arg):
+                return cls("str")
 
         self.assertEqual(A.t(0).arg, "int")
         self.assertEqual(A.t('').arg, "str")
         self.assertEqual(A.t(0.0).arg, "base")
 
     def test_callable_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __init__(self, arg):
-                    self.arg = arg
+        class A:
+            def __init__(self, arg):
+                self.arg = arg
 
-                @functools.singledispatchmethod
-                @classmethod
-                def t(cls, arg):
-                    return cls("base")
+            @functools.singledispatchmethod
+            @classmethod
+            def t(cls, arg):
+                return cls("base")
 
         @A.t.register(int)
         @classmethod
@@ -2738,13 +2693,12 @@ class TestSingleDispatch(CPythonTestCase):
         self.assertEqual(A.t(0.0).arg, "base")
 
     def test_abstractmethod_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Abstract(metaclass=abc.ABCMeta):
+        class Abstract(metaclass=abc.ABCMeta):
 
-                @functools.singledispatchmethod
-                @abc.abstractmethod
-                def add(self, x, y):
-                    pass
+            @functools.singledispatchmethod
+            @abc.abstractmethod
+            def add(self, x, y):
+                pass
 
         self.assertTrue(Abstract.add.__isabstractmethod__)
         self.assertTrue(Abstract.__dict__['add'].__isabstractmethod__)
@@ -2753,84 +2707,80 @@ class TestSingleDispatch(CPythonTestCase):
             Abstract()
 
     def test_type_ann_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def t(self, arg):
-                    return "base"
-                @t.register
-                def _(self, arg: int):
-                    return "int"
-                @t.register
-                def _(self, arg: str):
-                    return "str"
-            a = A()
+        class A:
+            @functools.singledispatchmethod
+            def t(self, arg):
+                return "base"
+            @t.register
+            def _(self, arg: int):
+                return "int"
+            @t.register
+            def _(self, arg: str):
+                return "str"
+        a = A()
 
         self.assertEqual(a.t(0), "int")
         self.assertEqual(a.t(''), "str")
         self.assertEqual(a.t(0.0), "base")
 
     def test_staticmethod_type_ann_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                @staticmethod
-                def t(arg):
-                    return arg
-                @t.register
-                @staticmethod
-                def _(arg: int):
-                    return isinstance(arg, int)
-                @t.register
-                @staticmethod
-                def _(arg: str):
-                    return isinstance(arg, str)
-            a = A()
+        class A:
+            @functools.singledispatchmethod
+            @staticmethod
+            def t(arg):
+                return arg
+            @t.register
+            @staticmethod
+            def _(arg: int):
+                return isinstance(arg, int)
+            @t.register
+            @staticmethod
+            def _(arg: str):
+                return isinstance(arg, str)
+        a = A()
 
         self.assertTrue(A.t(0))
         self.assertTrue(A.t(''))
         self.assertEqual(A.t(0.0), 0.0)
 
     def test_classmethod_type_ann_register(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __init__(self, arg):
-                    self.arg = arg
+        class A:
+            def __init__(self, arg):
+                self.arg = arg
 
-                @functools.singledispatchmethod
-                @classmethod
-                def t(cls, arg):
-                    return cls("base")
-                @t.register
-                @classmethod
-                def _(cls, arg: int):
-                    return cls("int")
-                @t.register
-                @classmethod
-                def _(cls, arg: str):
-                    return cls("str")
+            @functools.singledispatchmethod
+            @classmethod
+            def t(cls, arg):
+                return cls("base")
+            @t.register
+            @classmethod
+            def _(cls, arg: int):
+                return cls("int")
+            @t.register
+            @classmethod
+            def _(cls, arg: str):
+                return cls("str")
 
         self.assertEqual(A.t(0).arg, "int")
         self.assertEqual(A.t('').arg, "str")
         self.assertEqual(A.t(0.0).arg, "base")
 
     def test_method_wrapping_attributes(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def func(self, arg: int) -> str:
-                    """My function docstring"""
-                    return str(arg)
-                @functools.singledispatchmethod
-                @classmethod
-                def cls_func(cls, arg: int) -> str:
-                    """My function docstring"""
-                    return str(arg)
-                @functools.singledispatchmethod
-                @staticmethod
-                def static_func(arg: int) -> str:
-                    """My function docstring"""
-                    return str(arg)
+        class A:
+            @functools.singledispatchmethod
+            def func(self, arg: int) -> str:
+                """My function docstring"""
+                return str(arg)
+            @functools.singledispatchmethod
+            @classmethod
+            def cls_func(cls, arg: int) -> str:
+                """My function docstring"""
+                return str(arg)
+            @functools.singledispatchmethod
+            @staticmethod
+            def static_func(arg: int) -> str:
+                """My function docstring"""
+                return str(arg)
 
         prefix = A.__qualname__ + '.'
         for meth in (
@@ -2865,38 +2815,37 @@ class TestSingleDispatch(CPythonTestCase):
                 return wrapped(*args, **kwargs)
             return wrapper
 
-        with torch._dynamo.error_on_graph_break(False):
-            class WithoutSingleDispatch:
-                @classmethod
-                @contextlib.contextmanager
-                def cls_context_manager(cls, arg: int) -> str:
-                    try:
-                        yield str(arg)
-                    finally:
-                        return 'Done'
+        class WithoutSingleDispatch:
+            @classmethod
+            @contextlib.contextmanager
+            def cls_context_manager(cls, arg: int) -> str:
+                try:
+                    yield str(arg)
+                finally:
+                    return 'Done'
 
-                @classmethod_friendly_decorator
-                @classmethod
-                def decorated_classmethod(cls, arg: int) -> str:
-                    return str(arg)
+            @classmethod_friendly_decorator
+            @classmethod
+            def decorated_classmethod(cls, arg: int) -> str:
+                return str(arg)
 
-            class WithSingleDispatch:
-                @functools.singledispatchmethod
-                @classmethod
-                @contextlib.contextmanager
-                def cls_context_manager(cls, arg: int) -> str:
-                    """My function docstring"""
-                    try:
-                        yield str(arg)
-                    finally:
-                        return 'Done'
+        class WithSingleDispatch:
+            @functools.singledispatchmethod
+            @classmethod
+            @contextlib.contextmanager
+            def cls_context_manager(cls, arg: int) -> str:
+                """My function docstring"""
+                try:
+                    yield str(arg)
+                finally:
+                    return 'Done'
 
-                @functools.singledispatchmethod
-                @classmethod_friendly_decorator
-                @classmethod
-                def decorated_classmethod(cls, arg: int) -> str:
-                    """My function docstring"""
-                    return str(arg)
+            @functools.singledispatchmethod
+            @classmethod_friendly_decorator
+            @classmethod
+            def decorated_classmethod(cls, arg: int) -> str:
+                """My function docstring"""
+                return str(arg)
 
         # These are sanity checks
         # to test the test itself is working as expected
@@ -3021,11 +2970,10 @@ class TestSingleDispatch(CPythonTestCase):
             f(a=1)
 
     def test_invalid_positional_argument_singledispatchmethod(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def t(self, *args, **kwargs):
-                    pass
+        class A:
+            @functools.singledispatchmethod
+            def t(self, *args, **kwargs):
+                pass
         msg = 't requires at least 1 positional argument'
         with self.assertRaisesRegex(TypeError, msg):
             A().t()
@@ -3157,15 +3105,14 @@ class TestSingleDispatch(CPythonTestCase):
 
     def test_method_equal_instances(self):
         # gh-127750: Reference to self was cached
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __eq__(self, other):
-                    return True
-                def __hash__(self):
-                    return 1
-                @functools.singledispatchmethod
-                def t(self, arg):
-                    return self
+        class A:
+            def __eq__(self, other):
+                return True
+            def __hash__(self):
+                return 1
+            @functools.singledispatchmethod
+            def t(self, arg):
+                return self
 
         a = A()
         b = A()
@@ -3173,15 +3120,14 @@ class TestSingleDispatch(CPythonTestCase):
         self.assertIs(b.t(2), b)
 
     def test_method_bad_hash(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __eq__(self, other):
-                    raise AssertionError
-                def __hash__(self):
-                    raise AssertionError
-                @functools.singledispatchmethod
-                def t(self, arg):
-                    pass
+        class A:
+            def __eq__(self, other):
+                raise AssertionError
+            def __hash__(self):
+                raise AssertionError
+            @functools.singledispatchmethod
+            def t(self, arg):
+                pass
 
         # Should not raise
         A().t(1)
@@ -3190,11 +3136,10 @@ class TestSingleDispatch(CPythonTestCase):
 
     def test_method_no_reference_loops(self):
         # gh-127750: Created a strong reference to self
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                @functools.singledispatchmethod
-                def t(self, arg):
-                    return weakref.ref(self)
+        class A:
+            @functools.singledispatchmethod
+            def t(self, arg):
+                return weakref.ref(self)
 
         a = A()
         r = a.t(1)
@@ -3227,37 +3172,36 @@ class TestSingleDispatch(CPythonTestCase):
                          '(item, arg: int) -> str')
 
     def test_method_signatures(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def m(self, item, arg: int) -> str:
-                    return str(item)
-                @classmethod
-                def cm(cls, item, arg: int) -> str:
-                    return str(item)
-                @functools.singledispatchmethod
-                def func(self, item, arg: int) -> str:
-                    return str(item)
-                @func.register
-                def _(self, item, arg: bytes) -> str:
-                    return str(item)
+        class A:
+            def m(self, item, arg: int) -> str:
+                return str(item)
+            @classmethod
+            def cm(cls, item, arg: int) -> str:
+                return str(item)
+            @functools.singledispatchmethod
+            def func(self, item, arg: int) -> str:
+                return str(item)
+            @func.register
+            def _(self, item, arg: bytes) -> str:
+                return str(item)
 
-                @functools.singledispatchmethod
-                @classmethod
-                def cls_func(cls, item, arg: int) -> str:
-                    return str(arg)
-                @func.register
-                @classmethod
-                def _(cls, item, arg: bytes) -> str:
-                    return str(item)
+            @functools.singledispatchmethod
+            @classmethod
+            def cls_func(cls, item, arg: int) -> str:
+                return str(arg)
+            @func.register
+            @classmethod
+            def _(cls, item, arg: bytes) -> str:
+                return str(item)
 
-                @functools.singledispatchmethod
-                @staticmethod
-                def static_func(item, arg: int) -> str:
-                    return str(arg)
-                @func.register
-                @staticmethod
-                def _(item, arg: bytes) -> str:
-                    return str(item)
+            @functools.singledispatchmethod
+            @staticmethod
+            def static_func(item, arg: int) -> str:
+                return str(arg)
+            @func.register
+            @staticmethod
+            def _(item, arg: bytes) -> str:
+                return str(item)
 
         self.assertEqual(str(Signature.from_callable(A.func)),
                          '(self, item, arg: int) -> str')
@@ -3327,14 +3271,13 @@ class TestCachedProperty(CPythonTestCase):
             item.cost
 
     def test_immutable_dict(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MyMeta(type):
-                @py_functools.cached_property
-                def prop(self):
-                    return True
+        class MyMeta(type):
+            @py_functools.cached_property
+            def prop(self):
+                return True
 
-            class MyClass(metaclass=MyMeta):
-                pass
+        class MyClass(metaclass=MyMeta):
+            pass
 
         with self.assertRaisesRegex(
             TypeError,
@@ -3367,12 +3310,11 @@ class TestCachedProperty(CPythonTestCase):
             counter += 1
             return counter
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                cp = _cp
+        class A:
+            cp = _cp
 
-            class B:
-                cp = _cp
+        class B:
+            cp = _cp
 
         a = A()
         b = B()
@@ -3383,9 +3325,8 @@ class TestCachedProperty(CPythonTestCase):
 
     def test_set_name_not_called(self):
         cp = py_functools.cached_property(lambda s: None)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo:
-                pass
+        class Foo:
+            pass
 
         Foo.cp = cp
 
@@ -3409,18 +3350,17 @@ class TestCachedProperty(CPythonTestCase):
 
     def test_subclass_with___set__(self):
         """Caching still works for a subclass defining __set__."""
-        with torch._dynamo.error_on_graph_break(False):
-            class readonly_cached_property(py_functools.cached_property):
-                def __set__(self, obj, value):
-                    raise AttributeError("read only property")
+        class readonly_cached_property(py_functools.cached_property):
+            def __set__(self, obj, value):
+                raise AttributeError("read only property")
 
-            class Test:
-                def __init__(self, prop):
-                    self._prop = prop
+        class Test:
+            def __init__(self, prop):
+                self._prop = prop
 
-                @readonly_cached_property
-                def prop(self):
-                    return self._prop
+            @readonly_cached_property
+            def prop(self):
+                return self._prop
 
         t = Test(1)
         self.assertEqual(t.prop, 1)

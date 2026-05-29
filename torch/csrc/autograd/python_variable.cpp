@@ -3010,8 +3010,7 @@ static PyObject* THPVariable_get_backwards_hooks(
     return handle_torch_function_getter(self, "_backward_hooks");
   }
   if (self->backward_hooks) {
-    Py_INCREF(self->backward_hooks);
-    return self->backward_hooks;
+    return Py_NewRef(self->backward_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3050,8 +3049,7 @@ static PyObject* THPVariable_get_post_accumulate_grad_hooks(
     return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
   }
   if (self->post_accumulate_grad_hooks) {
-    Py_INCREF(self->post_accumulate_grad_hooks);
-    return self->post_accumulate_grad_hooks;
+    return Py_NewRef(self->post_accumulate_grad_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

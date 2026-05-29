@@ -1,23 +1,17 @@
 # mypy: allow-untyped-defs
 """MPS-specific lowering for flex attention."""
 
-import logging
-
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
 
 from ...ir import FixedLayout, TensorBox
-from ...lowering import _full
 from ...select_algorithm import realize_inputs
-from .common import (
-    infer_dense_strides,
-    maybe_realize,
-)
+from .common import infer_dense_strides, maybe_realize
 
 
-log = logging.getLogger(__name__)
+BLOCK_M = 32
 
 
 def lower_mps(
@@ -31,17 +25,18 @@ def lower_mps(
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
-    """Metal-based flex attention for MPS devices.
-
-    Generates a Metal shader implementing online-softmax attention
-    with block sparsity and inlined score_mod / mask_mod.
-    """
+    """Lower flex_attention to a Metal shader for MPS."""
     from ...codegen.metal_flex_attention_template import (
         _generate_metal_shader,
         MetalFlexAttentionNode,
     )
 
-    # Unpack block mask
+    if score_mod_other_buffers or mask_mod_other_buffers:
+        raise NotImplementedError(
+            "flex_attention on MPS does not yet support score_mod / mask_mod "
+            "with captured buffers"
+        )
+
     (
         _,  # q_length
         _,  # kv_length
@@ -49,16 +44,15 @@ def lower_mps(
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-        q_num_blocks,
-        q_indices,
-        full_q_num_blocks,
-        full_q_indices,
+        _,  # q_num_blocks
+        _,  # q_indices
+        _,  # full_q_num_blocks
+        _,  # full_q_indices
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
 
-    # Validate dtypes
     if query.get_dtype() not in (torch.float32, torch.float16, torch.bfloat16):
         raise NotImplementedError(
             f"flex_attention on MPS supports float32/float16/bfloat16, got {query.get_dtype()}"
@@ -73,10 +67,14 @@ def lower_mps(
             "flex_attention backward (return_lse=True) is not yet supported on MPS. "
             "Use torch.no_grad() or torch.inference_mode() for inference."
         )
+    if kernel_options.get("OUTPUT_MAX", False):
+        raise NotImplementedError(
+            "flex_attention on MPS does not yet support returning max scores "
+            "(return_aux=AuxRequest(max_scores=True))."
+        )
 
     dtype = query.get_dtype()
 
-    # Realize inputs
     (
         query,
         key,
@@ -86,40 +84,75 @@ def lower_mps(
         full_kv_num_blocks,
         full_kv_indices,
     ) = maybe_realize(
-        [query, key, value, kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
     )
 
-    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+    B, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    B = Bq
+    _, _, _, k_head_dim = key.get_size()
 
     has_full_blocks = full_kv_num_blocks is not None
 
-    # Guard compile-time constants
     d_qk = V.graph.sizevars.guard_int(qk_head_dim)
     d_v = V.graph.sizevars.guard_int(v_head_dim)
-    SPARSE_KV_BLOCK_SIZE_val = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE_val = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    d_k = V.graph.sizevars.guard_int(k_head_dim)
+    if d_k != d_qk:
+        raise NotImplementedError(
+            f"flex_attention on MPS requires query and key to share head dim, "
+            f"got d_qk={d_qk} d_k={d_k}"
+        )
 
-    # GQA factor, TODO do we need checking here for division of Hq / Hkv?
-    enable_gqa = V.graph.sizevars.evaluate_expr(sympy.Ne(Hq, Hkv))
-    gqa_shared_heads = sympy.floor(Hq / Hkv) if enable_gqa else sympy.Integer(1)
+    sizevars = V.graph.sizevars
+    # Kernel indexes K/V with the same b_idx as Q; no broadcast logic for Bkv=1 yet.
+    # check_equals adds a runtime guard B == Bkv; it raises AssertionError if it
+    # can prove they differ — convert to NIE so callers see the right error.
+    try:
+        sizevars.check_equals(B, Bkv)
+    except AssertionError:
+        raise NotImplementedError(
+            f"flex_attention on MPS does not yet support batch broadcasting "
+            f"between query and key/value (Bq != Bkv); got Bq={B} Bkv={Bkv}"
+        ) from None
 
-    BLOCK_M = 32
+    SPARSE_KV_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    if SPARSE_Q_BLOCK_SIZE_val < BLOCK_M or SPARSE_Q_BLOCK_SIZE_val % BLOCK_M != 0:
+        # Each threadgroup tiles BLOCK_M query rows and looks up sparse-mask info
+        # at sparse_q_idx = m_base / SPARSE_Q_BLOCK_SIZE; a smaller/non-multiple
+        # SPARSE_Q_BLOCK_SIZE makes one threadgroup span multiple sparse blocks.
+        raise NotImplementedError(
+            f"flex_attention on MPS requires SPARSE_Q_BLOCK_SIZE to be a positive "
+            f"multiple of {BLOCK_M}, got {SPARSE_Q_BLOCK_SIZE_val}"
+        )
 
-    # Generate Metal shader with compile-time constants and inlined score/mask mods
+    if not sizevars.statically_known_multiple_of(Hq, Hkv):
+        raise NotImplementedError(
+            f"flex_attention on MPS requires Hq to be a positive multiple of "
+            f"Hkv, got Hq={Hq} Hkv={Hkv}"
+        )
+    gqa_shared_heads = Hq // Hkv
+
+    scale_val = float(scale)
+
     shader_source = _generate_metal_shader(
         dtype=dtype,
         d_qk=d_qk,
         d_v=d_v,
         score_mod_graph=subgraph.graph_module,
         mask_mod_graph=mask_graph.graph_module,
-        num_extra_bufs=0,
         has_full_blocks=has_full_blocks,
         block_m=BLOCK_M,
+        scale=scale_val,
     )
 
-    # Output layout matching query strides
     out_size = [B, Hq, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, query.get_stride())
     layout = FixedLayout(
@@ -129,53 +162,43 @@ def lower_mps(
         stride=[sympy.sympify(s) for s in out_strides],
     )
 
-    # Create scale as a 1-element float32 tensor (IR-level), TODO is this needed? like the isinstance thingie
-    scale_val = scale if isinstance(scale, (int, float)) else float(scale)
-    scale_ir = _full(scale_val, query.get_device(), torch.float32, [1])
-    scale_ir.realize()
-
-    # Get sparse block strides before realize_inputs (which may wrap nodes)
-    kv_nb_strides = _get_strides(kv_num_blocks)   # [stride_z, stride_h, stride_q]
-    kv_idx_strides = _get_strides(kv_indices)       # [stride_z, stride_h, stride_q, stride_b]
+    kv_nb_strides = _get_strides(kv_num_blocks)
+    kv_idx_strides = _get_strides(kv_indices)
     full_kv_nb_strides = _get_strides(full_kv_num_blocks) if has_full_blocks else []
     full_kv_idx_strides = _get_strides(full_kv_indices) if has_full_blocks else []
 
-    # Build tensor inputs (must match shader [[buffer(N)]] order)
-    # Buffer 0 = Out, 1=Q, 2=K, 3=V, 4=kv_num_blocks, 5=kv_indices, 6=scale
-    input_nodes = [query, key, value, kv_num_blocks, kv_indices, scale_ir]
+    # Buffer order: 0=Out, 1=Q, 2=K, 3=V, 4=kv_num_blocks, 5=kv_indices,
+    # 6=(full_kv_num_blocks), 7=(full_kv_indices), then packed scalar buffer.
+    input_nodes = [query, key, value, kv_num_blocks, kv_indices]
     if has_full_blocks:
         input_nodes += [full_kv_num_blocks, full_kv_indices]
 
     realized_inputs = realize_inputs(*input_nodes)
 
-    # Get sparse structure sizes (SPARSE_Z, SPARSE_HQ) for modular indexing
-    kv_nb_sizes = kv_num_blocks.get_size()
-    sparse_z = kv_nb_sizes[0] if len(kv_nb_sizes) >= 1 else sympy.Integer(1)
-    sparse_hq = kv_nb_sizes[1] if len(kv_nb_sizes) >= 2 else sympy.Integer(1)
+    # Left-pad to (Z, H, Q_blocks); a sliced kv_num_blocks may be 1D or 2D.
+    kv_nb_sizes = list(kv_num_blocks.get_size())
+    while len(kv_nb_sizes) < 3:
+        kv_nb_sizes.insert(0, sympy.Integer(1))
+    sparse_z = kv_nb_sizes[0]
+    sparse_hq = kv_nb_sizes[1]
 
-    # Build scalar args (sizes, strides) - these become constant long& in the shader
-    # Order must match the scalar parameter declarations in the shader
+    # Order must match the unpack in metal_flex_attention_template's `scalar_names`.
     scalar_args = [
-        B, Hq, Hkv, seq_len_q, seq_len_kv,
-        # Q strides (4)
+        B,
+        Hq,
+        Hkv,
+        seq_len_q,
+        seq_len_kv,
         *query.get_stride(),
-        # K strides (4)
         *key.get_stride(),
-        # V strides (4)
         *value.get_stride(),
-        # Output strides (4)
         *[sympy.sympify(s) for s in out_strides],
-        # Block mask params
         sympy.Integer(SPARSE_KV_BLOCK_SIZE_val),
         gqa_shared_heads,
-        # Sparse structure dimensions for modular indexing
         sparse_z,
         sparse_hq,
-        # kv_num_blocks strides [z, h, q]
         *_pad_strides(kv_nb_strides, 3),
-        # kv_indices strides [z, h, q, b(lock)]
         *_pad_strides(kv_idx_strides, 4),
-        # SPARSE_Q_BLOCK_SIZE
         sympy.Integer(SPARSE_Q_BLOCK_SIZE_val),
     ]
     if has_full_blocks:
@@ -184,8 +207,7 @@ def lower_mps(
             *_pad_strides(full_kv_idx_strides, 4),
         ]
 
-    # Grid: (ceil(N_Q / BLOCK_M), Hq, B)
-    # TODO what is this
+    # (num_q_blocks, Hq, B); each threadgroup owns BLOCK_M query rows.
     grid = (
         sympy.ceiling(seq_len_q / BLOCK_M),
         Hq,
@@ -205,18 +227,16 @@ def lower_mps(
 
 
 def _get_strides(node):
-    """Safely get strides from an IR node, returning empty list for None."""
     if node is None:
         return []
-    try:
-        return list(node.get_stride())
-    except Exception:
-        return []
+    return list(node.get_stride())
 
 
 def _pad_strides(strides, target_len):
-    """Pad a strides list to target_len with Integer(1) for missing dims."""
-    result = list(strides[:target_len])
-    while len(result) < target_len:
-        result.append(sympy.Integer(1))
-    return result
+    """Left-pad strides to target_len with 0 (broadcast over missing leading dims)."""
+    strides = list(strides)
+    if len(strides) > target_len:
+        strides = strides[-target_len:]
+    while len(strides) < target_len:
+        strides.insert(0, sympy.Integer(0))
+    return strides

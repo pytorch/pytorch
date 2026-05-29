@@ -103,11 +103,18 @@ class ForeachFuncWrapper:
                 # synchronize within the profiler context to make sure events happen before exiting
                 torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
-            mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
+            mta_kernel_called = any("multi_tensor_apply_kernel" in k for k in keys)
+            # Explicitly track MTA launch on ROCm via RECORD_FUNCTION in
+            # MultiTensorApply.cuh to avoid dependence on ROCm kernel
+            # symbolization.
+            mta_launch_marker_called = TEST_WITH_ROCM and any(
+                "_foreach_mta_launch" in k for k in keys
+            )
+            mta_called = mta_kernel_called or mta_launch_marker_called
 
             if mta_called != (expect_fastpath and (not zero_size)):
                 raise AssertionError(
-                    f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+                    f"{mta_called=}, {mta_kernel_called=}, {mta_launch_marker_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
                 )
         else:
             actual = self.func(*inputs, **kwargs)

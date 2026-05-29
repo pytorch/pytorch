@@ -395,6 +395,13 @@ def get_caching_autotuner_plugins(
     imports kept inside the relevant branch.
     """
     plugins: list[CachingAutotunerPlugin] = []
+    if autotuner.inductor_meta.get("incremental_autotune", False):
+        try:
+            from .fb.incremental import IncrementalAutotunePlugin
+
+            plugins.append(IncrementalAutotunePlugin())
+        except ImportError:
+            pass
     return plugins
 
 
@@ -577,14 +584,13 @@ class CachingAutotuner(KernelInterface):
                     self.compile_results = [compile_result]
                     return
 
-            # If the best config isn't in our list of compile results,
-            # it's likely because it was found by coordesc after the cache
-            # already saved
-            if found_by_coordesc:
-                with dynamo_timed("CachingAutotuner.slow_precompile_config"):
-                    if self.fn.fn is None:
-                        self.fn = reload_kernel_from_src().fn
-                    self.compile_results = [self._precompile_config(best_config)]
+            # The best config isn't in our compile results — it was
+            # found dynamically (coordesc tuning or _dynamic_scale_rblock)
+            # after the static autotuner was saved. Compile it now.
+            with dynamo_timed("CachingAutotuner.slow_precompile_config"):
+                if self.fn.fn is None:
+                    self.fn = reload_kernel_from_src().fn
+                self.compile_results = [self._precompile_config(best_config)]
 
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
@@ -758,6 +764,11 @@ class CachingAutotuner(KernelInterface):
             yield new_config
 
     def _dynamic_scale_rblock(self):
+        if (
+            self.autotune_cache_info
+            and self.autotune_cache_info.get("autotune_cache_state") == "hit"
+        ):
+            return
         if not self._could_rblock_scale:
             return
         for new_config in self._iter_rblock_scale_candidates():
