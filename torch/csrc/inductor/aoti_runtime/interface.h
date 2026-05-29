@@ -188,9 +188,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
     size_t* data_size);
 
 // Extract the constants that is being used in the container.
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerExtractConstantsMapEntries.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
+// C-ABI-safe variant of AOTInductorModelContainerExtractConstantsMap.
+// On success, `entries` points to `num_entries` container-owned entries.
+// The returned array and each `entries[i].name` are valid until the next
+// AOTInductorModelContainerExtractConstantsMapEntries call on the same
+// container, until the container's constants are mutated, or until the
+// container is deleted. Callers that need to retain names should copy them.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry** entries,
+    size_t* num_entries,
     bool use_inactive);
 
 // Setup the constant buffer in model container with provided ConstantMap.
