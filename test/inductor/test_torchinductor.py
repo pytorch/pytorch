@@ -4520,6 +4520,36 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.autotune_cublasLt": True,
+        }
+    )
+    def test_addmm_unrealized_bias_view_max_autotune(self):
+        if self.device != "cpu":
+            self.skipTest("CPU regression test")
+
+        def fn(x, weight, bias):
+            flat = torch.cat([weight.view(-1), bias.view(-1)], dim=0)
+            flat_div = flat / 4.0
+
+            new_weight = flat_div.narrow(0, 0, weight.numel()).view_as(weight)
+            new_bias = flat_div.narrow(0, weight.numel(), bias.numel()).view_as(bias)
+
+            return F.linear(x, new_weight, new_bias)
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 64, device=self.device),
+                torch.randn(32, 64, device=self.device),
+                torch.randn(32, device=self.device),
+            ),
+            check_lowp=False,
+        )
+
     def test_addmv(self):
         def fn(a, b, c):
             return torch.addmv(a, b, c)
