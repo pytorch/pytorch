@@ -1460,11 +1460,23 @@ def _graph_nodes(graph: Any) -> list[Any]:
 
 
 def _kernel_param_infos(func: Any) -> list[tuple[int, int]]:
-    param_count = cuda_python_error_check(cuda_driver.cuFuncGetParamCount(func))
-    return [
-        cuda_python_error_check(cuda_driver.cuFuncGetParamInfo(func, param_index))
-        for param_index in range(param_count)
-    ]
+    if hasattr(cuda_driver, "cuFuncGetParamCount"):
+        param_count = cuda_python_error_check(cuda_driver.cuFuncGetParamCount(func))
+        return [
+            cuda_python_error_check(cuda_driver.cuFuncGetParamInfo(func, param_index))
+            for param_index in range(param_count)
+        ]
+
+    param_infos: list[tuple[int, int]] = []
+    for param_index in itertools.count():
+        result = cuda_driver.cuFuncGetParamInfo(func, param_index)
+        error, *others = result
+        if error == cuda_driver.CUresult.CUDA_ERROR_INVALID_VALUE:
+            return param_infos
+        param_offset, param_size = cuda_python_error_check(result)
+        param_infos.append((param_offset, param_size))
+
+    raise AssertionError("unreachable")
 
 
 def _kernel_name(func: Any) -> str:
@@ -2422,12 +2434,54 @@ def replace_memset_with_kernel(graph, memset_node, kernel):
 
 
 def _cuda_graph_node_links(query: Callable[..., Any], node: Any) -> list[Any]:
-    nodes, _edge_data, num_nodes = cuda_python_error_check(query(node))
+    result = cuda_python_error_check(query(node))
+    if len(result) == 2:
+        nodes, num_nodes = result
+    else:
+        nodes, _edge_data, num_nodes = result
     if num_nodes == 0:
         return []
 
-    nodes, _edge_data, num_nodes = cuda_python_error_check(query(node, num_nodes))
+    result = cuda_python_error_check(query(node, num_nodes))
+    if len(result) == 2:
+        nodes, num_nodes = result
+    else:
+        nodes, _edge_data, num_nodes = result
     return list(nodes[:num_nodes])
+
+
+def _cuda_graph_node_link_queries() -> tuple[Callable[..., Any], Callable[..., Any]]:
+    runtime_version = cuda_python_error_check(cuda_runtime.cudaRuntimeGetVersion())
+    if runtime_version >= 13000:
+        return (
+            cuda_runtime.cudaGraphNodeGetDependencies,
+            cuda_runtime.cudaGraphNodeGetDependentNodes,
+        )
+    return (
+        cuda_runtime.cudaGraphNodeGetDependencies_v2,
+        cuda_runtime.cudaGraphNodeGetDependentNodes_v2,
+    )
+
+
+def _cuda_graph_add_dependencies(
+    graph: Any,
+    from_nodes: list[Any],
+    to_nodes: list[Any],
+    num_dependencies: int,
+) -> None:
+    runtime_version = cuda_python_error_check(cuda_runtime.cudaRuntimeGetVersion())
+    if runtime_version >= 13000:
+        cuda_python_error_check(
+            cuda_runtime.cudaGraphAddDependencies(
+                graph, from_nodes, to_nodes, None, num_dependencies
+            )
+        )
+    else:
+        cuda_python_error_check(
+            cuda_runtime.cudaGraphAddDependencies(
+                graph, from_nodes, to_nodes, num_dependencies
+            )
+        )
 
 
 def replace_node_in_graph(graph, old_node, new_node):
@@ -2439,12 +2493,9 @@ def replace_node_in_graph(graph, old_node, new_node):
         old_node (cudaGraphNode_t): The node to remove from the graph
         new_node (cudaGraphNode_t): The node to add to the graph
     """
-    dependencies = _cuda_graph_node_links(
-        cuda_runtime.cudaGraphNodeGetDependencies, old_node
-    )
-    dependent_nodes = _cuda_graph_node_links(
-        cuda_runtime.cudaGraphNodeGetDependentNodes, old_node
-    )
+    get_dependencies, get_dependent_nodes = _cuda_graph_node_link_queries()
+    dependencies = _cuda_graph_node_links(get_dependencies, old_node)
+    dependent_nodes = _cuda_graph_node_links(get_dependent_nodes, old_node)
 
     # Remove the old node from the graph
     cuda_python_error_check(cuda_runtime.cudaGraphDestroyNode(old_node))
@@ -2454,24 +2505,18 @@ def replace_node_in_graph(graph, old_node, new_node):
 
     # Add the new node to the graph with the same dependencies as the old node
     if len(dependencies) > 0:
-        cuda_python_error_check(
-            cuda_runtime.cudaGraphAddDependencies(
-                graph,
-                dependencies,
-                [new_node] * len(dependencies),
-                None,
-                len(dependencies),
-            )
+        _cuda_graph_add_dependencies(
+            graph,
+            dependencies,
+            [new_node] * len(dependencies),
+            len(dependencies),
         )
 
     # Add the dependencies from the new node to the old node's dependent nodes
     if len(dependent_nodes) > 0:
-        cuda_python_error_check(
-            cuda_runtime.cudaGraphAddDependencies(
-                graph,
-                [new_node] * len(dependent_nodes),
-                dependent_nodes,
-                None,
-                len(dependent_nodes),
-            )
+        _cuda_graph_add_dependencies(
+            graph,
+            [new_node] * len(dependent_nodes),
+            dependent_nodes,
+            len(dependent_nodes),
         )
