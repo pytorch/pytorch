@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/utils/pybind.h>
+#include <cstdint>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1053,6 +1054,172 @@ TypePtr registerNamedTuple(
   return tt;
 }
 
+namespace {
+
+std::optional<std::string> constantString(Value* value) {
+  auto ivalue = toIValue(value);
+  if (ivalue && ivalue->isString()) {
+    return ivalue->toStringRef();
+  }
+  return std::nullopt;
+}
+
+std::optional<std::vector<std::string>> constantStringTuple(Value* value) {
+  auto ivalue = toIValue(value);
+  if (ivalue && ivalue->isList()) {
+    std::vector<std::string> fields;
+    for (const auto& elem : ivalue->toListRef()) {
+      if (!elem.isString()) {
+        return std::nullopt;
+      }
+      fields.emplace_back(elem.toStringRef());
+    }
+    return fields;
+  }
+
+  if (ivalue && ivalue->isTuple()) {
+    std::vector<std::string> fields;
+    for (const auto& elem : ivalue->toTupleRef().elements()) {
+      if (!elem.isString()) {
+        return std::nullopt;
+      }
+      fields.emplace_back(elem.toStringRef());
+    }
+    return fields;
+  }
+
+  if (value->node()->kind() != prim::ListConstruct &&
+      value->node()->kind() != prim::TupleConstruct) {
+    return std::nullopt;
+  }
+
+  std::vector<std::string> fields;
+  for (Value* input : value->node()->inputs()) {
+    auto field = constantString(input);
+    if (!field) {
+      return std::nullopt;
+    }
+    fields.emplace_back(std::move(*field));
+  }
+  return fields;
+}
+
+uint64_t fnv1a64(const std::string& data) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (unsigned char c : data) {
+    hash ^= c;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+std::string localNamedTupleQualifiedName(
+    const GraphFunction& function,
+    const SourceRange& loc,
+    const std::string& typename_value,
+    const std::string& field_names_key) {
+  std::stringstream key;
+  key << function.qualname().qualifiedName() << '|';
+  if (auto flc = loc.file_line_col()) {
+    const auto& [file, line, col] = *flc;
+    key << file << ':' << line << ':' << col;
+  }
+  key << '|' << loc.start() << ':' << loc.end() << '|' << typename_value << '|'
+      << field_names_key;
+
+  std::stringstream hash_atom;
+  hash_atom << "h" << std::hex << fnv1a64(key.str());
+  return c10::QualifiedName(
+             c10::QualifiedName(
+                 c10::QualifiedName("__torch__.__jit_local_namedtuple"),
+                 hash_atom.str()),
+             typename_value)
+      .qualifiedName();
+}
+
+struct NamedTupleFactoryValue : public SugaredValue {
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      GraphFunction& m,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t /*n_binders*/) override {
+    if (args.size() != 2) {
+      throw(
+          ErrorReport(loc)
+          << "collections.namedtuple is only supported in TorchScript with "
+          << "exactly two positional arguments: typename and field_names");
+    }
+    if (!kwargs.empty()) {
+      throw(
+          ErrorReport(loc)
+          << "collections.namedtuple keyword arguments such as rename, "
+          << "defaults, and module are not supported in TorchScript");
+    }
+
+    auto graph = m.graph();
+    auto typename_value = constantString(args[0].value(*graph));
+    if (!typename_value) {
+      throw(
+          ErrorReport(args[0].locOr(loc))
+          << "collections.namedtuple typename must be a string literal");
+    }
+
+    Value* field_names_value = args[1].value(*graph);
+    py::object field_names;
+    std::string field_names_key;
+    if (auto field_names_string = constantString(field_names_value)) {
+      field_names = py::str(*field_names_string);
+      field_names_key = *field_names_string;
+    } else if (
+        auto field_names_tuple = constantStringTuple(field_names_value)) {
+      py::list list;
+      for (const auto& field : *field_names_tuple) {
+        list.append(py::str(field));
+        field_names_key += field;
+        field_names_key.push_back('\0');
+      }
+      field_names = std::move(list);
+    } else {
+      throw(
+          ErrorReport(args[1].locOr(loc))
+          << "collections.namedtuple field_names must be a string literal or "
+          << "a list/tuple of string literals");
+    }
+
+    py::object tuple_class;
+    try {
+      tuple_class =
+          py::module::import("collections")
+              .attr("namedtuple")(py::str(*typename_value), field_names);
+      py::setattr(
+          tuple_class,
+          "_jit_override_qualname",
+          py::str(localNamedTupleQualifiedName(
+              m, loc, *typename_value, field_names_key)));
+    } catch (py::error_already_set& e) {
+      throw(ErrorReport(loc) << "collections.namedtuple failed: " << e.what());
+    }
+
+    auto fakeRcb =
+        py::module::import("torch.jit.annotations").attr("_fake_rcb");
+    auto tuple_type =
+        registerNamedTuple(tuple_class, loc, fakeRcb)->expect<TupleType>();
+    return std::make_shared<NamedTupleConstructor>(std::move(tuple_type));
+  }
+
+  std::string kind() const override {
+    return "collections.namedtuple";
+  }
+};
+
+bool isNamedTupleFactory(const py::object& obj) {
+  return obj.ptr() ==
+      py::module::import("collections").attr("namedtuple").ptr();
+}
+
+} // namespace
+
 static bool isEnumClass(py::object obj) {
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
@@ -1220,6 +1387,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::isinstance);
   } else if (obj.ptr() == py::module::import("torch").attr("_check").ptr()) {
     return std::make_shared<TorchCheckValue>();
+  } else if (isNamedTupleFactory(obj)) {
+    return std::make_shared<NamedTupleFactoryValue>();
 #ifdef USE_RPC
     // RPC module is only available when build flag "USE_DISTRIBUTED" is on.
   } else if (
