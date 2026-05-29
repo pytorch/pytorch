@@ -1246,8 +1246,23 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
 # Triton Kernel Wrappers
 
 
+class _TritonKernelWrapper(HigherOrderOperator):
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Tensor, ...]:
+        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
+        triton_kwargs = kwargs.get("kwargs")
+        if isinstance(triton_kwargs, dict):
+            overloaded_args.extend(
+                arg
+                for arg in triton_kwargs.values()
+                if isinstance(arg, Tensor) and self._has_python_key(arg)
+            )
+        return tuple(overloaded_args)
+
+
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(HigherOrderOperator):
+class TritonKernelWrapperMutation(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1273,22 +1288,9 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(HigherOrderOperator):
+class TritonKernelWrapperFunctional(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
-
-    def _get_overloaded_args(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[Tensor, ...]:
-        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
-        triton_kwargs = kwargs.get("kwargs")
-        if isinstance(triton_kwargs, dict):
-            overloaded_args.extend(
-                arg
-                for arg in triton_kwargs.values()
-                if isinstance(arg, Tensor) and self._has_python_key(arg)
-            )
-        return tuple(overloaded_args)
 
     def __call__(
         self,

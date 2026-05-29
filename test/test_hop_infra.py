@@ -129,6 +129,28 @@ class TestHOPInfra(TestCase):
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
+    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        mode = FakeTensorMode()
+        with mode:
+            fake_output = torch.empty_strided((2, 3), (3, 1))
+
+        self.assertIsInstance(fake_output, FakeTensor)
+
+        out = triton_kernel_wrapper_mutation(
+            kernel_idx=0,
+            constant_args_idx=0,
+            grid=[(1,)],
+            tma_descriptor_metadata={},
+            kwargs={"out_ptr": fake_output},
+        )
+
+        self.assertIsNone(out)
+
 
 if __name__ == "__main__":
     run_tests()
