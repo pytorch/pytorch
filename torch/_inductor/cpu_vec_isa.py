@@ -81,36 +81,35 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
-    # The probe does not `import torch`: that costs multiple seconds of
-    # startup per spawn and has hung under load in CI. The child still has
-    # to make libtorch_cpu loadable for the probe .so's transitive deps:
+    # The probe makes libtorch_cpu loadable for the test .so's transitive
+    # deps without paying the cost of `import torch` where it can be avoided:
+    # the full import costs multiple seconds of startup per spawn and has
+    # hung under load in CI (the motivation for this rework).
     #   - Linux: the parent prepends torch's lib dir to LD_LIBRARY_PATH and
     #     the dynamic linker resolves libtorch_cpu automatically; nothing to
     #     do in the child.
     #   - Windows: ctypes.cdll.LoadLibrary does not consult PATH/loader env
-    #     vars, so register torch's lib dir via os.add_dll_directory.
-    #   - macOS: SIP strips DYLD_LIBRARY_PATH from spawned children, so the
-    #     parent env does not reach the linker. Preload libtorch_cpu.dylib
-    #     by absolute path; the probe .so's @rpath dep then binds to the
-    #     already-loaded copy.
-    # In all cases the child locates torch via importlib.util.find_spec,
-    # which does not execute torch/__init__.py.
+    #     vars, so the child locates torch via importlib.util.find_spec
+    #     (which does not execute torch/__init__.py) and registers the lib
+    #     dir with os.add_dll_directory.
+    #   - macOS: SIP strips DYLD_LIBRARY_PATH from spawned children, and the
+    #     test .so's @rpath dependency on libtorch_cpu.dylib cannot be
+    #     resolved from the parent env (nor by merely preloading the dylib by
+    #     path). Fall back to `import torch`, which pulls the whole dependency
+    #     closure into the process; macOS only ever probes VecNEON, so this is
+    #     at most one import per process and is still bounded by the 60s
+    #     subprocess timeout in _probe_load.
     _avx_py_load = """
 import os
 import sys
-import importlib.util
+if sys.platform == "darwin":
+    import torch  # noqa: F401
+elif hasattr(os, "add_dll_directory"):
+    import importlib.util
+    spec = importlib.util.find_spec("torch")
+    if spec is not None and spec.origin:
+        os.add_dll_directory(os.path.join(os.path.dirname(spec.origin), "lib"))
 from ctypes import cdll
-spec = importlib.util.find_spec("torch")
-lib_dir = (
-    os.path.join(os.path.dirname(spec.origin), "lib")
-    if spec is not None and spec.origin
-    else None
-)
-if lib_dir is not None:
-    if hasattr(os, "add_dll_directory"):
-        os.add_dll_directory(lib_dir)
-    elif sys.platform == "darwin":
-        cdll.LoadLibrary(os.path.join(lib_dir, "libtorch_cpu.dylib"))
 cdll.LoadLibrary("__lib_path__")
 """
 
@@ -138,9 +137,9 @@ cdll.LoadLibrary("__lib_path__")
         ``import torch`` to bring them into its address space. Prepend rather
         than append so a successful probe is guaranteed to bind against the
         torch we are currently running, not an older install on the user's
-        loader path. DYLD_LIBRARY_PATH is set too, but macOS SIP strips it
-        from spawned children, so the child preloads libtorch_cpu.dylib by
-        absolute path instead; Windows registers the lib dir via
+        loader path. DYLD_LIBRARY_PATH is set too for non-SIP setups, but
+        macOS SIP strips it from spawned children, so the child falls back to
+        ``import torch`` there; Windows registers the lib dir via
         ``os.add_dll_directory`` (both in ``_avx_py_load``).
         """
         lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
