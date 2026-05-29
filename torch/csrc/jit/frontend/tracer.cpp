@@ -231,7 +231,7 @@ Value* TracingState::getValue(const IValue& var) {
 }
 bool TracingState::hasValue(const IValue& var) const {
   for (const auto& frame : env_stack) {
-    if (frame.count(var)) {
+    if (frame.contains(var)) {
       return true;
     }
   }

@@ -1439,6 +1439,18 @@ def is_wrapper_or_member_descriptor(
     )
 
 
+def tracked_repr(tx: InstructionTranslator, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
+
+
 def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
@@ -2769,8 +2781,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
 def timed(
     model: Any, example_inputs: Iterable[Any], times: int = 1
 ) -> tuple[Any, float]:
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
     else:
         synchronize = nothing
 
@@ -3887,18 +3899,20 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
-def _is_tracing_exception_table_protected_bytecode(
+def _is_tracing_exception_handler_protected_bytecode(
     tx: InstructionTranslatorBase,
 ) -> bool:
-    if sys.version_info < (3, 11):
-        return False
-
-    current_tx: Any | None = tx
+    current_tx: InstructionTranslatorBase | None = tx
     while current_tx is not None:
-        inst = getattr(current_tx, "current_instruction", None)
-        if getattr(inst, "exn_tab_entry", None) is not None:
+        if sys.version_info >= (3, 11):
+            if current_tx.current_instruction.exn_tab_entry is not None:
+                return True
+        elif any(
+            block.inst.opname in ("SETUP_EXCEPT", "SETUP_FINALLY", "SETUP_WITH")
+            for block in current_tx.block_stack
+        ):
             return True
-        current_tx = getattr(current_tx, "parent", None)
+        current_tx = current_tx.parent
     return False
 
 
@@ -4101,9 +4115,9 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        # User code may catch RuntimeError in bytecode protected by an
-        # exception table. Let graph-break fallback run that region eagerly.
-        if _is_tracing_exception_table_protected_bytecode(tx):
+        # User code may catch RuntimeError in exception-handler protected
+        # bytecode. Let graph-break fallback run that region eagerly.
+        if _is_tracing_exception_handler_protected_bytecode(tx):
             unimplemented(
                 gb_type="RuntimeError when making fake tensor call",
                 context="",
@@ -5700,19 +5714,23 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(

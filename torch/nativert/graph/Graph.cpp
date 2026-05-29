@@ -84,7 +84,7 @@ Graph::Graph()
 
 std::string Graph::getUniqueValueName() {
   auto name = fmt::format("v{}", uniqueValueName_);
-  while (values_.find(name) != values_.end()) {
+  while (values_.contains(name)) {
     name = fmt::format("v{}", uniqueValueName_++);
   }
   return name;
@@ -475,7 +475,7 @@ Value* Graph::tryGetValue(std::string_view name) const {
   // TODO: can eliminate this string copy by enabling heterogeneous lookup for
   // the container
   const auto key = std::string(name);
-  if (values_.find(key) != values_.end()) {
+  if (values_.contains(key)) {
     return values_.at(key).get();
   }
   return nullptr;
@@ -534,7 +534,7 @@ bool Graph::cleanupDeadNodes() {
       if (!producer) {
         continue;
       }
-      if (!visited.count(producer)) {
+      if (!visited.contains(producer)) {
         visited.insert(producer);
         visitStack.push_back(producer);
       }
@@ -545,7 +545,7 @@ bool Graph::cleanupDeadNodes() {
   std::vector<Node*> toRemove;
   for (auto& n : nodes()) {
     if (n.target() == "prim.Input" || n.target() == "prim.Output" ||
-        visited.count(&n)) {
+        visited.contains(&n)) {
       continue;
     }
     toRemove.push_back(&n);

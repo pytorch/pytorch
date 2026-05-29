@@ -117,7 +117,7 @@ static void _process_forward_mode_AD(
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
     auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
     bool is_differentiable =
-        (non_differentiable.count(out_tensor_impl) == 0 &&
+        (!non_differentiable.contains(out_tensor_impl) &&
          isDifferentiableType(raw_outputs[i].value().scalar_type()));
     const auto& out_grad = forward_grads[i];
     if (!out.defined() || !is_differentiable) {
@@ -131,8 +131,8 @@ static void _process_forward_mode_AD(
       continue;
     }
 
-    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
-    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
+    bool is_input = inputs_mapping.contains(out_tensor_impl);
+    bool is_modified = dirty_inputs.contains(out_tensor_impl);
 
     if (is_modified) {
       TORCH_CHECK(
@@ -168,7 +168,7 @@ static void _process_forward_mode_AD(
         // If the output is a view
         const auto& out_view_info =
             impl::get_view_autograd_meta(out)->get_forward_view();
-        if (inputs_bases.count(out_view_info.base_.unsafeGetTensorImpl())) {
+        if (inputs_bases.contains(out_view_info.base_.unsafeGetTensorImpl())) {
           // And it is a view of an input (either that input is its base or they
           // have a common base)
           const auto matching_input_idx =
@@ -372,13 +372,13 @@ static optional_variable_list _process_backward_mode_ad(
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();
-    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
-    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
+    bool is_input = inputs_mapping.contains(out_tensor_impl);
+    bool is_modified = dirty_inputs.contains(out_tensor_impl);
     bool is_differentiable = cdata &&
-        non_differentiable.count(out_tensor_impl) == 0 &&
+        !non_differentiable.contains(out_tensor_impl) &&
         isDifferentiableType(var.scalar_type());
     bool is_saved_and_setup_context =
-        to_save_if_setup_context.count(out_tensor_impl) > 0;
+        to_save_if_setup_context.contains(out_tensor_impl);
 
     if (cdata) {
       uint32_t output_nr = 0;
