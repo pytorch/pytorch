@@ -8529,31 +8529,61 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
 
 
 def _validate_quack_grouped_mm(kernel_options, quack_args) -> None:
-    grouped_mm_supported = (
-        kernel_options.get("grouped_mm_has_offs", False)
-        and not kernel_options.get("grouped_mm_has_bias", False)
-        and len(quack_args) == 3
-        and len(quack_args[0].get_size()) == 2
-        and len(quack_args[1].get_size()) in (2, 3)
-    )
-    varlen_k_layout_supported = grouped_mm_supported and (
-        len(quack_args[1].get_size()) != 2
-        or (quack_args[0].get_stride()[0] == 1 and quack_args[1].get_stride()[1] == 1)
-    )
-    if not grouped_mm_supported or not varlen_k_layout_supported:
+    if (
+        not kernel_options.get("grouped_mm_has_offs", False)
+        or kernel_options.get("grouped_mm_has_bias", False)
+        or len(quack_args) != 3
+    ):
         raise NotImplementedError(
-            "QUACK grouped_mm epilogue currently supports only 2D/3D "
-            "and m-major/contiguous 2D/2D grouped_mm with offsets and no bias"
+            "QUACK grouped_mm epilogue currently requires offsets and no bias"
         )
+
+    mat1, mat2 = quack_args[0], quack_args[1]
+    mat1_rank, mat2_rank = len(mat1.get_size()), len(mat2.get_size())
+    grouped_shape = (mat1_rank, mat2_rank)
+    if grouped_shape == (2, 3):
+        return
+    if grouped_shape == (2, 2):
+        if mat1.get_stride()[0] == 1 and mat2.get_stride()[1] == 1:
+            return
+        raise NotImplementedError(
+            "QUACK 2D/2D grouped_mm epilogue requires m-major A and contiguous B"
+        )
+    if grouped_shape == (3, 2):
+        if not _is_sm100_or_later():
+            raise NotImplementedError(
+                "QUACK 3D/2D grouped_mm epilogue currently requires SM100+"
+            )
+        if mat1.get_dtype() != torch.bfloat16 or mat2.get_dtype() != torch.bfloat16:
+            raise NotImplementedError(
+                "QUACK 3D/2D grouped_mm epilogue currently supports only bfloat16"
+            )
+        if mat1.get_stride()[2] == 1 and mat2.get_stride()[1] == 1:
+            return
+        raise NotImplementedError(
+            "QUACK 3D/2D grouped_mm epilogue requires contiguous K on A and contiguous N on B"
+        )
+    raise NotImplementedError(
+        "QUACK grouped_mm epilogue currently supports only 2D/3D, 2D/2D, and 3D/2D grouped_mm"
+    )
 
 
 def _infer_quack_main_layout(
     gemm_op, gemm_op_info, quack_args, graph_module, gemm_kwargs
 ):
+    def normalize_layout_expr(value):
+        if isinstance(value, torch.SymInt):
+            value = value.node.expr
+        return sympy.expand(value)
+
     mat1 = quack_args[gemm_op_info.mat1_index]
     mat2 = quack_args[gemm_op_info.mat2_index]
     if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
         m, n = mat1.get_size()[0], mat2.get_size()[2]
+        size = [m, n]
+        stride = [n, 1]
+    elif gemm_op == torch.ops.aten._grouped_mm.default and len(mat1.get_size()) == 3:
+        m, n = mat1.get_size()[1], mat2.get_size()[1]
         size = [m, n]
         stride = [n, 1]
     elif gemm_op == torch.ops.aten._grouped_mm.default:
@@ -8586,6 +8616,8 @@ def _infer_quack_main_layout(
             size = list(output_meta.shape)
             stride = list(output_meta.stride())
 
+    size = [normalize_layout_expr(value) for value in size]
+    stride = [normalize_layout_expr(value) for value in stride]
     return ir.FixedLayout(
         mat1.get_device_or_error(),
         main_output_dtype,

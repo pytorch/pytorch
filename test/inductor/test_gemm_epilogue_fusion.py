@@ -366,11 +366,16 @@ class GemmEpilogueFusionTests(TestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        for op in ("2d/3d", "2d/2d"):
+        ops = ["2d/3d", "2d/2d"]
+        if torch.cuda.get_device_capability() >= (10, 0):
+            ops.append("3d/2d")
+        for op in ops:
             with self.subTest(op=op):
                 a, b, offs = self._grouped_mm_inputs(op, "cuda")
                 if op == "2d/2d":
                     a = a.t().contiguous().t()
+                    b = b.contiguous()
+                elif op == "3d/2d":
                     b = b.contiguous()
 
                 actual, (code,) = run_and_get_code(
@@ -381,6 +386,104 @@ class GemmEpilogueFusionTests(TestCase):
                 FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
                     "offs="
                 ).check_not("extern_kernels._grouped_mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_3d_2d_grouped_mm_partial_n(self):
+        if torch.cuda.get_device_capability() < (10, 0):
+            self.skipTest("QUACK 3D/2D grouped_mm requires SM100+")
+
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(
+                a,
+                b,
+                lambda acc: acc.relu(),
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        groups, m, n, k = 2, 64, 128, 64
+        a = torch.randn(groups, m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n * groups + 64, device="cuda", dtype=torch.bfloat16)
+        offs = torch.tensor([96, n * groups], device="cuda", dtype=torch.int32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, offs
+        )
+
+        expected = fn(a, b, offs)
+        covered_n = int(offs[-1].item())
+        torch.testing.assert_close(
+            actual[:, :covered_n], expected[:, :covered_n], atol=1e-2, rtol=1e-2
+        )
+        FileCheck().check("@cute.jit").check("gemm_epilogue(").check(
+            "offs="
+        ).check_not("extern_kernels._grouped_mm").run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_3d_2d_grouped_mm_symbolic_layout(self):
+        if torch.cuda.get_device_capability() < (10, 0):
+            self.skipTest("QUACK 3D/2D grouped_mm requires SM100+")
+
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(
+                a,
+                b,
+                lambda acc: acc.relu(),
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for groups, m, n, k in ((2, 64, 128, 64), (4, 128, 128, 128)):
+            with self.subTest(groups=groups, m=m, k=k):
+                a = torch.randn(groups, m, k, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(k, n * groups, device="cuda", dtype=torch.bfloat16)
+                offs = torch.arange(n, n * groups + 1, n, device="cuda", dtype=torch.int32)
+
+                actual = compiled(a, b, offs)
+
+                torch.testing.assert_close(actual, fn(a, b, offs), atol=1e-2, rtol=1e-2)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_3d_2d_grouped_mm_unaligned_n(self):
+        if torch.cuda.get_device_capability() < (10, 0):
+            self.skipTest("QUACK 3D/2D grouped_mm requires SM100+")
+
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(
+                a,
+                b,
+                lambda acc: acc.relu(),
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        groups, m, n, k = 2, 64, 128, 64
+        a = torch.randn(groups, m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n * groups, device="cuda", dtype=torch.bfloat16)
+        offs = torch.tensor([65, n * groups], device="cuda", dtype=torch.int32)
+
+        with self.assertRaisesRegex(Exception, "tile_n-aligned"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, offs)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_3d_2d_grouped_mm_unsupported_layout(self):
+        if torch.cuda.get_device_capability() < (10, 0):
+            self.skipTest("QUACK 3D/2D grouped_mm requires SM100+")
+
+        def fn(a, b, offs):
+            return grouped_mm_epilogue(
+                a,
+                b,
+                lambda acc: acc.relu(),
+                offs=offs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a, b, offs = self._grouped_mm_inputs("3d/2d", "cuda")
+
+        with self.assertRaisesRegex(Exception, "contiguous N"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, offs)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_grouped_mm_grouped_contract_fuses(self):
