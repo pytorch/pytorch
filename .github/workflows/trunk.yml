@@ -156,7 +156,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda13.0-py3" },
+          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-29-113-l4", win_torch_wheel_artifact: "win-vs2022-cuda13.0-py3" },
         ]}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
