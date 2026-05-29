@@ -166,8 +166,8 @@ class MemoryDep(Dep):
 
     def normalize(self) -> "MemoryDep":
         """
-        Normalize by merging loops. The different to normalize_with_stride_order is,
-        this method does not reorder loops while normalize_with_stride_order reorder
+        Normalize by merging loops. The difference from normalize_with_stride_order is,
+        this method does not reorder loops while normalize_with_stride_order reorders
         loops based on stride order.
         """
         return MemoryDep(
