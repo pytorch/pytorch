@@ -140,7 +140,7 @@ bool SubgraphMatcher::tryMatchNodeInputs(
   // match pattern node inputs
   for (const auto i : c10::irange(target_node->attributes().size())) {
     const auto& it = target_node->attributes()[i];
-    if (matched_attributes.find(it.name) != matched_attributes.end()) {
+    if (matched_attributes.contains(it.name)) {
       continue; // Skip attributes already matched
     }
     const auto& patternInput = findInputByName(pattern_node, it.name);
@@ -159,7 +159,7 @@ bool SubgraphMatcher::tryMatchNodeInputs(
     Value* dummyOutput = dummyNode->addOutput(
         targetGraph->getUniqueValueName(), Type::Kind::None);
     targetGraph->insertBefore(dummyNode, target_node);
-    if (match.value_map.find(patternInput->value) != match.value_map.end()) {
+    if (match.value_map.contains(patternInput->value)) {
       return match.value_map[patternInput->value]->producer()->target() ==
           kDummyTarget;
     }
@@ -173,7 +173,7 @@ bool SubgraphMatcher::tryMatchNode(
     const Node* pattern_node,
     Node* target_node,
     Match& match) {
-  if (match.node_map.find(pattern_node) != match.node_map.end()) {
+  if (match.node_map.contains(pattern_node)) {
     return match.node_map[pattern_node] == target_node;
   }
 
@@ -225,7 +225,7 @@ bool SubgraphMatcher::tryMatchValue(
     const Value* pval,
     Value* tval,
     Match& match) {
-  if (match.value_map.find(pval) != match.value_map.end()) {
+  if (match.value_map.contains(pval)) {
     return match.value_map[pval] == tval;
   }
 
@@ -329,7 +329,7 @@ bool SubgraphRewriter::overlapsWithUsedNodes(
   // then this match overlaps with a previously selected match.
   for (auto& kv : match.node_map) {
     Node* target_node = kv.second;
-    if (usedNodes.find(target_node) != usedNodes.end()) {
+    if (usedNodes.contains(target_node)) {
       return true;
     }
   }
@@ -349,7 +349,7 @@ void SubgraphRewriter::rewriteMatch(
   Node* insertionPoint = nullptr;
   std::vector<Value*> inputs, outputs;
   for (Value* v : pattern.inputs()) {
-    if (match.value_map.find(v) == match.value_map.end()) {
+    if (!match.value_map.contains(v)) {
       continue;
     }
     Value* input = match.value_map.at(v);
@@ -393,7 +393,7 @@ void SubgraphRewriter::rewriteMatch(
   }
 
   for (auto& patternNode : pattern.nodes()) {
-    if (match.node_map.find(&patternNode) != match.node_map.end()) {
+    if (match.node_map.contains(&patternNode)) {
       Node* n = match.node_map.at(&patternNode);
       replacedNodes_.insert(n);
     }

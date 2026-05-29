@@ -22,7 +22,7 @@ class HandlerRegistry {
   void registerHandler(const std::string& name, HandlerFunc f) {
     std::unique_lock<std::shared_mutex> lock(handlersMutex_);
 
-    if (handlers_.find(name) != handlers_.end()) {
+    if (handlers_.contains(name)) {
       throw std::invalid_argument(
           fmt::format("Handler {} already registered", name));
     }

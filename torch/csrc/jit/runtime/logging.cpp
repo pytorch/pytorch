@@ -20,11 +20,11 @@ void LockingLogger::addStatValue(const std::string& stat_name, int64_t val) {
 
 int64_t LockingLogger::getCounterValue(const std::string& name) const {
   std::unique_lock<std::mutex> lk(m);
-  if (!raw_counters.count(name)) {
+  if (!raw_counters.contains(name)) {
     return 0;
   }
   AggregationType type =
-      agg_types.count(name) ? agg_types.at(name) : AggregationType::SUM;
+      agg_types.contains(name) ? agg_types.at(name) : AggregationType::SUM;
   const auto& raw_counter = raw_counters.at(name);
   switch (type) {
     case AggregationType::SUM: {

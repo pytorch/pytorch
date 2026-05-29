@@ -231,7 +231,7 @@ HazardKind getPotentialHazards(
 
   for (auto& pair : bBounds) {
     BufPtr buf = pair.first;
-    if (aBounds.find(buf) == aBounds.end()) {
+    if (!aBounds.contains(buf)) {
       continue;
     }
 
