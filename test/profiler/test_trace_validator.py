@@ -18,13 +18,50 @@ from torch.profiler._trace_validator import (
     _check_stream_wait_corr_id_in_past,
     _check_stream_wait_corr_id_populated,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CUDA,
     TestCase,
 )
+
+
+# ---------------------------------------------------------------------------
+# Device-agnostic accelerator helpers
+# ---------------------------------------------------------------------------
+
+_DEVICE_TYPE_TO_ACTIVITY = {
+    "cuda": ProfilerActivity.CUDA,
+    "xpu": ProfilerActivity.XPU,
+}
+if hasattr(ProfilerActivity, "HPU"):
+    _DEVICE_TYPE_TO_ACTIVITY["hpu"] = ProfilerActivity.HPU
+if hasattr(ProfilerActivity, "MTIA"):
+    _DEVICE_TYPE_TO_ACTIVITY["mtia"] = ProfilerActivity.MTIA
+if hasattr(ProfilerActivity, "PrivateUse1"):
+    _DEVICE_TYPE_TO_ACTIVITY["privateuse1"] = ProfilerActivity.PrivateUse1
+
+
+def _activity_for_device_type(device_type):
+    """Map a device type string to its ProfilerActivity enum."""
+    return _DEVICE_TYPE_TO_ACTIVITY.get(device_type, ProfilerActivity.CPU)
+
+
+def _sync_device(device):
+    """Synchronize the given device's backend."""
+    if device is None or device.type == "cpu":
+        return
+    mod = getattr(torch, device.type, None)
+    if mod and hasattr(mod, "synchronize"):
+        mod.synchronize()
+
+
+# ---------------------------------------------------------------------------
+# Model helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 
 class _Bottleneck(nn.Module):
@@ -79,8 +116,13 @@ def _resnet50():
     )
 
 
+# ---------------------------------------------------------------------------
+# Payload helpers
+# ---------------------------------------------------------------------------
+
+
 def _profile_resnet_payload(trace_path):
-    """Profile a ResNet50 training loop and return events."""
+    """Profile a ResNet50 training loop and return events (CUDA-specific)."""
     device = torch.device("cuda:0")
     model = _resnet50().to(device)
     inputs = torch.randn(4, 3, 224, 224, device=device)
@@ -108,7 +150,7 @@ def _profile_resnet_payload(trace_path):
 
 
 def _profile_complex_payload(trace_path):
-    """Profile multi-stream + CUDA events + forward/backward and return events."""
+    """Profile multi-stream + CUDA events + forward/backward (CUDA-specific)."""
     device = torch.device("cuda:0")
 
     with profile(
@@ -137,14 +179,75 @@ def _profile_complex_payload(trace_path):
     return _load_events(trace_path)
 
 
+def _profile_training_payload(trace_path, device, activity):
+    """Profile a ResNet50 training loop on any accelerator and return events.
+
+    Unlike _profile_resnet_payload, this avoids CUDA-specific APIs
+    (_ExperimentalConfig, torch.cuda.Stream, torch.cuda.Event).
+    """
+    model = _resnet50().to(device)
+    inputs = torch.randn(4, 3, 224, 224, device=device)
+    outputs = torch.rand_like(model(inputs))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+    loss_fn = nn.CrossEntropyLoss()
+    _sync_device(device)
+
+    with profile(activities=[ProfilerActivity.CPU, activity]) as prof:
+        for _ in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            with record_function("## forward ##"):
+                pred = model(inputs)
+            with record_function("## backward ##"):
+                loss_fn(pred, outputs).backward()
+            with record_function("## optimizer ##"):
+                optimizer.step()
+
+    _sync_device(device)
+    prof.export_chrome_trace(trace_path)
+    return _load_events(trace_path)
+
+
 def _load_events(trace_path):
     with open(trace_path) as f:
         data = json.load(f)
     return data.get("traceEvents", data)
 
 
+# ---------------------------------------------------------------------------
+# E2E mixin — shared helpers for E2E test classes
+# ---------------------------------------------------------------------------
+
+
+class _TraceValidatorE2EMixin:
+    """Shared helpers for E2E trace validator test classes."""
+
+    def _events(self, payload):
+        return self._payloads[payload]
+
+    @staticmethod
+    def _fmt(violations, limit=5):
+        lines = [f"  {v}" for v in violations[:limit]]
+        if len(violations) > limit:
+            lines.append(f"  ... and {len(violations) - limit} more")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Accelerator-UNRELATED tests (CPU, synthetic event dicts)
+# ---------------------------------------------------------------------------
+
+
 class TestTraceValidatorRules(TestCase):
-    """Synthetic tests for rules not exercised by real E2E payloads."""
+    """Synthetic unit tests for validation rules.
+
+    Category: Accelerator-UNRELATED
+
+    Each validator is a pure list[dict] -> list[Violation] function.
+    These tests verify rule logic using hand-crafted event dictionaries.
+    No profiling or device operations — runs on any machine.
+    """
+
+    # --- _check_nccl_metadata ---
 
     def test_nccl_metadata_pass(self):
         events = [
@@ -176,19 +279,355 @@ class TestTraceValidatorRules(TestCase):
         ]
         v = _check_nccl_metadata(events)
         self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_nccl_metadata")
+
+    def test_nccl_metadata_partial_fields(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "record_param_comms",
+                "ts": 100,
+                "dur": 10,
+                "args": {
+                    "Collective name": "all_reduce",
+                    "dtype": "float32",
+                    "Group size": 8,
+                },
+            },
+        ]
+        v = _check_nccl_metadata(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_nccl_metadata")
+        self.assertIn("In msg nelems", v[0].message)
+        self.assertIn("Out msg nelems", v[0].message)
+
+    # --- _check_gpu_kernel_causality ---
+
+    def test_gpu_kernel_causality_pass(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "cuda_runtime",
+                "name": "cudaLaunchKernel",
+                "ts": 100,
+                "dur": 5,
+                "args": {"External id": 1, "correlation": 10},
+            },
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": "volta_sgemm",
+                "ts": 110,
+                "dur": 50,
+                "args": {"External id": 1, "correlation": 10},
+            },
+        ]
+        self.assertEqual(_check_gpu_kernel_causality(events), [])
+
+    def test_gpu_kernel_causality_fail(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "cuda_runtime",
+                "name": "cudaLaunchKernel",
+                "ts": 200,
+                "dur": 5,
+                "args": {"External id": 1, "correlation": 10},
+            },
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": "volta_sgemm",
+                "ts": 100,
+                "dur": 50,
+                "args": {"External id": 1, "correlation": 10},
+            },
+        ]
+        v = _check_gpu_kernel_causality(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_gpu_kernel_causality")
+        self.assertIn("before its cudaLaunchKernel", v[0].message)
+
+    # --- _check_stream_wait_corr_id_populated ---
+
+    def test_stream_wait_corr_id_populated_pass(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "cudaStreamWaitEvent",
+                "ts": 100,
+                "dur": 1,
+                "args": {
+                    "cuda_sync_kind": "Stream Wait Event",
+                    "wait_on_cuda_event_record_corr_id": 42,
+                    "device": 0,
+                    "stream": 7,
+                },
+            },
+        ]
+        self.assertEqual(_check_stream_wait_corr_id_populated(events), [])
+
+    def test_stream_wait_corr_id_populated_fail(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "cudaStreamWaitEvent",
+                "ts": 100,
+                "dur": 1,
+                "args": {
+                    "cuda_sync_kind": "Stream Wait Event",
+                    "wait_on_cuda_event_record_corr_id": -1,
+                    "device": 0,
+                    "stream": 7,
+                },
+            },
+        ]
+        v = _check_stream_wait_corr_id_populated(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_stream_wait_corr_id_populated")
+
+    # --- _check_stream_sync_overlap ---
+
+    def test_stream_sync_overlap_pass(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": "gemm_kernel",
+                "ts": 100,
+                "dur": 50,
+                "args": {"device": 0, "stream": 7},
+            },
+            {
+                "ph": "X",
+                "cat": "cuda_sync",
+                "name": "cudaStreamSynchronize",
+                "ts": 200,
+                "dur": 10,
+                "args": {"cuda_sync_kind": "Stream Sync", "device": 0, "stream": 7},
+            },
+        ]
+        self.assertEqual(_check_stream_sync_overlap(events), [])
+
+    def test_stream_sync_overlap_fail(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": "gemm_kernel",
+                "ts": 100,
+                "dur": 200,
+                "args": {"device": 0, "stream": 7},
+            },
+            {
+                "ph": "X",
+                "cat": "cuda_sync",
+                "name": "cudaStreamSynchronize",
+                "ts": 150,
+                "dur": 10,
+                "args": {"cuda_sync_kind": "Stream Sync", "device": 0, "stream": 7},
+            },
+        ]
+        v = _check_stream_sync_overlap(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_stream_sync_overlap")
+        self.assertIn("still running", v[0].message)
+
+    # --- _check_stream_wait_corr_id_in_past ---
+
+    def test_stream_wait_corr_id_in_past_pass(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "cuda_runtime",
+                "name": "cudaEventRecord",
+                "ts": 100,
+                "dur": 1,
+                "args": {"External id": 5},
+            },
+            {
+                "ph": "X",
+                "name": "cudaStreamWaitEvent",
+                "ts": 200,
+                "dur": 1,
+                "args": {
+                    "cuda_sync_kind": "Stream Wait Event",
+                    "wait_on_cuda_event_record_corr_id": 5,
+                },
+            },
+        ]
+        self.assertEqual(_check_stream_wait_corr_id_in_past(events), [])
+
+    def test_stream_wait_corr_id_in_past_fail(self):
+        events = [
+            {
+                "ph": "X",
+                "cat": "cuda_runtime",
+                "name": "cudaEventRecord",
+                "ts": 300,
+                "dur": 1,
+                "args": {"External id": 5},
+            },
+            {
+                "ph": "X",
+                "name": "cudaStreamWaitEvent",
+                "ts": 200,
+                "dur": 1,
+                "args": {
+                    "cuda_sync_kind": "Stream Wait Event",
+                    "wait_on_cuda_event_record_corr_id": 5,
+                },
+            },
+        ]
+        v = _check_stream_wait_corr_id_in_past(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_stream_wait_corr_id_in_past")
+        self.assertIn("in the future", v[0].message)
+
+    def test_stream_wait_corr_id_in_past_missing_record(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "cudaStreamWaitEvent",
+                "ts": 200,
+                "dur": 1,
+                "args": {
+                    "cuda_sync_kind": "Stream Wait Event",
+                    "wait_on_cuda_event_record_corr_id": 999,
+                },
+            },
+        ]
+        v = _check_stream_wait_corr_id_in_past(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_stream_wait_corr_id_in_past")
+        self.assertIn("no matching cudaEventRecord", v[0].message)
+
+    # --- _check_backward_seq_id_uniqueness ---
+
+    def test_backward_seq_id_uniqueness_pass(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "autograd::engine::evaluate_function: AddmmBackward0",
+                "ts": 100,
+                "dur": 10,
+                "args": {"Sequence number": 1},
+            },
+            {
+                "ph": "X",
+                "name": "autograd::engine::evaluate_function: AddmmBackward0",
+                "ts": 200,
+                "dur": 10,
+                "args": {"Sequence number": 1},
+            },
+        ]
+        self.assertEqual(_check_backward_seq_id_uniqueness(events), [])
+
+    def test_backward_seq_id_uniqueness_fail(self):
+        events = [
+            {
+                "ph": "X",
+                "name": "autograd::engine::evaluate_function: AddmmBackward0",
+                "ts": 100,
+                "dur": 10,
+                "args": {"Sequence number": 1},
+            },
+            {
+                "ph": "X",
+                "name": "autograd::engine::evaluate_function: MulBackward0",
+                "ts": 200,
+                "dur": 10,
+                "args": {"Sequence number": 1},
+            },
+        ]
+        v = _check_backward_seq_id_uniqueness(events)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0].rule_name, "_check_backward_seq_id_uniqueness")
+        self.assertIn("shared by", v[0].message)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+# ---------------------------------------------------------------------------
+# Accelerator-AGNOSTIC E2E tests (any accelerator)
+# ---------------------------------------------------------------------------
+
+
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
-@instantiate_parametrized_tests
-class TestTraceValidatorE2E(TestCase):
+class TestTraceValidatorE2EAgnostic(_TraceValidatorE2EMixin, TestCase):
+    """E2E tests for validation rules that are not tied to any specific accelerator.
+
+    Category: Accelerator-AGNOSTIC
+
+    These tests profile a real workload on whatever accelerator is available
+    and validate trace properties that are hardware-independent (autograd
+    sequence IDs). Any backend that can run a ResNet50 training loop will
+    exercise these tests.
+
+    Instantiated per device type via ``instantiate_device_type_tests``.
+    """
+
     _trace_dir: str = ""
     _payloads: dict = {}
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_")
+        device = torch.device(cls.device_type, 0)
+        activity = _activity_for_device_type(cls.device_type)
+        cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
+        cls._payloads = {
+            "training": _profile_training_payload(
+                os.path.join(cls._trace_dir, "training.json"),
+                device,
+                activity,
+            ),
+        }
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._trace_dir and os.path.isdir(cls._trace_dir):
+            shutil.rmtree(cls._trace_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    # TODO: unskip once kineto backward sequence ID emission is verified
+    @unittest.skip(
+        "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
+    )
+    def test_backward_seq_id_uniqueness(self, device):
+        v = _check_backward_seq_id_uniqueness(self._events("training"))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+
+instantiate_device_type_tests(
+    TestTraceValidatorE2EAgnostic, globals(), except_for=("cpu",)
+)
+
+
+# ---------------------------------------------------------------------------
+# Accelerator-SPECIFIC E2E tests (CUDA only)
+# ---------------------------------------------------------------------------
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA not available")
+@skipIfTorchDynamo("profiler tests do not work with dynamo")
+@instantiate_parametrized_tests
+class TestTraceValidatorE2ECUDA(_TraceValidatorE2EMixin, TestCase):
+    """E2E tests for CUDA-specific profiler trace validation.
+
+    Category: Accelerator-SPECIFIC (CUDA only)
+
+    These tests exercise validators that parse CUDA-specific trace events
+    (cuda_runtime, cuda_sync, cudaLaunchKernel, cudaEventRecord, NCCL).
+    They use CUDA-specific profiling payloads including multi-stream
+    and CUDA event synchronization.
+    """
+
+    _trace_dir: str = ""
+    _payloads: dict = {}
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_cuda_")
         cls._payloads = {
             "resnet": _profile_resnet_payload(
                 os.path.join(cls._trace_dir, "resnet.json")
@@ -203,16 +642,6 @@ class TestTraceValidatorE2E(TestCase):
         if cls._trace_dir and os.path.isdir(cls._trace_dir):
             shutil.rmtree(cls._trace_dir, ignore_errors=True)
         super().tearDownClass()
-
-    def _events(self, payload):
-        return self._payloads[payload]
-
-    @staticmethod
-    def _fmt(violations, limit=5):
-        lines = [f"  {v}" for v in violations[:limit]]
-        if len(violations) > limit:
-            lines.append(f"  ... and {len(violations) - limit} more")
-        return "\n".join(lines)
 
     # TODO: unskip once kineto fixes CPU/GPU timestamp synchronization
     @unittest.skip(
@@ -257,15 +686,6 @@ class TestTraceValidatorE2E(TestCase):
     @parametrize("payload", ["resnet", "complex"])
     def test_nccl_metadata(self, payload):
         v = _check_nccl_metadata(self._events(payload))
-        self.assertEqual(len(v), 0, self._fmt(v))
-
-    # TODO: unskip once kineto backward sequence ID emission is verified in integration testing
-    @unittest.skip(
-        "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
-    )
-    @parametrize("payload", ["resnet", "complex"])
-    def test_backward_seq_id_uniqueness(self, payload):
-        v = _check_backward_seq_id_uniqueness(self._events(payload))
         self.assertEqual(len(v), 0, self._fmt(v))
 
 
