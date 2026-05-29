@@ -890,6 +890,17 @@ align_random_eager = False
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
+# fallback batch_norm ops to eager (calls into the registered ATen kernel:
+# MIOpen on ROCm, cuDNN on CUDA, native otherwise). Without this, inductor
+# decomposes BN to var_mean+sub+mul+rsqrt and fuses with neighbors; the parallel
+# reduction order in the lowered Triton kernel differs from MIOpen's two-stage
+# (PartialMV -> FinalMV) reduction by ~1 fp32 ULP of mean/var, which when
+# re-quantized to bf16 produces ~1 bf16-ULP per-element output drift -- enough
+# to trip tight per-model accuracy bounds (e.g. maml_omniglot on MI350X gfx950
+# under autocast bf16). Enabling this disables BN fusion (perf cost) but makes
+# eager and compile bit-identical on the BN path. Disabled by default.
+fallback_batch_norm = False
+
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 assume_unaligned_fallback_output = (

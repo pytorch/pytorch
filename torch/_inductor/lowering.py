@@ -2632,6 +2632,11 @@ def make_fallback(
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        # if fallback_batch_norm, we allow not decomposing BN
+        and not (
+            config.fallback_batch_norm
+            and op in torch._inductor.decomposition.extra_batch_norm_decomps
+        )
         and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously

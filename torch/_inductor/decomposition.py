@@ -107,6 +107,23 @@ inductor_decompositions = get_decompositions(
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
+# BN decomps gated by config.fallback_batch_norm. When the flag is set we
+# remove these from the active decomp table so the op survives to inductor as
+# a single node and falls back to its registered ATen kernel (MIOpen on ROCm,
+# cuDNN on CUDA), giving bit-identical numerics to eager at the cost of fusion.
+_batch_norm_decomp_ops = [
+    aten._native_batch_norm_legit,
+    aten._native_batch_norm_legit_functional,
+    aten._native_batch_norm_legit_no_training,
+    aten._batch_norm_with_update,
+    aten._batch_norm_with_update_functional,
+    aten._batch_norm_no_update,
+    aten.batch_norm_backward,
+    aten.native_batch_norm,
+    aten.native_batch_norm_backward,
+]
+extra_batch_norm_decomps = get_decompositions(_batch_norm_decomp_ops)
+
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
 decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = [
@@ -970,12 +987,15 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
-        return decompositions
-    if config.fallback_embedding_bag_byte_unpack:
+        result = decompositions
+    elif config.fallback_embedding_bag_byte_unpack:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
-        return decompositions
-    result = fast_random_decomps()
+        result = decompositions
+    else:
+        result = fast_random_decomps()
+    if config.fallback_batch_norm:
+        result = {k: v for k, v in result.items() if k not in extra_batch_norm_decomps}
     return result
 
 
