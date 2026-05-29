@@ -888,8 +888,15 @@ delay_realize_cheap_outputs: bool = Config(
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
-# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
-align_random_eager = False
+# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel.
+# Enabled by default: makes inductor-lowered dropout produce bit-identical masks to eager
+# aten.native_dropout for the same (seed, offset). Without this, the element-to-Philox-counter
+# mapping in the lowered Triton kernel (flat element-index) differs from the eager CUDA kernel's
+# (subseq, lane, offblk) layout, so eager and compile produce different dropout masks despite
+# identical torch.manual_seed(). The aligned codegen lives in
+# torch/_inductor/runtime/triton_helpers.py:rand_eager_kernel and is fully fusion-compatible;
+# perf parity verified on distilgpt2 training/amp (MI350X gfx950).
+align_random_eager = True
 
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
