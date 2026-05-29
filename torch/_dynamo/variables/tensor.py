@@ -41,6 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
     has_free_symbols,
+    has_free_unbacked_symbols,
     is_symbolic,
     SymTypes,
 )
@@ -119,6 +120,305 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+
+_VALUE_ONLY_FUNCTIONS = {
+    operator.abs,
+    operator.add,
+    operator.floordiv,
+    operator.matmul,
+    operator.mod,
+    operator.mul,
+    operator.neg,
+    operator.pos,
+    operator.pow,
+    operator.sub,
+    operator.truediv,
+    torch.abs,
+    torch.add,
+    torch.div,
+    torch.matmul,
+    torch.mul,
+    torch.sub,
+    torch.true_divide,
+}
+
+_VALUE_ONLY_METHODS = {
+    "abs",
+    "add",
+    "div",
+    "float_power",
+    "floor_divide",
+    "matmul",
+    "mul",
+    "multiply",
+    "neg",
+    "positive",
+    "pow",
+    "sub",
+    "subtract",
+    "true_divide",
+}
+
+_ALIASING_METHODS = {
+    "detach",
+}
+
+_ALIASING_FUNCTION_NAMES = {
+    "_get_data_attr",
+}
+
+_MISSING = object()
+
+
+def _contains_fx_node(obj: Any, nodes: set[torch.fx.Node]) -> bool:
+    if isinstance(obj, torch.fx.Node):
+        return obj in nodes
+    if isinstance(obj, (tuple, list)):
+        return any(_contains_fx_node(x, nodes) for x in obj)
+    if isinstance(obj, dict):
+        return any(_contains_fx_node(x, nodes) for x in obj.values())
+    return False
+
+
+def _is_contiguous_fx_node(node: torch.fx.Node) -> bool:
+    return (node.op == "call_method" and node.target == "contiguous") or (
+        node.op == "call_function" and node.target == torch.ops.aten.contiguous.default
+    )
+
+
+def _schema_arg_value(node: torch.fx.Node, index: int, arg_schema: Any) -> Any:
+    if index < len(node.args):
+        return node.args[index]
+    return node.kwargs.get(arg_schema.name, _MISSING)
+
+
+def _call_function_mutates_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    if node.target is operator.setitem and node.args:
+        return _contains_fx_node(node.args[0], aliases)
+
+    if _contains_fx_node(node.kwargs.get("out"), aliases):
+        return True
+
+    first_tensor_arg = node.args[0] if node.args else _MISSING
+    if first_tensor_arg is _MISSING:
+        first_tensor_arg = node.kwargs.get("input", node.kwargs.get("self", _MISSING))
+
+    if (
+        (
+            getattr(node.target, "__name__", "").endswith("_")
+            or node.kwargs.get("inplace") is True
+        )
+        and first_tensor_arg is not _MISSING
+        and _contains_fx_node(first_tensor_arg, aliases)
+    ):
+        return True
+
+    schema = getattr(node.target, "_schema", None)
+    if schema is None:
+        return False
+
+    for i, arg_schema in enumerate(schema.arguments):
+        alias_info = arg_schema.alias_info
+        arg_value = _schema_arg_value(node, i, arg_schema)
+        if (
+            alias_info is not None
+            and alias_info.is_write
+            and arg_value is not _MISSING
+            and _contains_fx_node(arg_value, aliases)
+        ):
+            return True
+    return False
+
+
+def _call_function_returns_alias_of_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    schema = getattr(node.target, "_schema", None)
+    if schema is None:
+        return False
+
+    output_aliases: set[str] = set()
+    for ret_schema in schema.returns:
+        if ret_schema.alias_info is not None:
+            output_aliases.update(ret_schema.alias_info.before_set)
+    if not output_aliases:
+        return False
+
+    for i, arg_schema in enumerate(schema.arguments):
+        alias_info = arg_schema.alias_info
+        arg_value = _schema_arg_value(node, i, arg_schema)
+        if (
+            alias_info is not None
+            and alias_info.before_set & output_aliases
+            and arg_value is not _MISSING
+            and _contains_fx_node(arg_value, aliases)
+        ):
+            return True
+    return False
+
+
+def _node_example_value(node: torch.fx.Node) -> Any:
+    return node.meta.get("example_value", node.meta.get("val"))
+
+
+def _example_value_aliases(value: Any, aliases: set[torch.fx.Node]) -> bool:
+    alias_value_ids: set[int] = set()
+
+    def add_tensor_and_bases(t: torch.Tensor) -> None:
+        seen: set[int] = set()
+        while isinstance(t, torch.Tensor):
+            tensor_id = id(t)
+            if tensor_id in seen:
+                return
+            seen.add(tensor_id)
+            alias_value_ids.add(tensor_id)
+            base = getattr(t, "_base", None)
+            if base is None:
+                return
+            t = base
+
+    for alias in aliases:
+        alias_value = _node_example_value(alias)
+        if isinstance(alias_value, torch.Tensor):
+            add_tensor_and_bases(alias_value)
+
+    def tensor_aliases(t: torch.Tensor) -> bool:
+        seen: set[int] = set()
+        while isinstance(t, torch.Tensor):
+            tensor_id = id(t)
+            if tensor_id in alias_value_ids:
+                return True
+            if tensor_id in seen:
+                return False
+            seen.add(tensor_id)
+            base = getattr(t, "_base", None)
+            if base is None:
+                return False
+            t = base
+        return False
+
+    if isinstance(value, torch.Tensor):
+        return tensor_aliases(value)
+    if isinstance(value, (tuple, list)):
+        return any(_example_value_aliases(x, aliases) for x in value)
+    if isinstance(value, dict):
+        return any(_example_value_aliases(x, aliases) for x in value.values())
+    return False
+
+
+def _node_output_aliases_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    if node.args and _contains_fx_node(node.args[0], aliases):
+        if node.op == "call_method" and node.target in _ALIASING_METHODS:
+            return True
+        if (
+            node.op == "call_function"
+            and getattr(node.target, "__name__", "") in _ALIASING_FUNCTION_NAMES
+        ):
+            return True
+    return (
+        node.op == "call_function"
+        and _call_function_returns_alias_of_alias_arg(node, aliases)
+    ) or _example_value_aliases(_node_example_value(node), aliases)
+
+
+def _call_function_is_proven_value_only(node: torch.fx.Node) -> bool:
+    if getattr(node.target, "_schema", None) is not None:
+        return True
+    return node.target in _VALUE_ONLY_FUNCTIONS
+
+
+def _call_method_is_proven_value_only(node: torch.fx.Node) -> bool:
+    return isinstance(node.target, str) and node.target in _VALUE_ONLY_METHODS
+
+
+def _contiguous_aliasing_is_observable(contiguous_node: torch.fx.Node) -> bool:
+    aliases: set[torch.fx.Node] = {contiguous_node}
+    base_node = contiguous_node.args[0] if contiguous_node.args else None
+    base_aliases: set[torch.fx.Node] = (
+        {base_node} if isinstance(base_node, torch.fx.Node) else set()
+    )
+    base_mutated = False
+    seen_contiguous = False
+
+    for node in contiguous_node.graph.nodes:
+        if node is contiguous_node:
+            seen_contiguous = True
+            base_mutated = False
+            continue
+
+        if node.op == "call_method":
+            self_arg = node.args[0] if node.args else None
+            if (
+                isinstance(self_arg, torch.fx.Node)
+                and self_arg in base_aliases
+                and _node_output_aliases_alias_arg(node, base_aliases)
+            ):
+                base_aliases.add(node)
+
+        if node.op == "call_function" and _node_output_aliases_alias_arg(
+            node, base_aliases
+        ):
+            base_aliases.add(node)
+
+        if not seen_contiguous:
+            continue
+
+        if node.op == "output":
+            return _contains_fx_node(node.args, aliases) or _contains_fx_node(
+                node.kwargs, aliases
+            )
+
+        consumes_contiguous_alias = _contains_fx_node(
+            node.args, aliases
+        ) or _contains_fx_node(node.kwargs, aliases)
+
+        if base_mutated and consumes_contiguous_alias:
+            return True
+
+        if node.op == "call_method":
+            self_arg = node.args[0] if node.args else None
+            if isinstance(self_arg, torch.fx.Node) and self_arg in aliases:
+                if isinstance(node.target, str) and node.target.endswith("_"):
+                    return True
+                if _node_output_aliases_alias_arg(node, aliases):
+                    aliases.add(node)
+                elif _call_method_is_proven_value_only(node):
+                    pass
+                else:
+                    return True
+            if (
+                isinstance(self_arg, torch.fx.Node)
+                and self_arg in base_aliases
+                and isinstance(node.target, str)
+                and node.target.endswith("_")
+            ):
+                if consumes_contiguous_alias:
+                    return True
+                base_mutated = True
+            continue
+
+        if node.op == "call_function":
+            if _call_function_mutates_alias_arg(node, aliases):
+                return True
+            if _call_function_mutates_alias_arg(node, base_aliases):
+                if consumes_contiguous_alias:
+                    return True
+                base_mutated = True
+            if not consumes_contiguous_alias:
+                continue
+            if _node_output_aliases_alias_arg(node, aliases):
+                aliases.add(node)
+                continue
+            if not _call_function_is_proven_value_only(node):
+                return True
+
+    return False
+
+
 supported_comparison_ops = {
     **supported_tensor_comparison_ops,
     **supported_const_comparison_ops,
@@ -299,6 +599,91 @@ class TensorVariable(VariableTracker):
             if has_tensor_arg:
                 self.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
+
+    def _has_marked_unbacked_dims(self) -> bool:
+        fake = self.proxy.node.meta.get("example_value")
+        for attr in ("_dynamo_unbacked_indices", "_dynamo_strict_unbacked_indices"):
+            if fake is not None and getattr(fake, attr, None):
+                return True
+        if fake is not None:
+            try:
+                if has_free_unbacked_symbols(fake.stride()):
+                    return True
+            except RuntimeError:
+                pass
+
+        if self.source is None:
+            return False
+
+        from .builder import is_unbacked_source
+
+        return any(is_unbacked_source(self.source.name, i) for i in range(self.ndim))
+
+    @staticmethod
+    def _contiguous_memory_format_arg(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> torch.memory_format | None:
+        memory_format_arg = kwargs.get("memory_format")
+        if memory_format_arg is None and args:
+            memory_format_arg = args[0]
+        if memory_format_arg is None:
+            return torch.contiguous_format
+        try:
+            return memory_format_arg.as_python_constant()
+        except NotImplementedError:
+            return None
+
+    def _install_unbacked_contiguous_alias_guard(
+        self,
+        tx: "InstructionTranslator",
+        contiguous_node: torch.fx.Node,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> None:
+        if self.source is None or not self._has_marked_unbacked_dims():
+            return
+
+        memory_format = self._contiguous_memory_format_arg(args, kwargs)
+        if memory_format is None:
+            return
+
+        source = self.source
+        output = tx.output
+
+        def install_contiguity_guard_if_aliasing_observable(
+            gm: torch.fx.GraphModule,
+        ) -> None:
+            if contiguous_node.graph is gm.graph and _contiguous_aliasing_is_observable(
+                contiguous_node
+            ):
+                output.guards.add(
+                    source.make_guard(
+                        functools.partial(
+                            GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                            memory_format=memory_format,
+                        )
+                    )
+                )
+                return
+
+            for node in gm.graph.nodes:
+                if (
+                    _is_contiguous_fx_node(node)
+                    and node.args == contiguous_node.args
+                    and _contiguous_aliasing_is_observable(node)
+                ):
+                    output.guards.add(
+                        source.make_guard(
+                            functools.partial(
+                                GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                                memory_format=memory_format,
+                            )
+                        )
+                    )
+                    return
+
+        tx.output.add_graph_finalizer(install_contiguity_guard_if_aliasing_observable)
 
     def debug_repr(self) -> str:
         return _tensor_debug_repr(
@@ -1004,6 +1389,9 @@ class TensorVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=e,
             )
+
+        if name == "contiguous":
+            self._install_unbacked_contiguous_alias_guard(tx, proxy.node, args, kwargs)
 
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the

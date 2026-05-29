@@ -4325,8 +4325,29 @@ def _automatic_dynamic(
     # Get base context if the tensor is a view
     view_base_context: SymbolicContext | None = None
     if e._is_view():
+        view_base = e._base
+        if view_base is None:
+            raise AssertionError("view tensor must have a base")
         base_source = AttrSource(source, "_base")
-        view_base_context = _automatic_dynamic(e._base, tx, base_source, static_shapes)
+        marked_unbacked = bool(getattr(e, "_dynamo_unbacked_indices", ())) or any(
+            is_unbacked_source(name, i) for i in range(e.dim())
+        )
+        if marked_unbacked:
+            # The fake base is only used to replay the view. Avoid binding
+            # guards to x._base so non-view tensors can reuse the graph.
+            view_base_context = StatefulSymbolicContext(
+                dynamic_sizes=[DimDynamic.STATIC] * view_base.dim(),
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * view_base.dim(),
+                constraint_sizes=[None] * view_base.dim(),
+                constraint_strides=[None] * view_base.dim(),
+                view_base_context=None,
+                tensor_source=base_source,
+                shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+            )
+        else:
+            view_base_context = _automatic_dynamic(
+                view_base, tx, base_source, static_shapes
+            )
 
     if is_traceable_wrapper_subclass(e) and not outer_only:
         # Get symbolic context for outer tensor
@@ -4463,6 +4484,11 @@ def _automatic_dynamic(
     constraint_sizes = []
     constraint_strides = []
     specialize_on = []
+    marked_unbacked_preserve_contiguous_strides = (
+        e.is_contiguous()
+        or e.is_contiguous(memory_format=torch.channels_last)
+        or e.is_contiguous(memory_format=torch.channels_last_3d)
+    )
 
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
@@ -4475,6 +4501,7 @@ def _automatic_dynamic(
             e, "_dynamo_weak_dynamic_indices", ()
         ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
         marked_static = i in getattr(e, "_dynamo_static_indices", ())
+        marked_unbacked_source = is_unbacked_source(name, i)
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
@@ -4518,7 +4545,7 @@ def _automatic_dynamic(
             log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
             automatic_dynamic_size = True
 
-        if is_unbacked_source(name, i):
+        if marked_unbacked_source:
             log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
             automatic_dynamic_size = True
 
@@ -4572,7 +4599,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked or is_unbacked_source(name, i):
+        if marked_unbacked or marked_unbacked_source:
             dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
@@ -4598,7 +4625,16 @@ def _automatic_dynamic(
                 )
             dynamic_size = DimDynamic.DUCK
 
-        if constraint_stride is not None:
+        if marked_unbacked or marked_unbacked_source:
+            if marked_unbacked_preserve_contiguous_strides:
+                # contiguous() aliases its input on contiguous layouts. If a
+                # later graph guard specializes on that branch, the fake tensor
+                # must preserve enough stride structure to trace the aliasing
+                # behavior instead of always taking the clone branch.
+                dynamic_stride = DimDynamic.INFER_STRIDE
+            else:
+                dynamic_stride = DimDynamic.UNBACKED
+        elif constraint_stride is not None:
             dynamic_stride = DimDynamic.DYNAMIC
         else:
             dynamic_stride = DimDynamic.INFER_STRIDE

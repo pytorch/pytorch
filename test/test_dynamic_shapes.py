@@ -3944,18 +3944,20 @@ class TestUbackedOps(TestCase):
         self.assertExpectedInline(
             aot_graphs,
             """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", arg3_1: "i64[u1][u2]cpu"):
         ge: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u2 >= 0)" = arg2_1 >= 0;  arg2_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
-        view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
-        view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_3 = None
+        view: "i64[u0, u0][u0*u2, u2]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][u0*u2, u2]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view_2: "i64[u0, u0][u0*u2, u2]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
         mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
@@ -3967,8 +3969,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         make_non_contiguous_tensor_and_test(49)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
-        # marking strides unbacked would have avoided the recompilation here.
+        # Pass in a contiguous tensor. The unbacked stride keeps this on the
+        # non-contiguous graph instead of specializing on stride 1.
         x = torch.arange(100)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
@@ -3979,28 +3981,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
             compiled_result = compiled_func(x, torch.tensor([10]))
             eager_result = func(x, torch.tensor([10]))
             self.assertEqual(compiled_result, eager_result)
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, 1)
 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
-        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
-        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
-        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
-        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
-        view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
-        clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
-        mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
-        return (mul_6, mul_9, clone)""",
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4008,7 +3994,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         x = torch.arange(25)
         compiled_result = compiled_func(x, torch.tensor([5]))
         eager_result = func(x, torch.tensor([5]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4044,30 +4030,34 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertExpectedInline(
             aot_graphs,
             """\
-def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
+def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "Sym(u4)", arg4_1: "Sym(u5)", arg5_1: "f32[u2, u3][u4, u5]cpu"):
         ge: "Sym(u2 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge = _assert_scalar = None
         ge_1: "Sym(u3 >= 0)" = arg2_1 >= 0
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        ge_2: "Sym(u4 >= 0)" = arg3_1 >= 0;  arg3_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u4 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
+        ge_3: "Sym(u5 >= 0)" = arg4_1 >= 0;  arg4_1 = None
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u5 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_3 = None
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
-        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
+        ge_4: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u0 >= 0 on node 'ge_4'");  ge_4 = _assert_scalar_4 = None
         sym_sum: "Sym(u0 + 1)" = torch.sym_sum((1, _local_scalar_dense))
         gt: "Sym(u0 + 1 > 0)" = sym_sum > 0;  sym_sum = None
-        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 0 < u0 + 1 on node 'gt'");  gt = _assert_scalar_3 = None
+        _assert_scalar_5 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 0 < u0 + 1 on node 'gt'");  gt = _assert_scalar_5 = None
         select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
-        ge_3: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
-        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_4 = None
+        ge_5: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_6 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u1 >= 0 on node 'ge_5'");  ge_5 = _assert_scalar_6 = None
         sym_sum_1: "Sym(u1 + 1)" = torch.sym_sum((1, _local_scalar_dense_1))
         gt_1: "Sym(u1 + 1 > 0)" = sym_sum_1 > 0;  sym_sum_1 = None
-        _assert_scalar_5 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 + 1 on node 'gt_1'");  gt_1 = _assert_scalar_5 = None
+        _assert_scalar_7 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 + 1 on node 'gt_1'");  gt_1 = _assert_scalar_7 = None
         mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
         mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
         eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
-        _assert_scalar_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_6 = None
-        clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
+        _assert_scalar_8 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_8 = None
+        clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg5_1, memory_format = torch.contiguous_format);  arg5_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
         mul_21: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         return (mul_21,)""",
@@ -4086,14 +4076,14 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass a contiguous tensor. A recompilation will happen due to 0/1 specialization on stride.
+        # Pass a contiguous tensor. The unbacked strides keep this on the
+        # non-contiguous graph instead of specializing on stride 1.
         log_stream, ctx = logs_to_string(
             "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
             # but not anymore since we use  contiguous_or_false .
-            # We need a way to mark strides unbacked to avoid the recompilation here.
             x = torch.randn(10, 10)
             torch._dynamo.decorators.mark_unbacked(x, 0)
             torch._dynamo.decorators.mark_unbacked(x, 1)
@@ -4110,14 +4100,14 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         result_eager = func(x, torch.tensor([2, 50]))
 
         self.assertEqual(result_compiled, result_eager)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
         x = torch.randn(4, 4)
 
         result_eager = func(x, torch.tensor([2, 8]))
         result_compiled = compiled_func(x, torch.tensor([2, 8]))
         self.assertEqual(result_compiled, result_eager)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4516,7 +4506,11 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg2_1, memory_format = torch.contiguous_format);  arg2_1 = None
+        ge_2: "Sym(u2 >= 0)" = arg2_1 >= 0;  arg2_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
+        ge_3: "Sym(u3 >= 0)" = arg3_1 >= 0;  arg3_1 = None
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_3 = None
+        clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg4_1, memory_format = torch.contiguous_format);  arg4_1 = None
         add_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
         mul_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_3, 100);  add_3 = None
         return (mul_6,)""",
@@ -4528,29 +4522,424 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             "torch._inductor.compile_fx", "post_grad_graphs"
         )
         with ctx():
-            # recompilation will happen due to stride specialization.
             y = torch.rand(20, 20)
             torch._dynamo.decorators.mark_unbacked(y, 0)
             torch._dynamo.decorators.mark_unbacked(y, 1)
             self.assertEqual(compiled_func(y), func(y))
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, 1)
 
         output = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
 
-        # No clone this time since input is contiguous.
         self.assertExpectedInline(
             output,
-            """\
-        ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
-        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
-        mul_5: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
-        return (mul_5,)""",
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_aliasing_mutation_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            y = x.contiguous()
+            y.add_(1)
+            return x
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(x, torch.zeros(3, 3).t())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        eager_y = torch.zeros(3, 3)
+        self.assertEqual(compiled_func(y), func(eager_y))
+        self.assertEqual(y, eager_y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_alias_after_input_mutation_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            y = x.contiguous()
+            x.add_(1)
+            return y + 1
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_func(y), func(torch.zeros(3, 3)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_alias_after_input_function_mutation_recompiles(self):
+        def relu_func(x):
+            y = x.contiguous()
+            torch.relu_(x)
+            return y + 1
+
+        def relu_kwarg_func(x):
+            y = x.contiguous()
+            torch.relu_(input=x)
+            return y + 1
+
+        def functional_relu_func(x):
+            y = x.contiguous()
+            torch.nn.functional.relu(x, inplace=True)
+            return y + 1
+
+        def functional_relu_kwarg_func(x):
+            y = x.contiguous()
+            torch.nn.functional.relu(input=x, inplace=True)
+            return y + 1
+
+        for name, func in (
+            ("relu_", relu_func),
+            ("relu_kwarg", relu_kwarg_func),
+            ("functional_relu_inplace", functional_relu_func),
+            ("functional_relu_inplace_kwarg", functional_relu_kwarg_func),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("inductor")
+                compiled_func = torch.compile(
+                    fullgraph=True, backend=cnt, dynamic=True
+                )(func)
+
+                x = -torch.ones(3, 3).t()
+                torch._dynamo.decorators.mark_unbacked(x, 0)
+                torch._dynamo.decorators.mark_unbacked(x, 1)
+                self.assertEqual(compiled_func(x), func(-torch.ones(3, 3).t()))
+                self.assertEqual(x, torch.zeros(3, 3).t())
+                self.assertEqual(cnt.frame_count, 1)
+
+                y = -torch.ones(3, 3)
+                torch._dynamo.decorators.mark_unbacked(y, 0)
+                torch._dynamo.decorators.mark_unbacked(y, 1)
+                eager_y = -torch.ones(3, 3)
+                self.assertEqual(compiled_func(y), func(eager_y))
+                self.assertEqual(y, eager_y)
+                self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_alias_after_input_alias_mutation_recompiles(self):
+        def aten_alias_func(x):
+            y = x.contiguous()
+            z = torch.ops.aten.alias.default(x)
+            z.add_(1)
+            return y + 1
+
+        def view_alias_func(x):
+            y = x.contiguous()
+            z = x.view_as(x)
+            z.add_(1)
+            return y + 1
+
+        def transpose_alias_func(x):
+            y = x.contiguous()
+            z = x.T
+            z.add_(1)
+            return y + 1
+
+        def detach_alias_func(x):
+            y = x.contiguous()
+            z = x.detach()
+            z.add_(1)
+            return y + 1
+
+        def data_alias_func(x):
+            y = x.contiguous()
+            z = x.data
+            z.add_(1)
+            return y + 1
+
+        for name, func in (
+            ("aten_alias", aten_alias_func),
+            ("view_alias", view_alias_func),
+            ("transpose_alias", transpose_alias_func),
+            ("detach_alias", detach_alias_func),
+            ("data_alias", data_alias_func),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("inductor")
+                compiled_func = torch.compile(
+                    fullgraph=True, backend=cnt, dynamic=True
+                )(func)
+
+                x = torch.zeros(3, 3).t()
+                torch._dynamo.decorators.mark_unbacked(x, 0)
+                torch._dynamo.decorators.mark_unbacked(x, 1)
+                self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+                self.assertEqual(x, torch.ones(3, 3).t())
+                self.assertEqual(cnt.frame_count, 1)
+
+                y = torch.zeros(3, 3)
+                torch._dynamo.decorators.mark_unbacked(y, 0)
+                torch._dynamo.decorators.mark_unbacked(y, 1)
+                eager_y = torch.zeros(3, 3)
+                self.assertEqual(compiled_func(y), func(eager_y))
+                self.assertEqual(y, eager_y)
+                self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_value_only_method_no_recompile(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            return x.contiguous().add(1)
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_func(y), func(torch.zeros(3, 3)))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_return_alias_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            return x.contiguous()
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        compiled_x = compiled_func(x)
+        self.assertEqual(compiled_x, func(torch.zeros(3, 3).t()))
+        self.assertNotEqual(compiled_x.data_ptr(), x.data_ptr())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        compiled_y = compiled_func(y)
+        self.assertEqual(compiled_y, func(torch.zeros(3, 3)))
+        self.assertEqual(compiled_y.data_ptr(), y.data_ptr())
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_storage_alias_return_recompiles(self):
+        def detach_func(x):
+            return x.contiguous().detach()
+
+        def data_func(x):
+            return x.contiguous().data
+
+        for name, func in (("detach", detach_func), ("data", data_func)):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("inductor")
+                compiled_func = torch.compile(
+                    fullgraph=True, backend=cnt, dynamic=True
+                )(func)
+
+                x = torch.zeros(3, 3).t()
+                torch._dynamo.decorators.mark_unbacked(x, 0)
+                torch._dynamo.decorators.mark_unbacked(x, 1)
+                compiled_x = compiled_func(x)
+                self.assertEqual(compiled_x, func(torch.zeros(3, 3).t()))
+                self.assertNotEqual(compiled_x.data_ptr(), x.data_ptr())
+                self.assertEqual(cnt.frame_count, 1)
+
+                y = torch.zeros(3, 3)
+                torch._dynamo.decorators.mark_unbacked(y, 0)
+                torch._dynamo.decorators.mark_unbacked(y, 1)
+                compiled_y = compiled_func(y)
+                self.assertEqual(compiled_y, func(torch.zeros(3, 3)))
+                self.assertEqual(compiled_y.data_ptr(), y.data_ptr())
+                self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_aten_contiguous_aliasing_mutation_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            y = torch.ops.aten.contiguous.default(x)
+            y.add_(1)
+            return x
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(x, torch.zeros(3, 3).t())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        eager_y = torch.zeros(3, 3)
+        self.assertEqual(compiled_func(y), func(eager_y))
+        self.assertEqual(y, eager_y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_aten_contiguous_return_alias_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            return torch.ops.aten.contiguous.default(x)
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        compiled_x = compiled_func(x)
+        self.assertEqual(compiled_x, func(torch.zeros(3, 3).t()))
+        self.assertNotEqual(compiled_x.data_ptr(), x.data_ptr())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        compiled_y = compiled_func(y)
+        self.assertEqual(compiled_y, func(torch.zeros(3, 3)))
+        self.assertEqual(compiled_y.data_ptr(), y.data_ptr())
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_out_kwarg_mutation_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            y = x.contiguous()
+            torch.add(y, 1, out=y)
+            return x
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(x, torch.zeros(3, 3).t())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        eager_y = torch.zeros(3, 3)
+        self.assertEqual(compiled_func(y), func(eager_y))
+        self.assertEqual(y, eager_y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_setitem_mutation_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            y = x.contiguous()
+            y[0, 0] = 1
+            return x
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_func(x), func(torch.zeros(3, 3).t()))
+        self.assertEqual(x, torch.zeros(3, 3).t())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        eager_y = torch.zeros(3, 3)
+        self.assertEqual(compiled_func(y), func(eager_y))
+        self.assertEqual(y, eager_y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_transpose_property_return_alias_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            return x.contiguous().T
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        compiled_x = compiled_func(x)
+        self.assertEqual(compiled_x, func(torch.zeros(3, 3).t()))
+        self.assertNotEqual(compiled_x.data_ptr(), x.data_ptr())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        compiled_y = compiled_func(y)
+        self.assertEqual(compiled_y, func(torch.zeros(3, 3)))
+        self.assertEqual(compiled_y.data_ptr(), y.data_ptr())
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @fresh_cache()
+    def test_unbacked_contiguous_real_property_return_alias_recompiles(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x):
+            return x.contiguous().real
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.zeros(3, 3).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        compiled_x = compiled_func(x)
+        self.assertEqual(compiled_x, func(torch.zeros(3, 3).t()))
+        self.assertNotEqual(compiled_x.data_ptr(), x.data_ptr())
+        self.assertEqual(cnt.frame_count, 1)
+
+        y = torch.zeros(3, 3)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        compiled_y = compiled_func(y)
+        self.assertEqual(compiled_y, func(torch.zeros(3, 3)))
+        self.assertEqual(compiled_y.data_ptr(), y.data_ptr())
+        self.assertEqual(cnt.frame_count, 2)
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4726,15 +5115,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertExpectedInline(
             aot_graphs,
             """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", arg3_1: "i64[u1][u2]cpu"):
         ge: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u2 >= 0)" = arg2_1 >= 0;  arg2_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_3 = None
         _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         return (_reshape_copy,)""",
             ignore_comments=True,
@@ -4744,8 +5135,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         make_non_contiguous_tensor_and_test(49)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
-        # marking strides unbacked would have avoided the recompilation here.
+        # Pass in a contiguous tensor. The unbacked stride keeps this on the
+        # non-contiguous graph instead of specializing on stride 1.
         x = torch.arange(100)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
@@ -4756,23 +5147,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
             compiled_result = compiled_func(x, torch.tensor([10]))
             eager_result = func(x, torch.tensor([10]))
             self.assertEqual(compiled_result, eager_result)
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, 1)
 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
-        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
-        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
-        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
-        return (_reshape_copy,)""",
+            """""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4780,7 +5160,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         x = torch.arange(25)
         compiled_result = compiled_func(x, torch.tensor([5]))
         eager_result = func(x, torch.tensor([5]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_item(self):
