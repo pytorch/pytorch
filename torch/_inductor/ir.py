@@ -9867,6 +9867,8 @@ class StorageBox(MutableBox):
         return False
 
     def mark_reuse(self, users: int) -> None:
+        if getattr(V.graph, "suppress_buffer_realization_heuristics", False):
+            return
         if self.should_realize_on_reuse(users):
             self.realize()
 

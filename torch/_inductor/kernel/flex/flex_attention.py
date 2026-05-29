@@ -17,7 +17,8 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv, Mod
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ... import config
+from ...ir import ComputedBuffer, ExternKernel, FixedLayout, Scatter, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
     autotune_select_algorithm,
@@ -581,6 +582,22 @@ class JointOutputResult:
     mutated_grads: list[TensorBox]
 
 
+def validate_captured_grad_scatter_unrolling(grads_compute: list[ComputedBuffer]):
+    for buf in grads_compute:
+        if not isinstance(buf.data, Scatter) or not buf.data.get_size():
+            continue
+        scatter_ranges = V.graph.sizevars.guard_int_seq(buf.data.get_size())
+        scatter_numel = math.prod(scatter_ranges)
+        if scatter_numel >= config.unroll_reductions_threshold:
+            raise NotImplementedError(
+                "Captured score_mod gradient slices with "
+                f"{scatter_numel} elements are not supported. "
+                "Only slices smaller than "
+                f"config.unroll_reductions_threshold="
+                f"{config.unroll_reductions_threshold} can be unrolled."
+            )
+
+
 def process_joint_outputs(
     all_joint_outputs: SubgraphResults, num_placeholders: int
 ) -> JointOutputResult:
@@ -604,6 +621,7 @@ def process_joint_outputs(
     # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
     # We only grab the buffers that require grad for inlining into kernel
     grads_compute = [buf for buf in other_grads if buf is not None]
+    validate_captured_grad_scatter_unrolling(grads_compute)
 
     def get_out(buf):
         if buf is None:
