@@ -1,6 +1,7 @@
 self-hosted-runner:
   labels:
     # GitHub hosted runner that actionlint doesn't recognize because actionlint version (1.6.21) is too old
+    - linux.rocm.gpu.mi210
     - ubuntu-24.04
     # GitHub hosted x86 Linux runners
     - linux.24_04.4x
