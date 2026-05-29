@@ -2219,6 +2219,9 @@ class GraphLowering(torch.fx.Interpreter):
     def create_deferred_runtime_asserts(
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
+        """
+        Register wrapper-level runtime asserts after their symbolic inputs are bound.
+        """
         if config.do_not_emit_runtime_assertions:
             return
         # [NOTE] Codegen runtime asserts in Inductor
@@ -2257,14 +2260,19 @@ class GraphLowering(torch.fx.Interpreter):
             self.register_buffer(assert_op, set_name=True)
             self.register_operation(assert_op)
 
-        if (
-            full_aoti_runtime_assert()
-            and n.target is torch.ops.aten._assert_scalar.default
-            and self.aot_mode
-        ):
+        codegen_input_assert = False
+        assert_expr: Any = None
+        if n.target is torch.ops.aten._assert_scalar.default:
             node_args, _ = self.fetch_args_kwargs_from_env(n)
-            if node_args[0] != True:  # noqa: E712
-                make_assert(node_args[0], f"{node_args[0]} to be True")
+            assert_expr = node_args[0]
+            codegen_input_assert = (full_aoti_runtime_assert() and self.aot_mode) or (
+                has_free_symbols(assert_expr)
+                and not bool(free_unbacked_symbols(assert_expr))
+            )
+
+        if codegen_input_assert:
+            if assert_expr != True:  # noqa: E712
+                make_assert(assert_expr, f"{assert_expr} to be True")
         else:
             # bound_unbacked_symbols tracks the symbols that are created so far,
             # we use it to make sure that runtime assertions are added after all

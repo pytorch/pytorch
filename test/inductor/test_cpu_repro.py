@@ -143,6 +143,20 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
+    def test_prefer_deferred_runtime_asserts_backed_symint_compile(self):
+        def fn(x):
+            y = x.reshape(100, -1).clone()
+            return y + 10
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        x = torch.rand(100, 100)
+        self.assertEqual(compiled(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to be True"):
+            compiled(torch.rand(101, 101))
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
