@@ -4394,15 +4394,21 @@ class TestMPS(TestCaseMPS):
     # Each (shape, dim) routes to a distinct scan kernel; see the dispatch in
     # aten/src/ATen/native/mps/operations/ScanKernel.mm.
     #   (4, 70000)    dim 1: contiguous decoupled look-back (float) / 3-pass multiblock (int)
-    #   (8, 70000, 2) dim 1: vectorized decoupled look-back (float) / strided multiblock (int)
-    #   (8, 70000, 5) dim 1: per-column decoupled look-back (float) / strided multiblock (int)
+    #   (8, 70000, 2) dim 1: strided decoupled look-back VEC=2 (float, macOS15+) / 2-pass vec multi-block (int)
+    #   (8, 70000, 4) dim 1: strided decoupled look-back VEC=4 (float, macOS15+) / 2-pass vec multi-block (int)
+    #   (8, 70000, 16) dim 1: strided decoupled look-back VEC=16 (float, macOS15+) / 3-pass strided multi-block (int)
+    #   (8, 70000, 5) dim 1: small-stride 2-pass vectorized multi-block (float) / 3-pass strided multi-block (int)
+    #   (8, 70000, 6) dim 1: vec width 6 (float, narrow-vec) / 3-pass strided multi-block (int)
+    #   (8, 70000, 12) dim 1: tight strided tile BN=12 (float) / BN=16 (int)
     #   (8, 70000, 1) dim 1: trailing dims size 1, n_irows==1 -> reshaped contiguous scan
     #   (8192, 16)    dim 1: tiny-innermost segmented scan
     #   (32, 100)     dim 1: fallback scan_innermost_dim
     #   (100, 64)     dim 0: fallback scan_outer_dim
     @parametrize("op_name", ["cumsum", "cumprod"])
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64])
-    @parametrize("shape,dim", [((4, 70000), 1), ((8, 70000, 2), 1), ((8, 70000, 5), 1),
+    @parametrize("shape,dim", [((4, 70000), 1), ((8, 70000, 2), 1), ((8, 70000, 4), 1),
+                               ((8, 70000, 16), 1), ((8, 70000, 5), 1),
+                               ((8, 70000, 6), 1), ((8, 70000, 12), 1),
                                ((8, 70000, 1), 1), ((8192, 16), 1), ((32, 100), 1), ((100, 64), 0)])
     def test_cumulative_scan_kernels(self, op_name, dtype, shape, dim):
         self._check_cumulative_op(op_name, shape, dim, dtype)
