@@ -693,14 +693,12 @@ def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
 
 
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
-    import traceback
-
     exc.innermost_user_frame_summary = None  # type: ignore[attr-defined]
 
     real_stack = get_real_stack(exc)
     if real_stack is not None and len(real_stack) > 0:
         exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
+        msg += f"\nfrom user code:\n {format_user_stack(real_stack)}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += (
@@ -741,6 +739,43 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         exc.args = (new_msg,) + exc.args[1:]
 
 
+def _format_frame_summary(frame: FrameSummary) -> str:
+    colno = getattr(frame, "colno", None)
+    end_colno = getattr(frame, "end_colno", None)
+    end_lineno = getattr(frame, "end_lineno", None)
+    if end_lineno is None:
+        end_lineno = frame.lineno
+
+    if (
+        frame.lineno is not None
+        and colno is not None
+        and end_colno is not None
+        and (end_lineno != frame.lineno or end_colno > colno)
+    ):
+        from .utils import format_source_range
+
+        source_range = format_source_range(
+            frame.filename,
+            frame.lineno,
+            end_lineno,
+            colno,
+            end_colno,
+            function_name=frame.name,
+        )
+        if source_range:
+            header = (
+                f'  File "{frame.filename}", line {frame.lineno}, in {frame.name}\n'
+            )
+            source_range = textwrap.dedent(source_range).rstrip("\n")
+            return header + textwrap.indent(source_range, "    ") + "\n"
+
+    return "".join(format_list([frame]))
+
+
+def format_user_stack(stack: StackSummary | list[FrameSummary]) -> str:
+    return "".join(_format_frame_summary(frame) for frame in stack)
+
+
 def get_exc_message(
     e: Exception, compile_id: CompileId
 ) -> tuple[str | None, int | None]:
@@ -765,15 +800,21 @@ def _extract_stack_with_positions() -> StackSummary:
         code = frame.f_code
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
+        lineno = frame.f_lineno
         if sys.version_info >= (3, 11) and frame.f_lasti >= 0:
             positions = list(code.co_positions())
             idx = frame.f_lasti // 2
             if idx < len(positions):
-                _, _, kwargs["colno"], kwargs["end_colno"] = positions[idx]
+                start_lineno, end_lineno, colno, end_colno = positions[idx]
+                if start_lineno is not None:
+                    lineno = start_lineno
+                kwargs["end_lineno"] = end_lineno
+                kwargs["colno"] = colno
+                kwargs["end_colno"] = end_colno
         stack.append(
             FrameSummary(
                 code.co_filename,
-                frame.f_lineno,
+                lineno,
                 code.co_name,
                 lookup_line=False,
                 **kwargs,
@@ -901,7 +942,7 @@ def format_error_msg_verbose(
             + "=" * 10
             + "\n\n"
         )
-        msg += "".join(format_list(real_stack))
+        msg += format_user_stack(real_stack)
         msg += "\n"
         msg += "=" * 10
 
