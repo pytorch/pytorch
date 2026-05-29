@@ -2818,12 +2818,27 @@ DEFINE_DISPATCH(linalg_eigh_stub);
 */
 
 TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
-                                  std::string_view uplo,
-                                  bool compute_v,
-                                  const Tensor& L,
-                                  const Tensor& V) {
+                                 std::string_view uplo,
+                                 bool compute_v,
+                                 const Tensor& L,
+                                 const Tensor& V) {
   if (A.numel() == 0) {
     return;
+  }
+
+  const auto n = A.size(-1);
+  // LAPACK's syevd uses int internally for workspace and dimension parameters.
+  // For large matrices (e.g., 53000 x 53000), the workspace computation
+  // 1 + 6*n + 2*n*n overflows INT32_MAX, causing a cryptic MKL error:
+  // "Intel MKL ERROR: Parameter 8 was incorrect on entry to SSYEVD".
+  // Emit a clear error message instead.
+  // See https://github.com/pytorch/pytorch/issues/92141
+  if (n * n > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+    TORCH_CHECK(false, "linalg.eigh: The matrix of size ", n,
+        " is too large for the LAPACK backend. "
+        "The workspace size for the eigenvalue decomposition would overflow "
+        "a 32-bit integer, which causes a cryptic internal error. "
+        "Consider using a smaller matrix.");
   }
 
   auto uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
