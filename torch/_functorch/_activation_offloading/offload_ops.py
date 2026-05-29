@@ -23,6 +23,12 @@ storage must outlive the async transfer but is not otherwise connected by a
 data-flow edge in the graph.
 """
 
+import ctypes
+import ctypes.util
+import functools
+import os
+import platform
+
 import torch
 from torch._library.custom_ops import custom_op
 from torch.fx import has_side_effect
@@ -30,6 +36,164 @@ from torch.fx import has_side_effect
 
 # --- Global transfer stream (one per device, lazily created) ---
 _transfer_streams: dict[torch.device, torch.Stream] = {}
+
+
+# --- NUMA-aware pinned memory allocation ---
+#
+# On systems with NVLink-C2C (e.g. GB200), allocating pinned CPU memory on the
+# NUMA node closest to the GPU is critical for bandwidth: ~350 GB/s NUMA-local
+# vs ~120 GB/s cross-NUMA.
+#
+# We use the set_mempolicy syscall with MPOL_BIND to strictly bind allocations
+# to the GPU's NUMA node during pinned memory allocation. MPOL_PREFERRED is too
+# weak - the kernel can still allocate on a remote node when the thread is
+# running on a different NUMA node's CPUs.
+
+_MPOL_DEFAULT = 0
+_MPOL_BIND = 2
+_SYS_SET_MEMPOLICY: int | None = None
+_SYS_GET_MEMPOLICY: int | None = None
+_libc: ctypes.CDLL | None = None
+
+
+def _init_mempolicy() -> bool:
+    """Initialize syscall numbers and libc for set/get_mempolicy. Linux-only."""
+    global _SYS_SET_MEMPOLICY, _SYS_GET_MEMPOLICY, _libc
+    if _libc is not None:
+        return _SYS_SET_MEMPOLICY is not None
+    try:
+        lib = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    except OSError:
+        _libc = False  # type: ignore[assignment]
+        return False
+    _libc = lib
+    machine = platform.machine()
+    if machine == "x86_64":
+        _SYS_SET_MEMPOLICY = 238
+        _SYS_GET_MEMPOLICY = 239
+    elif machine == "aarch64":
+        _SYS_SET_MEMPOLICY = 237
+        _SYS_GET_MEMPOLICY = 236
+    else:
+        return False
+    return True
+
+
+@functools.cache
+def _gpu_numa_node(device_index: int) -> int | None:
+    """Map a CUDA device index to its closest CPU NUMA node via sysfs.
+
+    Uses torch.cuda.get_device_properties() for the PCI address, matching
+    the approach in torch/numa/binding.py.
+    """
+    try:
+        props = torch.cuda.get_device_properties(device_index)
+        domain = props.pci_domain_id  # type: ignore[attr-defined]
+        bus = props.pci_bus_id  # type: ignore[attr-defined]
+        device = props.pci_device_id  # type: ignore[attr-defined]
+        pci_addr = f"{domain:04x}:{bus:02x}:{device:02x}.0"
+        numa_path = f"/sys/bus/pci/devices/{pci_addr}/numa_node"
+        if os.path.exists(numa_path):
+            with open(numa_path) as f:
+                node = int(f.read().strip())
+                return node if node >= 0 else None
+    except Exception:
+        pass
+    return None
+
+
+_BITS_PER_ULONG = ctypes.sizeof(ctypes.c_ulong) * 8
+
+
+def _nodemask_for(node: int) -> tuple[ctypes.Array[ctypes.c_ulong], int]:
+    """Build a nodemask with a single bit set for the given NUMA node.
+
+    Returns (nodemask_array, maxnode) sized to hold at least node+1 bits.
+    """
+    n_ulongs = node // _BITS_PER_ULONG + 1
+    maxnode = n_ulongs * _BITS_PER_ULONG
+    mask = (ctypes.c_ulong * n_ulongs)()
+    mask[node // _BITS_PER_ULONG] = 1 << (node % _BITS_PER_ULONG)
+    return mask, maxnode
+
+
+# Nodemask large enough for get_mempolicy to return any node the kernel knows.
+_GET_POLICY_MAXNODE = 1024
+_GET_POLICY_N_ULONGS = _GET_POLICY_MAXNODE // _BITS_PER_ULONG
+
+
+def _get_mempolicy() -> tuple[int, ctypes.Array[ctypes.c_ulong], int] | None:
+    """Capture the thread's current NUMA memory policy via get_mempolicy.
+
+    Returns (mode, nodemask, maxnode) or None on failure.
+    """
+    if _libc is None or not _libc or _SYS_GET_MEMPOLICY is None:
+        return None
+    mode = ctypes.c_int(0)
+    nodemask = (ctypes.c_ulong * _GET_POLICY_N_ULONGS)()
+    ret = _libc.syscall(
+        ctypes.c_long(_SYS_GET_MEMPOLICY),
+        ctypes.byref(mode),
+        ctypes.cast(nodemask, ctypes.POINTER(ctypes.c_ulong)),
+        ctypes.c_ulong(_GET_POLICY_MAXNODE),
+        ctypes.c_void_p(0),
+        ctypes.c_ulong(0),
+    )
+    if ret != 0:
+        return None
+    return (mode.value, nodemask, _GET_POLICY_MAXNODE)
+
+
+def _set_mempolicy(
+    mode: int, nodemask: ctypes.Array[ctypes.c_ulong] | None, maxnode: int = 0
+) -> bool:
+    """Set the thread's NUMA memory policy via set_mempolicy."""
+    if _libc is None or not _libc or _SYS_SET_MEMPOLICY is None:
+        return False
+    if mode == _MPOL_DEFAULT or nodemask is None:
+        ret = _libc.syscall(
+            ctypes.c_long(_SYS_SET_MEMPOLICY),
+            ctypes.c_int(_MPOL_DEFAULT),
+            ctypes.c_void_p(0),
+            ctypes.c_ulong(0),
+        )
+    else:
+        ret = _libc.syscall(
+            ctypes.c_long(_SYS_SET_MEMPOLICY),
+            ctypes.c_int(mode),
+            ctypes.cast(nodemask, ctypes.POINTER(ctypes.c_ulong)),
+            ctypes.c_ulong(maxnode),
+        )
+    return ret == 0
+
+
+def _pinned_empty_like_numa(tensor: torch.Tensor) -> torch.Tensor:
+    """Allocate a pinned CPU tensor on the NUMA node closest to tensor's GPU.
+
+    Saves and restores the thread's current memory policy around the
+    allocation so that any existing NUMA binding (e.g. from torchrun or
+    c10 NUMA APIs) is preserved.
+    """
+    if not _init_mempolicy():
+        return torch.empty_like(tensor, device="cpu", pin_memory=True)
+
+    numa_node = _gpu_numa_node(tensor.device.index or 0)
+    if numa_node is None:
+        return torch.empty_like(tensor, device="cpu", pin_memory=True)
+
+    saved = _get_mempolicy()
+
+    nodemask, maxnode = _nodemask_for(numa_node)
+    bound = _set_mempolicy(_MPOL_BIND, nodemask, maxnode)
+    try:
+        result = torch.empty_like(tensor, device="cpu", pin_memory=True)
+    finally:
+        if bound:
+            if saved is not None:
+                _set_mempolicy(saved[0], saved[1], saved[2])
+            else:
+                _set_mempolicy(_MPOL_DEFAULT, None)
+    return result
 
 
 def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
@@ -85,7 +249,7 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
     transfer_stream.wait_stream(current_stream)
 
     torch.accelerator.set_stream(transfer_stream)
-    result = torch.empty_like(tensor, device="cpu", pin_memory=True)
+    result = _pinned_empty_like_numa(tensor)
     completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
