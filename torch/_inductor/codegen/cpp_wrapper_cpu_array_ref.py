@@ -250,7 +250,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 code.splice(
                     f"""
                     thread_local ThreadLocalCachedOutputArray<std::decay_t<decltype({output})>>
-                        {cached_output_name}({output});
+                        {cached_output_name}{{{output}}};
                     {cached_output_name}.copy_data_from({output});
                     using {output_arrayref_type} = std::tuple_element_t<{idx}, AOTInductorModelOutputs>;
                     using {output_element_type} = typename {output_arrayref_type}::value_type;
@@ -600,7 +600,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             cache_type = "Array" if arr_iface else "Tensor"
             self.wrapper_call.writeline(
                 f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
-                f"{cached_output_name}({output});"
+                f"{cached_output_name}{{{output}}};"
             )
             if arr_iface:
                 self.wrapper_call.writeline(
