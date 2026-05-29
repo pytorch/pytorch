@@ -42,7 +42,7 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv
+from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -1408,7 +1408,15 @@ class TritonTemplateKernel(TritonKernel):
                         symbol = range_tree.symbol()
                         epilogue_index_symbols.append(symbol)
                         lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
+                        old_name = lookup_output.symbol()
                         lookup_output.set_name(name)
+                        # Update var_list and var_range
+                        range_tree.var_list[range_tree.var_list.index(old_name)] = (
+                            symbol
+                        )
+                        range_val = range_tree.var_ranges[old_name]
+                        del range_tree.var_ranges[old_name]
+                        range_tree.var_ranges[symbol] = range_val
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
@@ -3639,7 +3647,7 @@ def _classify_kernel_operation(
                 elif template_name.startswith("flex_"):
                     return "flex"
 
-            elif isinstance(choice, ExternKernelChoice):
+            elif isinstance(choice, ExternKernelCaller):
                 # Check extern kernel names
                 choice_name = choice.name
                 if choice_name in (
@@ -3763,7 +3771,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
         assert len(choices) >= 2
         externs = [
-            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+            choice for choice in choices if isinstance(choice, ExternKernelCaller)
         ]
         if len(externs) > 0:
             return externs[0]
@@ -4582,24 +4590,56 @@ class AlgorithmSelectorCache(PersistentCache):
             )(x)
             for i, x in enumerate(input_nodes)
         }
+
+        def addmm_unique_example_inputs_extern():
+            additional_example_inputs = {}
+            for input_node, extern_node in zip(input_nodes, extern_input_nodes):
+                extern_name = extern_node.get_name()
+                if extern_name in unique_example_inputs:
+                    continue
+
+                # Aten addmm benchmarks the original 1D bias while Triton
+                # benchmarks the expanded 2D input; keep both backed by the
+                # same values by making all rows identical.
+                global_tensor = unique_example_inputs[input_node.get_name()]
+                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+
+            return {
+                **unique_example_inputs,
+                **additional_example_inputs,
+            }
+
+        extern_choice = next(
+            (choice for choice in choices if cls._is_extern(choice)),
+            None,
+        )
+        extern_input_nodes = input_nodes
+        unique_example_inputs_extern = unique_example_inputs
+
+        if extern_choice is not None:
+            assert len(extern_choice.input_nodes) == len(input_nodes)
+            extern_input_nodes = extern_choice.input_nodes
+
+            if extern_choice.name == "addmm":
+                unique_example_inputs_extern = addmm_unique_example_inputs_extern()
+
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-
-        for i, input_node in enumerate(input_nodes):
-            if unique_example_inputs[input_node.get_name()].is_mkldnn:
-                example_inputs_extern.append(
-                    unique_example_inputs[input_node.get_name()]
-                )
+        for i, input_node in enumerate(extern_input_nodes):
+            input_tensor = unique_example_inputs_extern[input_node.get_name()]
+            if input_tensor.is_mkldnn:
+                example_inputs_extern.append(input_tensor)
             else:
-                base = unique_example_inputs[input_node.get_name()]
-                base = base if base._base is None else base._base
+                base = (
+                    input_tensor if input_tensor._base is None else input_tensor._base
+                )
 
                 if i in input_gen_fns:
                     # Use tensor's actual shape from input_gen_fn
-                    generated_tensor = unique_example_inputs[input_node.get_name()]
-                    sizes = tuple(generated_tensor.size())
-                    strides = tuple(generated_tensor.stride())
-                    storage_offset = generated_tensor.storage_offset()
+                    sizes = tuple(input_tensor.size())
+                    strides = tuple(input_tensor.stride())
+                    storage_offset = input_tensor.storage_offset()
                 else:
                     # Use IR node's shape resolved via size hints
                     sizes = V.graph.sizevars.optimization_hints_with_override(
@@ -4620,8 +4660,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 needed_size = torch._prims_common.compute_required_storage_length(
                     sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.untyped_storage().size()
-
+                current_size = base.untyped_storage().size() // base.element_size()
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
                     if base.dtype == torch.float4_e2m1fn_x2:
@@ -5483,7 +5522,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
 
         V.debug.log_autotuning_results(
-            name, input_nodes, timings, elapse, precompile_elapse
+            name, input_nodes, timings, elapse, precompile_elapse, prescreening_elapse
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
@@ -5775,8 +5814,8 @@ class SymbolicGridFn:
         params = inspect.signature(fn).parameters
         for name, fn_sym, fn_int in [
             ("cdiv", CeilDiv, ceildiv),
-            ("min", sympy.Min, min),
-            ("max", sympy.Max, max),
+            ("min", Min, min),
+            ("max", Max, max),
         ]:
             if name in params:
                 self.kwargs_int[name] = fn_int
