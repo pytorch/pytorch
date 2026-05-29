@@ -11655,7 +11655,9 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
-        aot_autograd_failures | symbolic_aot_autograd_failures | aot_autograd_disable_functionalization_failures,
+        aot_autograd_failures
+        | symbolic_aot_autograd_failures
+        | aot_autograd_disable_functionalization_failures,
     )
     def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
         self, device, dtype, op
