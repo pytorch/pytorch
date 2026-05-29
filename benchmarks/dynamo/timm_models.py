@@ -287,7 +287,27 @@ class TimmRunner(BenchmarkRunner):
             # elide when fusing across mixed-precision boundaries (e.g.
             # bf16 conv-bias-add fused into an fp32 cat-prep store), which
             # is what eager autocast actually does.
-            torch._inductor.config.emulate_precision_casts = True
+            #
+            # Restoration: the harness has no per-model teardown hook, so we
+            # capture the original value once and restore at process exit via
+            # atexit. This keeps process state clean across repeated harness
+            # invocations / debugger sessions. Within a single process running
+            # multiple models, the flag carries across iterations (same
+            # convention as scaled_compute_loss above) - benign for CI which
+            # uses --only <model> per process.
+            inductor_config = torch._inductor.config
+            if not hasattr(self, "_orig_emulate_precision_casts"):
+                import atexit
+
+                self._orig_emulate_precision_casts = (
+                    inductor_config.emulate_precision_casts
+                )
+                atexit.register(
+                    lambda v=self._orig_emulate_precision_casts: setattr(
+                        inductor_config, "emulate_precision_casts", v
+                    )
+                )
+            inductor_config.emulate_precision_casts = True
 
         if is_training and not use_eval_mode:
             model.train()
