@@ -1509,6 +1509,34 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
+class skipIfExceptPRIVATEUSE1:
+    """
+    Applies skipIf to all device types except the registered
+    PrivateUse1 backend.
+
+    This is useful when a skip condition is based on built-in backend
+    capability checks that do not account for out-of-tree
+    PrivateUse1 backends.
+    """
+
+    def __init__(self, dep, reason):
+        self.dep = dep
+        self.reason = reason
+        self.privateuse1_device_type = torch._C._get_privateuse1_backend_name()
+
+    def __call__(self, fn):
+        skipped_fn = skipIf(self.dep, self.reason)(fn)
+
+        @wraps(fn)
+        def wrapper(slf, *args, **kwargs):
+            if slf.device_type == self.privateuse1_device_type:
+                return fn(slf, *args, **kwargs)
+
+            return skipped_fn(slf, *args, **kwargs)
+
+        return wrapper
+
+
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
