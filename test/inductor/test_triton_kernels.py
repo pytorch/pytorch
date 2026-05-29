@@ -189,6 +189,60 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
+    @requires_cuda_and_triton
+    @inductor_config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.channel_resident_reduction_suffix": True,
+            "triton.multi_kernel": False,
+            "triton.use_block_ptr": False,
+        }
+    )
+    def test_channel_resident_reduction_suffix_store_elision(self):
+        n, c, h, w = 64, 32, 7, 7
+
+        def f(mask2d, mm, x, mean, invstd, gamma, beta):
+            scale = mask2d.to(torch.float32) * 1.25
+            expanded = (mm * scale).view(n, c, 1, 1).expand(n, c, h, w)
+            div = expanded / (h * w)
+            norm = (x - mean) * invstd
+            relu6_in = norm * gamma[None, :, None, None]
+            relu6_in = relu6_in + beta[None, :, None, None]
+            full = torch.where(
+                (relu6_in <= 0.0) | (relu6_in >= 6.0),
+                torch.full((), 0.0, device=x.device),
+                div,
+            )
+            centered = x - mean
+            sum0 = full.sum(dim=(0, 2, 3))
+            sum1 = (full * centered).sum(dim=(0, 2, 3))
+            invstd_1d = invstd.squeeze()
+            scale0 = (sum0 * (1.0 / (n * h * w)))[None, :, None, None]
+            scale1 = (sum1 * (1.0 / (n * h * w)) * invstd_1d.square())[
+                None, :, None, None
+            ]
+            out_scale = (invstd_1d * gamma)[None, :, None, None]
+            out = (full - centered * scale1 - scale0) * out_scale
+            return out, sum1 * invstd_1d
+
+        args = (
+            torch.randint(0, 2, (n, c), device=GPU_TYPE, dtype=torch.bool),
+            torch.randn(n, c, device=GPU_TYPE),
+            torch.randn(n, c, h, w, device=GPU_TYPE),
+            torch.randn(1, c, 1, 1, device=GPU_TYPE),
+            torch.randn(1, c, 1, 1, device=GPU_TYPE),
+            torch.randn(c, device=GPU_TYPE),
+            torch.randn(c, device=GPU_TYPE),
+        )
+        expected = f(*args)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), *args)
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertIn("'channel_resident_reduction_suffix': True", code)
+        self.assertEqual(code.count("tl.load(in_out_ptr"), 0)
+        self.assertEqual(code.count("tl.store(in_out_ptr"), 1)
+        self.assertEqual(code.count("tl.store("), 2)
+
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
         if inductor_config.cpp_wrapper:
