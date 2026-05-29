@@ -5224,9 +5224,13 @@ class InstructionTranslatorBase(
             CO_ITERABLE_COROUTINE,
         )
 
-        if f_code.co_flags & (
-            CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
-        ):
+        # This isn't really the right place to push None.  But since we treat RETURN_GENERATOR as a no-op for
+        # non-generator frames, there needs to be something on the stack since the first instruction will be POP_TOP,
+        # which would error out with an empty stack
+        push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        if sys.version_info < (3, 11):
+            push_types |= CO_GENERATOR
+        if f_code.co_flags & (push_types):
             self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
@@ -6195,7 +6199,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager
@@ -6210,6 +6213,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
+
+    def RETURN_GENERATOR(self, inst: Instruction) -> None:
+        self.symbolic_result = self.funcvar
+        raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
         self.generator_exhausted = True
