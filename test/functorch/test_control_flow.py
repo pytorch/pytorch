@@ -647,13 +647,19 @@ def forward(self, pred_1, x_1):
 def forward(self, pred_1, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _tensor_constant0, _tensor_constant1));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (x_1, ones_like));  pred_1 = true_graph_1 = false_graph_1 = x_1 = ones_like = None
-    getitem_1 = cond_1[0];  cond_1 = None
+    _tensor_constant0_1 = self._tensor_constant0
+    _tensor_constant1_1 = self._tensor_constant1
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (x_1, _tensor_constant0_1, _tensor_constant1_1, ones_like));  pred_1 = true_graph_1 = false_graph_1 = x_1 = _tensor_constant0_1 = _tensor_constant1_1 = ones_like = None
+    getitem_1 = cond_1[0]
+    getitem_2 = cond_1[1];  getitem_2 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1,)""",
         )
 
@@ -1658,7 +1664,7 @@ def forward(self, pred_1, x_1):
             self.assertEqual(foo(idx, inp), inp + closure_val)
 
         # Closed-over tensors must be lifted as extra inputs in the traced
-        # graph. This exercises _merge_switch_graph_inputs, which unions
+        # graph. This exercises _merge_graph_inputs, which unions
         # free variables across all branches into a shared placeholder
         # signature.
         gm = make_fx(foo)(torch.tensor([0]), inp)
@@ -6055,7 +6061,7 @@ def forward(self, l_inp_x_):
         # When different branches close over different tensors, dynamo must
         # union the free variables across branches so every branch graph
         # shares the same placeholder signature and the HOP receives the
-        # full union as operands. This pins down _merge_switch_graph_inputs.
+        # full union as operands. This pins down _merge_graph_inputs.
         a = torch.ones(2, 3)
         b = torch.ones(2, 3) + 1
         c = torch.ones(2, 3) * 2
@@ -6091,7 +6097,7 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_clos
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents, l_inp_x_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = l_inp_x_ = None
+    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6101,28 +6107,25 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_clos
         self.assertExpectedInline(
             gm.switch_branch0_0.code.strip(),
             """\
-def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents, l_inp_x_):
-    l_branch0_closure_0_cell_contents_1 = l_branch0_closure_0_cell_contents
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
-    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_1;  l_inp_x__1 = l_branch0_closure_0_cell_contents_1 = None
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
     return (add,)""",
         )
         self.assertExpectedInline(
             gm.switch_branch1_0.code.strip(),
             """\
-def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents, l_inp_x_):
-    l_branch1_closure_0_cell_contents_1 = l_branch1_closure_0_cell_contents
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
-    add = l_inp_x__1 + l_branch1_closure_0_cell_contents_1;  l_inp_x__1 = l_branch1_closure_0_cell_contents_1 = None
+    add = l_inp_x__1 + l_branch1_closure_0_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_0_cell_contents_branch1 = None
     return (add,)""",
         )
         self.assertExpectedInline(
             gm.switch_branch2_0.code.strip(),
             """\
-def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents, l_inp_x_):
-    l_branch2_closure_0_cell_contents_1 = l_branch2_closure_0_cell_contents
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
-    add = l_inp_x__1 + l_branch2_closure_0_cell_contents_1;  l_inp_x__1 = l_branch2_closure_0_cell_contents_1 = None
+    add = l_inp_x__1 + l_branch2_closure_0_cell_contents_branch2;  l_inp_x__1 = l_branch2_closure_0_cell_contents_branch2 = None
     return (add,)""",
         )
 
@@ -6271,21 +6274,17 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_para
         self.assertExpectedInline(
             gm.switch_branch0_0.code.strip(),
             """\
-def forward(self, l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_):
+def forward(self, l_inp_x_, l_linear0_parameters_bias__branch0, l_linear0_parameters_weight__branch0, l_linear1_parameters_bias__branch1, l_linear1_parameters_weight__branch1):
     l_inp_x__1 = l_inp_x_
-    l_linear0_parameters_bias__1 = l_linear0_parameters_bias_
-    l_linear0_parameters_weight__1 = l_linear0_parameters_weight_
-    linear = torch._C._nn.linear(l_inp_x__1, l_linear0_parameters_weight__1, l_linear0_parameters_bias__1);  l_inp_x__1 = l_linear0_parameters_weight__1 = l_linear0_parameters_bias__1 = None
+    linear = torch._C._nn.linear(l_inp_x__1, l_linear0_parameters_weight__branch0, l_linear0_parameters_bias__branch0);  l_inp_x__1 = l_linear0_parameters_weight__branch0 = l_linear0_parameters_bias__branch0 = None
     return (linear,)""",
         )
         self.assertExpectedInline(
             gm.switch_branch1_0.code.strip(),
             """\
-def forward(self, l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_):
+def forward(self, l_inp_x_, l_linear0_parameters_bias__branch0, l_linear0_parameters_weight__branch0, l_linear1_parameters_bias__branch1, l_linear1_parameters_weight__branch1):
     l_inp_x__1 = l_inp_x_
-    l_linear1_parameters_bias__1 = l_linear1_parameters_bias_
-    l_linear1_parameters_weight__1 = l_linear1_parameters_weight_
-    linear = torch._C._nn.linear(l_inp_x__1, l_linear1_parameters_weight__1, l_linear1_parameters_bias__1);  l_inp_x__1 = l_linear1_parameters_weight__1 = l_linear1_parameters_bias__1 = None
+    linear = torch._C._nn.linear(l_inp_x__1, l_linear1_parameters_weight__branch1, l_linear1_parameters_bias__branch1);  l_inp_x__1 = l_linear1_parameters_weight__branch1 = l_linear1_parameters_bias__branch1 = None
     return (linear,)""",
         )
 
