@@ -361,6 +361,32 @@ class TestOptimizeIndexing(TestCase):
         output_node = next(n for n in subgraph.nodes if n.op == "output")
         self.assertEqual(output_node.args[0].target, "value_expr")
 
+    def test_index_expr_masked_mask_value_use(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        mul = graph.call_method("mul", (ops, index_expr, 2147483648))
+        mask = graph.call_method("gt", (ops, mul, 0))
+        masked = graph.call_method("masked", (ops, mask, "body", 0))
+        graph.output(masked)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 2**40),
+                mul: ValueRanges(0, 2**40),
+                mask: ValueRanges(False, True),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(index_expr.target, "value_expr")
+
     def test_mixed_value_op_clones_value_path(self):
         graph = Graph()
         ops = graph.placeholder("ops")

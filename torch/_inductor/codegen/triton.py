@@ -1283,17 +1283,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
-            def maybe_cast_arg(arg) -> str:
-                if (
-                    func.__name__ == "sqrt"
-                    and (arg_dtype := triton_arg_dtype(arg)) is not None
-                    and (arg_dtype == torch.bool or is_integer_dtype(arg_dtype))
-                ):
-                    return TritonOverrides._cast_libdevice_arg(arg, torch.float32)
-                return maybe_upcast_arg(arg)
-
-            upcast_args = [maybe_cast_arg(arg) for arg in args]
-            upcast_kwargs = {key: maybe_cast_arg(val) for key, val in kwargs.items()}
+            upcast_args = [maybe_upcast_arg(arg) for arg in args]
+            upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
@@ -2528,10 +2519,13 @@ class TritonKernelOverrides(TritonOverrides):
                 result_dtype = operand_dtype
             else:
                 result_dtype = torch.float32
-        elif dtype.is_floating_point and expr.is_integer:
+        elif dtype.is_floating_point:
             expr_requires_int64 = _integer_expr_requires_int64(expr)
-            operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
-            result_dtype = operand_dtype
+            if expr.is_integer:
+                operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
+                result_dtype = operand_dtype
+            elif expr_requires_int64:
+                operand_dtype = torch.int64
 
         index_str = cls._value_expr_index_str(indexing, operand_dtype)
         var = cls._emit_expr_indexing(
@@ -2605,7 +2599,7 @@ class TritonKernelOverrides(TritonOverrides):
             if symbol_is_type(sym, scalar_int_types):
                 name = V.kernel.index_to_str(sym)
                 shape = ()
-                src_dtype = torch.int64
+                src_dtype = V.kernel.get_index_dtype_as_torch_dtype()
             elif symbol_is_type(sym, TritonSymbols.block_types):
                 name = sym.name
                 shape = TritonSymbols.get_block_shape(sym)

@@ -3416,6 +3416,19 @@ class CommonTemplate:
         fn_opt = torch.compile(fn, backend="inductor")
         self.assertEqual(fn_opt(mask), fn(mask))
 
+    @skipCPUIf(True, "requires CUDA/Triton")
+    @requires_cuda_and_triton
+    def test_arange_int64_computed_masked_mask(self):
+        def fn(x):
+            idx = torch.arange(0, 4, device=x.device, dtype=torch.int64)
+            mask = idx * 2147483648 > 0
+            values = idx * 3
+            return torch.ops.aten._unsafe_masked_index.default(values, mask, [idx], 0)
+
+        x = torch.empty(4, device=self.device)
+        fn_opt = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn_opt(x), fn(x))
+
     @xfail_if_triton_cpu
     def test_arange9(self):
         # int64 arange used inside a reduction: reduction must accumulate
@@ -18026,6 +18039,10 @@ if RUN_GPU:
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [torch.empty(4, device=GPU_TYPE)]
             self.assertEqual(fn_opt(*inps).float(), fn(*inps).float())
+            code = run_and_get_triton_code(fn_opt, *inps)
+            FileCheck().check_regex(
+                r"tmp\d+ = tmp\d+\.to\(tl\.float32\)\.to\(tl\.float8e4nv\)"
+            ).run(code)
 
         def test_value_expr_dynamic_shape_bounds(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
@@ -18052,6 +18069,22 @@ if RUN_GPU:
 
             code = run_and_get_triton_code(fn_opt, x, 2)
             self.assertFalse(".to(tl.int1)" in code)
+
+        def test_value_expr_float_integer_subexpr_computes_before_cast(self):
+            def fn(x: torch.Tensor, i: int) -> torch.Tensor:
+                return torch.full(
+                    (4,),
+                    ((i + 1099511627776) % 2048) + 0.5,
+                    device=x.device,
+                    dtype=torch.float32,
+                )
+
+            fn_opt = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+            x = torch.empty(1, device=GPU_TYPE)
+            self.assertEqual(fn_opt(x, 3), fn(x, 3))
+
+            code = run_and_get_triton_code(fn_opt, x, 3)
+            self.assertFalse("(ks0).to(tl.float32)" in code)
 
         def test_searchsorted_boundary_index_no_int64_cast(self):
             def fn(boundaries: torch.Tensor, values: torch.Tensor) -> torch.Tensor:

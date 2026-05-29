@@ -372,7 +372,7 @@ class _IndexValueOpsHandler:
 
     def masked(self, mask: Any, body: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
-            indexing_sinks=(mask,),
+            value_sinks=(mask,),
             value_inputs=(other,),
         )
 
@@ -427,7 +427,7 @@ class _IndexValueOpsHandler:
 
     def masked_subblock(self, mask: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
-            indexing_sinks=(mask,),
+            value_sinks=(mask,),
             value_inputs=(other,),
         )
 
