@@ -58,32 +58,7 @@
         mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)
         mask_mod_packed[0] = cutlass.Uint32(0)
         {% for interval in MASK_MOD_PACKED_INTERVALS %}
-        interval_lower_{{ loop.index0 }} = {{ interval.lower }}
-        interval_upper_{{ loop.index0 }} = {{ interval.upper }}
-        below_{{ loop.index0 }} = utils.shr_u32(
-            cutlass.Uint32(0xFFFFFFFF),
-            cutlass.Uint32(
-                min(
-                    max(
-                        cutlass.Int32(32) - interval_upper_{{ loop.index0 }},
-                        cutlass.Int32(0),
-                    ),
-                    cutlass.Int32(32),
-                )
-            ),
-        )
-        above_{{ loop.index0 }} = utils.shl_u32(
-            cutlass.Uint32(0xFFFFFFFF),
-            cutlass.Uint32(
-                min(
-                    max(interval_lower_{{ loop.index0 }}, cutlass.Int32(0)),
-                    cutlass.Int32(32),
-                )
-            ),
-        )
-        mask_mod_packed[0] = mask_mod_packed[0] | (
-            below_{{ loop.index0 }} & above_{{ loop.index0 }}
-        )
+        mask_mod_packed[0] = mask_mod_packed[0] | {{ interval.keep_mask_expr() }}
         {% endfor %}
         return mask_mod_packed.load()
         {% else %}
