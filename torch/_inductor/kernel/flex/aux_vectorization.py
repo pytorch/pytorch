@@ -21,7 +21,14 @@ from ...virtualized import V
 DEFAULT_MASK_MOD_VEC_SIZE = 32
 
 
-class AuxLoadKind(Enum):
+class LoadKind(Enum):
+    """How a captured aux tensor load behaves across vectorized KV lanes.
+
+    GATHER: Cannot use a direct vector load.
+    LANE_UNIFORM: The same value is used for every KV lane.
+    CONTIGUOUS: Consecutive KV lanes map to contiguous storage.
+    """
+
     GATHER = auto()
     LANE_UNIFORM = auto()
     CONTIGUOUS = auto()
@@ -29,30 +36,51 @@ class AuxLoadKind(Enum):
 
 @dataclasses.dataclass(frozen=True)
 class AuxLoadVecInfo:
-    kind: AuxLoadKind
+    """Vectorization classification for one captured aux tensor load.
+
+    kind: Load classification.
+    vec_size: Direct vector width for contiguous loads; None otherwise.
+    """
+
+    kind: LoadKind
     vec_size: int | None = None
 
     def __post_init__(self) -> None:
-        if self.kind is AuxLoadKind.CONTIGUOUS:
+        """Validate that only contiguous loads carry a vector width."""
+        if self.kind is LoadKind.CONTIGUOUS:
             assert self.vec_size is not None
         else:
             assert self.vec_size is None
 
     @classmethod
     def gather(cls) -> "AuxLoadVecInfo":
-        return cls(AuxLoadKind.GATHER)
+        """Create a gather-load classification."""
+        return cls(LoadKind.GATHER)
 
     @classmethod
     def lane_uniform(cls) -> "AuxLoadVecInfo":
-        return cls(AuxLoadKind.LANE_UNIFORM)
+        """Create a lane-uniform-load classification."""
+        return cls(LoadKind.LANE_UNIFORM)
 
     @classmethod
     def contiguous(cls, vec_size: int) -> "AuxLoadVecInfo":
-        return cls(AuxLoadKind.CONTIGUOUS, vec_size)
+        """Create a contiguous direct-vector-load classification."""
+        return cls(LoadKind.CONTIGUOUS, vec_size)
 
 
 @dataclasses.dataclass(frozen=True)
 class AuxVecPolicy:
+    """ABI-specific rules for selecting an aux tensor vector width.
+
+    q_idx_placeholder: Placeholder index for the query lane.
+    kv_idx_placeholder: Placeholder index for the vectorized KV lane.
+    max_vec_size: Largest direct captured-tensor load width to consider.
+    min_index_rank_for_contiguous_load: Minimum indexed rank for direct loads.
+    allow_gather_loads: Whether non-vectorizable loads may stay scalar/gathered.
+    require_contiguous_load: Whether at least one direct contiguous load is needed.
+    non_lane_placeholder_start: First non-lane placeholder participating in indices.
+    """
+
     q_idx_placeholder: int
     kv_idx_placeholder: int
     max_vec_size: int
@@ -80,6 +108,8 @@ SCORE_MOD_AUX_VEC_POLICY = AuxVecPolicy(
 
 @dataclasses.dataclass(frozen=True)
 class AuxIndexedTensor:
+    """Captured tensor plus any safe partial indices already accumulated."""
+
     buffer: TensorBox
     indices: tuple[object, ...]
 
@@ -89,6 +119,7 @@ def make_fx_index_symbols(
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node] = (),
 ) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
+    """Build symbolic replacements for lane and non-lane FX index nodes."""
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
     kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
     index_symbols = {
@@ -130,7 +161,12 @@ def select_score_mod_vec_size(
     graph_module: GraphModule | None,
     other_buffers: Sequence[TensorBox],
 ) -> int | None:
-    """Use score_mod's (score, b, h, q, kv) ABI; vec8 is the SM100 CuTe kernel cap."""
+    """Select score_mod vector width for captured aux loads.
+
+    Wider score_mod.__vec_size__ values remain legal when score_mod has no
+    captured tensors. For captured tensors, direct vector loads are capped to
+    the SM100 CuTe score_mod aux-load path's supported width of 8.
+    """
     if not has_score_mod or not has_aux_tensors:
         return None
     if not is_sm100_or_later:
@@ -147,7 +183,14 @@ def select_aux_mod_vec_size(
     other_buffers: Sequence[TensorBox],
     policy: AuxVecPolicy,
 ) -> int:
-    """Choose a safe vector width for captured tensor loads."""
+    """Choose a safe vector width for captured tensor loads.
+
+    The analysis follows aten.index chains from captured tensor placeholders,
+    accumulates partial indices that do not depend on the vectorized KV lane,
+    classifies complete loads, and picks the narrowest required contiguous
+    width. Unsupported indexing falls back to scalar unless the policy allows
+    gather loads to coexist with vectorizable loads.
+    """
     if graph_module is None:
         return 1
 
@@ -178,12 +221,14 @@ def select_aux_mod_vec_size(
             continue
         indexed_tensor = aux_indexed_tensors[buffer_node]
         if not isinstance(indices, (list, tuple)) or not indices:
+            # Unknown index shape is a gather-like load; only mask_mod allows it.
             if policy.allow_gather_loads:
                 continue
             return 1
         full_indices = indexed_tensor.indices + tuple(indices)
         rank = len(indexed_tensor.buffer.get_size())
         if len(full_indices) < rank:
+            # Chained indexing is safe to track only until the KV lane is used.
             if is_safe_partial_aux_index(
                 full_indices,
                 placeholders[policy.q_idx_placeholder],
@@ -197,6 +242,7 @@ def select_aux_mod_vec_size(
                 return 1
             continue
         if len(full_indices) > rank:
+            # Over-indexed tensors cannot be proven to load contiguous KV lanes.
             if policy.allow_gather_loads:
                 continue
             return 1
@@ -210,12 +256,13 @@ def select_aux_mod_vec_size(
             min_index_rank_for_contiguous_load=policy.min_index_rank_for_contiguous_load,
         )
         match aux_load_vec_info.kind:
-            case AuxLoadKind.LANE_UNIFORM:
+            case LoadKind.LANE_UNIFORM:
                 found_vectorizable_load = True
-            case AuxLoadKind.GATHER:
+            case LoadKind.GATHER:
+                # Gather loads are allowed only when another load proves the vec width.
                 if not policy.allow_gather_loads:
                     return 1
-            case AuxLoadKind.CONTIGUOUS:
+            case LoadKind.CONTIGUOUS:
                 contiguous_vec_size = aux_load_vec_info.vec_size
                 assert contiguous_vec_size is not None
                 selected_vec_size = min(selected_vec_size, contiguous_vec_size)
@@ -233,6 +280,7 @@ def is_safe_partial_aux_index(
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node],
 ) -> bool:
+    """Return whether partial indices can be chained before the KV-lane index."""
     _, kv_idx, index_symbols = make_fx_index_symbols(
         q_idx_node, kv_idx_node, non_lane_index_nodes
     )
@@ -252,7 +300,13 @@ def direct_aux_load_vec_size_and_kind(
     max_vec_size: int = 8,
     min_index_rank_for_contiguous_load: int = 1,
 ) -> AuxLoadVecInfo:
-    """Return vector-load information for a captured aux load."""
+    """Return vector-load information for a captured aux load.
+
+    The load is lane-uniform if none of its indices depend on KV. Otherwise,
+    only the final indexed dimension may depend on KV, the storage for that
+    dimension must be contiguous and vector-aligned, and the lane expression
+    must enumerate consecutive values for the chosen vector width.
+    """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo.gather()
     assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
@@ -304,6 +358,7 @@ def fx_aux_index_to_sympy(
     index: object,
     index_symbols: Mapping[torch.fx.Node, sympy.Expr],
 ) -> sympy.Expr | None:
+    """Translate the supported FX integer index operations to sympy."""
     if isinstance(index, int | sympy.Integer):
         return sympy.Integer(index)
     if not isinstance(index, torch.fx.Node):
