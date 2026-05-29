@@ -38,6 +38,7 @@
 #include <ATen/ops/_foreach_log2_native.h>
 #include <ATen/ops/_foreach_log_native.h>
 #include <ATen/ops/_foreach_max_native.h>
+#include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_maximum_native.h>
 #include <ATen/ops/_foreach_minimum_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
@@ -64,6 +65,7 @@
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
+#include <ATen/ops/mm.h>
 #include <ATen/ops/pow.h>
 #endif
 
@@ -553,6 +555,21 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   result.reserve(exponent.size());
   for (const auto& t : exponent) {
     result.emplace_back(at::pow(self, t));
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_mm_list_kernel_slow(
+    TensorList self,
+    TensorList mat2) {
+  TORCH_CHECK(self.size() > 0, "_foreach_mm requires non-empty tensor lists");
+  TORCH_CHECK(
+      self.size() == mat2.size(),
+      "_foreach_mm: self and mat2 must have the same number of tensors");
+  std::vector<Tensor> result;
+  result.reserve(self.size());
+  for (const auto i : c10::irange(self.size())) {
+    result.emplace_back(at::mm(self[i], mat2[i]));
   }
   return result;
 }
