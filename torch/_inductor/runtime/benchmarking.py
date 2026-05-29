@@ -388,11 +388,11 @@ def _get_callable_device_kernel_time_us(
     for event in benchmark_events:
         collect_cpu_event_ids(event)
 
-    # On some backends (e.g. XPU), an op may re-dispatch internally (e.g.
-    # aten::sum with no dim calls aten::sum with dim), producing a kineto CPU
-    # event whose corr ID the device kernel links to but which is absent from
-    # the profiler event tree.  Include kineto corr IDs of all CPU events
-    # within the _CALLABLE time window to cover these hidden dispatches.
+    # An op may re-dispatch internally (e.g. aten::sum with no dim calls
+    # aten::sum with dim), producing a kineto CPU event whose corr ID the
+    # device kernel links to but which is absent from the profiler event tree.
+    # Include kineto corr IDs of all CPU events within the _CALLABLE time
+    # window to cover these hidden dispatches.
     callable_kineto_windows: list[tuple[int, int]] = []
     for ev in kineto_events:
         if (
