@@ -2227,6 +2227,22 @@ class TestNamedTuple(JitTestCase):
         self.assertEqual(type(out).__name__, "T")
         self.assertTrue(repr(out).startswith("T("))
 
+    def test_namedtuple_factory_string_field_names(self):
+        def fn(x: Tensor, y: Tensor):
+            T = namedtuple("T", "x y")
+            out = T(x, y)
+            return out.x + out.y
+
+        self.checkScript(fn, (torch.ones(2), torch.ones(2) * 2))
+
+    def test_namedtuple_factory_rejects_kwargs(self):
+        def fn(x: Tensor):
+            T = namedtuple("T", ["x"], rename=False)
+            return T(x)
+
+        with self.assertRaisesRegex(RuntimeError, "keyword arguments.*rename"):
+            torch.jit.script(fn)
+
     def test_collections_namedtuple_factory_in_module(self):
         class M(nn.Module):
             def forward(self, x: Tensor):

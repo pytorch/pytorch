@@ -1104,7 +1104,7 @@ std::optional<std::vector<std::string>> constantStringTuple(Value* value) {
   return fields;
 }
 
-uint64_t stableHash(const std::string& data) {
+uint64_t fnv1a64(const std::string& data) {
   uint64_t hash = 14695981039346656037ULL;
   for (unsigned char c : data) {
     hash ^= c;
@@ -1128,7 +1128,7 @@ std::string localNamedTupleQualifiedName(
       << field_names_key;
 
   std::stringstream hash_atom;
-  hash_atom << "h" << std::hex << stableHash(key.str());
+  hash_atom << "h" << std::hex << fnv1a64(key.str());
   return c10::QualifiedName(
              c10::QualifiedName(
                  c10::QualifiedName("__torch__.__jit_local_namedtuple"),
@@ -1144,11 +1144,17 @@ struct NamedTupleFactoryValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t /*n_binders*/) override {
-    if (!kwargs.empty() || args.size() != 2) {
+    if (args.size() != 2) {
       throw(
           ErrorReport(loc)
           << "collections.namedtuple is only supported in TorchScript with "
-          << "constant typename and field_names arguments");
+          << "exactly two positional arguments: typename and field_names");
+    }
+    if (!kwargs.empty()) {
+      throw(
+          ErrorReport(loc)
+          << "collections.namedtuple keyword arguments such as rename, "
+          << "defaults, and module are not supported in TorchScript");
     }
 
     auto graph = m.graph();
