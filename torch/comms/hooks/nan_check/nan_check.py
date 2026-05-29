@@ -8,6 +8,7 @@ NanCheckHook for detecting NaN values in tensors before collective operations.
 Catches numerical instability early before it propagates across ranks.
 
 Example:
+    >>> # xdoctest: +SKIP("requires a CUDA device and a configured communicator")
     >>> from torch.comms.hooks import NanCheckHook
     >>> import torch.comms
     >>> comm = torch.comms.new_comm("nccl", device, "world")
@@ -22,6 +23,9 @@ from typing import Any
 
 import torch
 from torch._C._comms import OpName
+
+
+__all__ = ["NanCheckHook"]
 
 
 # Lazily resolved reference to torch.ops.c10d.check_for_nan.

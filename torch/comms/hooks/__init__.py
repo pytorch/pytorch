@@ -19,7 +19,3 @@ __all__ = [
     "FlightRecorderHook",
     "NanCheckHook",
 ]
-
-for name in __all__:
-    cls = globals()[name]
-    cls.__module__ = "torch.comms.hooks"

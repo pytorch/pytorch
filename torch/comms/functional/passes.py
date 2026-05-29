@@ -25,6 +25,8 @@ from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops
 from torch._inductor.fx_utils import FakeTensorUpdater
 
 
+__all__ = ["reinplacement_pass", "strip_with_effects_pass"]
+
 logger = logging.getLogger(__name__)
 
 

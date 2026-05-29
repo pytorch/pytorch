@@ -7,12 +7,12 @@ from importlib.metadata import entry_points
 
 import torch
 from torch.comms.functional import (
-    is_torch_compile_supported,
-    is_torch_compile_supported_and_enabled,
+    is_torch_compile_supported as _is_torch_compile_supported,
+    is_torch_compile_supported_and_enabled as _is_torch_compile_supported_and_enabled,
 )
 
 
-if is_torch_compile_supported():
+if _is_torch_compile_supported():
     from torch._opaque_base import OpaqueBaseMeta
 
     # make the metaclass available to the pybind module
@@ -46,7 +46,7 @@ import torch.comms.objcol as objcol
 from torch._C._comms import *  # noqa: F403
 
 
-if is_torch_compile_supported_and_enabled():
+if _is_torch_compile_supported_and_enabled():
     # Import collectives first to ensure all operations are registered
     # This must happen before patch_torchcomm() so that window operations
     # and other collectives are registered and can be patched
@@ -68,11 +68,9 @@ __all__ = [
     "TorchCommWindow",
     "register_backend",
     "TorchCommBackend",
+    "is_backend_built",
+    "built_backends",
 ]
-
-for name in __all__:
-    cls = globals()[name]
-    cls.__module__ = "torch.comms"
 
 
 def _load_backend(backend: str) -> None:
@@ -100,3 +98,11 @@ def is_backend_built(backend: str) -> bool:
 def built_backends() -> list[str]:
     """Names of all backends torch was built with."""
     return [ep.name for ep in entry_points(group="torch.comms.backends")]
+
+
+# Re-point __module__ of the re-exported pybind classes/functions at torch.comms
+# so reprs, docs and test_public_bindings treat torch.comms as the canonical
+# public location (the functions defined here are already torch.comms).
+for _name in __all__:
+    globals()[_name].__module__ = "torch.comms"
+del _name

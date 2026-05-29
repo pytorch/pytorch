@@ -7,7 +7,7 @@
 import torch
 import torch.comms
 from torch._C._comms import TorchCommBackend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class DummyWork:
@@ -134,6 +134,7 @@ class TestPythonBackend(TestCase):
         self.assertEqual(comm.get_backend(), "dummy_py")
         comm.finalize()
 
+    @skipIfTorchDynamo("python backend all_reduce relies on eager arg dispatch")
     def test_all_reduce_sync(self) -> None:
         comm = torch.comms.new_comm("dummy_py", torch.device("cpu"), name="test_ar")
         tensor = torch.ones(4)

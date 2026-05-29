@@ -35,5 +35,6 @@ def is_torch_compile_supported_and_enabled(
 
 
 __all__ = [
+    "is_torch_compile_supported",
     "is_torch_compile_supported_and_enabled",
 ]

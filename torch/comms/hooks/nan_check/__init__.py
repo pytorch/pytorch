@@ -10,6 +10,7 @@ This module provides the NanCheckHook class for detecting NaN values
 in tensors before collective operations.
 
 Example:
+    >>> # xdoctest: +SKIP("requires a CUDA device and a configured communicator")
     >>> from torch.comms.hooks import NanCheckHook
     >>> import torch.comms
     >>> comm = torch.comms.new_comm("nccl", device, "world")

@@ -14,7 +14,7 @@ the data may not be ready yet, causing race conditions and NaN values.
 import logging
 import os
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
@@ -121,6 +121,7 @@ def _check_node_in_output_path(gm, target_node) -> bool:
     return False
 
 
+@skipIfTorchDynamo("captures graphs via torch.compile; outer dynamo breaks capture")
 @skip_if_torch_compile_not_supported_or_enabled()
 class TestWaitProxyPropagation(TestCase):
     """Test that wait_tensors output proxies are properly propagated."""

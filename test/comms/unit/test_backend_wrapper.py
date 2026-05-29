@@ -13,7 +13,7 @@ import torch
 import torch.comms
 import torch.distributed as dist
 from torch._C._comms import _BackendWrapper, OpName
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 def _make_wrapped_pg(name: str) -> tuple[torch.comms.TorchComm, dist.ProcessGroup]:
@@ -63,6 +63,7 @@ class TestBackendWrapperHooks(TestCase):
 
         comm.finalize()
 
+    @skipIfTorchDynamo("hook op_id correlation relies on eager op dispatch")
     def test_hook_op_ids_correlate_and_increase(self) -> None:
         """Pre/post op_ids match per call and increase across calls."""
         comm, pg = _make_wrapped_pg("test_op_ids")

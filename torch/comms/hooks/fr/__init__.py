@@ -12,6 +12,7 @@ the OSS FlightRecorder format from PyTorch's distributed module, so traces
 can be analyzed using the same fr_trace analysis tools.
 
 Example:
+    >>> # xdoctest: +SKIP("requires a CUDA device and a configured communicator")
     >>> from torch.comms.hooks import fr
     >>> import torch.comms
     >>> comm = torch.comms.new_comm("nccl", device, "world")
@@ -31,6 +32,10 @@ else:
     import torch._C._comms as _comms_mod
 
     FlightRecorderHook = _comms_mod.hooks.fr.FlightRecorderHook
+    # Point __module__ at this module so it is recognized as the public,
+    # canonical location by test_public_bindings (the underlying pybind class
+    # otherwise reports its C-extension module).
+    FlightRecorderHook.__module__ = "torch.comms.hooks.fr"
 
 __all__ = [
     "FlightRecorderHook",

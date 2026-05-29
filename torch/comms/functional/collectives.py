@@ -15,6 +15,11 @@ from torch.comms.functional.async_tensor import (
 from torch.comms.functional.registry import finalize_registration, register_collective
 
 
+# This module registers collectives as a side effect; it exposes no public API
+# of its own (everything above is imported for use during registration).
+__all__: list[str] = []
+
+
 # Only create library if not already registered
 try:
     lib: torch.library.Library | None = torch.library.Library("torchcomms", "DEF")

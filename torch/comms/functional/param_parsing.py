@@ -13,6 +13,9 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 
 
+__all__ = ["CollectiveParamSchema", "ParamKind", "ParamSpec", "ParsedArgs"]
+
+
 class ParamKind(Enum):
     CLASS_OBJECT = "class_object"
     INPUT = "input"

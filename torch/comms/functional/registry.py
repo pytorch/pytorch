@@ -19,6 +19,8 @@ from torch.comms.functional.param_parsing import (
 )
 
 
+__all__ = ["finalize_registration", "register_collective"]
+
 logger = logging.getLogger(__name__)
 
 _REGISTERED_COLLECTIVES: dict[str, dict[str, Any]] = {}

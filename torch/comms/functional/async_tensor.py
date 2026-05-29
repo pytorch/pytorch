@@ -12,6 +12,9 @@ import torch
 from torch._C._comms import TorchWork
 
 
+__all__ = ["FakeWork", "TorchCommsAsyncTensor"]
+
+
 class _OnceWaitWork:
     """Wrapper that ensures wait() is only called once for shared work handles.
 

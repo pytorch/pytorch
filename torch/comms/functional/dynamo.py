@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.script_object import TorchScriptObjectVariable
 
+__all__ = [
+    "AsyncWorkVariable",
+    "AsyncWorkWaitMethod",
+    "TorchCommMethodVariable",
+    "register_with_dynamo",
+]
+
 logger = logging.getLogger(__name__)
 
 

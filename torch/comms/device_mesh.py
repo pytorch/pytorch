@@ -27,6 +27,9 @@ from torch._C._comms import _BackendWrapper, new_comm, TorchComm
 from torch.distributed.device_mesh import _mesh_resources
 
 
+__all__ = ["init_device_mesh"]
+
+
 try:
     from torch.distributed.distributed_c10d import GroupName
 except ImportError:

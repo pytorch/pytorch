@@ -7,6 +7,8 @@ import logging
 import torch
 
 
+__all__ = ["register_torchcomms_lowerings"]
+
 logger = logging.getLogger(__name__)
 
 try:

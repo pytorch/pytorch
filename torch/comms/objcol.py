@@ -13,6 +13,16 @@ from torch._C._comms import TorchComm
 from torch.monitor import _WaitCounter
 
 
+__all__ = [
+    "all_gather_object",
+    "broadcast_object_list",
+    "gather_object",
+    "recv_object_list",
+    "scatter_object_list",
+    "send_object_list",
+]
+
+
 class _Serialization:
     """Serialization helper with serialize and deserialize methods."""
 

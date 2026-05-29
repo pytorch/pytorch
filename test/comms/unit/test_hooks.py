@@ -12,7 +12,7 @@ from torch._C._comms import (
     OpName,
     RemovableHandle,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class TestHooks(TestCase):
@@ -64,6 +64,7 @@ class TestHooks(TestCase):
 
         comm.finalize()
 
+    @skipIfTorchDynamo("hook op_id correlation relies on eager op dispatch")
     def test_hook_op_id_correlation(self) -> None:
         """Test that pre-hook and post-hook op_ids match for the same operation."""
         comm = self._create_comm("test_op_id")
