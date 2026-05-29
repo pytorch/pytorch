@@ -1060,6 +1060,13 @@ def _get_optimization_cflags(
         else:
             cflags.append("fno-omit-frame-pointer")
 
+    if config.aot_inductor.enable_line_tables and not should_add_debug_symbol_flags:
+        if not _IS_WINDOWS:
+            if _is_clang(cpp_compiler):
+                cflags.append("gline-tables-only")
+            else:
+                cflags.append("g1")
+
     cflags += _get_ffast_math_flags()
 
     if _IS_WINDOWS:
