@@ -188,6 +188,20 @@ class ConstantVariable(VariableTracker):
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
 
+    def tp_iteritem_impl(
+        self, tx: InstructionTranslator, index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # 3.15 virtual-iterator slot. Only str and bytes install _tp_iteritem
+        # at the C level among ConstantVariable's payload types.
+        # unicode_iteritem: https://github.com/python/cpython/blob/f31a89bb9010/Objects/unicodeobject.c#L13994
+        # bytes_iteritem:   https://github.com/python/cpython/blob/f31a89bb9010/Objects/bytesobject.c#L3210
+        if not isinstance(self.value, (str, bytes)):
+            return super().tp_iteritem_impl(tx, index)
+        i = index.as_python_constant()
+        if i >= len(self.value):
+            raise_observed_exception(IndexError, tx)
+        return ConstantVariable.create(self.value[i]), ConstantVariable.create(i + 1)
+
     @staticmethod
     def is_base_literal(obj: object) -> bool:
         return type(obj) in common_constant_types

@@ -183,6 +183,21 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    def tp_iteritem_impl(
+        self, tx: "InstructionTranslator", index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # 3.15 _tp_iteritem slot.  list/tuple (and tuple subclasses like
+        # torch.Size) all share the same algorithm: index into self.items,
+        # bump the index, signal exhaustion with StopIteration.  Subclasses
+        # whose Python type does NOT install _tp_iteritem (range, deque)
+        # override this to fall back to the base "missing" behavior.
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/listobject.c#L3916-L3921 (list_iteritem)
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/tupleobject.c#L876-L885 (tuple_iteritem)
+        i = index.as_python_constant()
+        if i >= len(self.items):
+            raise_observed_exception(IndexError, tx)
+        return self.items[i], ConstantVariable.create(i + 1)
+
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
@@ -754,6 +769,14 @@ class RangeVariable(BaseListVariable):
         return RangeIteratorVariable(
             self.start(), self.stop(), self.step(), self.range_length()
         )
+
+    def tp_iteritem_impl(
+        self, tx: "InstructionTranslator", index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # CPython's range type does not install _tp_iteritem — iteration goes
+        # through range_iterator (tp_iternext) instead.  Skip BaseListVariable's
+        # generic impl (which would happily index self.items = [start, stop, step]).
+        return VariableTracker.tp_iteritem_impl(self, tx, index)
 
     def sq_item_impl(
         self,
@@ -1518,6 +1541,14 @@ class DequeVariable(CommonListMethodsVariable):
         # that keeps track of the maxlen and doesn't allow iterating over more
         # items than maxlen.
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def tp_iteritem_impl(
+        self, tx: "InstructionTranslator", index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # collections.deque does not install _tp_iteritem in CPython — fall
+        # back to the base "missing" behavior rather than BaseListVariable's
+        # generic indexer.
+        return VariableTracker.tp_iteritem_impl(self, tx, index)
 
 
 class TupleVariable(BaseListVariable):
