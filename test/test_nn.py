@@ -7132,6 +7132,48 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(3, device), scale_factor, m)
 
+    def test_interpolate_antialias_scale_factor_script(self):
+        class BilinearInterpolateModule(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(
+                    x,
+                    scale_factor=[0.5, 0.5],
+                    mode="bilinear",
+                    antialias=True,
+                    align_corners=False,
+                )
+
+        class BicubicInterpolateModule(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(
+                    x,
+                    scale_factor=[0.5, 0.5],
+                    mode="bicubic",
+                    antialias=True,
+                    align_corners=False,
+                )
+
+        class LanczosInterpolateModule(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(
+                    x,
+                    scale_factor=[0.5, 0.5],
+                    mode="lanczos",
+                    antialias=True,
+                    align_corners=False,
+                )
+
+        x = torch.rand(1, 3, 8, 8)
+        for module_cls in (
+            BilinearInterpolateModule,
+            BicubicInterpolateModule,
+            LanczosInterpolateModule,
+        ):
+            with self.subTest(module_cls=module_cls):
+                eager = module_cls()
+                scripted = torch.jit.script(eager)
+                self.assertEqual(scripted(x), eager(x))
+
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
         inp = torch.randn(2, 3, 5)
