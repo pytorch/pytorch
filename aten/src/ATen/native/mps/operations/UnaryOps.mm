@@ -356,14 +356,22 @@ static void cumulative_op_impl(const Tensor& self,
       input.scalar_type() != ScalarType::Int && input.scalar_type() != ScalarType::Long;
   if (castInputData) {
     auto input_i32 = input.to(ScalarType::Int);
-    auto result_i32 = at::empty(result.sizes(), result.options().dtype(ScalarType::Int));
-    mps::scan_simple_mps_impl(input_i32, result_i32, wrapped_dim, scan_op_name);
-    result.copy_(result_i32);
+    if (result.scalar_type() == ScalarType::Long) {
+      mps::scan_simple_mps_impl(input_i32, result, wrapped_dim, scan_op_name);
+    } else {
+      auto result_i32 = at::empty(result.sizes(), result.options().dtype(ScalarType::Int));
+      mps::scan_simple_mps_impl(input_i32, result_i32, wrapped_dim, scan_op_name);
+      result.copy_(result_i32);
+    }
+    return;
+  }
+  // int32 -> int64 result: scan int32 directly; the kernel widens (no upcast).
+  if (input.scalar_type() == ScalarType::Int && result.scalar_type() == ScalarType::Long) {
+    mps::scan_simple_mps_impl(input, result, wrapped_dim, scan_op_name);
     return;
   }
 
-  // Otherwise dispatch directly; the kernel's element type is selected from the
-  // input dtype, so make it match the output buffer's dtype.
+  // int64 input, or a dtype= override: match the scan input dtype to the result.
   auto scan_input = input.scalar_type() == result.scalar_type() ? input : input.to(result.scalar_type());
 
   mps::scan_simple_mps_impl(scan_input, result, wrapped_dim, scan_op_name);

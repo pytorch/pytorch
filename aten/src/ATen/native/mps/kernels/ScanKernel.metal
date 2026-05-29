@@ -422,9 +422,15 @@ inline acc_t block_reduce_impl(
 
 // Threadgroup inclusive scan of `len` elements seeded with `init_prefix`
 // (carry-in from preceding blocks). `simdgroup_sums` holds >= simd_size acc_t.
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
+// IN is the read type, T the write type (differ only for int32->int64 fusion).
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
 inline void block_scan_impl(
-    const device T* in,
+    const device IN* in,
     device T* out,
     uint len,
     acc_t init_prefix,
@@ -440,9 +446,9 @@ inline void block_scan_impl(
   for (uint r = 0; r < ceildiv(len, N_READS * lsize_x); r++) {
     uint offset = r * lsize_x * N_READS + lid_x * N_READS;
     if ((offset + N_READS) < len) {
-      load_unsafe<T, N_READS>(values, in + offset);
+      load_unsafe<IN, N_READS>(values, in + offset);
     } else {
-      load_safe<T, N_READS>(values, in + offset, offset, len, Op::init);
+      load_safe<IN, N_READS>(values, in + offset, offset, len, Op::init);
     }
     for (int i = 1; i < N_READS; i++) {
       values[i] = op(values[i], values[i - 1]);
@@ -480,9 +486,14 @@ inline void block_scan_impl(
 }
 
 // Inclusive scan along innermost dimension for contiguous tensors
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
 kernel void scan_innermost_dim(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device T* out [[buffer(1)]],
     const constant size_t& axis_size [[buffer(2)]],
     uint3 gid [[threadgroup_position_in_grid]],
@@ -494,7 +505,7 @@ kernel void scan_innermost_dim(
   // One threadgroup scans one row [gid.y, gid.z]; see block_scan_impl.
   size_t offset = (gid.y + gsize.y * size_t(gid.z)) * axis_size;
   threadgroup acc_t simdgroup_sums[simd_size];
-  block_scan_impl<T, Op, N_READS>(
+  block_scan_impl<T, Op, N_READS, IN>(
       in + offset,
       out + offset,
       uint(axis_size),
@@ -507,9 +518,14 @@ kernel void scan_innermost_dim(
 }
 
 // Inclusive scan along outer dimension for contiguous tensors
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
 kernel void scan_outer_dim(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device T* out [[buffer(1)]],
     const constant size_t& axis_size [[buffer(2)]],
     const constant size_t& stride [[buffer(3)]],
@@ -602,6 +618,99 @@ kernel void scan_outer_dim(
         }
       }
     }
+  }
+}
+
+// Fused transpose-scan: storage [axis_size, n_cols] contiguous, scanned along
+// axis, written to contiguous output [n_cols, axis_size]. Both the strided read
+// and the transposed write coalesce (scanned values sit in registers by
+// axis-lane), avoiding a full .contiguous() transpose copy.
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
+kernel void scan_innermost_transposed(
+    const device IN* in [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    const constant size_t& axis_size [[buffer(2)]],
+    const constant size_t& n_cols [[buffer(3)]],
+    const constant size_t& stride_blocks [[buffer(4)]],
+    uint3 gid [[threadgroup_position_in_grid]],
+    uint3 gsize [[threadgroups_per_grid]],
+    uint3 lid [[thread_position_in_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int BM = 32;
+  constexpr int BN = 32;
+  constexpr int BN_pad = BN + 1; // coprime with 32 banks -> conflict-free
+  constexpr int n_simds = BN / N_READS;
+  constexpr int n_scans = BN / n_simds;
+  Op op;
+
+  threadgroup acc_t read_buffer[BM * BN_pad];
+  acc_t values[n_scans];
+  acc_t prefix[n_scans];
+  for (int i = 0; i < n_scans; i++) {
+    prefix[i] = Op::init;
+  }
+
+  size_t col_block = gid.y + gsize.y * size_t(gid.z);
+  if (col_block >= stride_blocks) {
+    return;
+  }
+  size_t col_base = col_block * BN;
+  uint col_limit = uint(min(size_t(BN), n_cols - col_base));
+
+  uint read_offset_y = (lid.x * N_READS) / BN; // axis within chunk
+  uint read_offset_x = (lid.x * N_READS) % BN; // column within block
+  const device IN* in_p = in + col_base + read_offset_x;
+  threadgroup acc_t* read_into =
+      read_buffer + read_offset_y * BN_pad + read_offset_x;
+  threadgroup acc_t* read_from =
+      read_buffer + simd_lane_id * BN_pad + simd_group_id * n_scans;
+
+  for (uint j = 0; j < axis_size; j += BM) {
+    uint index_y = j + read_offset_y;
+    // Coalesced strided read: consecutive threads read consecutive columns.
+    if (index_y < axis_size && (read_offset_x + N_READS) <= col_limit) {
+      for (int i = 0; i < N_READS; i++) {
+        read_into[i] = static_cast<acc_t>(in_p[size_t(index_y) * n_cols + i]);
+      }
+    } else {
+      for (int i = 0; i < N_READS; i++) {
+        read_into[i] = (index_y < axis_size && (read_offset_x + i) < col_limit)
+            ? static_cast<acc_t>(in_p[size_t(index_y) * n_cols + i])
+            : Op::init;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // Lane = axis position within the chunk; each simdgroup owns n_scans
+    // columns.
+    for (int i = 0; i < n_scans; i++) {
+      values[i] = read_from[i];
+    }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    for (int i = 0; i < n_scans; i++) {
+      values[i] = op.simd_scan(values[i]);
+      values[i] = op(values[i], prefix[i]);
+      prefix[i] = simd_shuffle(values[i], simd_size - 1);
+    }
+
+    // Transposed coalesced write straight from registers: consecutive lanes
+    // (axis positions) hit consecutive contiguous-output addresses.
+    uint axis_pos = j + simd_lane_id;
+    if (axis_pos < axis_size) {
+      for (int i = 0; i < n_scans; i++) {
+        uint col = uint(col_base) + simd_group_id * n_scans + i;
+        if (col < n_cols) {
+          out[size_t(col) * axis_size + axis_pos] = static_cast<T>(values[i]);
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
@@ -792,9 +901,14 @@ kernel void scan_with_indices_outer_dim(
 
 // Three-pass scan (block_reduce -> scan_block_sums -> block_carry) over a
 // [n_scans, axis_size] tensor; splits a long axis across threadgroups.
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
 kernel void scan_block_reduce(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device acc_t* block_sums [[buffer(1)]],
     const constant size_t& axis_size [[buffer(2)]],
     const constant size_t& block_size [[buffer(3)]],
@@ -807,7 +921,7 @@ kernel void scan_block_reduce(
   threadgroup acc_t smem[simd_size];
   size_t block_start = size_t(gid.x) * block_size;
   uint len = uint(min(size_t(block_size), axis_size - block_start));
-  acc_t total = block_reduce_impl<T, Op, N_READS>(
+  acc_t total = block_reduce_impl<IN, Op, N_READS, acc_t>(
       in + size_t(gid.y) * axis_size + block_start,
       len,
       smem,
@@ -843,9 +957,14 @@ kernel void scan_block_sums(
       simd_group_id);
 }
 
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
 kernel void scan_block_carry(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device T* out [[buffer(1)]],
     const device acc_t* block_sums [[buffer(2)]],
     const constant size_t& axis_size [[buffer(3)]],
@@ -871,7 +990,7 @@ kernel void scan_block_carry(
   size_t block_start = size_t(gid.x) * block_size;
   uint len = uint(min(size_t(block_size), axis_size - block_start));
   size_t base = size_t(gid.y) * axis_size + block_start;
-  block_scan_impl<T, Op, N_READS>(
+  block_scan_impl<T, Op, N_READS, IN>(
       in + base,
       out + base,
       len,
@@ -1204,6 +1323,235 @@ kernel void scan_vec_decoupled(
   }
 }
 
+// Componentwise inclusive scan of one tile into registers (no carry); tile
+// total per component goes to tg_total. Scalar per-component simd scans (not
+// the float4-batched path) keep int64 accumulators exact past 2^24.
+template <typename Op, int N_READS, int VEC, typename acc_t, typename IN>
+inline void scan_vec_tile_inclusive(
+    const device IN* in,
+    size_t base,
+    uint len,
+    uint soff,
+    uint lsize,
+    uint simd_lane_id,
+    uint simd_group_id,
+    threadgroup acc_t* simdgroup_sums, // simd_size * VEC
+    threadgroup acc_t* tg_total, // VEC
+    thread acc_t* vals) { // N_READS * VEC
+  Op op;
+  const uint simd_groups = lsize / simd_size;
+  for (int i = 0; i < N_READS; i++) {
+    const uint s = soff + i;
+    for (int c = 0; c < VEC; c++) {
+      vals[i * VEC + c] = (s < len)
+          ? static_cast<acc_t>(in[base + size_t(s) * VEC + c])
+          : Op::init;
+    }
+  }
+  for (int i = 1; i < N_READS; i++) {
+    for (int c = 0; c < VEC; c++) {
+      vals[i * VEC + c] = op(vals[i * VEC + c], vals[(i - 1) * VEC + c]);
+    }
+  }
+  acc_t prev_thread[VEC];
+  for (int c = 0; c < VEC; c++) {
+    const acc_t last = vals[(N_READS - 1) * VEC + c];
+    prev_thread[c] = op.simd_exclusive_scan(last);
+    if (simd_lane_id == simd_size - 1) {
+      simdgroup_sums[simd_group_id * VEC + c] = op(prev_thread[c], last);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simd_group_id == 0) {
+    for (int c = 0; c < VEC; c++) {
+      acc_t v = (simd_lane_id < simd_groups)
+          ? simdgroup_sums[simd_lane_id * VEC + c]
+          : Op::init;
+      simdgroup_sums[simd_lane_id * VEC + c] = op.simd_exclusive_scan(v);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int i = 0; i < N_READS; i++) {
+    for (int c = 0; c < VEC; c++) {
+      vals[i * VEC + c] =
+          op(op(vals[i * VEC + c], simdgroup_sums[simd_group_id * VEC + c]),
+             prev_thread[c]);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simd_group_id == simd_groups - 1 && simd_lane_id == simd_size - 1) {
+    for (int c = 0; c < VEC; c++) {
+      tg_total[c] = vals[(N_READS - 1) * VEC + c];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+// Int small-stride outer scan over [n_orows, axis, VEC], componentwise. Int has
+// no decoupled look-back (no 64-bit atomic on metal3.1), so 2-pass:
+// block_reduce sums each (orow, block); block_carry re-scans seeded with
+// preceding blocks. Compile-time VEC stays in registers with coalesced reads.
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    int VEC,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
+kernel void scan_vec_block_reduce(
+    const device IN* in [[buffer(0)]],
+    device acc_t* block_sums [[buffer(1)]],
+    const constant size_t& axis_size [[buffer(2)]],
+    const constant size_t& block_size [[buffer(3)]],
+    const constant size_t& num_blocks [[buffer(4)]],
+    const constant size_t& n_orows [[buffer(5)]],
+    uint3 gid [[threadgroup_position_in_grid]],
+    uint3 gsize [[threadgroups_per_grid]],
+    uint3 lid [[thread_position_in_threadgroup]],
+    uint3 lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  Op op;
+  threadgroup acc_t smem[simd_size];
+  size_t full_gid = gid.y + gsize.y * size_t(gid.z);
+  size_t block_id = full_gid % num_blocks;
+  size_t orow = full_gid / num_blocks;
+  if (orow >= n_orows) {
+    return;
+  }
+  size_t block_start = block_id * block_size;
+  if (block_start >= axis_size) {
+    if (lid.x == 0) {
+      for (int c = 0; c < VEC; c++) {
+        block_sums[(orow * num_blocks + block_id) * VEC + c] = Op::init;
+      }
+    }
+    return;
+  }
+  uint len = uint(min(block_size, axis_size - block_start));
+  size_t base = (orow * axis_size + block_start) * VEC;
+
+  acc_t acc[VEC];
+  for (int c = 0; c < VEC; c++) {
+    acc[c] = Op::init;
+  }
+  for (uint r = 0; r < ceildiv(len, N_READS * lsize.x); r++) {
+    for (int i = 0; i < N_READS; i++) {
+      uint s = r * lsize.x * N_READS + lid.x * N_READS + i;
+      if (s < len) {
+        for (int c = 0; c < VEC; c++) {
+          acc[c] =
+              op(acc[c], static_cast<acc_t>(in[base + size_t(s) * VEC + c]));
+        }
+      }
+    }
+  }
+  for (int c = 0; c < VEC; c++) {
+    acc_t total = threadgroup_reduce<Op>(
+        acc[c], smem, lsize.x, simd_lane_id, simd_group_id);
+    if (lid.x == 0) {
+      block_sums[(orow * num_blocks + block_id) * VEC + c] = total;
+    }
+  }
+}
+
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    int VEC,
+    typename IN = T,
+    typename acc_t = accum_t<T>>
+kernel void scan_vec_block_carry(
+    const device IN* in [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    const device acc_t* block_sums [[buffer(2)]],
+    const constant size_t& axis_size [[buffer(3)]],
+    const constant size_t& block_size [[buffer(4)]],
+    const constant size_t& num_blocks [[buffer(5)]],
+    const constant size_t& n_orows [[buffer(6)]],
+    uint3 gid [[threadgroup_position_in_grid]],
+    uint3 gsize [[threadgroups_per_grid]],
+    uint3 lid [[thread_position_in_threadgroup]],
+    uint3 lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  Op op;
+  threadgroup acc_t simdgroup_sums[simd_size * VEC];
+  threadgroup acc_t tg_total[VEC];
+  threadgroup acc_t tg_carry[VEC];
+
+  size_t full_gid = gid.y + gsize.y * size_t(gid.z);
+  size_t block_id = full_gid % num_blocks;
+  size_t orow = full_gid / num_blocks;
+  if (orow >= n_orows) {
+    return;
+  }
+  size_t block_start = block_id * block_size;
+  if (block_start >= axis_size) {
+    return;
+  }
+  uint len = uint(min(block_size, axis_size - block_start));
+  size_t base = (orow * axis_size + block_start) * VEC;
+
+  // Carry-in = sum of all preceding blocks' per-component totals (parallel over
+  // threads, then threadgroup-reduced). block_sums is small and cached.
+  acc_t partial[VEC];
+  for (int c = 0; c < VEC; c++) {
+    partial[c] = Op::init;
+  }
+  for (uint b = lid.x; b < block_id; b += lsize.x) {
+    for (int c = 0; c < VEC; c++) {
+      partial[c] =
+          op(partial[c], block_sums[(orow * num_blocks + b) * VEC + c]);
+    }
+  }
+  for (int c = 0; c < VEC; c++) {
+    acc_t carry = threadgroup_reduce<Op>(
+        partial[c], simdgroup_sums, lsize.x, simd_lane_id, simd_group_id);
+    if (lid.x == 0) {
+      tg_carry[c] = carry;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  acc_t prefix[VEC];
+  for (int c = 0; c < VEC; c++) {
+    prefix[c] = tg_carry[c];
+  }
+  const uint tile = lsize.x * N_READS;
+  const uint soff = lid.x * N_READS;
+  for (uint t0 = 0; t0 < len; t0 += tile) {
+    uint tlen = min(tile, len - t0);
+    acc_t vals[N_READS * VEC];
+    scan_vec_tile_inclusive<Op, N_READS, VEC, acc_t, IN>(
+        in,
+        base + size_t(t0) * VEC,
+        tlen,
+        soff,
+        lsize.x,
+        simd_lane_id,
+        simd_group_id,
+        simdgroup_sums,
+        tg_total,
+        vals);
+    for (int i = 0; i < N_READS; i++) {
+      const uint s = soff + i;
+      if (s < tlen) {
+        for (int c = 0; c < VEC; c++) {
+          out[base + size_t(t0 + s) * VEC + c] =
+              static_cast<T>(op(prefix[c], vals[i * VEC + c]));
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (int c = 0; c < VEC; c++) {
+      prefix[c] = op(prefix[c], tg_total[c]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
 // Per-column decoupled look-back for any inner stride: one simdgroup per
 // column-tile, constant N_READS regs; block-claimed adjacent columns coalesce.
 template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
@@ -1306,9 +1654,10 @@ template <
     typename Op,
     int N_READS,
     int BN,
+    typename IN = T,
     typename acc_t = accum_t<T>>
 kernel void scan_strided_block_reduce(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device acc_t* block_sums [[buffer(1)]],
     const constant size_t& axis_size [[buffer(2)]],
     const constant size_t& stride [[buffer(3)]],
@@ -1407,9 +1756,10 @@ template <
     typename Op,
     int N_READS,
     int BN,
+    typename IN = T,
     typename acc_t = accum_t<T>>
 kernel void scan_strided_block_carry(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device T* out [[buffer(1)]],
     const device acc_t* block_sums [[buffer(2)]],
     const constant size_t& axis_size [[buffer(3)]],
@@ -1523,9 +1873,9 @@ kernel void scan_strided_block_carry(
 
 // Segmented scan for a tiny innermost axis with very many rows: pack many rows
 // per threadgroup (one-threadgroup-per-row would launch far too many).
-template <typename T, typename Op, typename acc_t = accum_t<T>>
+template <typename T, typename Op, typename IN = T, typename acc_t = accum_t<T>>
 kernel void scan_tiny_innermost(
-    const device T* in [[buffer(0)]],
+    const device IN* in [[buffer(0)]],
     device T* out [[buffer(1)]],
     const constant uint& axis_size [[buffer(2)]],
     const constant uint& n_scans [[buffer(3)]],
@@ -1708,6 +2058,130 @@ kernel void scan_tiny_innermost(
       uint simd_lane_id [[thread_index_in_simdgroup]],                        \
       uint simd_group_id [[simdgroup_index_in_threadgroup]])
 
+// Integer small-stride (VEC in {2,3,4}) two-pass vectorized multi-block scan.
+#define REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, VEC) \
+  template [[host_name(#OP_NAME "_vec_block_reduce_" #VEC                      \
+                                "_" #DTYPE)]] [[kernel]] void                  \
+  scan_vec_block_reduce<DTYPE, OP_CLASS<DTYPE>, NREADS, VEC>(                  \
+      const device DTYPE* in [[buffer(0)]],                                    \
+      device accum_t<DTYPE>* block_sums [[buffer(1)]],                         \
+      const constant size_t& axis_size [[buffer(2)]],                          \
+      const constant size_t& block_size [[buffer(3)]],                         \
+      const constant size_t& num_blocks [[buffer(4)]],                         \
+      const constant size_t& n_orows [[buffer(5)]],                            \
+      uint3 gid [[threadgroup_position_in_grid]],                              \
+      uint3 gsize [[threadgroups_per_grid]],                                   \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
+      uint3 lsize [[threads_per_threadgroup]],                                 \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);                  \
+                                                                               \
+  template [[host_name(#OP_NAME "_vec_block_carry_" #VEC                       \
+                                "_" #DTYPE)]] [[kernel]] void                  \
+  scan_vec_block_carry<DTYPE, OP_CLASS<DTYPE>, NREADS, VEC>(                   \
+      const device DTYPE* in [[buffer(0)]],                                    \
+      device DTYPE* out [[buffer(1)]],                                         \
+      const device accum_t<DTYPE>* block_sums [[buffer(2)]],                   \
+      const constant size_t& axis_size [[buffer(3)]],                          \
+      const constant size_t& block_size [[buffer(4)]],                         \
+      const constant size_t& num_blocks [[buffer(5)]],                         \
+      const constant size_t& n_orows [[buffer(6)]],                            \
+      uint3 gid [[threadgroup_position_in_grid]],                              \
+      uint3 gsize [[threadgroups_per_grid]],                                   \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
+      uint3 lsize [[threads_per_threadgroup]],                                 \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(                        \
+    OP_NAME, OP_CLASS, DTYPE, NREADS)                                   \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 2); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 3); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 4); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 8)
+
+// Fused int32 -> int64 vectorized multi-block scan.
+#define REGISTER_VEC_MULTIBLOCK_SCAN_OP_PROMOTED(                              \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, VEC)                       \
+  template [[host_name(#OP_NAME "_vec_block_reduce_" #VEC "_" #IN_DTYPE        \
+                                "_" #OUT_DTYPE)]] [[kernel]] void              \
+  scan_vec_block_reduce<                                                       \
+      OUT_DTYPE,                                                               \
+      OP_CLASS<OUT_DTYPE>,                                                     \
+      NREADS,                                                                  \
+      VEC,                                                                     \
+      IN_DTYPE>(                                                               \
+      const device IN_DTYPE* in [[buffer(0)]],                                 \
+      device accum_t<OUT_DTYPE>* block_sums [[buffer(1)]],                     \
+      const constant size_t& axis_size [[buffer(2)]],                          \
+      const constant size_t& block_size [[buffer(3)]],                         \
+      const constant size_t& num_blocks [[buffer(4)]],                         \
+      const constant size_t& n_orows [[buffer(5)]],                            \
+      uint3 gid [[threadgroup_position_in_grid]],                              \
+      uint3 gsize [[threadgroups_per_grid]],                                   \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
+      uint3 lsize [[threads_per_threadgroup]],                                 \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);                  \
+                                                                               \
+  template [[host_name(#OP_NAME "_vec_block_carry_" #VEC "_" #IN_DTYPE         \
+                                "_" #OUT_DTYPE)]] [[kernel]] void              \
+  scan_vec_block_carry<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, VEC, IN_DTYPE>( \
+      const device IN_DTYPE* in [[buffer(0)]],                                 \
+      device OUT_DTYPE* out [[buffer(1)]],                                     \
+      const device accum_t<OUT_DTYPE>* block_sums [[buffer(2)]],               \
+      const constant size_t& axis_size [[buffer(3)]],                          \
+      const constant size_t& block_size [[buffer(4)]],                         \
+      const constant size_t& num_blocks [[buffer(5)]],                         \
+      const constant size_t& n_orows [[buffer(6)]],                            \
+      uint3 gid [[threadgroup_position_in_grid]],                              \
+      uint3 gsize [[threadgroups_per_grid]],                                   \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
+      uint3 lsize [[threads_per_threadgroup]],                                 \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC_PROMOTED( \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS)       \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP_PROMOTED(               \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 2); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP_PROMOTED(               \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 3); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP_PROMOTED(               \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 4); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP_PROMOTED(               \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 8)
+
+#define REGISTER_TRANSPOSED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS)         \
+  template [[host_name(#OP_NAME "_innermost_transposed_" #DTYPE)]] [[kernel]] \
+  void scan_innermost_transposed<DTYPE, OP_CLASS<DTYPE>, NREADS>(             \
+      const device DTYPE* in [[buffer(0)]],                                   \
+      device DTYPE* out [[buffer(1)]],                                        \
+      const constant size_t& axis_size [[buffer(2)]],                         \
+      const constant size_t& n_cols [[buffer(3)]],                            \
+      const constant size_t& stride_blocks [[buffer(4)]],                     \
+      uint3 gid [[threadgroup_position_in_grid]],                             \
+      uint3 gsize [[threadgroups_per_grid]],                                  \
+      uint3 lid [[thread_position_in_threadgroup]],                           \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                        \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_TRANSPOSED_SCAN_OP_PROMOTED(                                  \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS)                            \
+  template [[host_name(#OP_NAME "_innermost_transposed_" #IN_DTYPE             \
+                                "_" #OUT_DTYPE)]] [[kernel]] void              \
+  scan_innermost_transposed<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, IN_DTYPE>( \
+      const device IN_DTYPE* in [[buffer(0)]],                                 \
+      device OUT_DTYPE* out [[buffer(1)]],                                     \
+      const constant size_t& axis_size [[buffer(2)]],                          \
+      const constant size_t& n_cols [[buffer(3)]],                             \
+      const constant size_t& stride_blocks [[buffer(4)]],                      \
+      uint3 gid [[threadgroup_position_in_grid]],                              \
+      uint3 gsize [[threadgroups_per_grid]],                                   \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
 // Strided multi-block kernels are templated on tile width BN (host fits it to
 // n_irows); signatures are BN-independent.
 #define REGISTER_STRIDED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, BN) \
@@ -1761,6 +2235,137 @@ kernel void scan_tiny_innermost(
       const constant uint& rows_per_tg [[buffer(4)]],                        \
       uint3 tgid [[threadgroup_position_in_grid]],                           \
       uint3 lid [[thread_position_in_threadgroup]],                          \
+      uint3 tg_size [[threads_per_threadgroup]])
+
+// Fused integer-widening scans: read IN, accumulate/write OUT (int32 -> int64).
+// Named "{in}_{out}" so the host scans the narrow input directly (no upcast).
+#define REGISTER_SCAN_OP_PROMOTED(                                      \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS)                     \
+  template [[host_name(#OP_NAME "_innermost_" #IN_DTYPE                 \
+                                "_" #OUT_DTYPE)]] [[kernel]] void       \
+  scan_innermost_dim<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, IN_DTYPE>( \
+      const device IN_DTYPE* in [[buffer(0)]],                          \
+      device OUT_DTYPE* out [[buffer(1)]],                              \
+      const constant size_t& axis_size [[buffer(2)]],                   \
+      uint3 gid [[threadgroup_position_in_grid]],                       \
+      uint3 gsize [[threadgroups_per_grid]],                            \
+      uint3 lid [[thread_position_in_threadgroup]],                     \
+      uint3 lsize [[threads_per_threadgroup]],                          \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                  \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);           \
+                                                                        \
+  template [[host_name(#OP_NAME "_outer_" #IN_DTYPE                     \
+                                "_" #OUT_DTYPE)]] [[kernel]] void       \
+  scan_outer_dim<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, IN_DTYPE>(     \
+      const device IN_DTYPE* in [[buffer(0)]],                          \
+      device OUT_DTYPE* out [[buffer(1)]],                              \
+      const constant size_t& axis_size [[buffer(2)]],                   \
+      const constant size_t& stride [[buffer(3)]],                      \
+      const constant size_t& stride_blocks [[buffer(4)]],               \
+      uint3 gid [[threadgroup_position_in_grid]],                       \
+      uint3 gsize [[threadgroups_per_grid]],                            \
+      uint3 lid [[thread_position_in_threadgroup]],                     \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                  \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_MULTIBLOCK_SCAN_OP_PROMOTED(                          \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS)                    \
+  template [[host_name(#OP_NAME "_block_reduce_" #IN_DTYPE             \
+                                "_" #OUT_DTYPE)]] [[kernel]] void      \
+  scan_block_reduce<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, IN_DTYPE>( \
+      const device IN_DTYPE* in [[buffer(0)]],                         \
+      device accum_t<OUT_DTYPE>* block_sums [[buffer(1)]],             \
+      const constant size_t& axis_size [[buffer(2)]],                  \
+      const constant size_t& block_size [[buffer(3)]],                 \
+      const constant size_t& num_blocks [[buffer(4)]],                 \
+      uint3 gid [[threadgroup_position_in_grid]],                      \
+      uint3 lid [[thread_position_in_threadgroup]],                    \
+      uint3 lsize [[threads_per_threadgroup]],                         \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                 \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);          \
+                                                                       \
+  template [[host_name(#OP_NAME "_block_carry_" #IN_DTYPE              \
+                                "_" #OUT_DTYPE)]] [[kernel]] void      \
+  scan_block_carry<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, NREADS, IN_DTYPE>(  \
+      const device IN_DTYPE* in [[buffer(0)]],                         \
+      device OUT_DTYPE* out [[buffer(1)]],                             \
+      const device accum_t<OUT_DTYPE>* block_sums [[buffer(2)]],       \
+      const constant size_t& axis_size [[buffer(3)]],                  \
+      const constant size_t& block_size [[buffer(4)]],                 \
+      const constant size_t& num_blocks [[buffer(5)]],                 \
+      uint3 gid [[threadgroup_position_in_grid]],                      \
+      uint3 lid [[thread_position_in_threadgroup]],                    \
+      uint3 lsize [[threads_per_threadgroup]],                         \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                 \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_STRIDED_SCAN_OP_PROMOTED(                                 \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, BN)                    \
+  template [[host_name(#OP_NAME "_strided_block_reduce_" #BN "_" #IN_DTYPE \
+                                "_" #OUT_DTYPE)]] [[kernel]] void          \
+  scan_strided_block_reduce<                                               \
+      OUT_DTYPE,                                                           \
+      OP_CLASS<OUT_DTYPE>,                                                 \
+      NREADS,                                                              \
+      BN,                                                                  \
+      IN_DTYPE>(                                                           \
+      const device IN_DTYPE* in [[buffer(0)]],                             \
+      device accum_t<OUT_DTYPE>* block_sums [[buffer(1)]],                 \
+      const constant size_t& axis_size [[buffer(2)]],                      \
+      const constant size_t& stride [[buffer(3)]],                         \
+      const constant size_t& stride_blocks [[buffer(4)]],                  \
+      const constant size_t& block_size [[buffer(5)]],                     \
+      const constant size_t& num_blocks [[buffer(6)]],                     \
+      const constant size_t& n_orows [[buffer(7)]],                        \
+      uint3 gid [[threadgroup_position_in_grid]],                          \
+      uint3 gsize [[threadgroups_per_grid]],                               \
+      uint3 lid [[thread_position_in_threadgroup]],                        \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]]);              \
+                                                                           \
+  template [[host_name(#OP_NAME "_strided_block_carry_" #BN "_" #IN_DTYPE  \
+                                "_" #OUT_DTYPE)]] [[kernel]] void          \
+  scan_strided_block_carry<                                                \
+      OUT_DTYPE,                                                           \
+      OP_CLASS<OUT_DTYPE>,                                                 \
+      NREADS,                                                              \
+      BN,                                                                  \
+      IN_DTYPE>(                                                           \
+      const device IN_DTYPE* in [[buffer(0)]],                             \
+      device OUT_DTYPE* out [[buffer(1)]],                                 \
+      const device accum_t<OUT_DTYPE>* block_sums [[buffer(2)]],           \
+      const constant size_t& axis_size [[buffer(3)]],                      \
+      const constant size_t& stride [[buffer(4)]],                         \
+      const constant size_t& stride_blocks [[buffer(5)]],                  \
+      const constant size_t& block_size [[buffer(6)]],                     \
+      const constant size_t& num_blocks [[buffer(7)]],                     \
+      const constant size_t& n_orows [[buffer(8)]],                        \
+      uint3 gid [[threadgroup_position_in_grid]],                          \
+      uint3 gsize [[threadgroups_per_grid]],                               \
+      uint3 lid [[thread_position_in_threadgroup]],                        \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
+
+#define REGISTER_STRIDED_SCAN_OP_ALL_BN_PROMOTED(          \
+    OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS)        \
+  REGISTER_STRIDED_SCAN_OP_PROMOTED(                       \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 8);  \
+  REGISTER_STRIDED_SCAN_OP_PROMOTED(                       \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 16); \
+  REGISTER_STRIDED_SCAN_OP_PROMOTED(                       \
+      OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE, NREADS, 32)
+
+#define REGISTER_TINY_SCAN_OP_PROMOTED(OP_NAME, OP_CLASS, IN_DTYPE, OUT_DTYPE) \
+  template [[host_name(#OP_NAME "_tiny_innermost_" #IN_DTYPE                   \
+                                "_" #OUT_DTYPE)]] [[kernel]] void              \
+  scan_tiny_innermost<OUT_DTYPE, OP_CLASS<OUT_DTYPE>, IN_DTYPE>(               \
+      const device IN_DTYPE* in [[buffer(0)]],                                 \
+      device OUT_DTYPE* out [[buffer(1)]],                                     \
+      const constant uint& axis_size [[buffer(2)]],                            \
+      const constant uint& n_scans [[buffer(3)]],                              \
+      const constant uint& rows_per_tg [[buffer(4)]],                          \
+      uint3 tgid [[threadgroup_position_in_grid]],                             \
+      uint3 lid [[thread_position_in_threadgroup]],                            \
       uint3 tg_size [[threads_per_threadgroup]])
 
 // Simple scan operations
@@ -1838,6 +2443,11 @@ REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, bfloat, 4);
 REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, int, 4);
 REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, long, 2);
 
+// Integer small-stride (VEC in {2,3,4}) vectorized multi-block scan. Only int
+// (no float decoupled limitation here); float small strides use vec_decoupled.
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumsum, CumSumOp, long, 2);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumprod, CumProdOp, long, 2);
+
 // Tiny-innermost-axis variants (many short scans).
 REGISTER_TINY_SCAN_OP(cumsum, CumSumOp, float);
 REGISTER_TINY_SCAN_OP(cumsum, CumSumOp, half);
@@ -1850,6 +2460,41 @@ REGISTER_TINY_SCAN_OP(cumprod, CumProdOp, half);
 REGISTER_TINY_SCAN_OP(cumprod, CumProdOp, bfloat);
 REGISTER_TINY_SCAN_OP(cumprod, CumProdOp, int);
 REGISTER_TINY_SCAN_OP(cumprod, CumProdOp, long);
+
+// Fused int32 -> int64. NREADS matches int64 (same int64-accumulator
+// footprint).
+REGISTER_SCAN_OP_PROMOTED(cumsum, CumSumOp, int, long, 2);
+REGISTER_SCAN_OP_PROMOTED(cumprod, CumProdOp, int, long, 2);
+REGISTER_MULTIBLOCK_SCAN_OP_PROMOTED(cumsum, CumSumOp, int, long, 2);
+REGISTER_MULTIBLOCK_SCAN_OP_PROMOTED(cumprod, CumProdOp, int, long, 2);
+REGISTER_STRIDED_SCAN_OP_ALL_BN_PROMOTED(cumsum, CumSumOp, int, long, 2);
+REGISTER_STRIDED_SCAN_OP_ALL_BN_PROMOTED(cumprod, CumProdOp, int, long, 2);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC_PROMOTED(
+    cumsum,
+    CumSumOp,
+    int,
+    long,
+    2);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC_PROMOTED(
+    cumprod,
+    CumProdOp,
+    int,
+    long,
+    2);
+
+// Fused transpose-scan (dense non-contiguous input, innermost logical axis).
+REGISTER_TRANSPOSED_SCAN_OP(cumsum, CumSumOp, float, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumsum, CumSumOp, half, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumsum, CumSumOp, bfloat, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumsum, CumSumOp, long, 2);
+REGISTER_TRANSPOSED_SCAN_OP(cumprod, CumProdOp, float, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumprod, CumProdOp, half, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumprod, CumProdOp, bfloat, 4);
+REGISTER_TRANSPOSED_SCAN_OP(cumprod, CumProdOp, long, 2);
+REGISTER_TRANSPOSED_SCAN_OP_PROMOTED(cumsum, CumSumOp, int, long, 2);
+REGISTER_TRANSPOSED_SCAN_OP_PROMOTED(cumprod, CumProdOp, int, long, 2);
+REGISTER_TINY_SCAN_OP_PROMOTED(cumsum, CumSumOp, int, long);
+REGISTER_TINY_SCAN_OP_PROMOTED(cumprod, CumProdOp, int, long);
 
 // Scan with indices operations for cummin/cummax
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, float, 4);
