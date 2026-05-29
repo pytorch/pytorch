@@ -734,12 +734,9 @@ uint64_t computeFlops(
     const std::string& op_name,
     const std::unordered_map<std::string, c10::IValue>& extra_args) {
   if (op_name == kConv2dOp) {
-    if (extra_args.find(kInputSize) == extra_args.end() ||
-        extra_args.find(kWeightSize) == extra_args.end() ||
-        extra_args.find(kGroups) == extra_args.end() ||
-        extra_args.find(kPadding) == extra_args.end() ||
-        extra_args.find(kStride) == extra_args.end() ||
-        extra_args.find(kDilation) == extra_args.end()) {
+    if (!extra_args.contains(kInputSize) || !extra_args.contains(kWeightSize) ||
+        !extra_args.contains(kGroups) || !extra_args.contains(kPadding) ||
+        !extra_args.contains(kStride) || !extra_args.contains(kDilation)) {
       TORCH_WARN(
           "Calculating flops for aten::conv2d requires groups, padding, stride, dilation, input_size, and weight_size in saved arguments.");
       return 0;
@@ -807,8 +804,7 @@ uint64_t computeFlops(
     return conv2d_multiply_factor * minibatch * output_h * output_w * kernel_h *
         kernel_w * in_channels * out_channels / groups;
   } else if (op_name == kMMOp || op_name == kAddMMOp) {
-    if (extra_args.find(kMat1Size) == extra_args.end() ||
-        extra_args.find(kMat2Size) == extra_args.end()) {
+    if (!extra_args.contains(kMat1Size) || !extra_args.contains(kMat2Size)) {
       TORCH_WARN(
           "Calculating flops for ",
           op_name,
@@ -848,8 +844,7 @@ uint64_t computeFlops(
     flops *= gemm_multiply_factor;
     return flops;
   } else if (op_name == kBMMOp || op_name == kBAddBMMOp) {
-    if (extra_args.find(kMat1Size) == extra_args.end() ||
-        extra_args.find(kMat2Size) == extra_args.end()) {
+    if (!extra_args.contains(kMat1Size) || !extra_args.contains(kMat2Size)) {
       TORCH_WARN(
           "Calculating flops for ",
           op_name,
@@ -895,7 +890,7 @@ uint64_t computeFlops(
     flops *= gemm_multiply_factor;
     return flops;
   } else if (op_name == kMulOp) {
-    if (extra_args.find(kMatSize) == extra_args.end()) {
+    if (!extra_args.contains(kMatSize)) {
       TORCH_WARN(
           "Calculating flops for aten::mul.Tensor requires mat_size in saved arguments.");
       return 0;
@@ -914,7 +909,7 @@ uint64_t computeFlops(
     }
     return flops;
   } else if (op_name == kAddOp) {
-    if (extra_args.find(kMatSize) == extra_args.end()) {
+    if (!extra_args.contains(kMatSize)) {
       TORCH_WARN(
           "Calculating flops for aten::add.Tensor requires mat_size in saved arguments.");
       return 0;

@@ -10,7 +10,7 @@ c10::QualifiedName TypeNameUniquer::getUniqueName(c10::ConstNamedTypePtr t) {
   }
 
   auto qualifiedName = t->name().value();
-  if (!used_names_.count(qualifiedName)) {
+  if (!used_names_.contains(qualifiedName)) {
     // We haven't used this qualified name yet, so assign it to this type.
     used_names_.insert(qualifiedName);
     name_map_.emplace(std::move(t), qualifiedName);
@@ -20,7 +20,7 @@ c10::QualifiedName TypeNameUniquer::getUniqueName(c10::ConstNamedTypePtr t) {
   // The qualified name for this type is already in use by another type being
   // serialized. Mangle the name so that we can get a unique name for this type.
   auto mangled = mangler_.mangle(qualifiedName);
-  while (used_names_.count(mangled)) {
+  while (used_names_.contains(mangled)) {
     mangled = mangler_.mangle(qualifiedName);
   }
 

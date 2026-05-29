@@ -79,7 +79,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 
 at::ClassTypePtr getCustomClass(const std::string& class_name) {
   auto ret =
-      customClasses().count(class_name) ? customClasses()[class_name] : nullptr;
+      customClasses().contains(class_name) ? customClasses()[class_name] : nullptr;
   if (ret) {
     RECORD_CUSTOM_CLASS(class_name);
   }

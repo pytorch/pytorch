@@ -616,8 +616,8 @@ void GraphEncoder::TensorTypeToONNXType(
     auto sizes = tensor_type->symbolic_sizes().sizes().value();
     for (const auto i : c10::irange(sizes.size())) {
       shape->add_dim();
-      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+      if ((dynamic_axes.contains(name)) &&
+          (dynamic_axes.at(name).contains(i))) {
         shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
         if (!sizes[i].is_static()) {
           symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
@@ -625,7 +625,7 @@ void GraphEncoder::TensorTypeToONNXType(
       } else if (sizes[i].is_static()) {
         shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
       } else if (assign_dim_param) {
-        if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+        if (!symbol_dim_map_.contains(sizes[i])) {
           symbol_dim_map_[sizes[i]] =
               dim_name_prefix + name + "_dim_" + std::to_string(i);
         }
@@ -1186,7 +1186,7 @@ void GraphEncoder::EncodeLocalFunctionOpsetImport(
     }
     domains_.insert(domain);
 
-    if (custom_domains.find(domain) == custom_domains.end()) {
+    if (!custom_domains.contains(domain)) {
       custom_domains.insert(domain);
 
       auto* custom_imp = func_proto->add_opset_import();
