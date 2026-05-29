@@ -8214,6 +8214,36 @@ class ShapeEnv:
             extra,
         )
 
+    def _maybe_evaluate_bool_short_circuit(
+        self,
+        expr: sympy.Basic,
+        *,
+        size_oblivious: bool,
+        forcing_spec: bool,
+    ) -> sympy.Basic | None:
+        if isinstance(expr, sympy.Or):
+            target = sympy.true
+            target_bool = True
+            fallback = False
+        elif isinstance(expr, sympy.And):
+            target = sympy.false
+            target_bool = False
+            fallback = True
+        else:
+            return None
+
+        for arg in expr.args:
+            result = self.evaluate_expr(
+                arg,
+                size_oblivious=size_oblivious,
+                fallback_value=fallback,
+                forcing_spec=forcing_spec,
+            )
+            if result is target or result is target_bool:
+                return target
+
+        return None
+
     def _evaluate_expr(
         self,
         orig_expr: sympy.Basic,
@@ -8383,6 +8413,14 @@ class ShapeEnv:
                 if new_expr is None:
                     raise AssertionError("new_expr must not be None")
                 if not (new_expr.free_symbols <= self.backed_var_to_val.keys()):
+                    short_circuit_result = self._maybe_evaluate_bool_short_circuit(
+                        new_expr,
+                        size_oblivious=size_oblivious,
+                        forcing_spec=forcing_spec,
+                    )
+                    if short_circuit_result is not None:
+                        return short_circuit_result
+
                     ok = False
 
                     # fallback_value is set when guard_or_true or guard_or_false are used.
