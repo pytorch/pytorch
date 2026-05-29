@@ -479,7 +479,7 @@ static void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto scalar_type = shape_type->scalarType().value();
-    if (!qTypeToValType.contains(scalar_type)) {
+    if (qTypeToValType.find(scalar_type) == qTypeToValType.end()) {
       index++;
       continue;
     }

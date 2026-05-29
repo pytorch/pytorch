@@ -978,7 +978,7 @@ void AOTIModelPackageLoader::load_constants(
 
   std::unordered_map<std::string, at::Tensor> updated_constants_map;
   for (const auto& it : constants_map) {
-    if (fqn_to_constant_name.contains(it.first)) {
+    if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
       updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
     } else {
       TORCH_CHECK(false, "Constant not found: ", it.first);

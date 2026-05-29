@@ -394,7 +394,7 @@ std::string CreateMetricReport(
       metric_names.begin(), metric_names.end());
   arena->ForEachMetric(
       [&ss, &metric_name_set](const std::string& name, MetricData* data) {
-        if (metric_name_set.contains(name)) {
+        if (metric_name_set.find(name) != metric_name_set.end()) {
           EmitMetricInfo(name, data, &ss);
         }
       });
@@ -402,7 +402,7 @@ std::string CreateMetricReport(
       counter_names.begin(), counter_names.end());
   arena->ForEachCounter(
       [&ss, &counter_name_set](const std::string& name, CounterData* data) {
-        if (counter_name_set.contains(name)) {
+        if (counter_name_set.find(name) != counter_name_set.end()) {
           EmitCounterInfo(name, data, &ss);
         }
       });

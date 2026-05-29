@@ -421,7 +421,7 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
     int numKeysToAwait = 0;
     for (auto& key : keys) {
       // Only count keys that have not already been set
-      if (!tcpStore_.contains(key)) {
+      if (tcpStore_.find(key) == tcpStore_.end()) {
         waitingSockets_[key].push_back(socket);
         numKeysToAwait++;
       }
@@ -510,12 +510,12 @@ void TCPStoreMasterDaemon::barrierHandler(int socket) {
 bool TCPStoreMasterDaemon::checkKeys(
     const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
-    return tcpStore_.contains(s);
+    return tcpStore_.count(s) > 0;
   });
 }
 
 void TCPStoreMasterDaemon::addMiscellaneousSocket(int socket) {
-  if (!miscellaneousSockets_.contains(socket)) {
+  if (miscellaneousSockets_.find(socket) == miscellaneousSockets_.end()) {
     miscellaneousSockets_.insert(socket);
   }
 }
@@ -528,7 +528,7 @@ void TCPStoreMasterDaemon::removeMiscellaneousSocket(int socket) {
 }
 
 bool TCPStoreMasterDaemon::isMiscellaneousSocket(int socket) {
-  return miscellaneousSockets_.contains(socket);
+  return miscellaneousSockets_.find(socket) != miscellaneousSockets_.end();
 }
 
 #ifdef _WIN32

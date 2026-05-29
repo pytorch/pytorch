@@ -359,7 +359,7 @@ ModelCompatCheckResult is_compatible(
 
   // Check type table
   for (const auto& type_name : model_info.type_table) {
-    if (!supported_type.contains(type_name)) {
+    if (supported_type.find(type_name) == supported_type.end()) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Primitive type: '" << type_name
@@ -376,7 +376,8 @@ ModelCompatCheckResult is_compatible(
     OperatorInfo model_op_info = op.second;
 
     // Check if operator not present in runtime
-    if (!runtime_info.operator_info.contains(op_name)) {
+    if (runtime_info.operator_info.find(op_name) ==
+        runtime_info.operator_info.end()) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Operator '" << op_name << "' missing from runtime (not found)";

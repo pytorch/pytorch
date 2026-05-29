@@ -1626,7 +1626,7 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(b != nullptr);
       TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
-        if (!expected_live_allocations.contains(b->ptr)) {
+        if (!expected_live_allocations.count(b->ptr)) {
           return false;
         }
 

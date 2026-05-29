@@ -31,10 +31,10 @@ void for_deserialization(
   int version_number{-1};
   int format_number{-1};
 
-  if (m.contains("version_number")) {
+  if (m.find("version_number") != m.end()) {
     version_number = 1;
   }
-  if (m.contains("format_number")) {
+  if (m.find("format_number") != m.end()) {
     format_number = 29;
   }
 

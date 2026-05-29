@@ -457,7 +457,8 @@ convertIValue(
           tensor.numel() != 0) {
         enableRecordFunction(false);
 
-        if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
+        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
+                ob.nodeListForSavingIntegerTensor.end() &&
             !ob.resourceDir.empty()) {
           std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
               std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
@@ -609,7 +610,7 @@ static void handleKernelBackendInfo(
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.contains("kernel_backend")) {
+  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
     fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
     if (fc.kernelBackend == "triton") {
       fc.kernelFile = kwinputs.at("kernel_file").toStringRef();

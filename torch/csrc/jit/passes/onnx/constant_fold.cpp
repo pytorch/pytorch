@@ -545,8 +545,9 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
 static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
   auto parentNode = val->node();
   return (parentNode->kind() == prim::Param &&
-          valsToParamsMap.contains(
-              val)) || // Checks val is a parameter and not a real input
+          valsToParamsMap.find(val) !=
+              valsToParamsMap
+                  .end()) || // Checks val is a parameter and not a real input
       (parentNode->kind() == onnx::Constant && !parentNode->mustBeNone() &&
        parentNode->kindOf(attr::value) ==
            AttributeKind::t); // Check other types?
@@ -554,7 +555,7 @@ static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
 
 static bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
   for (auto input : n->inputs()) {
-    if (valsToParamsMap.contains(input)) {
+    if (valsToParamsMap.find(input) != valsToParamsMap.end()) {
       return true;
     }
   }

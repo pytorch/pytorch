@@ -121,7 +121,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "floor_divide_",
       "floor_divide_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
-  return allowed.contains(name);
+  return allowed.find(name) != allowed.end();
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
