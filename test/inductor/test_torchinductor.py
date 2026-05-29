@@ -3757,9 +3757,9 @@ class CommonTemplate:
             self.assertEqual(fn_opt(x, i), fn(x, i))
 
         code = run_and_get_triton_code(fn_opt, x, i)
-        FileCheck().check_regex(r"tmp\d+ = \(ks0\)\.to\(tl\.float32\)").check(
+        FileCheck().check_regex(r"tmp\d+ = \(ks0\)\.to\(tl\.int64\)").check(
             "libdevice.nearbyint"
-        ).run(code)
+        ).check_regex(r"\)\.to\(tl\.float32\)").run(code)
 
     def test_builtins_round_int_ndigits_pos(self):
         def fn(x, i):
