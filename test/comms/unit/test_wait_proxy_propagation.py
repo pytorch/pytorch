@@ -19,6 +19,14 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 os.environ["TORCHCOMMS_PATCH_FOR_COMPILE"] = "1"
 
+import os
+import sys
+
+
+# Make test/comms importable so `helpers` / `integration` resolve when this
+# file is run directly (run_test.py runs `python comms/unit/<file>.py`).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from helpers.comm_test_helpers import skip_if_torch_compile_not_supported_or_enabled
 
 import torch

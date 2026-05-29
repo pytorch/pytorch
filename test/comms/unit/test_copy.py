@@ -4,6 +4,12 @@
 
 import copy
 import os
+import sys
+
+
+# Make test/comms importable so `helpers` / `integration` resolve when this
+# file is run directly (run_test.py runs `python comms/unit/<file>.py`).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from integration.helpers.TorchCommTestHelpers import TorchCommTestWrapper
 
