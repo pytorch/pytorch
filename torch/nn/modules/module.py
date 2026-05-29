@@ -963,12 +963,17 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+            is_fake_param = isinstance(param, FakeTensor)
+            is_fake_param_applied = isinstance(param_applied, FakeTensor)
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors
-                or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                not is_fake_param
+                and not is_fake_param_applied
+                and (
+                    should_use_swap_tensors
+                    or is_traceable_wrapper_subclass(param_applied)
+                )
             )
 
             param_grad = param.grad

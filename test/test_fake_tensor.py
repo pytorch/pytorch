@@ -2123,6 +2123,26 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device, gpu_device)
 
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_move_module_under_fake_with_swap_future(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        gpu_device = torch.device(GPU_TYPE, 0)
+        old_swap = torch.__future__.get_swap_module_params_on_conversion()
+
+        try:
+            torch.__future__.set_swap_module_params_on_conversion(True)
+            with FakeTensorMode():
+                m = torch.nn.Linear(2, 2)
+                m.to(device=gpu_device)
+        finally:
+            torch.__future__.set_swap_module_params_on_conversion(old_swap)
+
+        for p in m.parameters():
+            self.assertTrue(isinstance(p, FakeTensor))
+            self.assertEqual(p.device, gpu_device)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_move_meta_tensor(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
