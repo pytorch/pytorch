@@ -174,6 +174,40 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(sort.args[2][0].target, "value_expr")
         self.assertEqual(scan.args[1][0].target, "value_expr")
 
+    def test_index_expr_bucketize_values_are_value_sink(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        values = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        boundaries = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        boundary_indices = graph.call_method(
+            "index_expr", (ops, get_index, torch.int64)
+        )
+        bucketize = graph.call_method(
+            "bucketize",
+            (ops, values, boundaries, boundary_indices, torch.int64, False),
+        )
+        graph.output(bucketize)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                values: ValueRanges(0, 2**40),
+                boundaries: ValueRanges(0, 2**40),
+                boundary_indices: ValueRanges(0, 2**40),
+                bucketize: ValueRanges(0, 2),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(values.target, "value_expr")
+        self.assertEqual(boundaries.target, "index_expr")
+        self.assertEqual(boundary_indices.target, "index_expr")
+
     def test_index_expr_masked_subblock_value_use(self):
         graph = Graph()
         ops = graph.placeholder("ops")
@@ -386,6 +420,38 @@ class TestOptimizeIndexing(TestCase):
         convert_index_expr_to_value_expr(loop_body)
 
         self.assertEqual(index_expr.target, "value_expr")
+
+    def test_index_expr_where_condition_value_use(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        condition_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        mul = graph.call_method("mul", (ops, condition_expr, 2147483648))
+        mask = graph.call_method("gt", (ops, mul, 0))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        where = graph.call_method("where", (ops, mask, index_expr, 0))
+        load = graph.call_method("load", (ops, "arg0", where))
+        graph.output(load)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                condition_expr: ValueRanges(0, 2**40),
+                mul: ValueRanges(0, 2**40),
+                mask: ValueRanges(False, True),
+                index_expr: ValueRanges(0, 1),
+                where: ValueRanges(0, 1),
+                load: ValueRanges(0, 1),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(condition_expr.target, "value_expr")
+        self.assertEqual(index_expr.target, "index_expr")
 
     def test_mixed_value_op_clones_value_path(self):
         graph = Graph()

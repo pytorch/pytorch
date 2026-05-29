@@ -18031,6 +18031,23 @@ if RUN_GPU:
             inps = [torch.empty(4096, device=GPU_TYPE)]
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_value_expr_float16_non_integer_casts_before_store(self):
+            def fn(x: torch.Tensor, i: int) -> torch.Tensor:
+                return torch.full(
+                    (4,),
+                    i / 3 + 0.1,
+                    device=x.device,
+                    dtype=torch.float16,
+                )
+
+            fn_opt = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+            inps = [torch.empty(1, device=GPU_TYPE), 4]
+            self.assertEqual(fn_opt(*inps), fn(*inps), atol=0, rtol=0)
+            code = run_and_get_triton_code(fn_opt, *inps)
+            FileCheck().check_regex(r"tmp\d+ = \(ks0\)\.to\(tl\.int64\)").check(
+                ".to(tl.float32)"
+            ).check_regex(r"tmp\d+ = tmp\d+\.to\(tl\.float16\)").run(code)
+
         def test_value_expr_int_to_fp8_cast_uses_float32_intermediate(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
@@ -18097,6 +18114,54 @@ if RUN_GPU:
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_searchsorted_values_preserve_int64_arange(self):
+            def fn(boundaries: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                values = idx * 2147483648
+                return torch.searchsorted(boundaries, values, out_int32=False)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [
+                torch.tensor(
+                    [0, 2147483648, 4294967296, 6442450944, 8589934592],
+                    device=GPU_TYPE,
+                    dtype=torch.int64,
+                ),
+                torch.empty(4, device=GPU_TYPE),
+            ]
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_bucketize_values_preserve_int64_arange(self):
+            def fn(boundaries: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                values = idx * 2147483648
+                return torch.bucketize(values, boundaries, out_int32=False)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [
+                torch.tensor(
+                    [0, 2147483648, 4294967296, 6442450944, 8589934592],
+                    device=GPU_TYPE,
+                    dtype=torch.int64,
+                ),
+                torch.empty(4, device=GPU_TYPE),
+            ]
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_where_index_condition_preserves_int64_arange(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
+                mask = idx * 2147483648 > 0
+                index = torch.where(mask, idx, torch.zeros_like(idx))
+                return x[index]
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.arange(4, device=GPU_TYPE)]
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 

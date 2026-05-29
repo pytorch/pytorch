@@ -266,9 +266,6 @@ def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
         if not _range_expressible_in_32_bits(bounds):
             return True
 
-        if expr.is_Integer:
-            return not _val_expressible_in_32_bits(expr)
-
     return any(
         isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
         for arg in expr.args
@@ -2524,8 +2521,9 @@ class TritonKernelOverrides(TritonOverrides):
             if expr.is_integer:
                 operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
                 result_dtype = operand_dtype
-            elif expr_requires_int64:
-                operand_dtype = torch.int64
+            else:
+                result_dtype = upcast_compute_type(dtype)
+                operand_dtype = torch.int64 if expr_requires_int64 else result_dtype
 
         index_str = cls._value_expr_index_str(indexing, operand_dtype)
         var = cls._emit_expr_indexing(

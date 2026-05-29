@@ -153,7 +153,7 @@ class _IndexValueRule:
     # Inputs in the LoopBody FX node that act as terminal sinks.
     indexing_sinks: tuple[Any, ...] = ()
     value_sinks: tuple[Any, ...] = ()
-    # Inputs that receive value use from this op's result. None means all inputs.
+    # Inputs whose values determine this op's result. None means all inputs.
     value_inputs: tuple[Any, ...] | None = ()
 
 
@@ -222,7 +222,6 @@ class _IndexValueOpsHandler:
         "trunc_to_int",
         "truncdiv",
         "value_expr",
-        "where",
     )
 
     def __new__(cls) -> "_IndexValueOpsHandler":
@@ -423,6 +422,12 @@ class _IndexValueOpsHandler:
     ) -> _IndexValueRule:
         return self.store(name, index, value)
 
+    def where(self, condition: Any, input: Any, other: Any) -> _IndexValueRule:
+        return _IndexValueRule(
+            value_sinks=(condition,),
+            value_inputs=(input, other),
+        )
+
     # LoopBody pseudo call_module rules.
 
     def masked_subblock(self, mask: Any, other: Any) -> _IndexValueRule:
@@ -526,12 +531,9 @@ def _compute_graph_uses(
             continue
 
         if demand & _INDEXING_DEMAND and node.target != "load":
-            if _is_masked_subblock(node):
-                if rule is not None:
-                    value_inputs = rule.value_inputs
-                    assert value_inputs is not None
-                    for arg in value_inputs:
-                        mark_rule_arg(node, arg, _INDEXING_DEMAND)
+            if rule is not None and rule.value_inputs is not None:
+                for arg in rule.value_inputs:
+                    mark_rule_arg(node, arg, _INDEXING_DEMAND)
             else:
                 mark_args(node, _INDEXING_DEMAND)
 
