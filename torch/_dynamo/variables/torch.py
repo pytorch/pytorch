@@ -531,7 +531,7 @@ class BaseTorchVariable(VariableTracker):
         elif is_wrapper_or_member_descriptor(value) or isinstance(
             value, torch._dynamo.compiled_autograd.Op
         ):
-            # Dont need to guard on wrappers
+            # Don't need to guard on wrappers
             pass
         else:
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
@@ -599,6 +599,11 @@ class BaseTorchVariable(VariableTracker):
 
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), False
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
