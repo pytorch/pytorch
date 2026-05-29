@@ -4,21 +4,22 @@
 import dataclasses
 import functools
 import importlib
-from collections.abc import Callable, Mapping, Sequence
+import warnings
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, Literal, NamedTuple
+from typing import Any, cast, Literal
 
 import sympy
 from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import V
+from .aux_vectorization import select_mask_mod_vec_size, select_score_mod_vec_size
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -26,11 +27,6 @@ from .common import (
     load_flex_template,
     SubgraphResults,
 )
-
-
-# Match one vectorized mask_mod call to one 32-bit R2P keep mask; on Blackwell,
-# vec32 aux loads are close to vec16.
-DEFAULT_MASK_MOD_VEC_SIZE = 32
 
 
 @dataclasses.dataclass
@@ -50,56 +46,6 @@ class FlexFlashConfig:
     score_mod_vec_size: int | None = None
     mask_mod_vec_size: int | None = None
     mask_mod_vec_size_forced: bool = False
-
-
-class AuxLoadVecInfo(NamedTuple):
-    """Vectorization result for a captured aux tensor load.
-
-    Args:
-        contiguous_vec_size: Largest finite KV-lane vector width for adjacent
-            memory loads, or ``None`` when this is not a contiguous vector load.
-        is_lane_uniform: Whether one scalar value can be reused for every KV lane.
-    """
-
-    contiguous_vec_size: int | None
-    is_lane_uniform: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class AuxIndexedTensor:
-    """Captured aux tensor together with indices accumulated from partial indexing.
-
-    Args:
-        buffer: The original captured tensor being indexed.
-        indices: Prefix indices already applied by earlier partial index ops.
-            For ``x[b][h][q, kv]``, the intermediate ``x[b][h]`` stores
-            ``(b, h)`` until the final index completes the load.
-    """
-
-    buffer: TensorBox
-    indices: tuple[object, ...]
-
-
-def _make_fx_index_symbols(
-    q_idx_node: torch.fx.Node,
-    kv_idx_node: torch.fx.Node,
-    non_lane_index_nodes: Sequence[torch.fx.Node] = (),
-) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
-    """Map FX index placeholders to SymPy expressions for lane analysis.
-
-    q and kv get stable base symbols because vectorization is analyzed across
-    KV lanes. Batch/head placeholders are only needed when they appear in aux
-    indices, so callers pass those through ``non_lane_index_nodes``.
-    """
-    q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
-    kv_idx = sympy.Symbol("kv_idx", integer=True, nonnegative=True)
-    index_symbols = {
-        node: sympy.Symbol(node.name, integer=True, nonnegative=True)
-        for node in non_lane_index_nodes
-    }
-    index_symbols[q_idx_node] = q_idx
-    index_symbols[kv_idx_node] = kv_idx
-    return q_idx, kv_idx, index_symbols
 
 
 def get_flex_flash_fwd_configs(
@@ -154,273 +100,6 @@ def get_flex_flash_fwd_configs(
     return configs
 
 
-def select_mask_mod_vec_size(
-    *,
-    has_mask_mod: bool,
-    has_mask_aux_tensors: bool,
-    supports_mask_mod_vec: bool,
-    graph_module: GraphModule | None,
-    other_buffers: Sequence[TensorBox],
-) -> int | None:
-    """Use mask_mod's (b, h, q, kv) ABI; vec32 matches the packed R2P mask width."""
-    if not has_mask_mod or not supports_mask_mod_vec:
-        return None
-    if not has_mask_aux_tensors:
-        return DEFAULT_MASK_MOD_VEC_SIZE
-
-    vec_size = _select_aux_mod_vec_size(
-        graph_module,
-        other_buffers,
-        q_idx_placeholder=2,
-        kv_idx_placeholder=3,
-        max_vec_size=32,
-        min_index_rank_for_contiguous_load=2,
-        allow_gather_loads=True,
-        require_contiguous_load=True,
-    )
-    return vec_size if vec_size > 1 else None
-
-
-def select_score_mod_vec_size(
-    *,
-    has_score_mod: bool,
-    has_aux_tensors: bool,
-    is_sm100_or_later: bool,
-    graph_module: GraphModule | None,
-    other_buffers: Sequence[TensorBox],
-) -> int | None:
-    """Use score_mod's (score, b, h, q, kv) ABI; vec8 is the SM100 CuTe kernel cap."""
-    if not has_score_mod or not has_aux_tensors:
-        return None
-    if not is_sm100_or_later:
-        return 1
-    return _select_aux_mod_vec_size(
-        graph_module,
-        other_buffers,
-        q_idx_placeholder=3,
-        kv_idx_placeholder=4,
-        max_vec_size=8,
-        non_lane_placeholder_start=1,
-    )
-
-
-def _select_aux_mod_vec_size(
-    graph_module: GraphModule | None,
-    other_buffers: Sequence[TensorBox],
-    *,
-    q_idx_placeholder: int,
-    kv_idx_placeholder: int,
-    max_vec_size: int,
-    min_index_rank_for_contiguous_load: int = 1,
-    allow_gather_loads: bool = False,
-    require_contiguous_load: bool = False,
-    non_lane_placeholder_start: int = 0,
-) -> int:
-    """Choose a safe vector width for captured tensor loads.
-
-    Vectorization is enabled from captured tensor loads that can be emitted as
-    direct contiguous vector loads or lane-uniform scalar loads. By default, any
-    load requiring gather semantics disables vectorization. Mask mods can allow
-    gather loads so one vectorizable aux load still enables packed/R2P mask
-    application while unrelated aux loads stay on the per-lane gather path.
-    """
-    if graph_module is None:
-        return 1
-
-    placeholders = [
-        node for node in graph_module.graph.nodes if node.op == "placeholder"
-    ]
-    num_fixed_placeholders = kv_idx_placeholder + 1
-    if len(placeholders) < num_fixed_placeholders:
-        return 1
-
-    aux_indexed_tensors = {
-        placeholder: AuxIndexedTensor(buffer, ())
-        for placeholder, buffer in zip(
-            placeholders[num_fixed_placeholders:], other_buffers
-        )
-    }
-    non_lane_index_nodes = placeholders[non_lane_placeholder_start:q_idx_placeholder]
-    selected_vec_size = max_vec_size
-    found_vectorizable_load = False
-    found_contiguous_load = False
-    for node in graph_module.graph.nodes:
-        if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
-            continue
-        buffer_node, indices = node.args
-        if buffer_node not in aux_indexed_tensors:
-            continue
-        indexed_tensor = aux_indexed_tensors[buffer_node]
-        if not isinstance(indices, (list, tuple)) or not indices:
-            if allow_gather_loads:
-                continue
-            return 1
-        full_indices = indexed_tensor.indices + tuple(indices)
-        rank = len(indexed_tensor.buffer.get_size())
-        if len(full_indices) < rank:
-            if _is_safe_partial_aux_index(
-                full_indices,
-                placeholders[q_idx_placeholder],
-                placeholders[kv_idx_placeholder],
-                non_lane_index_nodes,
-            ):
-                aux_indexed_tensors[node] = AuxIndexedTensor(
-                    indexed_tensor.buffer, full_indices
-                )
-            elif not allow_gather_loads:
-                return 1
-            continue
-        if len(full_indices) > rank:
-            if allow_gather_loads:
-                continue
-            return 1
-        aux_load_vec_info = direct_aux_load_vec_size_and_kind(
-            full_indices,
-            indexed_tensor.buffer,
-            placeholders[q_idx_placeholder],
-            placeholders[kv_idx_placeholder],
-            non_lane_index_nodes=non_lane_index_nodes,
-            max_vec_size=max_vec_size,
-            min_index_rank_for_contiguous_load=min_index_rank_for_contiguous_load,
-        )
-        if aux_load_vec_info.is_lane_uniform:
-            found_vectorizable_load = True
-            continue
-        if aux_load_vec_info.contiguous_vec_size is None:
-            if allow_gather_loads:
-                continue
-            return 1
-        selected_vec_size = min(
-            selected_vec_size, aux_load_vec_info.contiguous_vec_size
-        )
-        found_vectorizable_load = True
-        found_contiguous_load = True
-
-    if require_contiguous_load and not found_contiguous_load:
-        return 1
-    return selected_vec_size if found_vectorizable_load else 1
-
-
-def _is_safe_partial_aux_index(
-    indices: tuple[object, ...],
-    q_idx_node: torch.fx.Node,
-    kv_idx_node: torch.fx.Node,
-    non_lane_index_nodes: Sequence[torch.fx.Node],
-) -> bool:
-    _, kv_idx, index_symbols = _make_fx_index_symbols(
-        q_idx_node, kv_idx_node, non_lane_index_nodes
-    )
-    for index in indices:
-        expr = _fx_aux_index_to_sympy(index, index_symbols)
-        if expr is None or kv_idx in expr.free_symbols:
-            return False
-    return True
-
-
-def direct_aux_load_vec_size_and_kind(
-    indices: object,
-    buffer: TensorBox,
-    q_idx_node: torch.fx.Node,
-    kv_idx_node: torch.fx.Node,
-    non_lane_index_nodes: Sequence[torch.fx.Node] = (),
-    max_vec_size: int = 8,
-    min_index_rank_for_contiguous_load: int = 1,
-) -> AuxLoadVecInfo:
-    """Return vector-load information for a captured aux load.
-
-    contiguous_vec_size is the largest safe finite KV-lane vector width for an
-    adjacent-memory load. Lane-uniform scalar loads are represented separately
-    with is_lane_uniform=True because they do not have a natural finite width.
-    non_lane_index_nodes are placeholders such as batch/head that may appear in
-    non-KV prefix dimensions. min_index_rank_for_contiguous_load excludes
-    lower-rank loads from contiguous-vector consideration while still allowing
-    uniform loads.
-    """
-    if not isinstance(indices, (list, tuple)) or not indices:
-        return AuxLoadVecInfo(None, False)
-    assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
-
-    _, kv_idx, index_symbols = _make_fx_index_symbols(
-        q_idx_node, kv_idx_node, non_lane_index_nodes
-    )
-    index_exprs = [_fx_aux_index_to_sympy(index, index_symbols) for index in indices]
-    if any(expr is None for expr in index_exprs):
-        return AuxLoadVecInfo(None, False)
-    if all(kv_idx not in expr.free_symbols for expr in index_exprs):
-        return AuxLoadVecInfo(None, True)
-
-    last_expr = index_exprs[-1]
-    if kv_idx not in last_expr.free_symbols:
-        return AuxLoadVecInfo(None, False)
-    if len(indices) < min_index_rank_for_contiguous_load:
-        return AuxLoadVecInfo(None, False)
-
-    prefix_exprs = index_exprs[:-1]
-    if any(kv_idx in expr.free_symbols for expr in prefix_exprs):
-        return AuxLoadVecInfo(None, False)
-
-    sizes = buffer.get_size()
-    strides = buffer.get_stride()
-    if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
-        return AuxLoadVecInfo(None, False)
-
-    # FlashAttention groups vectorized mod calls across consecutive KV lanes.
-    offset = buffer.get_layout().offset
-    vec_size = max_vec_size
-    while vec_size >= 2:
-        lane_info = classify_lane_expr(last_expr, kv_idx, max_width=vec_size)
-        if (
-            V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
-            and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
-            and all(
-                V.graph.sizevars.statically_known_multiple_of(stride, vec_size)
-                for stride in strides[:-1]
-            )
-            and lane_info.is_contiguous
-        ):
-            return AuxLoadVecInfo(vec_size, False)
-        vec_size //= 2
-    return AuxLoadVecInfo(None, False)
-
-
-def _fx_aux_index_to_sympy(
-    index: object,
-    index_symbols: Mapping[torch.fx.Node, sympy.Expr],
-) -> sympy.Expr | None:
-    if isinstance(index, int | sympy.Integer):
-        return sympy.Integer(index)
-    if not isinstance(index, torch.fx.Node):
-        return None
-    if index in index_symbols:
-        return index_symbols[index]
-    if index.op != "call_function":
-        return None
-
-    args = index.args
-    target = index.target
-    if len(args) < 2:
-        return None
-    lhs = _fx_aux_index_to_sympy(args[0], index_symbols)
-    rhs = _fx_aux_index_to_sympy(args[1], index_symbols)
-    if lhs is None or rhs is None:
-        return None
-    match target:
-        case torch.ops.aten.add.Tensor | torch.ops.aten.add.Scalar:
-            return V.graph.sizevars.simplify(lhs + rhs)
-        case torch.ops.aten.sub.Tensor | torch.ops.aten.sub.Scalar:
-            return V.graph.sizevars.simplify(lhs - rhs)
-        case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
-            return V.graph.sizevars.simplify(lhs * rhs)
-        case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
-            return ModularIndexing(lhs, 1, rhs)
-        case torch.ops.aten.div.Tensor_mode if (
-            index.kwargs.get("rounding_mode") == "floor"
-        ):
-            return FloorDiv(lhs, rhs)
-        case _:
-            return None
-
-
 def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:
     return [FlexFlashConfig()]
 
@@ -443,7 +122,6 @@ def ensure_flash_available() -> bool:
 
 
 from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
-from ...codegen.cutedsl.lane_analysis import classify_lane_expr
 
 
 flash_attention_cutedsl_template = CuteDSLTemplate(
@@ -916,6 +594,10 @@ def create_flex_flash_attention_backward_kernel(
     q_indices: TensorBox | None = None,
     full_q_num_blocks: TensorBox | None = None,
     full_q_indices: TensorBox | None = None,
+    dq_write_order: TensorBox | None = None,
+    dq_write_order_full: TensorBox | None = None,
+    dq_kv_order: TensorBox | None = None,
+    dq_kv_order_spt: bool | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
@@ -995,6 +677,82 @@ def create_flex_flash_attention_backward_kernel(
             ]
         )
 
+    has_dq_write_order = dq_write_order is not None
+    if has_dq_write_order:
+        input_nodes.append(dq_write_order)
+        if dq_write_order_full is not None:
+            input_nodes.append(dq_write_order_full)
+    has_dq_kv_order = dq_kv_order is not None and has_dq_write_order
+    dq_kv_order_spt_for_flash = dq_kv_order_spt if has_dq_write_order else None
+    if has_dq_kv_order:
+        input_nodes.append(dq_kv_order)
+
+    supports_dq_kv_order = False
+    supports_spt = False
+    if has_block_mask:
+        # pyrefly: ignore[missing-import]
+        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+
+        block_sparse_fields = getattr(BlockSparseTensorsTorch, "_fields", ())
+        supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
+        supports_spt = "spt" in block_sparse_fields
+        if has_dq_kv_order and not supports_dq_kv_order:
+            raise NotImplementedError(
+                "Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support"
+            )
+        if dq_kv_order_spt_for_flash is not None and not (
+            supports_dq_kv_order or supports_spt
+        ):
+            raise NotImplementedError(
+                "Boolean dq_kv_order requires flash-attn-4 with dq_kv_order or spt support"
+            )
+
+    deterministic_requested = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    deterministic_backward_enabled = deterministic_requested
+    if deterministic_requested and has_block_mask:
+        major, _ = torch.cuda.get_device_capability(device)
+        missing_dq_write_order = dq_write_order is None or (
+            full_q_num_blocks is not None and dq_write_order_full is None
+        )
+        missing_dq_kv_order = not (
+            has_dq_kv_order or dq_kv_order_spt_for_flash is not None
+        )
+        if major < 10:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise NotImplementedError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires SM100+ (compute capability >= 10.0). "
+                    "Use BACKEND='TRITON' for deterministic backward on older architectures."
+                )
+        elif missing_dq_write_order:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise ValueError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires dQ write-order metadata. Create the block mask with "
+                    "create_block_mask(..., compute_dq_write_order=True)."
+                )
+        elif missing_dq_kv_order:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise ValueError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires dQ KV scheduler-order metadata. Create the block mask with "
+                    "create_block_mask(..., compute_dq_write_order=True)."
+                )
+    if deterministic_requested and not deterministic_backward_enabled:
+        warnings.warn(
+            "flex_attention backward with block_mask and BACKEND='FLASH' does not have "
+            "a deterministic implementation for this configuration, but you set "
+            "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+            "Running non-deterministic backward.",
+        )
+
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
     subgraphs = []
     if has_score_mod:
@@ -1018,6 +776,13 @@ def create_flex_flash_attention_backward_kernel(
                 HAS_SCORE_MOD=has_score_mod,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 HAS_BLOCK_MASK=has_block_mask,
+                HAS_DQ_WRITE_ORDER=has_dq_write_order,
+                HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
+                HAS_DQ_KV_ORDER=has_dq_kv_order,
+                DQ_KV_ORDER_SPT=dq_kv_order_spt_for_flash,
+                SUPPORTS_DQ_KV_ORDER=supports_dq_kv_order,
+                SUPPORTS_SPT=supports_spt,
+                DETERMINISTIC_BACKWARD_ENABLED=deterministic_backward_enabled,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
