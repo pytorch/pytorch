@@ -22,7 +22,7 @@ import enum
 import functools
 import inspect
 import types
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -107,11 +107,10 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)  # pyrefly: ignore[bad-argument-type]
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # OpaqueObjectClassVariable wraps the CLASS, not an instance.
+        # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
+        return hash(self.value), False
 
     def nb_or_impl(
         self,
@@ -178,7 +177,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the
@@ -328,6 +327,34 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return f"{self.__class__.__name__}({value})"
 
     __repr__ = __str__
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        from .constant import ConstantVariable
+        from .object_protocol import object_richcompare
+
+        # Try value-based comparison first. TorchScriptObjectVariable wraps
+        # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
+        # does value comparison. Falling through to object_richcompare would
+        # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
+        # would be False instead of True).
+        try:
+            self_val = self.as_python_constant()
+        except NotImplementedError:
+            return object_richcompare(self, tx, other, op)
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        try:
+            result = getattr(type(self_val), op)(self_val, other_val)
+            return ConstantVariable.create(result)
+        except Exception:
+            return ConstantVariable.create(NotImplemented)
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -538,16 +565,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def is_python_hashable(self) -> bool:
-        try:
-            self.get_python_hash()
-            return True
-        except TypeError:
-            return False
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        from ..exc import raise_type_error
 
-    def get_python_hash(self) -> int:
         real_obj = self.as_python_constant()
-        return hash(real_obj)
+        try:
+            return hash(real_obj), False
+        except TypeError:
+            raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
