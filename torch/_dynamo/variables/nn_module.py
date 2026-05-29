@@ -107,7 +107,31 @@ def initialize_lazy_module(
             elif isinstance(x, (list, tuple, set)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
-                return get_fake_value(x.node, tx)
+                fake_value = get_fake_value(x.node, tx)
+                if isinstance(fake_value, torch.Tensor):
+                    concrete_shape = tuple(
+                        s.node.hint if isinstance(s, torch.SymInt) else s
+                        for s in fake_value.shape
+                    )
+                    empty_tensor = torch.empty(
+                        concrete_shape,
+                        dtype=fake_value.dtype,
+                        device=fake_value.device,
+                        layout=fake_value.layout,
+                        requires_grad=fake_value.requires_grad,
+                    )
+                    fake_value = tx.output.fake_mode.from_tensor(
+                        empty_tensor, static_shapes=True
+                    )
+                elif isinstance(
+                    fake_value, (torch.SymInt, torch.SymFloat, torch.SymBool)
+                ):
+                    fake_value = (
+                        fake_value.node.hint
+                        if fake_value.node.hint is not None
+                        else fake_value.node.constant
+                    )
+                return fake_value
             else:
                 return x
 

@@ -1511,8 +1511,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1691,8 +1689,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -1729,6 +1725,29 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_lazy_module_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.LazyBatchNorm2d()
+                self.fc = torch.nn.LazyLinear(10)
+
+            def forward(self, x):
+                x = self.bn(x)
+                x = x.flatten(1)
+                x = self.fc(x)
+                return x
+
+        m = M()
+        opt_m = torch.compile(m, backend="eager", dynamic=True)
+        inp = torch.randn(1, 3, 16, 16)
+        result = opt_m(inp)
+        self.assertEqual(result.shape, (1, 10))
+        self.assertIsInstance(m.bn, torch.nn.BatchNorm2d)
+        self.assertIsInstance(m.fc, torch.nn.Linear)
+        self.assertEqual(m.bn.num_features, 3)
+        self.assertEqual(m.fc.in_features, 768)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
