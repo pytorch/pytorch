@@ -36,6 +36,7 @@ from torch._inductor.utils import (
 from torch._library import capture_triton, wrap_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
@@ -5974,6 +5975,9 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
     @requires_cuda_and_triton
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8, "fp8e4nv (float8_e4m3fn) requires SM 8.9+"
+    )
     def test_wrap_fusion_norm_quant(self):
         @triton.jit
         def _normalization_fwd(
