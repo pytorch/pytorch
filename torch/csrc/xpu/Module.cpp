@@ -353,6 +353,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
 #endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
+      // TODO: Expose cache size by level when available from SYCL
+      .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
 #if SYCL_COMPILER_VERSION >= 20250000
       .def_property_readonly("architecture", get_device_architecture)
@@ -375,6 +377,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, last_level_cache_size="
+                   << prop.global_mem_cache_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
