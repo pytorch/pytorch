@@ -1693,6 +1693,87 @@ class f(torch.nn.Module):
             x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
             torch.ops.aten.avg_pool1d(x, [2], [2])
 
+    def test_pixel_shuffle_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, u(shape_env), 3, 3), device="meta")
+            torch.ops.aten.pixel_shuffle(x, 1)
+
+    def test_pdist_forward_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((self._make_unbacked_size(shape_env), 5), device="meta")
+            torch.ops.aten._pdist_forward(x, 2.0)
+
+    def test_reflection_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad2d(x, [1, 1, 1, 1])
+
+    def test_replication_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.replication_pad2d(x, [1, 1, 1, 1])
+
+    def test_reflection_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad1d(x, [1, 1])
+
+    def test_replication_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.replication_pad1d(x, [1, 1])
+
+    def test_reflection_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.reflection_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+    def test_replication_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
