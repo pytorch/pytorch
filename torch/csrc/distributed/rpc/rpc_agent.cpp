@@ -253,14 +253,14 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
-std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
+std::atomic<std::shared_ptr<RpcAgent>> RpcAgent::currentRpcAgent_{nullptr};
 
 bool RpcAgent::isCurrentRpcAgentSet() {
-  return std::atomic_load(&currentRpcAgent_) != nullptr;
+  return currentRpcAgent_.load() != nullptr;
 }
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
-  std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
+  std::shared_ptr<RpcAgent> agent = currentRpcAgent_.load();
   TORCH_CHECK(
       agent,
       "Current RPC agent is not set! Did you initialize the RPC "
@@ -273,9 +273,9 @@ void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
     std::shared_ptr<RpcAgent> previousAgent;
     // Use compare_exchange so that we don't actually perform the exchange if
     // that would trigger the assert just below. See:
-    // https://en.cppreference.com/w/cpp/atomic/atomic_compare_exchange
-    std::atomic_compare_exchange_strong(
-        &currentRpcAgent_, &previousAgent, std::move(rpcAgent));
+    // https://en.cppreference.com/w/cpp/atomic/atomic/compare_exchange
+    currentRpcAgent_.compare_exchange_strong(
+        previousAgent, std::move(rpcAgent));
     TORCH_INTERNAL_ASSERT(
         previousAgent == nullptr, "Current RPC agent is set!");
   } else {
@@ -283,7 +283,7 @@ void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
     // don't need to, as the only case that would trigger the assert is if we
     // replaced nullptr with nullptr, which we can just do as it has no effect.
     std::shared_ptr<RpcAgent> previousAgent =
-        std::atomic_exchange(&currentRpcAgent_, std::move(rpcAgent));
+        currentRpcAgent_.exchange(std::move(rpcAgent));
     TORCH_INTERNAL_ASSERT(
         previousAgent != nullptr, "Current RPC agent is not set!");
   }

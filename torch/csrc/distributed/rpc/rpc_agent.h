@@ -274,7 +274,7 @@ class TORCH_API RpcAgent {
   std::atomic<bool> rpcAgentRunning_;
 
  private:
-  static std::shared_ptr<RpcAgent> currentRpcAgent_;
+  static std::atomic<std::shared_ptr<RpcAgent>> currentRpcAgent_;
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
