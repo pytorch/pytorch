@@ -29,6 +29,7 @@ Graph: TypeAlias = torch.fx.Graph
 _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
+    torch.ops.streams.wait_stream.default,
     torch.ops.streams.synchronize_event.default,
     torch.ops.streams.synchronize_device.default,
     torch.ops.streams.synchronize_stream.default,
@@ -503,6 +504,23 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         found_sync = True
                         _wrap_sync_node(gm, node, all_stream_deps, visited)
                     stream_to_nodes.clear()
+                    node = next_node
+                    continue
+
+                # wait_stream(waiting, waited_on) creates a dependency on
+                # the waited_on stream: all prior work there must complete
+                # before the waiting stream proceeds.
+                if node.target is torch.ops.streams.wait_stream.default:
+                    waited_on_stream: int = node.args[1]  # type: ignore[assignment]
+                    deps_before_sync = list(stream_to_nodes.get(waited_on_stream, ()))
+                    if None in stream_to_nodes and waited_on_stream is not None:
+                        deps_before_sync.extend(stream_to_nodes[None])
+                    if deps_before_sync:
+                        found_sync = True
+                        _wrap_sync_node(gm, node, deps_before_sync, visited)
+                    stream_to_nodes[waited_on_stream] = []
+                    if None in stream_to_nodes:
+                        stream_to_nodes[None] = []
                     node = next_node
                     continue
 
