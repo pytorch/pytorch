@@ -4,7 +4,9 @@ import json
 import os
 import pprint
 import sys
+import unittest
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -12,6 +14,14 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -451,6 +461,10 @@ class TestDynamoTimed(TestCase):
             "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148093",
+    )
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -1256,6 +1270,29 @@ class TestDynamoTimed(TestCase):
         self.assertEqual(compilation_events[0].param_numel, 24)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
         self.assertEqual(compilation_events[0].param_count, 3)
+
+
+class TestTimedSync(TestCase):
+    def test_timed_syncs_on_accelerator(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.utils import timed
+
+        called = []
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+        ):
+            timed(gm, inputs, times=1)
+
+        # once before loop + once per iteration for times=1
+        self.assertEqual(len(called), 2)
+
+
+instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
 
 
 class TestInductorConfigParsingForLogging(TestCase):
