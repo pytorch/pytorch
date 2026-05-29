@@ -10034,13 +10034,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return aten.bernoulli(a)
 
-        opt_fn = torch.compile(fn, backend="inductor")
-        a = torch.full((4,), 2.0, device=self.device)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected p_in >= 0 && p_in <= 1 to be true, but got false",
-        ):
-            opt_fn(a)
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(1)
+            opt_fn = torch.compile(fn, backend="inductor")
+            a = torch.full((4,), 2.0, device=self.device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected p_in >= 0 && p_in <= 1 to be true, but got false",
+            ):
+                opt_fn(a)
+        finally:
+            torch.set_num_threads(num_threads)
 
     @requires_gpu_and_triton
     @config.patch(force_disable_caches=True)

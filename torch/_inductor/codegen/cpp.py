@@ -2182,15 +2182,6 @@ class CppKernel(Kernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def device_assert_async(self, cond, msg):
-        if isinstance(cond, CppCSEVariable) and cond.is_vec:
-            if self.tail_size:
-                mask_type = self._get_mask_type(torch.float)
-                cond = (
-                    f"{mask_type}::set({mask_type}::from(1)"
-                    f", ({cond}), {cexpr_index(self.tail_size)}).all_masked()"
-                )
-            else:
-                cond = f"({cond}).all_masked()"
         self.compute.writeline(
             f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0));'
         )
@@ -2757,6 +2748,18 @@ class CppVecKernel(CppKernel):
         assert mask.dtype == torch.bool, repr(mask)
         num_vectors = self._get_num_vectors(dtype)
         return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
+
+    def device_assert_async(self, cond, msg):
+        if isinstance(cond, CppCSEVariable) and cond.is_vec:
+            if self.tail_size:
+                mask_type = self._get_mask_type(torch.float)
+                cond = (
+                    f"{mask_type}::set({mask_type}::from(1)"
+                    f", ({cond}), {cexpr_index(self.tail_size)}).all_masked()"
+                )
+            else:
+                cond = f"({cond}).all_masked()"
+        super().device_assert_async(cond, msg)
 
     def _get_vec_load_line(
         self,

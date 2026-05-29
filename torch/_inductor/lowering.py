@@ -2955,13 +2955,14 @@ def bernoulli_default(
 
     def inner_fn(index):
         p = ops.to_dtype(x_loader(index), torch.float32)
-        ops.device_assert_async(
-            ops.and_(
-                ops.le(ops.constant(0, torch.float32), p),
-                ops.le(p, ops.constant(1, torch.float32)),
-            ),
-            msg,
-        )
+        if device.type != "cpu" or config.cpu_backend == "cpp":
+            ops.device_assert_async(
+                ops.and_(
+                    ops.le(ops.constant(0, torch.float32), p),
+                    ops.le(p, ops.constant(1, torch.float32)),
+                ),
+                msg,
+            )
         return ops.to_dtype(ops.lt(rand_fn(index), p), dtype)
 
     result = Pointwise.create(
