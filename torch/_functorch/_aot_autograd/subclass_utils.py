@@ -434,16 +434,23 @@ def remap_unwrapped_subclass_arg_indices(
     new_ind = 0
     remapped_static_indices = []
     for i, arg in enumerate(wrapped_args):
-        num_indices = 1
-        if is_traceable_wrapper_subclass(arg):
-            num_indices = (
-                len(get_plain_tensors(arg, out=[]))
-                + len(enumerate_filter_symints(arg.size()))
-                + len(enumerate_filter_symints(arg.stride()))
+        if not is_traceable_wrapper_subclass(arg):
+            if i in static_input_indices_set and isinstance(arg, Tensor):
+                remapped_static_indices.append(new_ind)
+            new_ind += 1
+            continue
+
+        if not isinstance(arg, Tensor):
+            raise AssertionError(
+                f"expected Tensor for traceable wrapper subclass, got {type(arg)}"
             )
 
-        for _ in range(num_indices):
-            if i in static_input_indices_set:
+        unwrapped_args, _ = unwrap_tensor_subclasses(
+            [arg], [DummyAOTInput(i)], append_symints=True
+        )
+
+        for unwrapped_arg in unwrapped_args:
+            if i in static_input_indices_set and isinstance(unwrapped_arg, Tensor):
                 remapped_static_indices.append(new_ind)
 
             new_ind += 1
