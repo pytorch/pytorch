@@ -86,7 +86,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
     }
 
     // bias is optional
-    if (vmap.find("bias") != vmap.end()) {
+    if (vmap.contains("bias")) {
       auto bias = toIValue(match.values_map.at(vmap.at("bias")));
       if (bias.has_value() && bias.value().isTensor()) {
         const at::Tensor& bias_t = bias.value().toTensor();
@@ -98,7 +98,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
     }
 
     // z is optional
-    if (vmap.find("z") != vmap.end()) {
+    if (vmap.contains("z")) {
       auto z = toIValue(match.values_map.at(vmap.at("z")));
       if (z.has_value() && z.value().isTensor()) {
         const at::Tensor& z_t = z.value().toTensor();
