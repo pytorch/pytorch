@@ -432,7 +432,8 @@ def _exclusive_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
         start
         + num_physical_cores_per_device
         + (
-            1 if original_device_relative_index
+            1
+            if original_device_relative_index
             < num_devices_to_give_one_extra_physical_core
             else 0
         )
