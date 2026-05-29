@@ -6184,7 +6184,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
-        self.generator_just_started = True
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
@@ -6215,7 +6214,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.push(res)
 
     def RETURN_GENERATOR(self, inst: Instruction):
-        self.generator_just_started = False
         self.symbolic_result = self.funcvar
         raise ReturnValueOp
 
