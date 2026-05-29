@@ -302,7 +302,7 @@ class BlockingAsyncStager(AsyncStager):
 
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 

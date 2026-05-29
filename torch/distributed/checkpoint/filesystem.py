@@ -606,7 +606,7 @@ class _FileSystemWriter(StorageWriter):
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
@@ -997,9 +997,9 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)

@@ -201,7 +201,7 @@ class _PipelineStageBase(ABC):
         self.args_recv_info: dict[int, tuple[_RecvInfo, ...]] = {}
         self.act_send_info: dict[int, list] = {}
 
-        # Backward infra will created lazily
+        # Backward infra will be created lazily
         self.grad_recv_info: dict = {}
         self.grad_send_info: list | None = None
 

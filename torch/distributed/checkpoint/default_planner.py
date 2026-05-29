@@ -348,7 +348,7 @@ class DefaultLoadPlanner(LoadPlanner):
             # 2. If we found a missing key, we first convert the keys back to
             #    the key format of v2.3
             # 3. If the previous missing keys are in the v2.3 keys, we assume
-            #    this is a old checkpoint.
+            #    this is an old checkpoint.
             # 4. Pass the state_dict to `create_default_local_load_plan()`,
             #    which has the logic to check missing for allow_partial_load.
             # So for 1.2 and 1.4 cases, we delegate allow_partial_load check to
@@ -548,7 +548,7 @@ def create_default_local_save_plan(
                 requests += _create_write_items(fqn, obj)
         else:
             # For the plain tensor and non-tensor values, add the request for all
-            # the ranks. Coordinator will decides whether to deduplicate the
+            # the ranks. Coordinator will decide whether to deduplicate the
             # values based on the keys.
             requests += _create_write_items(fqn, obj)
 
