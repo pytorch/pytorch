@@ -110,6 +110,12 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) = 0;
+  // Best-effort cleanup hook for ProcessGroup teardown. Implementations should
+  // release resources associated with `group_name` while the ProcessGroup
+  // communicator is still live. Existing handles for that group may be
+  // invalidated after this returns.
+  virtual void release_group_resources(
+      const std::optional<std::string>& group_name) {}
   virtual bool has_multicast_support(int device_idx) = 0;
   virtual c10::DeviceType supported_device_type() = 0;
   virtual std::string name() = 0;
@@ -183,11 +189,18 @@ TORCH_API at::Tensor empty_strided_p2p(
 // rendezvous() with the same tensor, or tensors allocated with
 // empty_strided_p2p_persistent() using the same alloc_id, will receive the
 // cached SymmetricMemory object.
+// The returned handle is only valid while the backing tensor storage and the
+// associated process-group resources remain live.
 //
 // The function has a collective semantic and must be invoked simultaneously
 // from all rendezvous participants.
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const at::Tensor& tensor,
+    const std::optional<std::string>& group_name = std::nullopt);
+
+// Best-effort group-scoped cleanup used by destroy_process_group() before the
+// backing ProcessGroup is shut down.
+TORCH_API void release_group_resources(
     const std::optional<std::string>& group_name = std::nullopt);
 
 TORCH_API bool has_multicast_support(

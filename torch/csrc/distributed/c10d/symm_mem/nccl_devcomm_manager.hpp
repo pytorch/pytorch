@@ -177,6 +177,33 @@ class NCCLDevCommManager {
         " already registered.");
   }
 
+  void unregister_comm(const std::string& group_name) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto group_it = devcomm_registry_.find(group_name);
+    if (group_it != devcomm_registry_.end()) {
+      auto comm_it = group_to_comm_.find(group_name);
+      if (comm_it != group_to_comm_.end()) {
+        try {
+          c10::cuda::CUDAGuard guard(device_);
+          C10_CUDA_CHECK(cudaDeviceSynchronize());
+          for (auto& [_, devcomm] : group_it->second) {
+            ncclDevCommDestroy(comm_it->second, &devcomm);
+          }
+        } catch (const std::exception& e) {
+          LOG(WARNING)
+              << "Failed to unregister NCCL device communicators for group "
+              << group_name << ": " << e.what();
+        } catch (...) {
+          LOG(WARNING)
+              << "Failed to unregister NCCL device communicators for group "
+              << group_name << ": unknown exception";
+        }
+      }
+      devcomm_registry_.erase(group_it);
+    }
+    group_to_comm_.erase(group_name);
+  }
+
   // Destructor: Clean up all registered device communicators.
   // This is a best-effort cleanup. If the CUDA context has already been
   // destroyed, the cleanup will be skipped. All errors are caught and ignored

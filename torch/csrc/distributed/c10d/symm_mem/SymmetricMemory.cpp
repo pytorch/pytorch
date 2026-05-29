@@ -1,10 +1,12 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <c10/util/Logging.h>
 #include <torch/custom_class.h>
 
 #include <atomic>
 #include <mutex>
+#include <vector>
 
 namespace {
 
@@ -25,7 +27,7 @@ static bool is_finalizing_ = false;
 // Using std::atomic for thread safety when accessed from C++ without GIL.
 static std::atomic<size_t> configured_signal_pad_size_{0};
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions,cppcoreguidelines-pro-type-member-init)
 class AllocatorMap {
  public:
   AllocatorMap(const AllocatorMap&) = delete;
@@ -94,6 +96,27 @@ class AllocatorMap {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = map_.find(device_type);
     return it != map_.end();
+  }
+
+  void release_group_resources(const std::optional<std::string>& group_name) {
+    std::vector<c10::intrusive_ptr<SymmetricMemoryAllocator>> allocators;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (const auto& entry : map_) {
+        allocators.push_back(entry.second);
+      }
+    }
+    for (const auto& allocator : allocators) {
+      try {
+        allocator->release_group_resources(group_name);
+      } catch (const std::exception& e) {
+        LOG(WARNING) << "Failed to release symmetric-memory group resources: "
+                     << e.what();
+      } catch (...) {
+        LOG(WARNING) << "Failed to release symmetric-memory group resources: "
+                     << "unknown exception";
+      }
+    }
   }
 
   ~AllocatorMap() {
@@ -187,21 +210,23 @@ static at::Tensor empty_strided_p2p_persistent(
 }
 
 } // namespace
-
 namespace c10d::symmetric_memory {
 
 bool is_finalizing() {
   return is_finalizing_;
 }
 
-void register_allocator(
+// These APIs are declared in SymmetricMemory.hpp and used across translation
+// units; clang-tidy does not infer that from this definition file.
+// NOLINTBEGIN(misc-use-internal-linkage)
+C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
   return AllocatorMap::get().register_allocator(
       device_type, std::move(allocator));
 }
 
-void register_availability(
+C10_EXPORT void register_availability(
     const std::string& name,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
   return AllocatorMap::get().register_availability(name, std::move(allocator));
@@ -228,12 +253,12 @@ bool has_allocator(c10::DeviceType device_type) {
   return AllocatorMap::get().has_allocator(device_type);
 }
 
-c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
+C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type) {
   return AllocatorMap::get().get_allocator(device_type);
 }
 
-void set_group_info(
+TORCH_API void set_group_info(
     const std::string& group_name,
     int rank,
     int world_size,
@@ -295,6 +320,12 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
+TORCH_API void release_group_resources(
+    const std::optional<std::string>& group_name) {
+  AllocatorMap::get().release_group_resources(group_name);
+}
+// NOLINTEND(misc-use-internal-linkage)
+
 TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
   if (!has_allocator(tensor.device().type())) {
     return false;
@@ -318,7 +349,7 @@ TORCH_API bool has_multicast_support(
 
 // A map from device type to allocator for MemPool.
 // TODO: Consolidate with `AllocatorMap` above.
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions,cppcoreguidelines-pro-type-member-init)
 class MemPoolAllocatorMap {
  public:
   MemPoolAllocatorMap(const MemPoolAllocatorMap&) = delete;
@@ -582,6 +613,9 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "_rendezvous(Tensor tensor, str? group_name=None) -> __torch__.torch.classes.c10d.SymmetricMemory");
   m.def("_barrier(__torch__.torch.classes.c10d.SymmetricMemory symm) -> ()");
+  // Production teardown hook used by destroy_process_group(). It is
+  // best-effort, idempotent, and may invalidate existing handles for the group.
+  m.def("_release_group_resources(str? group_name=None) -> ()");
 
   // One-sided communication APIs.
   // The op defined here is backend-specific. Backend dispatching is handled in
@@ -595,7 +629,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
 c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
     const at::Tensor& tensor,
-    std::optional<std::string> group_name) {
+    const std::optional<std::string>& group_name) {
   return c10d::symmetric_memory::rendezvous(tensor, group_name);
 }
 
@@ -605,11 +639,16 @@ void barrier_op(const c10::intrusive_ptr<SymmetricMemory>& symm) {
   symm->barrier(/*channel=*/0, /*timeout_ms=*/0);
 }
 
+void release_group_resources_op(const std::optional<std::string>& group_name) {
+  c10d::symmetric_memory::release_group_resources(group_name);
+}
+
 TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
   // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
   // only. Please do not use them in production code.
   m.impl("_rendezvous", rendezvous_op);
   m.impl("_barrier", barrier_op);
+  m.impl("_release_group_resources", release_group_resources_op);
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

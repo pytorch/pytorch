@@ -2392,6 +2392,11 @@ def destroy_process_group(group: ProcessGroup | None = None):
     if type(pg) is ProcessGroup and pg._has_hooks():
         pg._wait_for_pending_works()
 
+    def _release_symmetric_memory_resources(pg_to_release: ProcessGroup) -> None:
+        group_name = _world.pg_names.get(pg_to_release)
+        if group_name is not None:
+            torch.ops.symm_mem._release_group_resources(group_name)
+
     if group is None or group == GroupMember.WORLD:
         for comm in _world.comms:
             comm.finalize()
@@ -2402,6 +2407,7 @@ def destroy_process_group(group: ProcessGroup | None = None):
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
+            _release_symmetric_memory_resources(pg_to_shutdown)
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
@@ -2430,6 +2436,7 @@ def destroy_process_group(group: ProcessGroup | None = None):
                 if isinstance(backend, _BackendWrapper):
                     backend.get_comm().finalize()
             _world.comms.clear()
+        _release_symmetric_memory_resources(pg)
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]

@@ -19,6 +19,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
+#include <cstdint>
 #include <mutex>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
@@ -46,6 +47,7 @@ struct NCCLAllocation {
   size_t buffer_size;
   size_t signal_pad_size;
   int device_idx;
+  uint64_t sequence_number;
   std::mutex mutex;
   // Map of group name to peer alloc info
   ska::flat_hash_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>>
@@ -55,11 +57,13 @@ struct NCCLAllocation {
       void* ptr,
       size_t buffer_size,
       size_t signal_pad_size,
-      int device_idx)
+      int device_idx,
+      uint64_t sequence_number)
       : ptr(ptr),
         buffer_size(buffer_size),
         signal_pad_size(signal_pad_size),
-        device_idx(device_idx) {}
+        device_idx(device_idx),
+        sequence_number(sequence_number) {}
 
   ~NCCLAllocation() {
     // Avoid calling CUDA functions after driver shutting down
@@ -170,6 +174,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       std::string group_name)
       : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
+        sequence_number_(allocation->sequence_number),
         group_name_(std::move(group_name))
   {
     c10::cuda::CUDAGuard guard(device_idx_);
@@ -281,34 +286,79 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Exact copy is not needed / supported
   NCCLPeerAllocInfo(const NCCLPeerAllocInfo& other) = delete;
   NCCLPeerAllocInfo& operator=(const NCCLPeerAllocInfo& other) = delete;
-  NCCLPeerAllocInfo(NCCLPeerAllocInfo&& other) = default;
-  NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = default;
+  NCCLPeerAllocInfo(NCCLPeerAllocInfo&& other) = delete;
+  NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = delete;
 
-  ~NCCLPeerAllocInfo() {
-    if (is_finalizing()) {
-      return;
-    }
-    c10::cuda::CUDAGuard guard(device_idx_);
-    if (combined_win_ != nullptr) {
-      auto res = ncclCommWindowDeregister(comm_, combined_win_);
-      if (res != ncclSuccess) {
-        LOG(WARNING) << "ncclCommWindowDeregister failed: "
-                     << ncclGetErrorString(res);
+  void release(bool synchronize_device) noexcept {
+    try {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (is_finalizing() || released_) {
+        return;
       }
-    }
-    // signal_pad_ptr_ is part of the owning NCCLAllocation's combined
-    // ncclMemAlloc region; freeing the buffer there releases it too.
-    if (buffers_dev_ != nullptr) {
-      c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
-    }
-    if (signal_pads_dev_ != nullptr) {
-      c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
+      c10::cuda::CUDAGuard guard(device_idx_);
+      if (synchronize_device) {
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+      }
+      if (combined_win_ != nullptr) {
+        auto res = ncclCommWindowDeregister(comm_, combined_win_);
+        if (res != ncclSuccess) {
+          LOG(WARNING) << "ncclCommWindowDeregister failed: "
+                       << ncclGetErrorString(res);
+        }
+        combined_win_ = nullptr;
+      }
+      // signal_pad_ptr_ is part of the owning NCCLAllocation's combined
+      // ncclMemAlloc region; freeing the buffer there releases it too.
+      if (buffers_dev_ != nullptr) {
+        c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
+        buffers_dev_ = nullptr;
+      }
+      if (signal_pads_dev_ != nullptr) {
+        c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
+        signal_pads_dev_ = nullptr;
+      }
+      buffers_.clear();
+      signal_pads_.clear();
+      signal_pad_ptr_ = nullptr;
+      mc_addr_ = nullptr;
+      released_ = true;
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to release NCCL symmetric-memory resources for "
+                   << "group " << group_name_ << ": " << e.what();
+    } catch (...) {
+      LOG(WARNING) << "Failed to release NCCL symmetric-memory resources for "
+                   << "group " << group_name_ << ": unknown exception";
     }
   }
 
+  ~NCCLPeerAllocInfo() {
+    release(/*synchronize_device=*/false);
+  }
+
+  int device_idx() const {
+    return device_idx_;
+  }
+
+  const std::string& group_name() const {
+    return group_name_;
+  }
+
+  uint64_t sequence_number() const {
+    return sequence_number_;
+  }
+
  private:
+  void check_live_locked() const {
+    TORCH_CHECK(
+        !released_ && combined_win_ != nullptr,
+        "NCCL symmetric-memory handle is no longer valid because its backing "
+        "tensor or process group has been released");
+  }
+
+  std::mutex mutex_;
   size_t buffer_size_;
   int device_idx_;
+  uint64_t sequence_number_;
   int rank_;
   int world_size_;
   std::vector<void*> buffers_;
@@ -322,8 +372,22 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Multicast address
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
+  bool released_{false};
   friend class NCCLSymmetricMemory;
 };
+
+void sort_peer_alloc_infos_for_release(
+    std::vector<c10::intrusive_ptr<NCCLPeerAllocInfo>>& peer_alloc_infos) {
+  std::sort(
+      peer_alloc_infos.begin(),
+      peer_alloc_infos.end(),
+      [](const auto& lhs, const auto& rhs) {
+        if (lhs->group_name() != rhs->group_name()) {
+          return lhs->group_name() < rhs->group_name();
+        }
+        return lhs->sequence_number() < rhs->sequence_number();
+      });
+}
 
 NCCLSymmetricMemory::NCCLSymmetricMemory(
     c10::intrusive_ptr<NCCLPeerAllocInfo> pai,
@@ -337,31 +401,45 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 }
 
 std::vector<void*> NCCLSymmetricMemory::get_buffer_ptrs() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->buffers_;
 }
 
 std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->signal_pads_;
 }
 
 void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->buffers_dev_;
 }
 
 void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->signal_pads_dev_;
 }
 
 size_t NCCLSymmetricMemory::get_buffer_size() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->buffer_size_;
 }
 
 bool NCCLSymmetricMemory::has_multicast_support() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->mc_addr_ != nullptr;
 }
 
 void* NCCLSymmetricMemory::get_multicast_ptr() {
-  if (!has_multicast_support()) {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
+  if (pai_->mc_addr_ == nullptr) {
     return nullptr;
   }
   return static_cast<char*>(pai_->mc_addr_) + offset_;
@@ -378,8 +456,15 @@ void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_m
   c10::cuda::CUDAGuard guard(device_idx_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-  ncclComm_t comm = manager.get_comm(pai_->group_name_);
+  std::string group_name;
+  {
+    std::lock_guard<std::mutex> lock(pai_->mutex_);
+    pai_->check_live_locked();
+    group_name = pai_->group_name_;
+  }
+  auto& manager =
+      NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+  ncclComm_t comm = manager.get_comm(group_name);
 
   // use ncclSignal for pure signaling without data transfer
   C10D_NCCL_CHECK(
@@ -403,8 +488,15 @@ void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_
   c10::cuda::CUDAGuard guard(device_idx_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-  ncclComm_t comm = manager.get_comm(pai_->group_name_);
+  std::string group_name;
+  {
+    std::lock_guard<std::mutex> lock(pai_->mutex_);
+    pai_->check_live_locked();
+    group_name = pai_->group_name_;
+  }
+  auto& manager =
+      NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+  ncclComm_t comm = manager.get_comm(group_name);
 
   // create signal descriptor for waiting - populate all fields
   ncclWaitSignalDesc_t signalDesc;
@@ -454,6 +546,8 @@ bool NCCLSymmetricMemory::world_within_direct_access() {
 }
 
 ncclWindow_t NCCLSymmetricMemory::get_window() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
+  pai_->check_live_locked();
   return pai_->combined_win_;
 }
 
@@ -462,6 +556,7 @@ size_t NCCLSymmetricMemory::get_offset() {
 }
 
 std::string NCCLSymmetricMemory::get_group_name() {
+  std::lock_guard<std::mutex> lock(pai_->mutex_);
   return pai_->group_name_;
 }
 
@@ -491,25 +586,43 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       allocations_.emplace(
           ptr,
           std::make_unique<NCCLAllocation>(
-              ptr, size, signal_pad_size, device_idx));
+              ptr, size, signal_pad_size, device_idx, next_allocation_id_++));
     }
     return ptr;
   }
 
   void free(void* ptr) override {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto alloc_it = allocations_.find(ptr);
-    if (alloc_it == allocations_.end()) {
-      return;
-    }
-    auto cache_keys_it = symm_mem_keys_by_alloc_.find(ptr);
-    if (cache_keys_it != symm_mem_keys_by_alloc_.end()) {
-      for (const auto& key : cache_keys_it->second) {
-        symm_mems_.erase(key);
+    std::unique_ptr<NCCLAllocation> allocation;
+    std::vector<c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto alloc_it = allocations_.find(ptr);
+      if (alloc_it == allocations_.end()) {
+        return;
       }
-      symm_mem_keys_by_alloc_.erase(cache_keys_it);
+      allocation = std::move(alloc_it->second);
+      allocations_.erase(alloc_it);
+      {
+        std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
+        for (const auto& entry : allocation->peer_alloc_infos_) {
+          if (entry.second) {
+            peer_alloc_infos.push_back(entry.second);
+          }
+        }
+        allocation->peer_alloc_infos_.clear();
+      }
+      auto cache_keys_it = symm_mem_keys_by_alloc_.find(ptr);
+      if (cache_keys_it != symm_mem_keys_by_alloc_.end()) {
+        for (const auto& key : cache_keys_it->second) {
+          symm_mems_.erase(key);
+        }
+        symm_mem_keys_by_alloc_.erase(cache_keys_it);
+      }
     }
-    allocations_.erase(alloc_it);
+    sort_peer_alloc_infos_for_release(peer_alloc_infos);
+    for (const auto& peer_alloc_info : peer_alloc_infos) {
+      peer_alloc_info->release(/*synchronize_device=*/false);
+    }
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -549,17 +662,31 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // Get or create peer alloc info for the group under the per-allocation
     // lock. This serializes concurrent rendezvous on the same allocation
     // for different groups (e.g., forward vs backward).
-    std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
-    auto& peer_alloc_infos = allocation->peer_alloc_infos_;
-    auto& pai = peer_alloc_infos[*group_name];
-    if (!pai) {
-      pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
+    c10::intrusive_ptr<NCCLPeerAllocInfo> peer_alloc_info;
+    size_t offset;
+    {
+      std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
+      auto& peer_alloc_infos = allocation->peer_alloc_infos_;
+      auto pai_it = peer_alloc_infos.find(*group_name);
+      if (pai_it == peer_alloc_infos.end() || !pai_it->second) {
+        auto new_peer_alloc_info =
+            c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
+        if (pai_it == peer_alloc_infos.end()) {
+          peer_alloc_infos.emplace(*group_name, new_peer_alloc_info);
+        } else {
+          pai_it->second = new_peer_alloc_info;
+        }
+        peer_alloc_info = std::move(new_peer_alloc_info);
+      } else {
+        peer_alloc_info = pai_it->second;
+      }
+      offset =
+          reinterpret_cast<uintptr_t>(ptr) -
+          reinterpret_cast<uintptr_t>(allocation->ptr);
     }
-    size_t offset =
-        reinterpret_cast<uintptr_t>(ptr) -
-        reinterpret_cast<uintptr_t>(allocation->ptr);
     // Create the SymmetricMemory handle.
-    auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+    auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(
+        peer_alloc_info, offset);
     {
       std::lock_guard<std::mutex> lock(mutex_);
       // Insert the SymmetricMemory handle into the map (cache), keyed by the
@@ -575,8 +702,84 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       // There is no more use of `key`; we can move it into the per-allocation
       // key set to avoid an extra copy.
       symm_mem_keys_by_alloc_[allocation->ptr].insert(std::move(key));
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      group_devices_[*group_name].insert(peer_alloc_info->device_idx());
+#endif
     }
     return symm_mem;
+  }
+
+  void release_group_resources(
+      const std::optional<std::string>& group_name) override {
+    std::vector<c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos;
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    std::vector<std::pair<int, std::string>> dev_comms_to_unregister;
+#endif
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (auto& entry : allocations_) {
+        auto& allocation = entry.second;
+        std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
+        for (auto it = allocation->peer_alloc_infos_.begin();
+             it != allocation->peer_alloc_infos_.end();) {
+          if (!group_name.has_value() || it->first == *group_name) {
+            auto peer_alloc_info = it->second;
+            if (peer_alloc_info) {
+              peer_alloc_infos.push_back(peer_alloc_info);
+            }
+            it = allocation->peer_alloc_infos_.erase(it);
+          } else {
+            ++it;
+          }
+        }
+      }
+      for (auto alloc_it = symm_mem_keys_by_alloc_.begin();
+           alloc_it != symm_mem_keys_by_alloc_.end();) {
+        auto& keys = alloc_it->second;
+        for (auto key_it = keys.begin(); key_it != keys.end();) {
+          if (!group_name.has_value() || key_it->second == *group_name) {
+            symm_mems_.erase(*key_it);
+            key_it = keys.erase(key_it);
+          } else {
+            ++key_it;
+          }
+        }
+        if (keys.empty()) {
+          alloc_it = symm_mem_keys_by_alloc_.erase(alloc_it);
+        } else {
+          ++alloc_it;
+        }
+      }
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      if (group_name.has_value()) {
+        auto group_devices_it = group_devices_.find(*group_name);
+        if (group_devices_it != group_devices_.end()) {
+          for (const auto device_idx : group_devices_it->second) {
+            dev_comms_to_unregister.emplace_back(device_idx, *group_name);
+          }
+          group_devices_.erase(group_devices_it);
+        }
+      } else {
+        for (const auto& [group, devices] : group_devices_) {
+          for (const auto device_idx : devices) {
+            dev_comms_to_unregister.emplace_back(device_idx, group);
+          }
+        }
+        group_devices_.clear();
+      }
+#endif
+    }
+    sort_peer_alloc_infos_for_release(peer_alloc_infos);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    for (const auto& [device_idx, group] : dev_comms_to_unregister) {
+      auto& manager =
+          NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx));
+      manager.unregister_comm(group);
+    }
+#endif
+    for (const auto& peer_alloc_info : peer_alloc_infos) {
+      peer_alloc_info->release(/*synchronize_device=*/true);
+    }
   }
 
   bool has_multicast_support(int device_idx) override {
@@ -601,6 +804,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   NCCLAllocMap allocations_;
   NCCLSymmMemMap symm_mems_;
   NCCLSymmMemKeysByAlloc symm_mem_keys_by_alloc_;
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  ska::flat_hash_map<std::string, ska::flat_hash_set<int>> group_devices_;
+#endif
+  uint64_t next_allocation_id_{0};
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {

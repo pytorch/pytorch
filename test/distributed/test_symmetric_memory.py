@@ -41,6 +41,7 @@ from torch.testing._internal.common_distributed import (
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
+    requires_nccl_version,
     setup_torchcomms_pg,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
@@ -522,6 +523,114 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # Exercise dispatcher schema that accepts a TorchBind
         # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
         torch.ops.symm_mem._barrier(sm)
+
+
+@skip_if_rocm_multiprocess
+@requires_cuda_p2p_access()
+class SymmMemNCCLTeardownTest(MultiProcContinuousTest):
+    def setUp(self) -> None:
+        self._prev_torch_symmmem = os.environ.get("TORCH_SYMMMEM")
+        os.environ["TORCH_SYMMMEM"] = "NCCL"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        if self._prev_torch_symmmem is None:
+            os.environ.pop("TORCH_SYMMMEM", None)
+        else:
+            os.environ["TORCH_SYMMMEM"] = self._prev_torch_symmmem
+        super().tearDown()
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self) -> None:
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
+
+    def _init_nccl_comm(self) -> None:
+        dist.all_reduce(torch.ones(1, device=self.device))
+
+    def _rendezvous_tensor(self) -> tuple[torch.Tensor, _SymmetricMemory]:
+        t = symm_mem.empty(1024, dtype=torch.float32, device=self.device).fill_(
+            self.rank
+        )
+        return t, symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+    def _assert_handle_released(self, handle: _SymmetricMemory) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError, "NCCL symmetric-memory handle is no longer valid"
+        ):
+            handle.buffer_ptrs_dev
+        with self.assertRaisesRegex(
+            RuntimeError, "NCCL symmetric-memory handle is no longer valid"
+        ):
+            handle.signal_pad_ptrs_dev
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @requires_nccl_version((2, 28), "NCCL symmetric-memory device API")
+    @skip_if_lt_x_gpu(2)
+    def test_release_group_resources_is_idempotent(self) -> None:
+        self._init_process()
+        self._init_nccl_comm()
+        group_name = dist.group.WORLD.group_name
+
+        t, handle = self._rendezvous_tensor()
+        self.assertNotEqual(handle.buffer_ptrs_dev, 0)
+        self.assertNotEqual(handle.signal_pad_ptrs_dev, 0)
+
+        torch.ops.symm_mem._release_group_resources(group_name)
+        self._assert_handle_released(handle)
+
+        torch.ops.symm_mem._release_group_resources(group_name)
+        self._init_nccl_comm()
+
+        rerendezvous_handle = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        self.assertNotEqual(rerendezvous_handle.buffer_ptrs_dev, 0)
+        self.assertNotEqual(rerendezvous_handle.signal_pad_ptrs_dev, 0)
+        torch.ops.symm_mem._release_group_resources(group_name)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @requires_nccl_version((2, 28), "NCCL symmetric-memory device API")
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_process_group_reinit_same_group_name(self) -> None:
+        self._init_process()
+        self._init_nccl_comm()
+        old_group_name = dist.group.WORLD.group_name
+
+        handles = [self._rendezvous_tensor()[1] for _ in range(2)]
+        for handle in handles:
+            self._assert_handle_released(handle)
+        dist.barrier()
+        dist.destroy_process_group()
+
+        for handle in handles:
+            self._assert_handle_released(handle)
+
+        store = dist.FileStore(f"{self.__class__.rdvz_file}.reinit", self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=self.__class__.timeout,
+        )
+        self.assertEqual(dist.group.WORLD.group_name, old_group_name)
+
+        self._init_nccl_comm()
+        _, handle = self._rendezvous_tensor()
+        self.assertEqual(handle.world_size, self.world_size)
+        self.assertNotEqual(handle.buffer_ptrs_dev, 0)
+        self.assertNotEqual(handle.signal_pad_ptrs_dev, 0)
+        dist.barrier()
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
