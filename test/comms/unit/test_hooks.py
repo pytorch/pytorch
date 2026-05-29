@@ -15,6 +15,7 @@ from torch._C._comms import (
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
+@skipIfTorchDynamo("comms hook tests verify eager hook dispatch, not traced")
 class TestHooks(TestCase):
     def _create_comm(self, name: str) -> torch.comms.TorchComm:
         """Create a communicator using the fake backend."""
@@ -64,7 +65,6 @@ class TestHooks(TestCase):
 
         comm.finalize()
 
-    @skipIfTorchDynamo("hook op_id correlation relies on eager op dispatch")
     def test_hook_op_id_correlation(self) -> None:
         """Test that pre-hook and post-hook op_ids match for the same operation."""
         comm = self._create_comm("test_op_id")

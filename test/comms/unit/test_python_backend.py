@@ -120,6 +120,7 @@ class AsyncAllReduceBackend(DummyPyBackend):
         return work
 
 
+@skipIfTorchDynamo("python backend collectives rely on eager dispatch, not traced")
 class TestPythonBackend(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -134,7 +135,6 @@ class TestPythonBackend(TestCase):
         self.assertEqual(comm.get_backend(), "dummy_py")
         comm.finalize()
 
-    @skipIfTorchDynamo("python backend all_reduce relies on eager arg dispatch")
     def test_all_reduce_sync(self) -> None:
         comm = torch.comms.new_comm("dummy_py", torch.device("cpu"), name="test_ar")
         tensor = torch.ones(4)

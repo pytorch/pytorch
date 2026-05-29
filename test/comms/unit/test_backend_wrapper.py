@@ -34,6 +34,7 @@ def _make_wrapped_pg(name: str) -> tuple[torch.comms.TorchComm, dist.ProcessGrou
     return comm, pg
 
 
+@skipIfTorchDynamo("backend-wrapper hook tests verify eager hook dispatch, not traced")
 class TestBackendWrapperHooks(TestCase):
     def test_hooks_fire_when_invoked_through_backend_wrapper(self) -> None:
         """Pre/post hooks on TorchComm fire when collectives go through the wrapper."""
@@ -63,7 +64,6 @@ class TestBackendWrapperHooks(TestCase):
 
         comm.finalize()
 
-    @skipIfTorchDynamo("hook op_id correlation relies on eager op dispatch")
     def test_hook_op_ids_correlate_and_increase(self) -> None:
         """Pre/post op_ids match per call and increase across calls."""
         comm, pg = _make_wrapped_pg("test_op_ids")
