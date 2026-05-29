@@ -11,6 +11,7 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model.h>
 
 namespace torch::aot_inductor {
@@ -264,6 +265,32 @@ class AOTInductorModelContainer {
     }
 
     return ret;
+  }
+
+  const std::vector<AOTInductorConstantMapEntry>& extract_constants_map_entries(
+      bool use_inactive) {
+    size_t n_consts = this->num_constants();
+    extracted_constant_map_entry_names_.clear();
+    extracted_constant_map_entries_.clear();
+    extracted_constant_map_entry_names_.reserve(n_consts);
+    extracted_constant_map_entries_.reserve(n_consts);
+
+    const auto& extract_map = use_inactive ? inactive().map : active().map;
+    for (size_t idx = 0; idx < n_consts; idx++) {
+      if (this->constant_from_folded(idx)) {
+        continue;
+      }
+
+      auto it = extract_map->find(this->constant_name(idx));
+      if (it != extract_map->end()) {
+        extracted_constant_map_entry_names_.emplace_back(
+            this->constant_original_fqn(idx));
+        extracted_constant_map_entries_.push_back(
+            {extracted_constant_map_entry_names_.back().c_str(), it->second});
+      }
+    }
+
+    return extracted_constant_map_entries_;
   }
 
   size_t num_constants() const {
@@ -768,6 +795,9 @@ class AOTInductorModelContainer {
 
   // Notified whenever a model is placed onto pending_models_.
   std::condition_variable pending_models_available_;
+
+  std::vector<std::string> extracted_constant_map_entry_names_;
+  std::vector<AOTInductorConstantMapEntry> extracted_constant_map_entries_;
 
   ConstantBufferSet& active() {
     return buffers_[active_idx_];
