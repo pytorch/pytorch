@@ -36,6 +36,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
+    onlyOn,
     e4m3_type,
     e5m2_type,
     E4M3_MAX_POS,
