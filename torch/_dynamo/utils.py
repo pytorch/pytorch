@@ -1363,6 +1363,9 @@ def is_lru_cache_wrapped_function(
     )
 
 
+DYNAMO_ALLOW_LRU_CACHE_TRACE_ATTR = "_torchdynamo_allow_lru_cache_trace_without_warning"
+
+
 _FuncTypes: TypeAlias = (
     types.FunctionType
     | types.BuiltinFunctionType

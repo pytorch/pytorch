@@ -80,6 +80,7 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
+    DYNAMO_ALLOW_LRU_CACHE_TRACE_ATTR,
     identity,
     is_function,
     is_tensor_base_attr_getter,
@@ -2539,7 +2540,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
 
-            if module_name.split(".", maxsplit=1)[0] != "torch":
+            if module_name.split(".", maxsplit=1)[0] != "torch" and not getattr(
+                self.wrapper_obj, DYNAMO_ALLOW_LRU_CACHE_TRACE_ATTR, False
+            ):
                 frame_summary = tx.frame_summary()
                 filename = os.path.basename(frame_summary.filename)
                 lineno = frame_summary.lineno
