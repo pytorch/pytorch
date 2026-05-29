@@ -44,9 +44,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.higher_order_ops import SubgraphTracingInfo
 
 log = logging.getLogger(__name__)
@@ -200,7 +198,7 @@ def classify_vt(vt: Any) -> InputTag | None:
 
 
 def build_input_fingerprint(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_args_vt: Any,
     kwargs: dict[str, Any],
 ) -> InputFingerprint:
@@ -245,7 +243,7 @@ def build_fingerprint_fast(fn_args_vt: Any) -> InputFingerprint:
 
 
 def build_fingerprint_with_pytree(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_args_vt: Any,
     kwargs: dict[str, Any],
 ) -> InputFingerprint:
@@ -343,7 +341,7 @@ def get_fn_code(fn_var: Any) -> types.CodeType | None:
 
 
 def has_mutated_vars(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     traced_sources: OrderedSet[Source],
 ) -> bool:
     """Check if any source accessed by the subgraph has been mutated.
@@ -363,7 +361,7 @@ def has_mutated_vars(
 
 
 def is_reuse_eligible(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     body_r: Any,
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
@@ -434,7 +432,7 @@ def is_reuse_eligible(
 
 
 def build_reuse_condition(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     traced_sources: OrderedSet[Source],
 ) -> InvokeSubgraphReuseCondition | None:
@@ -559,7 +557,7 @@ def build_source_replacement(
 
 
 def is_reusable(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     condition: "InvokeSubgraphReuseCondition",
     fingerprint: InputFingerprint,
     cached_entry: InvokeSubgraphReuseEntry,
@@ -738,7 +736,7 @@ def is_reusable(
 
 
 def has_reuse_entries(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
 ) -> bool:
     """Cheap check: does the cache have any entries for this function?"""
@@ -754,7 +752,7 @@ def has_reuse_entries(
 
 
 def find_reuse_match(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     fingerprint: InputFingerprint,
 ) -> InvokeSubgraphReuseEntry | None:
@@ -781,7 +779,7 @@ def find_reuse_match(
 
 
 def save_reuse_entry(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     fingerprint: InputFingerprint,
     body_name: str,
@@ -875,9 +873,9 @@ def save_reuse_entry(
 
 
 def trace_reuse_hash_fn(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     reuse_hash_fn: Any,
-    fn_args_vt: "Sequence[VariableTracker]",
+    fn_args_vt: "list[VariableTracker]",
     kwargs: dict[str, VariableTracker],
 ) -> int:
     """Trace the user's reuse_hash_fn to get a constant integer hash key.
@@ -905,7 +903,7 @@ def trace_reuse_hash_fn(
 
 
 def find_reuse_entry_by_key(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     hash_key: int,
 ) -> InvokeSubgraphReuseEntry | None:
@@ -923,7 +921,7 @@ def find_reuse_entry_by_key(
 
 
 def stamp_out_subgraph(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     cached: InvokeSubgraphReuseEntry,
 ) -> VariableTracker:
@@ -1043,7 +1041,7 @@ def stamp_out_subgraph(
 
 
 def build_subgraph_input_mapping(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     p_args: tuple[Any, ...],
     flat_vts: list[tuple[InputTag, VariableTracker]],
 ) -> list[LiftedArgOrigin]:
@@ -1122,9 +1120,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     # pyrefly: ignore[bad-override]
     def install_subgraph_in_output_graph(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn_vt: VariableTracker,
-        fn_args_vt: "Sequence[VariableTracker]",
+        fn_args_vt: "list[VariableTracker]",
         kwargs: dict[str, VariableTracker],
         body_gmod: GraphModule,
         attr_name: str,
@@ -1203,8 +1201,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
     def _call_function(
         self,
-        tx: "InstructionTranslator",
-        args: "Sequence[VariableTracker]",
+        tx: "InstructionTranslatorBase",
+        args: "list[VariableTracker]",
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._dynamo.utils import dynamo_timed
