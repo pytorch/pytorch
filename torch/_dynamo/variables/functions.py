@@ -1817,10 +1817,15 @@ def invoke_and_store_as_constant(
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
+    source = ConstantSource(name)
+    if isinstance(res, torch.Tensor):
+        source_name = tx.output.install_global_by_id(name, res)
+        tx.output.update_co_names(source_name)
+        source = ConstantSource(source_name)
     return tx.output.register_attr_or_module(
         res,
         name,
-        source=ConstantSource(name),
+        source=source,
     )
 
 

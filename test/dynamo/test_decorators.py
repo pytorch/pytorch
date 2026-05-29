@@ -1460,6 +1460,26 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
 
+    def test_assume_constant_result_tensor_output_with_attr_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.tensor = torch.tensor([1.0])
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.tensor.sum() == 1.0
+
+            def forward(self, x):
+                self.device_prop = x.device
+                return x * 2 if self.check() else x * 3
+
+        mod = Mod()
+        x = torch.randn(2)
+        ref = mod(x)
+        opt_mod = torch.compile(mod, backend="eager")
+        self.assertEqual(ref, opt_mod(x))
+
     def test_justknobs_check(self):
         def fn(x, y):
             if torch._utils_internal.justknobs_check("test", True):
