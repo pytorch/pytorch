@@ -495,6 +495,26 @@ def is_wrap_triton_enabled() -> bool:
     return getattr(wrap_triton_enabled, "value", wrap_triton_enabled_default)
 
 
+def _has_interpreted_triton_kernel(triton_kernel: Callable) -> bool:
+    try:
+        from triton.runtime.interpreter import InterpretedFunction
+    except ImportError:
+        return False
+
+    seen: set[int] = set()
+    kernel: Any = triton_kernel
+    while True:
+        if isinstance(kernel, InterpretedFunction):
+            return True
+        kernel_id = id(kernel)
+        if kernel_id in seen:
+            return False
+        seen.add(kernel_id)
+        kernel = getattr(kernel, "fn", None)
+        if kernel is None:
+            return False
+
+
 def capture_triton(triton_kernel: Callable, /) -> Any:
     """This API has been renamed to wrap_triton"""
     return wrap_triton(triton_kernel)
@@ -568,10 +588,18 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
 
     from torch._higher_order_ops.triton_kernel_wrap import TraceableTritonKernelWrapper
 
-    if not isinstance(triton_kernel, (JITFunction, Autotuner)):
+    has_interpreted_kernel = _has_interpreted_triton_kernel(triton_kernel)
+    if (
+        not isinstance(triton_kernel, (JITFunction, Autotuner))
+        and not has_interpreted_kernel
+    ):
         raise RuntimeError(
             "wrap_triton only works on functions annotated with triton.jit or triton.autotune"
         )
+    # TRITON_INTERPRET=1 makes @triton.jit return InterpretedFunction. It is
+    # eager-launchable but lacks the JIT metadata the traceable wrapper needs.
+    if has_interpreted_kernel:
+        return triton_kernel
     if not is_wrap_triton_enabled():
         return triton_kernel
     return TraceableTritonKernelWrapper(triton_kernel, None, None)
