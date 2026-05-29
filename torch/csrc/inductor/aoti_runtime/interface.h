@@ -248,9 +248,21 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
 // Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
 // allowed to pass CPU tensors even when the model lives on a non-CPU device.
 // CPU tensors are silently copied to the model's device.
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
     bool use_inactive,
     bool validate_full_update);
 
