@@ -2,11 +2,7 @@
 
 ## Background
 
-The third-party device integration mechanism based on PrivateUse1 has become the official mainstream method for new backends to integrate with PyTorch. Ensuring the availability of this mechanism is crucial for enriching PyTorch's hardware ecosystem.
-
-**Note:**
-
-The goal of `OpenReg` codebase is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
+The third-party device integration mechanism based on PrivateUse1 has become the official mainstream method for new backends to integrate with PyTorch. Ensuring the availability of this mechanism is crucial for enriching PyTorch's hardware ecosystem. The goal of `OpenReg` codebase is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
 
 ### Purpose
 
@@ -18,7 +14,52 @@ The goal of `OpenReg` codebase is **not to implement a fully functional, high-pe
 
 - **Minimality Principle**: The fundamental goal is to enable/verify all integration paths/mechanisms for a new backend to integrate to PyTorch. All functions follow a "just right" strategy to ensure the correctness of relevant integration capabilities.
 - **Authenticity Principle**: To complete the `OpenReg` integration in the same way a real accelerator backend would integrate with PyTorch.
-- **Integration-over-Simulation Principle**: OpenReg focuses on demonstrating *how* a vendor backend integrates into each PyTorch module, **not** on simulating the underlying device capabilities themselves. Implementations should be STUB-level — exposing the correct APIs and returning the expected structures, rather than providing fully functional behavior.
+- **Integration-over-Simulation Principle**: OpenReg focuses on demonstrating *how* a vendor backend integrates into each PyTorch module, not on simulating the underlying device capabilities themselves. Implementations should be STUB-level — exposing the correct APIs and returning the expected structures, rather than providing fully functional behavior.
+
+## Installation and Usage
+
+### Installation
+
+```python
+python -m pip install --no-build-isolation -e . # for develop
+python -m pip install --no-build-isolation . # for install
+```
+
+### Usage Example
+
+After installation, you can use the `openreg` device in Python just like any other regular device.
+
+```python
+import torch
+
+if not torch.openreg.is_available():
+    print("OpenReg backend is not available in this build.")
+    exit()
+
+print("OpenReg backend is available!")
+
+device = torch.device("openreg")
+
+x = torch.tensor([[1., 2.], [3., 4.]], device=device)
+y = x + 2
+print("Result y:\n", y)
+print(f"Device of y: {y.device}")
+
+z = y.cpu()
+print("Result z:\n", z)
+print(f"Device of z: {z.device}")
+```
+
+## Documentation
+
+Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
+
+### Profiler Integration
+
+- **Fallback (operator-level)**: `ProfilerStubs` registration provides operator-level timing via `torch.autograd.profiler.profile(use_device="openreg")` (default `use_kineto=False`). See `csrc/profiler/stubs/openreg.cpp`.
+- **Kineto plugin (correlation + session wiring)**: `IActivityProfiler` registered via `REGISTER_PRIVATEUSE1_PROFILER` provides Kineto session integration and correlation-ID plumbing via `torch.profiler.profile(activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1])`. See `csrc/profiler/OpenRegActivityProfiler.cpp` and `third_party/openreg/csrc/tracer.cpp`. Requires Kineto at build time (`kineto_LIBRARY` from `find_package(Torch)`); vendors extend the stub to emit kernel events and flow links.
+
+For the full integration guide, see the [Profiler Integration](https://docs.pytorch.org/docs/main/accelerator/profiler.html) documentation.
 
 ## Directory Structure
 
@@ -204,59 +245,3 @@ Support for `torch.compile` with a custom backend and DeviceInterface.
 Custom serialization support for saving and loading tensors on the device.
 
 - Device tensor serialization and deserialization: See `OpenRegSerialization.cpp` in `csrc/runtime/`
-
-## Installation and Usage
-
-### Installation
-
-```python
-python -m pip install --no-build-isolation -e . # for develop
-python -m pip install --no-build-isolation . # for install
-```
-
-### Usage Example
-
-After installation, you can use the `openreg` device in Python just like any other regular device.
-
-```python
-import torch
-
-if not torch.openreg.is_available():
-    print("OpenReg backend is not available in this build.")
-    exit()
-
-print("OpenReg backend is available!")
-
-device = torch.device("openreg")
-
-x = torch.tensor([[1., 2.], [3., 4.]], device=device)
-y = x + 2
-print("Result y:\n", y)
-print(f"Device of y: {y.device}")
-
-z = y.cpu()
-print("Result z:\n", z)
-print(f"Device of z: {z.device}")
-```
-
-## Documentation
-
-Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
-
-### Profiler Integration
-
-- **Fallback (operator-level)**: `ProfilerStubs` registration provides operator-level timing via `torch.autograd.profiler.profile(use_device="openreg")` (default `use_kineto=False`). See `csrc/profiler/stubs/openreg.cpp`.
-- **Kineto plugin (correlation + session wiring)**: `IActivityProfiler` registered via `REGISTER_PRIVATEUSE1_PROFILER` provides Kineto session integration and correlation-ID plumbing via `torch.profiler.profile(activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1])`. See `csrc/profiler/OpenRegActivityProfiler.cpp` and `third_party/openreg/csrc/tracer.cpp`. Requires Kineto at build time (`kineto_LIBRARY` from `find_package(Torch)`); vendors extend the stub to emit kernel events and flow links.
-
-For the full integration guide, see the [Profiler Integration](https://docs.pytorch.org/docs/main/accelerator/profiler.html) documentation.
-
-## Future Plans
-
-- **Enhance Features**:
-  - Device-agnostic APIs
-  - Memory Management
-  - Generator
-  - Distributed
-  - Custom Tensor&Storage
-  - ...
-- **Improve Tests**: Add more test cases related to the integration mechanism.
