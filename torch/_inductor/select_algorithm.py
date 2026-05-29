@@ -1058,9 +1058,36 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        return scatter_graph.data.store_output(  # type: ignore[attr-defined]
-            scatter_graph.name, contiguous_strides, []
-        )
+        scatter_data = scatter_graph.data
+        if not scatter_data.get_size():
+            return [
+                scatter_data.store_output(  # type: ignore[attr-defined]
+                    scatter_graph.name, contiguous_strides, []
+                )
+            ]
+
+        # Captured-buffer gradients may scatter a small slice per score_mod
+        # invocation, e.g. alpha[h, :] in an RBF basis.  The score tile already
+        # occupies the template's vector dimensions, so unroll the extra static
+        # slice dimensions into separate vectorized atomic adds.
+        scatter_ranges = V.graph.sizevars.guard_int_seq(scatter_data.get_size())
+        scatter_numel = math.prod(scatter_ranges)
+        if scatter_numel >= config.unroll_reductions_threshold:
+            raise NotImplementedError(
+                "Captured score_mod gradient slices with "
+                f"{scatter_numel} elements are not supported. "
+                "Only slices smaller than "
+                f"config.unroll_reductions_threshold="
+                f"{config.unroll_reductions_threshold} can be unrolled."
+            )
+        return [
+            scatter_data.store_output(  # type: ignore[attr-defined]
+                scatter_graph.name,
+                contiguous_strides,
+                [sympy.Integer(i) for i in index],
+            )
+            for index in itertools.product(*(range(r) for r in scatter_ranges))
+        ]
 
     def modification(
         self,
@@ -1098,7 +1125,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
-                        scatters.append(self._handle_scatter_graph(scatter_graph))
+                        scatters.extend(self._handle_scatter_graph(scatter_graph))
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:

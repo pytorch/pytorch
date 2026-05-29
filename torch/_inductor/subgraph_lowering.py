@@ -42,6 +42,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     additional_lowerings: LoweringDict | None
     buffers: list[ir.Buffer]
     mutated_buffers: OrderedSet[str]
+    # Pointwise subgraphs are inlined into their caller; heuristic realization
+    # would try to create a temporary buffer, which this lowering mode forbids.
+    suppress_buffer_realization_heuristics = True
 
     def __init__(
         self,

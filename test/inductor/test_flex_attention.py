@@ -3,6 +3,7 @@
 import functools
 import gc
 import json
+import math
 import os
 import random
 import string
@@ -4608,6 +4609,123 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return inv_dist * score
 
         self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_score_mod_rbf_bias_trainable_reductions(self, device):
+        B_local, H_local, S_local, D_local = 1, 2, 32, 32
+        D_s, num_basis = 2, 5
+        dtype = torch.float32
+
+        query = torch.randn(
+            B_local,
+            H_local,
+            S_local,
+            D_local,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            B_local,
+            H_local,
+            S_local,
+            D_local,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            B_local,
+            H_local,
+            S_local,
+            D_local,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        query_pos = torch.randn(B_local, S_local, D_s, device=device)
+        key_pos = torch.randn(B_local, S_local, D_s, device=device)
+        alpha = nn.Parameter(torch.randn(H_local, num_basis, device=device) * 0.1)
+        beta = nn.Parameter(torch.rand(H_local, num_basis, device=device) * 0.05 + 0.05)
+        alpha_ref = nn.Parameter(alpha.detach().clone())
+        beta_ref = nn.Parameter(beta.detach().clone())
+
+        def make_rbf_bias(alpha, beta):
+            def rbf_bias(score, b, h, q_idx, kv_idx):
+                d_sq = torch.square(query_pos[b, q_idx] - key_pos[b, kv_idx]).sum()
+                d_rbf = alpha[h] * torch.exp(-beta[h] * d_sq)
+                return score + d_rbf.sum()
+
+            return rbf_bias
+
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value)
+        score_mod = make_rbf_bias(alpha, beta)
+
+        compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_flex_attention(
+            query,
+            key,
+            value,
+            score_mod=score_mod,
+            kernel_options={"BACKEND": "TRITON"},
+        )
+        scores = (query_ref @ key_ref.transpose(-2, -1)) * (
+            1 / math.sqrt(query_ref.size(-1))
+        )
+        d_sq = torch.square(query_pos[:, :, None, :] - key_pos[:, None, :, :]).sum(
+            dim=-1
+        )
+        bias = (
+            alpha_ref[None, :, None, None, :]
+            * torch.exp(-beta_ref[None, :, None, None, :] * d_sq[:, None, :, :, None])
+        ).sum(dim=-1)
+        ref = torch.softmax(scores + bias, dim=-1) @ value_ref
+
+        torch.testing.assert_close(out, ref, atol=3e-2, rtol=3e-2)
+
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+        ref.backward(grad_out)
+        torch.testing.assert_close(query.grad, query_ref.grad, atol=4e-2, rtol=4e-2)
+        torch.testing.assert_close(key.grad, key_ref.grad, atol=4e-2, rtol=4e-2)
+        torch.testing.assert_close(value.grad, value_ref.grad, atol=4e-2, rtol=4e-2)
+        torch.testing.assert_close(alpha.grad, alpha_ref.grad, atol=4e-2, rtol=4e-2)
+        torch.testing.assert_close(beta.grad, beta_ref.grad, atol=4e-2, rtol=4e-2)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_score_mod_captured_grad_slice_unroll_limit(self, device):
+        B_local, H_local, S_local, D_local = 1, 1, 16, 16
+        basis = config.unroll_reductions_threshold - 3
+        query = torch.randn(
+            B_local,
+            H_local,
+            S_local,
+            D_local,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        alpha = nn.Parameter(torch.randn(H_local, basis, basis, device=device))
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            # Each reduction is small enough to be unrolled in the forward
+            # score_mod, but the captured-gradient scatter slice is basis**2.
+            return score + (alpha[h] * (q_idx - kv_idx)).sum(dim=-1).sum(dim=-1)
+
+        out = torch.compile(flex_attention, fullgraph=True)(
+            query,
+            key,
+            value,
+            score_mod=score_mod,
+            kernel_options={"BACKEND": "TRITON"},
+        )
+        expected_error_message = "Captured score_mod gradient slices with"
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            out.sum().backward()
 
     @supported_platform
     @skip_on_cpu
