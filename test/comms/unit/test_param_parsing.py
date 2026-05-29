@@ -60,6 +60,7 @@ class TestParamSpec(TestCase):
 @skip_if_torch_compile_not_supported_or_enabled()
 class TestParsedArgs(TestCase):
     def setUp(self):
+        super().setUp()
         self.object_param = ParamSpec("self", ParamKind.CLASS_OBJECT, "MyClass")
         self.tensor_param = ParamSpec("tensor", ParamKind.INPUT, "Tensor", mutable=True)
         self.tensor_list_param = ParamSpec(
