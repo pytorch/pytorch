@@ -169,6 +169,10 @@ class TimmRunner(BenchmarkRunner):
         return self._config["require_larger_multiplier_for_smaller_tensor"]
 
     @property
+    def _emulate_precision_casts(self):
+        return self._config.get("emulate_precision_casts", [])
+
+    @property
     def skip_models_for_cpu(self):
         return self._skip["device"]["cpu"]
 
@@ -276,6 +280,14 @@ class TimmRunner(BenchmarkRunner):
 
         if model_name in self._config["scaled_compute_loss"]:
             self.compute_loss = self.scaled_compute_loss
+
+        if model_name in self._emulate_precision_casts:
+            # See yaml note for emulate_precision_casts. This preserves the
+            # bf16/fp16 downcast-upcast pairs that inductor would otherwise
+            # elide when fusing across mixed-precision boundaries (e.g.
+            # bf16 conv-bias-add fused into an fp32 cat-prep store), which
+            # is what eager autocast actually does.
+            torch._inductor.config.emulate_precision_casts = True
 
         if is_training and not use_eval_mode:
             model.train()
