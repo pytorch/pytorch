@@ -3760,17 +3760,19 @@ class TestDistributions(DistributionsTestCase):
             )
 
     def test_kumaraswamy_mode(self):
-        # Cases where mode is undefined (a<1, b<1, or a=b=1) -> nan
+        # Cases where mode is undefined (a<1, b<1, or a=b=1) -> nan.
+        # Unsqueeze a to test all (a, b) combinations in the cartesian product.
         torch.set_default_dtype(torch.float64)
-        a_nan = torch.tensor([0.5, 1.0, 0.5, 1.0])
-        b_nan = torch.tensor([0.5, 0.5, 1.0, 1.0])
+        a_nan = torch.tensor([0.5, 1.0]).unsqueeze(1)  # shape (2, 1)
+        b_nan = torch.tensor([0.5, 1.0])  # shape (2,)
         mode_nan = Kumaraswamy(a_nan, b_nan).mode
         self.assertTrue(mode_nan.isnan().all(), "expected nan for undefined modes")
 
         # Cases where mode is well-defined: verify it is a local maximum of log-prob.
         # If m is the mode, log_prob(m) >= log_prob(m +/- eps) for small eps.
-        a_valid = torch.tensor([3.0, 1.0, 3.0, 2.0])
-        b_valid = torch.tensor([1.0, 3.0, 5.0, 1e6])
+        # Unsqueeze a to test all (a, b) combinations in the cartesian product.
+        a_valid = torch.tensor([2.0, 3.0, 5.0]).unsqueeze(1)  # shape (3, 1)
+        b_valid = torch.tensor([2.0, 5.0, 100.0])  # shape (3,)
         dist = Kumaraswamy(a_valid, b_valid)
         mode = dist.mode
         eps = 1e-5
