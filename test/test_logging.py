@@ -1,9 +1,11 @@
 # Owner(s): ["module: unknown"]
 
 import glob
+import io
 import logging
 import os
 import tempfile
+import unittest.mock
 
 import torch
 import torch._logging._internal as log_internal
@@ -65,6 +67,30 @@ class LoggingTest(TestCase):
             else:
                 os.environ["TORCH_TRACE"] = old_env
             log_internal.LOG_TRACE_HANDLER = old_handler
+            _init_logs()
+
+    def test_logs_use_current_stderr_after_capture_stream_closes(self):
+        old_state = log_internal._get_log_state()
+        old_log = logging.getLogger("torch._dynamo")
+        captured_stderr = io.StringIO()
+        current_stderr = io.StringIO()
+
+        try:
+            log_internal._set_log_state(log_internal.LogState())
+            with unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": "dynamo"}):
+                os.environ.pop("TORCH_LOGS_OUT", None)
+                with unittest.mock.patch("sys.stderr", captured_stderr):
+                    _init_logs()
+
+            captured_stderr.close()
+
+            with unittest.mock.patch("sys.stderr", current_stderr):
+                old_log.info("late torch log")
+
+            self.assertIn("late torch log", current_stderr.getvalue())
+            self.assertNotIn("Logging error", current_stderr.getvalue())
+        finally:
+            log_internal._set_log_state(old_state)
             _init_logs()
 
 
