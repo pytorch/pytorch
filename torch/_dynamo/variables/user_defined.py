@@ -878,7 +878,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
-    def nb_invert_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def nb_invert_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__invert__")
         if m:
             source = self.source and AttrSource(self.source, "__invert__")
@@ -2023,7 +2023,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_invert_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
