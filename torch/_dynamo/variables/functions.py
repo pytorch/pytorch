@@ -284,7 +284,7 @@ def wrap_bound_arg(
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
-        return variables.LazyVariableTracker.create(val, source)
+        return variables.LazyVariableTracker.create(val, source, tx=tx)
 
 
 def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
@@ -383,7 +383,7 @@ def fn_var_getattr(
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
     if source:
-        return variables.LazyVariableTracker.create(subobj, source)
+        return variables.LazyVariableTracker.create(subobj, source, tx=tx)
     return VariableTracker.build(tx, subobj)
 
 

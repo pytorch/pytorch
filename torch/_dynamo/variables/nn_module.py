@@ -1348,7 +1348,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # value. This removes the reliance on the actual key value.
                 source_key = ConstDictKeySource(hooks_dict_source, i)
                 source_value = DictGetItemSource(hooks_dict_source, source_key)
-                value = LazyVariableTracker.create(v, source_value)
+                value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value
 
             result = dict(
