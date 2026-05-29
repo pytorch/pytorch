@@ -1306,16 +1306,6 @@ endif()
 
 append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
 
-if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    string(APPEND CMAKE_CXX_FLAGS " -s")
-  elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -g0")
-  else()
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -s")
-  endif()
-endif()
-
 if(NOT APPLE AND UNIX)
   list(APPEND Caffe2_DEPENDENCY_LIBS dl)
 endif()
