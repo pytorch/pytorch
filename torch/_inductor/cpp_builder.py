@@ -561,11 +561,9 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
         return bool(lines) and "Microsoft" in lines[0]
 
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return False
 
-    # pyrefly: ignore [unreachable]
-    return False
 
 @functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
