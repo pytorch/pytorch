@@ -1911,6 +1911,26 @@ def is_invalid_cancel(
     )
 
 
+def is_out_of_tree_l3(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this check is a non-blocking L3 out-of-tree failure.
+
+    Dr.CI is the classification authority. A check is L3 non-blocking when
+    Dr.CI returns it under the ``OUT_OF_TREE`` category. CRCR (cross-repo CI
+    relay) L3 check runs are named ``crcr/<repo>/<workflow>`` and will be
+    classified as OUT_OF_TREE by Dr.CI when their downstream_repo_level is L3.
+    """
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
+    return any(
+        name == oot["name"] or (job_id and job_id == oot["id"])
+        for oot in drci_classifications.get("OUT_OF_TREE", [])
+    )
+
+
 def get_classifications(
     pr_num: int,
     project: str,
@@ -2003,6 +2023,18 @@ def get_classifications(
                 check.url,
                 check.status,
                 "INVALID_CANCEL",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        elif is_out_of_tree_l3(check, drci_classifications):
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "OUT_OF_TREE",
                 check.job_id,
                 check.title,
                 check.summary,
@@ -2298,7 +2330,13 @@ def categorize_checks(
             target = (
                 failed_checks_categorization[classification]
                 if classification
-                in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
+                in (
+                    "IGNORE_CURRENT_CHECK",
+                    "BROKEN_TRUNK",
+                    "FLAKY",
+                    "UNSTABLE",
+                    "OUT_OF_TREE",
+                )
                 else failed_checks
             )
             target.append((checkname, url, job_id))
