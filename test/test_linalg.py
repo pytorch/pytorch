@@ -2693,6 +2693,46 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "torch.linalg.eig: input tensor should not"):
                     torch.linalg.eig(a)
 
+    @onlyCUDA
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
+    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
+    @dtypes(torch.float32, torch.float64)
+    def test_eig_batched_small_matrices(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/183806
+        # cuSolver's Xgeev processes each batch element sequentially, causing
+        # 30-130x slowdown for batched small matrices. A custom batched kernel
+        # handles n <= 3 in a single launch.
+        cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+
+        for batch, n in [(512, 3), (64, 2), (128, 1), (32, 3)]:
+            a = make_tensor((batch, n, n), dtype=dtype, device=device)
+            eigenvalues, eigenvectors = torch.linalg.eig(a)
+
+            # verify A @ v = v @ diag(w) for each matrix
+            a_c = a.to(cdtype)
+            lhs = a_c @ eigenvectors
+            rhs = eigenvectors * eigenvalues.unsqueeze(-2)
+            self.assertEqual(lhs, rhs)
+
+        # verify n=3 with known real eigenvalues (diagonal matrix)
+        diag_vals = torch.tensor([1.0, 2.0, 3.0], dtype=dtype, device=device)
+        a_diag = torch.diag(diag_vals).unsqueeze(0).expand(16, -1, -1).contiguous()
+        w, v = torch.linalg.eig(a_diag)
+        # eigenvalues should be 1, 2, 3 (possibly reordered)
+        w_sorted = torch.sort(w.real, dim=-1).values
+        expected = diag_vals.unsqueeze(0).expand(16, -1)
+        self.assertEqual(w_sorted, expected)
+
+        # verify single matrix still works (should go through cuSolver)
+        a_single = make_tensor((3, 3), dtype=dtype, device=device)
+        w, v = torch.linalg.eig(a_single)
+        lhs = a_single.to(cdtype) @ v
+        rhs = v * w.unsqueeze(-2)
+        self.assertEqual(lhs, rhs)
+
     @skipCPUIfNoLapack
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,

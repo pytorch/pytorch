@@ -1169,6 +1169,17 @@ void linalg_eig_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, 
 }
 #endif
 
+// Defined in BatchLinearAlgebraSmallEig.cu
+void linalg_eig_batched_small_real(
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors,
+    const Tensor& input,
+    const Tensor& infos,
+    bool compute_eigenvectors);
+
+// Threshold for using the batched small-matrix kernel instead of cuSolver.
+constexpr int64_t BATCHED_SMALL_EIG_THRESHOLD = 3;
+
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   // This function calculates the non-symmetric eigendecomposition in-place
@@ -1176,6 +1187,14 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
   // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
 #if !defined(USE_ROCM) && defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+  auto n = input.size(-1);
+  auto batch = batchCount(input);
+  // Batched small matrices: custom kernel avoids cuSolver's sequential launches.
+  // See https://github.com/pytorch/pytorch/issues/183806
+  if (n <= BATCHED_SMALL_EIG_THRESHOLD && batch > 1 && !input.is_complex()) {
+    linalg_eig_batched_small_real(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+    return;
+  }
   _warn_once_magma_deprecation("linalg.eig");
   linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 #else
