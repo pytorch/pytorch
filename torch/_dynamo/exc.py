@@ -733,6 +733,8 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     old_msg = augment_exc_message_with_hop_name(exc, old_msg)
+    if msg == "\n":
+        msg = ""
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
