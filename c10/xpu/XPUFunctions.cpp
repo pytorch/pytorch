@@ -288,6 +288,9 @@ c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
 }
 
+// TODO: Currently only used by syncStreamsOnDevice. Once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms,
+// deprecate syncStreamsOnDevice and route callers to device_synchronize.
 void device_synchronize(c10::DeviceIndex device) {
 #if SYCL_COMPILER_VERSION >= 20260000
   initDevicePoolCallOnce();

@@ -339,6 +339,45 @@ class TestFullyShardDTensor(FSDPTest):
                 self.assertEqual(param.placements[0].dim, 0)
                 self.assertIsInstance(param.placements[1], Replicate)
 
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_unused_dtensor_param(self):
+        class TwoExpertParams(nn.Module):
+            def __init__(self, ep_mesh) -> None:
+                super().__init__()
+                used = torch.randn(8, 4, device=device_type)
+                unused = torch.randn(8, 4, device=device_type)
+                self.register_parameter(
+                    "used",
+                    nn.Parameter(distribute_tensor(used, ep_mesh, [Shard(0)])),
+                )
+                self.register_parameter(
+                    "unused",
+                    nn.Parameter(distribute_tensor(unused, ep_mesh, [Shard(0)])),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.used.to_local().float().sum() + (x.float().sum() * 0)
+
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("dp", "ep"),
+        )
+        model = TwoExpertParams(mesh["ep"])
+        fully_shard(model, mesh=mesh["dp"], reshard_after_forward=True)
+        model.set_reduce_scatter_unused_params(True)
+
+        loss = model(torch.ones(1, device=device_type))
+        loss.backward()
+        torch.get_device_module(device_type).synchronize()
+
+        unused_grad = model.unused.grad
+        self.assertIsNotNone(unused_grad)
+        self.assertIsInstance(unused_grad, DTensor)
+        self.assertEqual(
+            unused_grad.to_local(), torch.zeros_like(unused_grad.to_local())
+        )
+
     @skip_if_lt_x_gpu(2)
     def test_validation_non_replicate_dp_placement(self):
         """Error when a param has non-Replicate placement on the DP shard dim."""

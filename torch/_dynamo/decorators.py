@@ -1639,12 +1639,17 @@ def disable_nested_graph_breaks(fn: Any | None = None) -> Any:
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
+        self.prev_error_on_graph_break: list[bool | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_error_on_graph_break = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.error_on_graph_break)
+        current_error_on_graph_break = _get_error_on_graph_break()
+        if current_error_on_graph_break != self.error_on_graph_break:
+            self.prev_error_on_graph_break.append(current_error_on_graph_break)
+            _set_error_on_graph_break(self.error_on_graph_break)
+        else:
+            self.prev_error_on_graph_break.append(None)
 
     def __exit__(
         self,
@@ -1652,7 +1657,9 @@ class ErrorOnGraphBreakDecoratorContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _set_error_on_graph_break(self.prev_error_on_graph_break)
+        prev_error_on_graph_break = self.prev_error_on_graph_break.pop()
+        if prev_error_on_graph_break is not None:
+            _set_error_on_graph_break(prev_error_on_graph_break)
 
 
 def error_on_graph_break(
@@ -1799,3 +1806,72 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+_HASH_SLOTS = ("__hash__",)
+_RICHCOMPARE_SLOTS = ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+
+
+def allow_c_slot(
+    tp: type,
+    *,
+    tp_hash: bool = True,
+    tp_richcompare: bool = True,
+) -> type:
+    """Register a C extension type's slots as safe to call at trace time.
+
+    By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
+    or comparison operators on a C extension type with custom C slots (e.g.,
+    types defined in C extension modules).  This function tells Dynamo that the
+    type's C slots are safe to evaluate during tracing, avoiding graph breaks.
+
+    The slot functions must satisfy these requirements:
+
+    - **Pure**: depends only on the object's value, with no observable side
+      effects (no I/O, no mutation of global state).
+    - **Deterministic**: returns the same result for the same object across
+      calls within a process.
+    - **Immutable objects**: the object's state must not change after
+      construction in a way that affects the slot's return value.
+
+    Builtin types (``int``, ``str``, etc.) and Python-level dunder methods
+    are already handled and do not need registration.  This API is only needed
+    for C extension types whose C slots Dynamo cannot trace into.
+
+    Args:
+        tp: The C extension type whose C slots should be allowed.
+        tp_hash: Register ``__hash__`` as safe (default True).
+        tp_richcompare: Register comparison dunders as safe (default True).
+
+    Returns:
+        The type, unchanged (so it can be used as a decorator).
+
+    Example::
+
+        import torch._dynamo
+        from my_extension import MyType
+
+        # Register all slots (hash + comparison)
+        torch._dynamo.allow_c_slot(MyType)
+
+        # Register only hash
+        torch._dynamo.allow_c_slot(MyType, tp_richcompare=False)
+
+        # Register only comparison
+        torch._dynamo.allow_c_slot(MyType, tp_hash=False)
+    """
+    from .variables.user_defined import _safe_c_slots
+
+    if not isinstance(tp, type):
+        raise TypeError(f"allow_c_slot expects a type, got {type(tp).__name__}")
+    safe = _safe_c_slots()
+    dunders = ()
+    if tp_hash:
+        dunders += _HASH_SLOTS
+    if tp_richcompare:
+        dunders += _RICHCOMPARE_SLOTS
+    for dunder in dunders:
+        fn = getattr(tp, dunder, None)
+        if fn is not None and fn is not getattr(object, dunder, None):
+            safe.add(fn)
+    return tp

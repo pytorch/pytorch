@@ -8,7 +8,12 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
-from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
+from ..utils import (
+    _type_of,
+    device_supports_fp64,
+    expr_fits_within_32bit,
+    triton_version_uses_attrs_dict,
+)
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -61,12 +66,20 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
-            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
+            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
+                V.graph.current_device
+            ):
+                return "fp64"
+            return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
             # Unbacked floats from .item() should preserve fp64 precision
-            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
+            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
+                V.graph.current_device
+            ):
+                return "fp64"
+            return "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"
 

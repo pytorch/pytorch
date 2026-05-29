@@ -15,6 +15,7 @@ from torch.distributed.argparse_util import check_env, env
 
 class ArgParseUtilTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         # remove any lingering environment variables
         for e in os.environ.keys():  # noqa: SIM118
             if e.startswith("PET_"):
