@@ -246,7 +246,7 @@ TypePtr TypeParser::parseCustomType() {
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr std::array<const char*, 4> expected_atoms = {
+  static constexpr std::initializer_list<const char*> expected_atoms = {
       "torch", ".", "classes", "."};
   for (const auto& atom : expected_atoms) {
     expect(atom);

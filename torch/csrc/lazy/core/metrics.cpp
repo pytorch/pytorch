@@ -326,8 +326,8 @@ std::string MetricFnValue(double value) {
 }
 
 std::string MetricFnBytes(double value) {
-  static const std::array<const char*, 6> kSizeSuffixes{
-      "B", "KB", "MB", "GB", "TB", "PB"};
+  static const auto kSizeSuffixes =
+      std::to_array<const char*>({"B", "KB", "MB", "GB", "TB", "PB"});
   unsigned sfix = 0;
   for (; (sfix + 1) < kSizeSuffixes.size() && value >= 1024.0; ++sfix) {
     value /= 1024.0;
@@ -346,13 +346,13 @@ std::string MetricFnTime(double value) {
     int precision;
     char fill;
   };
-  static const std::array<TimePart, 6> time_parts{
+  static const auto time_parts = std::to_array<TimePart>(
       {{"d", 86400.0 * 1e9, 2, 0, '0'},
        {"h", 3600.0 * 1e9, 2, 0, '0'},
        {"m", 60.0 * 1e9, 2, 0, '0'},
        {"s", 1e9, 2, 0, '0'},
        {"ms", 1e6, 3, 0, '0'},
-       {"us", 1e3, 7, 3, '0'}}};
+       {"us", 1e3, 7, 3, '0'}});
   int count = 0;
   std::stringstream ss;
   for (const auto i : c10::irange(time_parts.size())) {
