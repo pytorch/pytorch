@@ -589,6 +589,89 @@ class TestExport(TestCase):
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
 
+    def _get_avg_pool2d_node(self, ep):
+        nodes = [
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.avg_pool2d.default
+        ]
+        self.assertEqual(len(nodes), 1)
+        return nodes[0]
+
+    def test_avg_pool2d_export_single_element_args(self):
+        class FunctionalAvgPool2d(torch.nn.Module):
+            def forward(self, x):
+                return F.avg_pool2d(x, kernel_size=(2,))
+
+        class FunctionalAvgPool2dWithListArgs(torch.nn.Module):
+            def forward(self, x):
+                return F.avg_pool2d(x, kernel_size=[2], stride=[1], padding=[1])
+
+        class ModuleAvgPool2d(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AvgPool2d(kernel_size=(2,))
+
+            def forward(self, x):
+                return self.pool(x)
+
+        class DirectAtenAvgPool2d(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.avg_pool2d.default(x, [2])
+
+        class DirectAtenAvgPool2dWithPadding(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.avg_pool2d.default(x, [2], [], [1])
+
+        class DirectCAvgPool2d(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._nn.avg_pool2d(x, [2])
+
+        x = torch.randn(1, 1, 8, 8)
+
+        functional_ep = export(FunctionalAvgPool2d(), (x,))
+        functional_node = self._get_avg_pool2d_node(functional_ep)
+        self.assertEqual(functional_node.args[1], [2, 2])
+        self.assertEqual(len(functional_node.args), 2)
+        self.assertEqual(functional_ep.module()(x), FunctionalAvgPool2d()(x))
+
+        functional_list_ep = export(FunctionalAvgPool2dWithListArgs(), (x,))
+        functional_list_node = self._get_avg_pool2d_node(functional_list_ep)
+        self.assertEqual(functional_list_node.args[1], [2, 2])
+        self.assertEqual(functional_list_node.args[2], [1, 1])
+        self.assertEqual(functional_list_node.args[3], [1, 1])
+        self.assertEqual(
+            functional_list_ep.module()(x), FunctionalAvgPool2dWithListArgs()(x)
+        )
+
+        module_ep = export(ModuleAvgPool2d(), (x,))
+        module_node = self._get_avg_pool2d_node(module_ep)
+        self.assertEqual(module_node.args[1], [2, 2])
+        self.assertEqual(module_node.args[2], [2, 2])
+        self.assertEqual(module_ep.module()(x), ModuleAvgPool2d()(x))
+
+        direct_aten_ep = export(DirectAtenAvgPool2d(), (x,))
+        direct_aten_node = self._get_avg_pool2d_node(direct_aten_ep)
+        self.assertEqual(direct_aten_node.args[1], [2, 2])
+        self.assertEqual(len(direct_aten_node.args), 2)
+        self.assertEqual(direct_aten_ep.module()(x), DirectAtenAvgPool2d()(x))
+
+        direct_aten_padding_ep = export(DirectAtenAvgPool2dWithPadding(), (x,))
+        direct_aten_padding_node = self._get_avg_pool2d_node(direct_aten_padding_ep)
+        self.assertEqual(direct_aten_padding_node.args[1], [2, 2])
+        self.assertEqual(direct_aten_padding_node.args[2], [])
+        self.assertEqual(direct_aten_padding_node.args[3], [1, 1])
+        self.assertEqual(
+            direct_aten_padding_ep.module()(x), DirectAtenAvgPool2dWithPadding()(x)
+        )
+
+        direct_c_ep = export(DirectCAvgPool2d(), (x,))
+        direct_c_node = self._get_avg_pool2d_node(direct_c_ep)
+        self.assertEqual(direct_c_node.args[1], [2, 2])
+        self.assertEqual(len(direct_c_node.args), 2)
+        self.assertEqual(direct_c_ep.module()(x), DirectCAvgPool2d()(x))
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,

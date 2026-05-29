@@ -1128,6 +1128,30 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _expand_singleton_int_list(arg: object) -> object:
+    if isinstance(arg, (list, tuple)) and len(arg) == 1:
+        return [arg[0], arg[0]]
+    return arg
+
+
+def _normalize_avg_pool2d_args(
+    func: OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> tuple[tuple[object, ...], dict[str, object]]:
+    if func is not torch.ops.aten.avg_pool2d.default:
+        return args, kwargs
+
+    args_list = list(args)
+    kwargs = dict(kwargs)
+    for idx, name in ((1, "kernel_size"), (2, "stride"), (3, "padding")):
+        if idx < len(args_list):
+            args_list[idx] = _expand_singleton_int_list(args_list[idx])
+        elif name in kwargs:
+            kwargs[name] = _expand_singleton_int_list(kwargs[name])
+    return tuple(args_list), kwargs
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1215,6 +1239,9 @@ def proxy_call(
             )
 
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
+    proxy_args, proxy_kwargs = _normalize_avg_pool2d_args(
+        func, proxy_args, proxy_kwargs
+    )
 
     # When we trace through a torch.tensor invocation, you never actually
     # see a torch.ops.aten.tensor call. Instead, the way this function is
