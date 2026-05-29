@@ -160,7 +160,7 @@ class SuperVariable(VariableTracker):
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
         for index in range(start_index, len(search_mro)):
-            # Dont call getattr, just check the __dict__ of the class
+            # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
@@ -730,6 +730,10 @@ class ExceptionVariable(VariableTracker):
     def debug_repr(self) -> str:
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        return VariableTracker.build(tx, self.debug_repr())
 
 
 class UnknownVariable(VariableTracker):

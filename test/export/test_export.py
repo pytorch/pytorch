@@ -356,13 +356,48 @@ class TestDynamismExpression(TestCase):
             def forward(self, *args):
                 return torch.ops.aten.slice.Tensor(*args)
 
-        inp = (torch.rand((10, 3, 224, 224)), 0, 0, 9223372036854775807)
+        inp = (torch.rand((10, 3, 224, 224)), 0, 0, sys.maxsize)
         dynamic_shapes = (({0: Dim("dim")}, None, None, None),)
-        torch.export.export(
+        ep = torch.export.export(
             Slice(),
             inp,
             dynamic_shapes=dynamic_shapes,
         )
+        slice_nodes = [
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.slice.Tensor
+        ]
+        self.assertEqual(len(slice_nodes), 1)
+        self.assertEqual(slice_nodes[0].args[2:], (0, sys.maxsize))
+
+    def test_export_slice_python_indexing_default_bounds(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x[::6, :], y
+
+        model = Model()
+        x = torch.randn(30, 6)
+        y = torch.randn(1000, 3)
+        batch = Dim("batch", min=1, max=1000)
+
+        ep = export(
+            model,
+            (x, y),
+            dynamic_shapes={"x": {}, "y": {0: batch}},
+        )
+
+        graph_str = str(ep.graph_module.graph)
+        self.assertNotIn(str(sys.maxsize), graph_str)
+
+        slice_nodes = [
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.slice.Tensor
+        ]
+        self.assertEqual(len(slice_nodes), 1)
+        self.assertEqual(slice_nodes[0].args[2:], (None, None, 6))
+        self.assertTrue(torchdynamo.utils.same(model(x, y), ep.module()(x, y)))
 
     def test_no_grad_param_inplace(self):
         class Foo(torch.nn.Module):
@@ -1278,7 +1313,7 @@ def forward(self, x):
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1984,43 +2019,46 @@ graph():
             export(model, input1, dynamic_shapes=dynamic_shapes, strict=False)
 
     def test_interpolate_symbolic_scale_factor(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                scale = 16 / x.shape[2]
-                return F.interpolate(
-                    x,
-                    scale_factor=(scale, scale),
-                    mode="bilinear",
-                    antialias=True,
-                    align_corners=False,
+        for mode in ("bilinear", "bicubic", "lanczos"):
+            with self.subTest(mode=mode):
+
+                class M(torch.nn.Module):
+                    def forward(self, x):
+                        scale = 16 / x.shape[2]
+                        return F.interpolate(
+                            x,
+                            scale_factor=(scale, scale),
+                            mode=mode,
+                            antialias=True,
+                            align_corners=False,
+                        )
+
+                model = M()
+                ep = export(
+                    model,
+                    (torch.rand(2, 3, 16, 32),),
+                    dynamic_shapes=({0: Dim.DYNAMIC, 2: Dim.DYNAMIC, 3: Dim.DYNAMIC},),
+                    strict=False,
                 )
+                module = ep.module()
 
-        model = M()
-        ep = export(
-            model,
-            (torch.rand(2, 3, 16, 32),),
-            dynamic_shapes=({0: Dim.DYNAMIC, 2: Dim.DYNAMIC, 3: Dim.DYNAMIC},),
-            strict=False,
-        )
-        module = ep.module()
+                for shape in [
+                    (1, 3, 32, 20),
+                    (1, 3, 64, 20),
+                ]:
+                    x = torch.rand(*shape)
+                    torch.testing.assert_close(module(x), model(x))
 
-        for shape in [
-            (1, 3, 32, 20),
-            (1, 3, 64, 20),
-        ]:
-            x = torch.rand(*shape)
-            torch.testing.assert_close(module(x), model(x))
-
-        # The current ATen upsample schemas accept scale factors as float[], so
-        # symbolic scale factors use output_size and recomputed-scale semantics.
-        # For rounded output sizes, cover the issue's dynamic shape behavior but
-        # do not assert scale_factor=False value semantics.
-        for shape, expected_shape in [
-            ((1, 3, 30, 17), (1, 3, 16, 9)),
-            ((1, 3, 32, 20), (1, 3, 16, 10)),
-            ((1, 3, 64, 20), (1, 3, 16, 5)),
-        ]:
-            self.assertEqual(module(torch.rand(*shape)).shape, expected_shape)
+                # The current ATen upsample schemas accept scale factors as float[], so
+                # symbolic scale factors use output_size and recomputed-scale semantics.
+                # For rounded output sizes, cover the issue's dynamic shape behavior but
+                # do not assert scale_factor=False value semantics.
+                for shape, expected_shape in [
+                    ((1, 3, 30, 17), (1, 3, 16, 9)),
+                    ((1, 3, 32, 20), (1, 3, 16, 10)),
+                    ((1, 3, 64, 20), (1, 3, 16, 5)),
+                ]:
+                    self.assertEqual(module(torch.rand(*shape)).shape, expected_shape)
 
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
