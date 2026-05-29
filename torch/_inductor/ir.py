@@ -9337,12 +9337,7 @@ class FallbackKernel(ExternKernelAlloc):
                 out_op = lookup_manual_out_variant(kernel)
 
             if out_op is not None and len(get_out_arg_names(out_op)) == 1:
-                layout = FixedLayout(
-                    device=example_output.device,
-                    dtype=example_output.dtype,
-                    size=[*example_output.shape],
-                    stride=[*example_output.stride()],
-                )
+                layout = cls.tensor_to_layout(example_output)
                 return ExternKernelOut(  # type: ignore[return-value]
                     layout=layout,
                     inputs=list(tensor_args),
