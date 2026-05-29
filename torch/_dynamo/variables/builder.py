@@ -332,10 +332,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 log = logging.getLogger(__name__)
@@ -713,7 +710,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         source: Source,
         allow_lazy_constant: bool = True,
     ) -> None:
@@ -2556,6 +2553,14 @@ class VariableBuilder:
                         sym_val.node.shape_env.var_to_hint_override[expr] = (
                             int_spec.optimization_hint
                         )
+                    # Dedup multiple uses of the same IntVar via runtime
+                    # equality check. `_uid` distinguishes IntVars with
+                    # the same name (including default `anon`). The
+                    # `__intvar__:` prefix keeps these from colliding
+                    # with user-supplied `shape_id` strings.
+                    sym_val.node.shape_env._add_shape_id_eq_check(
+                        sym_val, f"__intvar__:{int_spec._uid}"
+                    )
                     return result
                 else:
                     raise ValueError(
@@ -4714,6 +4719,13 @@ def _wrap_to_fake_tensor_and_record_impl(
                 size_sym = fake_e.size(dim_i)
                 if not isinstance(size_sym, torch.SymInt):
                     continue
+                # Dedup multiple uses of the same IntVar via runtime equality
+                # check. `_uid` distinguishes IntVars with the same name
+                # (including default `anon`). The `__intvar__:` prefix keeps
+                # these from colliding with user-supplied `shape_id` strings.
+                size_sym.node.shape_env._add_shape_id_eq_check(
+                    size_sym, f"__intvar__:{dim_spec._uid}"
+                )
                 if dim_spec.min is not None:
                     torch._check(size_sym >= dim_spec.min)
                 if dim_spec.max is not None:
@@ -4994,11 +5006,11 @@ class SourcelessBuilder:
 
     @staticmethod
     def make_type_handlers() -> dict[
-        type, Callable[["InstructionTranslator", Any], VariableTracker]
+        type, Callable[["InstructionTranslatorBase", Any], VariableTracker]
     ]:
         create = SourcelessBuilder.create
         handlers: dict[
-            type, Callable[[InstructionTranslator, Any], VariableTracker]
+            type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
@@ -5071,7 +5083,7 @@ class SourcelessBuilder:
             )
         )
 
-        def passthrough(tx: "InstructionTranslator", value: T) -> T:
+        def passthrough(tx: "InstructionTranslatorBase", value: T) -> T:
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
@@ -5093,7 +5105,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())
