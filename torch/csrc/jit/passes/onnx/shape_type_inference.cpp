@@ -517,7 +517,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
       shape_ratio /= static_cast<uint64_t>(target_shape.static_size());
     } else {
       auto value = target_shape.value();
-      if (sym_map.find(value) == sym_map.end()) {
+      if (!sym_map.contains(value)) {
         return std::nullopt;
       }
       sym_map[value]--;
@@ -1942,14 +1942,13 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
   auto complete = true;
   auto input_size = n->inputs().size();
   std::unordered_set<int64_t> non_required_idx = {};
-  if (non_required_shape_inference_idx_map.find(n->kind().toDisplayString()) !=
-      non_required_shape_inference_idx_map.end()) {
+  if (non_required_shape_inference_idx_map.contains(
+          n->kind().toDisplayString())) {
     non_required_idx =
         non_required_shape_inference_idx_map[n->kind().toDisplayString()];
   }
   for (auto idx : c10::irange(input_size)) {
-    if (!non_required_idx.empty() &&
-        non_required_idx.find(idx) != non_required_idx.end()) {
+    if (!non_required_idx.empty() && non_required_idx.contains(idx)) {
       continue;
     }
     auto input = n->inputs()[idx];
@@ -1985,10 +1984,8 @@ void UpdateReliable(
     bool no_type_warning) {
   auto inferred =
       ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
-  auto isTypeReliableForTracer =
-      nodeTypeReliableForTracer.find(
-          output->node()->kind().toDisplayString()) !=
-      nodeTypeReliableForTracer.end();
+  auto isTypeReliableForTracer = nodeTypeReliableForTracer.contains(
+      output->node()->kind().toDisplayString());
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
     TORCH_WARN(
@@ -2225,7 +2222,7 @@ void ONNXSetDynamicInputShape(
 
   for (const auto i : c10::irange(input_names.size())) {
     const auto& input_name = input_names[i];
-    if (dynamic_axes.find(input_name) != dynamic_axes.end()) {
+    if (dynamic_axes.contains(input_name)) {
       auto axes_names = dynamic_axes.find(input_name)->second;
       TORCH_INTERNAL_ASSERT(i < graph->inputs().size());
       auto input_tensor_type = graph->inputs()[i]->type()->cast<TensorType>();
@@ -2241,7 +2238,7 @@ void ONNXSetDynamicInputShape(
       for (const auto& pair : axes_names) {
         const auto axis = pair.first;
         const auto name = pair.second;
-        if (name_to_sym.find(name) == name_to_sym.end()) {
+        if (!name_to_sym.contains(name)) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
         TORCH_CHECK(

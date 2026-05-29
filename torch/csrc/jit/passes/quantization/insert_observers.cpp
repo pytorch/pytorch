@@ -48,7 +48,7 @@ void fillQConfigMap(
     const std::string& key = "",
     const std::optional<QConfig>& parent_qconfig = std::nullopt) {
   std::optional<QConfig> qconfig;
-  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+  if (qconfig_dict.contains(key)) {
     GRAPH_DEBUG("Got module config for key:", key);
     qconfig = qconfig_dict.at(key);
   } else {
@@ -108,8 +108,8 @@ class ModuleCloneHelper {
     // ClassType during cloning, so we first use type and qconfig to check if
     // the type is already cloned, if so, we'll create a new module with the
     // cloned ClassType, if not, we'll create a new module and a new ClassType.
-    bool type_already_cloned = type_remap.find(type) != type_remap.end() &&
-        type_remap.at(type).find(qconfig) != type_remap.at(type).end();
+    bool type_already_cloned =
+        type_remap.contains(type) && type_remap.at(type).contains(qconfig);
     Module r;
     if (type_already_cloned) {
       // if we cloned the class type before, we'll reuse it
@@ -255,9 +255,9 @@ class ModuleCloneHelper {
       const std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
     auto type_remap_fn = [&](TypePtr type_ptr,
                              const std::optional<QConfig>& qconfig) {
-      if (type_remap.find(type_ptr) != type_remap.end()) {
+      if (type_remap.contains(type_ptr)) {
         const auto& qconfig_map = type_remap.at(type_ptr);
-        if (qconfig_map.find(qconfig) != qconfig_map.end()) {
+        if (qconfig_map.contains(qconfig)) {
           return qconfig_map.at(qconfig);
         }
       }
@@ -376,7 +376,7 @@ class InsertObserversHelper {
   bool isObserved(
       Value* v,
       const std::unordered_set<Value*>& block_observed_values) {
-    return block_observed_values.count(v) || observed_values_.count(v);
+    return block_observed_values.contains(v) || observed_values_.contains(v);
   }
 
   // Fill the map from value to the corresponding observer module
@@ -922,7 +922,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       // Skip observer nodes
-      if (observer_nodes_.count(n)) {
+      if (observer_nodes_.contains(n)) {
         continue;
       }
       if (n->kind() == prim::CallMethod) {
@@ -945,7 +945,7 @@ void InsertObserversHelper::insertObserverFor(
     Module& module,
     const Module& observer_module,
     NameModuleVector& observer_name_and_modules) {
-  if (observed_values_.count(v)) {
+  if (observed_values_.contains(v)) {
     return;
   }
   GRAPH_DEBUG("Inserting observer for:", v->debugName());
@@ -1269,7 +1269,7 @@ void InsertObserversHelper::fillValueObserverMap(
   Method method = module.get_method(method_name);
   auto graph = method.graph();
 
-  if (visited_graph_of_observer_map_.count(graph.get())) {
+  if (visited_graph_of_observer_map_.contains(graph.get())) {
     return;
   }
   visited_graph_of_observer_map_.insert(graph.get());
@@ -1309,13 +1309,13 @@ void InsertObserversHelper::fillValueObserverMap(
 }
 
 std::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
-  if (observer_for_value_.count(v)) {
+  if (observer_for_value_.contains(v)) {
     auto observer = observer_for_value_.at(v);
     GRAPH_DEBUG("Got observer module config for:", v->debugName());
     return observer;
   }
   std::optional<Module> result;
-  if (boundary_value_map_.count(v)) {
+  if (boundary_value_map_.contains(v)) {
     for (Value* next : boundary_value_map_.at(v)) {
       GRAPH_DEBUG(
           "Going through boundary map:",
@@ -1360,7 +1360,7 @@ void InsertObserversHelper::recordObserved(
     std::unordered_map<Value*, Module>& values_to_observe,
     std::unordered_set<Value*>& block_observed_values) {
   Value* to_observe = v;
-  if (delay_observation_map_.count(v)) {
+  if (delay_observation_map_.contains(v)) {
     to_observe = delay_observation_map_.at(v);
   }
   values_to_observe[to_observe] = observer_module;
@@ -1418,7 +1418,7 @@ InsertObserversHelper::insertObserversFor(
   // This means the block is been processed before, we just
   // need to attach observer modules and construct the information
   // needed by call site here
-  bool visited = block_observer_map_.count(block);
+  bool visited = block_observer_map_.contains(block);
   if (visited) {
     // instance clone of observer module and setAttr
     for (const auto& observer_attrs : block_observer_map_.at(block)) {
@@ -1448,7 +1448,7 @@ InsertObserversHelper::insertObserversFor(
   std::unordered_map<Value*, Module> values_to_observe;
 
   for (auto* v : block->inputs()) {
-    if (!inputs_outputs.count(v) && !values_to_observe.count(v)) {
+    if (!inputs_outputs.contains(v) && !values_to_observe.contains(v)) {
       if (auto observer_opt = getObserverFor(v)) {
         recordObserved(
             v, *observer_opt, values_to_observe, block_observed_values);
@@ -1459,7 +1459,7 @@ InsertObserversHelper::insertObserversFor(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      if (observer_nodes_.count(n)) {
+      if (observer_nodes_.contains(n)) {
         continue;
       }
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
@@ -1500,7 +1500,7 @@ InsertObserversHelper::insertObserversFor(
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto* node_input = n->input(i + input_offset);
-          if (input_observers[i] && !inputs_outputs.count(node_input) &&
+          if (input_observers[i] && !inputs_outputs.contains(node_input) &&
               !isObserved(node_input, block_observed_values)) {
             recordObserved(
                 node_input,
@@ -1510,7 +1510,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
         for (auto i = 0U; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
+          if (output_observers[i] && !inputs_outputs.contains(n->output(i)) &&
               !isObserved(n->output(i), block_observed_values)) {
             recordObserved(
                 n->output(i),
@@ -1538,7 +1538,7 @@ InsertObserversHelper::insertObserversFor(
           // we will check if output of subblocks are quantized consistently
           for (size_t i = 0; i < subblock->outputs().size(); ++i) {
             Value* output = subblock->outputs()[i];
-            if (output_observers[i] && !inputs_outputs.count(output) &&
+            if (output_observers[i] && !inputs_outputs.contains(output) &&
                 !isObserved(output, block_observed_values)) {
               recordObserved(
                   output,
@@ -1581,7 +1581,8 @@ InsertObserversHelper::insertObserversFor(
       }
       for (Value* v : n->outputs()) {
         propagateObservedProperty(v, block_observed_values);
-        if (!inputs_outputs.count(v) && !isObserved(v, block_observed_values)) {
+        if (!inputs_outputs.contains(v) &&
+            !isObserved(v, block_observed_values)) {
           auto observer_opt = getObserverFor(v);
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
@@ -1624,13 +1625,13 @@ InsertObserversHelper::insertObserversFor(
 void InsertObserversHelper::propagateObservedProperty(
     Value* output,
     std::unordered_set<Value*>& block_observed_values) {
-  if (pass_through_value_map_.count(output)) {
+  if (pass_through_value_map_.contains(output)) {
     // since the vector is always non-empty, we will
     // not return the initial value
     bool all_observed = true;
     for (Value* v : pass_through_value_map_.at(output)) {
       all_observed &=
-          observed_values_.count(v) || block_observed_values.count(v);
+          observed_values_.contains(v) || block_observed_values.contains(v);
     }
     if (all_observed) {
       GRAPH_DEBUG("Pass through observed property in node:", *output->node());

@@ -266,7 +266,7 @@ class ShapePropagator : public PropertyPropBase {
         aten::transpose_,
     };
 
-    if (resize_ops.count(n->kind()))
+    if (resize_ops.contains(n->kind()))
       return true;
 
     if (!n->maybeSchema())
@@ -361,7 +361,7 @@ class ShapePropagator : public PropertyPropBase {
   // know whether the dependency has been executed.
   std::unordered_map<Node*, bool> dependsOnMutationMemo_;
   bool dependsOnMutation(Node* node) {
-    if (dependsOnMutationMemo_.count(node) != 0) {
+    if (dependsOnMutationMemo_.contains(node)) {
       return dependsOnMutationMemo_[node];
     }
 

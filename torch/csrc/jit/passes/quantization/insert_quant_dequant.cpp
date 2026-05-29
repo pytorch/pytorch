@@ -731,7 +731,7 @@ class InsertQuantDeQuantHelper {
       Node* n);
 
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
-    if (qscheme_for_graph_.count(g)) {
+    if (qscheme_for_graph_.contains(g)) {
       // FIXME[T110786721]: This check was broken before nevery failing.
       // Once fixed, this check triggers and fails tests.
       // Fix the tests that enabling this check produce!
@@ -787,7 +787,7 @@ class InsertQuantDeQuantHelper {
           std::nullopt);
 
   bool isQuantized(Value* v) {
-    return quantized_values_.count(v) != 0;
+    return quantized_values_.contains(v);
   }
 
   std::unordered_map<Graph*, std::vector<std::string>>
@@ -857,7 +857,7 @@ void InsertQuantDeQuantHelper::removeObserverNodes(Module& module) {
 }
 
 void InsertQuantDeQuantHelper::removeObserverNodes(Graph* g) {
-  if (nodes_to_destroy_.count(g)) {
+  if (nodes_to_destroy_.contains(g)) {
     for (auto& n : nodes_to_destroy_.at(g)) {
       n->removeAllInputs();
     }
@@ -885,7 +885,7 @@ void InsertQuantDeQuantHelper::cleanup(Module& module, Graph* g) {
   // attributes has been removed from the type(see step 2) but the slot
   // index of these attributes are kept in the list, we'll replay the observer
   // slots removal using these slot indexes
-  if (removed_observer_slots_.count(g)) {
+  if (removed_observer_slots_.contains(g)) {
     for (auto slot : removed_observer_slots_.at(g)) {
       module._ivalue()->unsafeRemoveSlot(slot);
     }
@@ -895,7 +895,7 @@ void InsertQuantDeQuantHelper::cleanup(Module& module, Graph* g) {
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer modules with this optimization
-  if (observer_modules_to_remove_.count(g)) {
+  if (observer_modules_to_remove_.contains(g)) {
     auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
@@ -921,7 +921,7 @@ void SubGraphCloneHelper::cloneNodeInGraph(
     std::unordered_map<Value*, Value*>& remap_old_to_new) {
   auto* block = g->block();
   auto value_fn = [&](Value* v) {
-    if (remap_old_to_new.count(v) == 0) {
+    if (!remap_old_to_new.contains(v)) {
       auto new_value = g->block()->addInput();
       remap_old_to_new[v] = new_value;
       new_value->copyMetadata(v);
@@ -997,7 +997,7 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
   // If the graph was already visited, return the GraphFunction directly.
   // Multiple module instances can share the same graph code, so we don't need
   // to re-run the extraction process.
-  if (weight_to_graph_fn_.count(weight_value) == 0) {
+  if (!weight_to_graph_fn_.contains(weight_value)) {
     // Extract the subgraph nodes.
     findSubgraph(self, weight_value, weight_subgraph);
 
@@ -1019,7 +1019,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
     Module& module,
     Graph* g,
     Value* self) {
-  if (!observer_nodes_for_graph_.count(g)) {
+  if (!observer_nodes_for_graph_.contains(g)) {
     return;
   }
   for (auto* n : observer_nodes_for_graph_.at(g)) {
@@ -1415,7 +1415,7 @@ void InsertQuantDeQuantHelper::run(
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
-  if (observer_nodes_for_graph_.count(graph.get())) {
+  if (observer_nodes_for_graph_.contains(graph.get())) {
     for (auto* n : observer_nodes_for_graph_.at(graph.get())) {
       auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
@@ -1599,7 +1599,7 @@ void InsertQuantDeQuantHelper::insertCalculateQParamsAndQuantizationOps(
     Module& module,
     Graph* graph,
     Value* self) {
-  if (!observer_nodes_for_graph_.count(graph)) {
+  if (!observer_nodes_for_graph_.contains(graph)) {
     return;
   }
   for (auto* n : observer_nodes_for_graph_.at(graph)) {

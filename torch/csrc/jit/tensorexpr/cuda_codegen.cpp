@@ -88,8 +88,8 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
 }
 
 void CudaAnalysis::visit(const FreePtr& v) {
-  if (thread_local_bufs_.count(v->buffer_var()) == 0 &&
-      cross_block_bufs_.count(v->buffer_var()) == 0) {
+  if (!thread_local_bufs_.contains(v->buffer_var()) &&
+      !cross_block_bufs_.contains(v->buffer_var())) {
     throw std::runtime_error("Global free not supported yet");
   }
 }
@@ -200,14 +200,14 @@ void CudaPrinter::print_flat_alloc(const AllocatePtr& alloc) {
 
 void CudaPrinter::visit(const AllocatePtr& v) {
   // TODO: handle dynamic shapes here.
-  if (cuda_analysis_->cross_block_bufs().count(v->buffer_var()) != 0) {
+  if (cuda_analysis_->cross_block_bufs().contains(v->buffer_var())) {
     emitIndent();
     os() << "__shared__ ";
     print_flat_alloc(v);
     return;
   }
 
-  if (cuda_analysis_->thread_local_bufs().count(v->buffer_var()) != 0) {
+  if (cuda_analysis_->thread_local_bufs().contains(v->buffer_var())) {
     emitIndent();
     print_flat_alloc(v);
     return;
@@ -351,7 +351,7 @@ class AtomicAddFuser : public IRMutator {
     BufPtr buf = v->buf();
 
     // Thread locals never need to be atomic.
-    if (thread_local_bufs_.count(buf->base_handle()) != 0) {
+    if (thread_local_bufs_.contains(buf->base_handle())) {
       return v;
     }
 
@@ -419,7 +419,7 @@ void CudaPrinter::visit(const StorePtr& v) {
 
 void CudaPrinter::visit(const AtomicAddPtr& v) {
   emitIndent();
-  if (cuda_analysis_->thread_local_bufs().count(v->base_handle()) > 0) {
+  if (cuda_analysis_->thread_local_bufs().contains(v->base_handle())) {
     // atomicAdd only works on global and shared memory
     os() << *v->base_handle() << '[' << *v->flat_index()
          << "] += " << *v->value() << ';';
@@ -495,7 +495,7 @@ class PrioritizeLoad : public IRMutator {
     if (nested_let_) {
       return IRMutator::mutate(v);
     }
-    if (thread_local_bufs_.count(v->base_handle()) > 0) {
+    if (thread_local_bufs_.contains(v->base_handle())) {
       return IRMutator::mutate(v);
     }
     if (v->indices().empty()) {
@@ -634,7 +634,7 @@ class PrioritizeLoad : public IRMutator {
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   int64_t counter = 0;
   std::string name = func_prefix;
-  while (taken_func_names.count(name)) {
+  while (taken_func_names.contains(name)) {
     name = func_prefix + "_" + std::to_string(counter++);
   }
 
@@ -1020,7 +1020,7 @@ void CudaCodeGen::Initialize() {
     vars_in_extents.insert(v.begin(), v.end());
   }
   for (const size_t i : c10::irange(buffer_args.size())) {
-    if (vars_in_extents.count(buffer_args[i].var())) {
+    if (vars_in_extents.contains(buffer_args[i].var())) {
       extents_buffer_args.push_back(buffer_args[i]);
       arg_pos_in_extents_.push_back(true);
     } else {

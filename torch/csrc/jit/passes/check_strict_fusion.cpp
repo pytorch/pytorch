@@ -46,7 +46,7 @@ static std::unordered_set<Node*> collectValuesUsedInGuard(
           inp_node->owningBlock() != enter_node->owningBlock()) {
         continue;
       }
-      if (visited_nodes.count(inp_node)) {
+      if (visited_nodes.contains(inp_node)) {
         continue;
       }
       queue.push_back(inp_node);
@@ -91,7 +91,7 @@ static void checkForUnfusedOps(Node* enter_node) {
   }
   std::vector<Node*> unfused_nodes_not_used_in_guard;
   for (Node* unfused : unsupported_nodes) {
-    if (!guarding_check_nodes.count(unfused)) {
+    if (!guarding_check_nodes.contains(unfused)) {
       unfused_nodes_not_used_in_guard.push_back(unfused);
     }
   }
