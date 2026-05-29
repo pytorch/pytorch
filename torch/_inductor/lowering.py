@@ -8935,7 +8935,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
             return (node, aux_out)
         return (node,)
 
-    fusible_template_backends = OrderedSet(["TRITON", "CUTLASS"])
+    fusible_template_backends = OrderedSet(["TRITON"])
     if backend not in fusible_template_backends:
         raise NotImplementedError(
             f"GEMM epilogue backend {backend} does not support Inductor template "
@@ -8949,10 +8949,6 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     ]
     if backend == "TRITON":
         patches.append(patch.object(config.triton, "num_decompose_k_splits", 0))
-    if backend == "CUTLASS":
-        patches.append(
-            patch.object(config.cutlass, "cutlass_epilogue_fusion_enabled", True)
-        )
 
     with contextlib.ExitStack() as stack:
         for config_patch in patches:

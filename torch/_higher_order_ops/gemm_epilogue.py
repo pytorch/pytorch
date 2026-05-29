@@ -47,7 +47,7 @@ _GEMM_EPILOGUE_OP_ALIASES = {
     torch.baddbmm: torch.ops.aten.baddbmm.default,
     torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
-_SUPPORTED_BACKENDS = {"TRITON", "CUTLASS", "CUTEDSL", "QUACK"}
+_SUPPORTED_BACKENDS = {"TRITON", "CUTEDSL", "QUACK"}
 _SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
 
 

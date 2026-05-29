@@ -257,19 +257,6 @@ class GemmEpilogueFusionTests(TestCase):
 
                 torch.testing.assert_close(actual, F.grouped_mm(a, b, offs=offs).relu())
 
-    def test_cutlass_backend_is_accepted(self):
-        a = torch.randn(2, 3)
-        b = torch.randn(3, 4)
-
-        actual = gemm_epilogue_fusion(
-            torch.ops.aten.mm.default,
-            (a, b),
-            lambda acc: acc.relu(),
-            kernel_options={"backend": "CUTLASS"},
-        )
-
-        torch.testing.assert_close(actual, (a @ b).relu())
-
     def test_make_fx_preserves_gemm_kwargs(self):
         def fn(bias, a, b):
             return gemm_epilogue_fusion(
@@ -1221,33 +1208,6 @@ class GemmEpilogueFusionTests(TestCase):
         )
         with self.assertRaisesRegex(Exception, "Invalid blockwise scaling configuration"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale_a, scale_b)
-
-    @requires_cuda_and_triton
-    def test_cuda_inductor_cutlass_backend_uses_cutlass_template_fusion(self):
-        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
-
-        if not try_import_cutlass() or torch.version.cuda is None:
-            self.skipTest("CUTLASS is not available")
-
-        def fn(a, b):
-            return gemm_epilogue_fusion(
-                torch.ops.aten.mm.default,
-                (a, b),
-                lambda acc: acc.relu(),
-                kernel_options={"backend": "CUTLASS"},
-            )
-
-        a = torch.randn(512, 512, device="cuda", dtype=torch.float16)
-        b = torch.randn(512, 512, device="cuda", dtype=torch.float16)
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("async_compile.cuda").check("cutlass").check_not(
-            "extern_kernels.mm"
-        ).run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_addmm_relu_to_quack_hook(self):
