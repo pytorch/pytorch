@@ -7822,14 +7822,19 @@ class CommonTemplate:
             fn,
             (
                 torch.tensor([], dtype=torch.bfloat16),
-                torch.randn(1, 8, 0, 78, dtype=torch.bfloat16),
+                torch.randn(1, 8, 5, 78, dtype=torch.bfloat16),
             ),
         )
+
+    def test_cat_empty_1d_negative_dim_zero_output(self):
+        def fn(cache, new_keys):
+            return torch.cat([cache, new_keys], dim=-2)
+
         self.common(
             fn,
             (
                 torch.tensor([], dtype=torch.bfloat16),
-                torch.randn(1, 8, 5, 78, dtype=torch.bfloat16),
+                torch.randn(1, 8, 0, 78, dtype=torch.bfloat16),
             ),
         )
 
