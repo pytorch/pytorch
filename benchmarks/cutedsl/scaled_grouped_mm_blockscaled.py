@@ -1,7 +1,6 @@
 import argparse
 import gc
 import importlib
-import statistics
 import subprocess
 import sys
 import time
@@ -139,18 +138,22 @@ def _run_with_cuda_profiler(fn):
 def _get_cpp_scaled_grouped_mm_v2_kernel():
     global _CPP_SCALED_GROUPED_MM_V2_KERNEL
     if _CPP_SCALED_GROUPED_MM_V2_KERNEL is None:
-        _CPP_SCALED_GROUPED_MM_V2_KERNEL = (
-            torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
-                "aten::_scaled_grouped_mm_v2", "CUDA"
-            )
+        _CPP_SCALED_GROUPED_MM_V2_KERNEL = torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
+            "aten::_scaled_grouped_mm_v2", "CUDA"
         )
     return _CPP_SCALED_GROUPED_MM_V2_KERNEL
 
 
 def _cuda_dispatch_keyset(device_type: str):
-    dispatch_key = torch._C._dispatch_key_for_device(device_type)  # pyrefly: ignore [missing-module-attribute]
-    dispatch_key = getattr(torch._C.DispatchKey, dispatch_key)  # pyrefly: ignore [missing-module-attribute]
-    return torch._C.DispatchKeySet(dispatch_key)  # pyrefly: ignore [missing-module-attribute]
+    dispatch_key = torch._C._dispatch_key_for_device(
+        device_type
+    )  # pyrefly: ignore [missing-module-attribute]
+    dispatch_key = getattr(
+        torch._C.DispatchKey, dispatch_key
+    )  # pyrefly: ignore [missing-module-attribute]
+    return torch._C.DispatchKeySet(
+        dispatch_key
+    )  # pyrefly: ignore [missing-module-attribute]
 
 
 _get_cpp_scaled_grouped_mm_v2_kernel()
@@ -704,7 +707,6 @@ def benchmark_scaled_grouped_mm(
     subprocess_depth: int = 0,
     cuda_profiler_backend: str | None = None,
 ):
-    user_provided_gmnk = gmnk is not None
     if dtype is None:
         dtype = torch.bfloat16
     if backend not in ("both", "cpp", "cute"):

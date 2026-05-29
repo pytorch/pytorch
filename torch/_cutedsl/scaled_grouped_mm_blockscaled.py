@@ -1,7 +1,7 @@
 import functools
 import importlib
 from collections.abc import Sequence
-from typing import Any, cast, NamedTuple, Optional, Protocol
+from typing import Any, cast, NamedTuple, Protocol
 
 import torch
 from torch import Tensor
@@ -31,7 +31,7 @@ class _BlockScaledFormat(NamedTuple):
     logical_vals_per_elem: int
     cutlass_ab_dtype_name: str
     cutlass_scale_ab_dtype_name: str
-    torch_global_scale_dtype: Optional[torch.dtype] = None
+    torch_global_scale_dtype: torch.dtype | None = None
 
 
 _TORCH_TO_CUTLASS_DTYPE_NAME = {
@@ -85,7 +85,7 @@ def _get_blockscaled_format(
     scale_b: Sequence[Tensor],
     scale_recipe_a: Sequence[ScalingType],
     scale_recipe_b: Sequence[ScalingType],
-) -> Optional[_BlockScaledFormat]:
+) -> _BlockScaledFormat | None:
     for fmt in _BLOCKSCALED_FORMATS:
         if fmt.torch_global_scale_dtype is None:
             if len(scale_a) != 1 or len(scale_b) != 1:
@@ -123,7 +123,7 @@ def _get_blockscaled_format(
 
 
 @functools.cache
-def _cutedsl_unavailable_reason() -> Optional[str]:
+def _cutedsl_unavailable_reason() -> str | None:
     deps = [
         ("nvidia-cutlass-dsl", "cutlass"),
         ("apache-tvm-ffi", "tvm_ffi"),
@@ -554,7 +554,7 @@ def _round_up(a: int, b: int) -> int:
 
 def _allocate_output(
     mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype, ngroups: int
-) -> Optional[Tensor]:
+) -> Tensor | None:
     a_is_2d = mat_a.dim() == 2
     b_is_2d = mat_b.dim() == 2
     M, N = mat_a.size(0), mat_b.size(-1)
@@ -796,11 +796,11 @@ def scaled_grouped_mm_blockscaled(
     scale_recipe_b: list[ScalingType],
     swizzle_a: list[SwizzleType],
     swizzle_b: list[SwizzleType],
-    offs: Optional[Tensor],
-    output_dtype: Optional[torch.dtype] = None,
+    offs: Tensor | None,
+    output_dtype: torch.dtype | None = None,
     contraction_dim: Sequence[int] = (),
     use_fast_accum: bool = False,
-    bias: Optional[Tensor] = None,
+    bias: Tensor | None = None,
 ) -> Tensor:
     def _is_transposed_layout(t: Tensor) -> bool:
         end_dim = t.dim() - 1
@@ -1194,9 +1194,9 @@ def _scaled_grouped_mm_v2_conditional_cuda_impl(dispatch_keys, *args, **kwargs):
         scale_recipe_b_t = cast(list[int], scale_recipe_b)
         swizzle_a_t = cast(list[int], swizzle_a)
         swizzle_b_t = cast(list[int], swizzle_b)
-        offs_t = cast(Optional[Tensor], offs)
-        bias_t = cast(Optional[Tensor], bias)
-        output_dtype_t = cast(Optional[torch.dtype], output_dtype)
+        offs_t = cast(Tensor | None, offs)
+        bias_t = cast(Tensor | None, bias)
+        output_dtype_t = cast(torch.dtype | None, output_dtype)
         contraction_dim_t = cast(Sequence[int], contraction_dim)
         use_fast_accum_t = cast(bool, use_fast_accum)
 

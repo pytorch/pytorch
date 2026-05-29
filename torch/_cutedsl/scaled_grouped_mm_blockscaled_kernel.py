@@ -1,5 +1,4 @@
 from inspect import isclass
-from typing import Union
 
 import cuda.bindings.driver as cuda
 
@@ -571,8 +570,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             ab_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_ab_stage]
             acc_full_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
             acc_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
-            tmem_dealloc_mbar_ptr: cutlass.Int64
-            tmem_holding_buf: cutlass.Int32
+            tmem_dealloc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, 1]
+            tmem_holding_buf: cute.struct.MemRange[cutlass.Int32, 1]
             # (EPI_TILE_M, EPI_TILE_N, STAGE)
             sC: cute.struct.Align[
                 cute.struct.MemRange[
@@ -644,7 +643,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             tensormap_cute_tensor,
         ).launch(
             grid=grid,
-            block=[self.threads_per_cta, 1, 1],
+            block=[32 * Sm100GroupedBlockScaledGemmKernel.NUM_WARPS_PER_CTA, 1, 1],
             cluster=(*self.cluster_shape_mn, 1),
             smem=self.shared_storage.size_in_bytes(),  # pyrefly: ignore [missing-attribute]
             stream=stream,
@@ -674,7 +673,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         b_smem_layout_staged: cute.ComposedLayout,
         sfa_smem_layout_staged: cute.Layout,
         sfb_smem_layout_staged: cute.Layout,
-        c_smem_layout_staged: Union[cute.Layout, cute.ComposedLayout],
+        c_smem_layout_staged: cute.Layout | cute.ComposedLayout,
         epi_tile: cute.Tile,
         total_num_clusters: cute.Tensor,
         tensor_addr_global_scale: cute.Tensor,
@@ -746,8 +745,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             + Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8
         )
 
-        tmem_dealloc_mbar_ptr = storage.tmem_dealloc_mbar_ptr
-        tmem_holding_buf = storage.tmem_holding_buf
+        tmem_dealloc_mbar_ptr = storage.tmem_dealloc_mbar_ptr.data_ptr()
+        tmem_holding_buf = storage.tmem_holding_buf.data_ptr()
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1970,7 +1969,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         tAcc: cute.Tensor,
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
-        use_2cta_instrs: Union[cutlass.Boolean, bool],
+        use_2cta_instrs: cutlass.Boolean | bool,
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
         """
         Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination).
@@ -2067,7 +2066,7 @@ class Sm100GroupedBlockScaledGemmKernel:
     def epilog_gmem_copy_and_partition(
         self,
         tidx: cutlass.Int32,
-        atom: Union[cute.CopyAtom, cute.TiledCopy],
+        atom: cute.CopyAtom | cute.TiledCopy,
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
         sC: cute.Tensor,
