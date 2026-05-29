@@ -224,6 +224,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         check_aliasing: bool = True,
         only_check_ops_with_meta: bool = True,
         check_symbolic_guards: bool = False,
+        check_symbolic_guards_only: bool = False,
     ) -> None:
         super().__init__()
         self.ignore_op_fn = (
@@ -233,6 +234,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         self.check_aliasing = check_aliasing
         self.only_check_ops_with_meta = only_check_ops_with_meta
         self.check_symbolic_guards = check_symbolic_guards
+        self.check_symbolic_guards_only = check_symbolic_guards_only
 
     def __torch_dispatch__(
         self,
@@ -270,33 +272,34 @@ class CrossRefFakeMode(TorchDispatchMode):
 
             try:
                 # Composite kernels may run ordinary eager code under
-                # FakeTensorMode; only freeze guards for explicit Meta/fake
-                # kernels.
-                check_symbolic_guards = (
+                # FakeTensorMode; only check explicit Meta/fake kernels.
+                check_guard_int = (
                     self.check_symbolic_guards
                     and torch._C._dispatch_has_kernel_for_dispatch_key(
                         func.name(), "Meta"
                     )
                 )
                 # TODO: enable_python_dispatcher() here
-                shape_env = ShapeEnv(specialize_zero_one=not check_symbolic_guards)
+                shape_env = ShapeEnv(specialize_zero_one=not check_guard_int)
                 with FakeTensorMode(shape_env=shape_env) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
                         functools.partial(
                             fake_mode.from_tensor,
-                            static_shapes=not check_symbolic_guards,
+                            static_shapes=not check_guard_int,
                         ),
                         (args, kwargs),
                     )
                     guard_context = (
-                        shape_env.error_on_new_guards
-                        if check_symbolic_guards
+                        shape_env.error_on_guard_int
+                        if check_guard_int
                         else contextlib.nullcontext
                     )
                     with warnings.catch_warnings():
                         with guard_context():
-                            fake_r = func(*fake_args, **fake_kwargs)
+                            maybe_fake_r = func(*fake_args, **fake_kwargs)
+                            if not self.check_symbolic_guards_only:
+                                fake_r = maybe_fake_r
             except UnsupportedFakeTensorException:
                 pass
 

@@ -1006,7 +1006,7 @@ def get_desired_device_type_test_bases(
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-# TODO: remove "allow_xpu" option after Interl GPU support all test case instantiate by this function.
+# TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -2041,9 +2041,7 @@ def has_cusolver():
 
 
 def has_hipsolver():
-    rocm_version = _get_torch_rocm_version()
-    # hipSOLVER is disabled on ROCM < 5.3
-    return rocm_version >= (5, 3)
+    return TEST_WITH_ROCM
 
 
 # Skips a test on CUDA if cuSOLVER is not available,

@@ -5647,7 +5647,7 @@ TORCH_LIBRARY_IMPL(test_opcheck_fails_cpp_meta_kernel_guard_int, Meta, m) {
         x = torch.randn(3, 4)
         with self.assertRaisesRegex(
             optests.OpCheckError,
-            "Guard attempted while ShapeEnv guards are frozen",
+            "guard_int attempted on symbolic value",
         ):
             torch.library.opcheck(op, (x,), test_utils="test_faketensor")
 
