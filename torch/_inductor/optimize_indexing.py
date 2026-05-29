@@ -606,8 +606,8 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
       - Any ``index_expr`` reachable from a value sink is rewritten to
         ``value_expr`` on the value path. If the same node also reaches an
         indexing sink, the value path is cloned first so indexing uses keep
-        the original ``index_expr``. A mixed masked-subblock output is treated
-        as indexing-only by policy above, avoiding subblock cloning.
+        the original ``index_expr``. Mixed masked-subblock outputs are
+        rewritten on the value path without cloning the subblock.
 
     """
     graphs = [
@@ -632,7 +632,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
         value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
         rewritten_value_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
-        def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
+        def value_version(node: torch.fx.Node) -> torch.fx.Node:
             # Value-only chains can be rewritten in place. Mixed value/indexing
             # chains are cloned so indexing users keep the original path.
             if node.op == "placeholder":
@@ -646,7 +646,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                     node.target = "value_expr"
                     return node
                 if node not in value_clones:
-                    with graph.inserting_before(anchor):
+                    with graph.inserting_after(node):
                         clone = graph.call_method(
                             "value_expr", node.args, dict(node.kwargs)
                         )
@@ -669,7 +669,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                     return node
 
                 if node not in value_clones:
-                    with graph.inserting_before(anchor):
+                    with graph.inserting_after(node):
                         clone = graph.node_copy(node, lambda n: n)
                     clone.meta = node.meta.copy()
                     clone_rule = _IndexValueOpsHandler().rule_for_node(clone)
@@ -683,30 +683,28 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             if node not in indexing_use:
                 if node not in rewritten_value_nodes:
                     rewritten_value_nodes.add(node)
-                    node.args = map_arg(node.args, lambda n: value_version(n, node))
-                    node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
+                    node.args = map_arg(node.args, value_version)
+                    node.kwargs = map_arg(node.kwargs, value_version)
                 return node
 
             if node not in value_clones:
-                with graph.inserting_before(anchor):
-                    clone = graph.node_copy(node, lambda n: value_version(n, anchor))
+                with graph.inserting_after(node):
+                    clone = graph.node_copy(node, value_version)
                 clone.meta = node.meta.copy()
                 value_clones[node] = clone
             return value_clones[node]
 
-        def rewrite_value_arg(arg: Any, anchor: torch.fx.Node) -> Any:
-            return map_arg(arg, lambda n: value_version(n, anchor))
+        def rewrite_value_arg(arg: Any) -> Any:
+            return map_arg(arg, value_version)
 
         def rewrite_rule_args(node: torch.fx.Node, sinks: tuple[Any, ...]) -> None:
             for arg in sinks:
-                _rewrite_rule_arg(
-                    node, arg, lambda value: rewrite_value_arg(value, node)
-                )
+                _rewrite_rule_arg(node, arg, rewrite_value_arg)
 
         for node in graph.nodes:
             if node.op == "output":
                 if output_is_value:
-                    node.args = rewrite_value_arg(node.args, node)
+                    node.args = rewrite_value_arg(node.args)
                 continue
 
             rule = _IndexValueOpsHandler().rule_for_node(node)

@@ -2519,15 +2519,19 @@ class TritonKernelOverrides(TritonOverrides):
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
         operand_dtype = dtype
         result_dtype = dtype
-        needs_int_widening = (
-            is_predicate
-            or (dtype == torch.bool and expr.is_integer)
-            or (dtype.is_floating_point and expr.is_integer)
-        )
-        if needs_int_widening:
+        if is_predicate or dtype == torch.bool:
             expr_requires_int64 = _integer_expr_requires_int64(expr)
             operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
-            result_dtype = torch.bool if is_predicate else operand_dtype
+            if is_predicate:
+                result_dtype = torch.bool
+            elif expr.is_integer:
+                result_dtype = operand_dtype
+            else:
+                result_dtype = torch.float32
+        elif dtype.is_floating_point and expr.is_integer:
+            expr_requires_int64 = _integer_expr_requires_int64(expr)
+            operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
+            result_dtype = operand_dtype
 
         index_str = cls._value_expr_index_str(indexing, operand_dtype)
         var = cls._emit_expr_indexing(

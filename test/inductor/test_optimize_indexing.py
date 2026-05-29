@@ -399,6 +399,46 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(add.args[2], index_expr)
         self.assertEqual(index_expr.target, "index_expr")
 
+    def test_mixed_index_expr_clone_dominates_value_users(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        a = graph.call_method("add", (ops, index_expr, 1))
+        b = graph.call_method("add", (ops, index_expr, 2))
+        sub = graph.call_method("sub", (ops, b, a))
+        load = graph.call_method("load", (ops, "arg0", index_expr))
+        value = graph.call_method("add", (ops, load, sub))
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, value, None))
+        graph.output(store)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 1),
+                a: ValueRanges(0, 2),
+                b: ValueRanges(0, 3),
+                sub: ValueRanges(-2, 2),
+                load: ValueRanges(0, 1),
+                value: ValueRanges(-2, 3),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        value_exprs = [n for n in graph.nodes if n.target == "value_expr"]
+        self.assertEqual(len(value_exprs), 1)
+        value_expr = value_exprs[0]
+        self.assertEqual(load.args[2], index_expr)
+        self.assertEqual(a.args[1], value_expr)
+        self.assertEqual(b.args[1], value_expr)
+        nodes = list(graph.nodes)
+        self.assertLess(nodes.index(value_expr), nodes.index(a))
+
     def test_shared_value_only_ancestors_are_rewritten_once(self):
         graph = Graph()
         ops = graph.placeholder("ops")

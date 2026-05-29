@@ -18041,6 +18041,18 @@ if RUN_GPU:
 
             self.assertEqual(fn_opt(x), fn(x))
 
+        def test_value_expr_bool_non_integer_computes_before_cast(self):
+            def fn(x: torch.Tensor, i: int) -> torch.Tensor:
+                return torch.full((4,), (i - 2) / 2, device=x.device, dtype=torch.bool)
+
+            fn_opt = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+            x = torch.empty(1, device=GPU_TYPE)
+            for i in (1, 2, 3):
+                self.assertEqual(fn_opt(x, i), fn(x, i))
+
+            code = run_and_get_triton_code(fn_opt, x, 2)
+            self.assertFalse(".to(tl.int1)" in code)
+
         def test_searchsorted_boundary_index_no_int64_cast(self):
             def fn(boundaries: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
                 return torch.searchsorted(boundaries, values, out_int32=False)
