@@ -39,6 +39,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
     FxGraphCachePickler,
@@ -59,7 +60,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache
+from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
@@ -438,6 +439,33 @@ class TestPyCodeCache(TestCase):
             ).decode()
             self.assertIn("debug", out)
 
+    def test_cpp_wrapper_none_output_keeps_none_refcount(self):
+        source = textwrap.dedent(
+            """
+            #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+
+            void inductor_entry_impl(
+                AtenTensorHandle* input_handles,
+                AtenTensorHandle* output_handles
+            ) {
+                output_handles[0] = nullptr;
+            }
+            """
+        )
+
+        with mock.patch.object(
+            CppWrapperCodeCache, "load_async", return_value=lambda: None
+        ) as load_async:
+            CppWrapperCodeCache.load_pybinding_async(
+                ["std::vector<AtenTensorHandle>"],
+                source,
+                device_type="cpu",
+                num_outputs=1,
+            )
+
+        generated_source = load_async.call_args.args[0]
+        self.assertIn("Py_NewRef(Py_None)", generated_source)
+
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
@@ -464,6 +492,17 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def _find_triton_kernel_binaries(self):
+        found = []
+        triton_dir = os.path.join(cache_dir(), "triton")
+        device_type = "hip" if torch.version.hip else "cuda"
+        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+        for dirpath, _, filenames in os.walk(triton_dir):
+            for filename in filenames:
+                if filename.endswith(binary_ext):
+                    found.append(os.path.join(dirpath, filename))
+        return found
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -888,6 +927,55 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "bundle_triton_into_fx_graph_cache": True,
+            "triton.store_cubin": True,
+            "compile_threads": 1,
+        }
+    )
+    def test_cache_artifact_load_emits_triton_bundle(self):
+        def fn(x, y):
+            return (x.sin() + y.cos()).relu()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TORCHINDUCTOR_CACHE_DIR": tmpdir,
+                    "TRITON_CACHE_DIR": os.path.join(tmpdir, "triton"),
+                },
+            ),
+        ):
+            self.reset()
+            CacheArtifactManager.clear()
+
+            x = torch.randn(256, 256, device="cuda")
+            y = torch.randn(256, 256, device="cuda")
+            compiled_fn = torch.compile(fn, dynamic=False)
+
+            self.assertEqual(fn(x, y), compiled_fn(x, y))
+            torch.cuda.synchronize()
+
+            artifacts = torch.compiler.save_cache_artifacts()
+            self.assertIsNotNone(artifacts)
+            artifact_bytes, _ = artifacts
+
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
+
+            self.reset()
+            CacheArtifactManager.clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            self.assertIsNotNone(cache_info)
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
 
     @requires_triton()
     @config.patch(
