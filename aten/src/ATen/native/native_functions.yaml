@@ -11398,7 +11398,9 @@
   device_check: NoCheck
   variants: function
   dispatch:
-    CompositeImplicitAutograd: foreach_tensor_mm_list_kernel_slow
+    CompositeExplicitAutograd: foreach_tensor_mm_list_kernel_slow
+    CUDA: foreach_tensor_mm_list_kernel_cuda
+
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
