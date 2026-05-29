@@ -1951,6 +1951,17 @@ def using_b200() -> bool:
     return device_properties.major == 10
 
 
+@functools.lru_cache
+def using_gfx950() -> bool:
+    """Returns true if the device is using GFX950 arch, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    if torch.version.hip is None:
+        return False
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return "gfx950" in device_properties.gcnArchName
+
+
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
@@ -1983,7 +1994,11 @@ def get_tma_workspace_arg(
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx950" in arch:
+        # kpack must be 1 on GFX950
+        return 1
+    if "gfx942" in arch and block_k <= 16:
         return 1
     return 2
 

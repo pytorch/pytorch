@@ -416,6 +416,43 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    def test_rocm_gfx950_filters_mm_configs_with_non_unit_kpack(self):
+        from torch._inductor.template_heuristics.triton import (
+            ROCmConfigHeuristic,
+            ROCmGemmConfig,
+        )
+
+        device_props = MagicMock()
+        device_props.gcnArchName = "gfx950"
+        mm_configs = [
+            ROCmGemmConfig(32, 32, 16, 1, 4, group_m=8, kpack=1),
+            ROCmGemmConfig(64, 64, 16, 1, 4, group_m=8, kpack=2),
+        ]
+
+        with (
+            patch("torch.version.hip", "7.0"),
+            patch("torch.cuda.get_device_properties", return_value=device_props),
+            patch(
+                "torch._inductor.template_heuristics.triton.get_backend_num_stages",
+                return_value=2,
+            ),
+            patch(
+                "torch._inductor.template_heuristics.triton.get_default_kpack",
+                return_value=1,
+            ),
+            config.patch({"test_configs.max_mm_configs": None}),
+            self.assertLogs(
+                "torch._inductor.template_heuristics.triton", level="WARNING"
+            ) as log_context,
+        ):
+            config_heuristic = ROCmConfigHeuristic()
+            configs = list(config_heuristic._finalize_mm_configs(mm_configs))
+
+        self.assertEqual([cfg.kwargs["kpack"] for cfg in configs], [1])
+        self.assertIn("Invalid TritonConfig has been dropped", log_context.output[0])
+        self.assertIn("ROCmGemmConfig", log_context.output[0])
+        self.assertIn("kpack=2", log_context.output[0])
+
 
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"

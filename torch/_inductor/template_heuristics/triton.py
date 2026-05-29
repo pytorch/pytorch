@@ -39,6 +39,7 @@ from ..utils import (
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
+    using_gfx950,
 )
 from ..virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -1767,6 +1768,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
             kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            if (kpack != 1) and using_gfx950():
+                log.warning(
+                    "Invalid TritonConfig has been dropped because `kpack` must be 1 on GFX950: "
+                    "conf=%s, kpack=%d",
+                    conf,
+                    kpack,
+                )
+                continue
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
