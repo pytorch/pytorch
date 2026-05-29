@@ -5391,19 +5391,51 @@ class TestCustomOpFastPath(TestCase):
     """Tests for the fast dispatch path in custom_op."""
 
     @contextlib.contextmanager
-    def _assert_fast_path_taken(self, opdef):
-        """Assert that the fast path handled the call (not the C++ dispatcher)."""
+    def _assert_immutable_fast_path_taken(self, opdef):
+        """Assert fast path with 2 redispatches (autograd + backend)."""
+        import torch._ops
+
         if TEST_WITH_CROSSREF:
             # CrossRefMode is a TorchFunctionMode, so the fast path correctly
             # falls back to the C++ dispatcher -- skip the assertion.
             yield
             return
-        before = opdef._fast_path_hits
+        hits_before = opdef._fast_path_hits
+        redispatch_before = torch._ops._fast_redispatch_count
         yield
         self.assertGreater(
             opdef._fast_path_hits,
-            before,
-            "fast path was not taken; call went through the C++ dispatcher",
+            hits_before,
+            "fast path was not taken",
+        )
+        self.assertEqual(
+            torch._ops._fast_redispatch_count - redispatch_before,
+            2,
+            "expected 2 redispatches (autograd + backend)",
+        )
+
+    @contextlib.contextmanager
+    def _assert_mutable_fast_path_taken(self, opdef):
+        """Assert fast path with 3 redispatches (autograd + adinplaceorview + backend)."""
+        import torch._ops
+
+        if TEST_WITH_CROSSREF:
+            # CrossRefMode is a TorchFunctionMode, so the fast path correctly
+            # falls back to the C++ dispatcher -- skip the assertion.
+            yield
+            return
+        hits_before = opdef._fast_path_hits
+        redispatch_before = torch._ops._fast_redispatch_count
+        yield
+        self.assertGreater(
+            opdef._fast_path_hits,
+            hits_before,
+            "fast path was not taken",
+        )
+        self.assertEqual(
+            torch._ops._fast_redispatch_count - redispatch_before,
+            3,
+            "expected 3 redispatches (autograd + adinplaceorview + backend)",
         )
 
     @contextlib.contextmanager
@@ -5439,13 +5471,15 @@ class TestCustomOpFastPath(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
-        with self._assert_fast_path_taken(fp_add):
+
+        with self._assert_immutable_fast_path_taken(fp_add):
             self.assertEqual(fp_add(x, y), x + y)
-            # OpOverload path (torch.ops.ns.name.default)
+        # OpOverload path (torch.ops.ns.name.default)
+        with self._assert_immutable_fast_path_taken(fp_add):
             self.assertEqual(torch.ops._torch_testing.fp_add.default(x, y), x + y)
-            # OpOverloadPacket path (torch.ops.ns.name) - resolves to the
-            # default overload whose _op carries the fast path.
-            self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
+        # OpOverloadPacket path (torch.ops.ns.name) does NOT hit the fast
+        # path entry; just verify correctness.
+        self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
 
     def test_fast_path_multiple_overloads(self):
         @torch.library.custom_op("_torch_testing::fp_multi", mutates_args=())
@@ -5468,9 +5502,9 @@ class TestCustomOpFastPath(TestCase):
         bias = torch.randn(3)
 
         # Each overload should work independently via its OpOverload._op
-        with self._assert_fast_path_taken(fp_multi):
+        with self._assert_immutable_fast_path_taken(fp_multi):
             self.assertEqual(torch.ops._torch_testing.fp_multi.default(x), x * 2)
-        with self._assert_fast_path_taken(fp_multi_bias):
+        with self._assert_immutable_fast_path_taken(fp_multi_bias):
             self.assertEqual(
                 torch.ops._torch_testing.fp_multi.with_bias(x, bias),
                 x * 2 + bias,
@@ -5554,7 +5588,7 @@ class TestCustomOpFastPath(TestCase):
 
         x = torch.randn(4)
         y = torch.randn(4)
-        with self._assert_fast_path_taken(fp_multi_body):
+        with self._assert_immutable_fast_path_taken(fp_multi_body):
             result = fp_multi_body(x, y)
         expected = torch.nn.functional.softmax(torch.relu(x + y) * 2, dim=0)
         self.assertEqual(result, expected)
@@ -5567,7 +5601,7 @@ class TestCustomOpFastPath(TestCase):
         x = torch.randn(3)
         x_orig = x.clone()
         v_before = x._version
-        with self._assert_fast_path_taken(fp_inplace):
+        with self._assert_mutable_fast_path_taken(fp_inplace):
             fp_inplace(x)
         self.assertTrue(x._version > v_before)
         self.assertEqual(x, x_orig * 2)
@@ -5591,7 +5625,7 @@ class TestCustomOpFastPath(TestCase):
         fp_square.register_autograd(_backward, setup_context=_setup_context)
 
         x = torch.randn(3, requires_grad=True)
-        with self._assert_fast_path_taken(fp_square):
+        with self._assert_immutable_fast_path_taken(fp_square):
             y = fp_square(x)
         y.sum().backward()
         self.assertEqual(x.grad, 2 * x)
@@ -5615,7 +5649,7 @@ class TestCustomOpFastPath(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         with torch.no_grad():
-            with self._assert_fast_path_taken(fp_nograd_check):
+            with self._assert_immutable_fast_path_taken(fp_nograd_check):
                 result = fp_nograd_check(x)
         self.assertEqual(result, x**2)
 
@@ -5949,8 +5983,9 @@ class TestCustomOpFastPath(TestCase):
 
         self.assertEqual(f(x), expected)
 
-        with self._assert_fast_path_taken(fp_compile):
-            for _ in range(3):
+        # Each compiled replay should still hit the fast path.
+        for _ in range(3):
+            with self._assert_immutable_fast_path_taken(fp_compile):
                 self.assertEqual(f(x), expected)
 
     def test_fast_path_nested_dispatch(self):
@@ -5966,7 +6001,7 @@ class TestCustomOpFastPath(TestCase):
         # The inner op is called from inside the outer's backend kernel where
         # autograd keys are excluded, so it correctly falls back to slow path.
         x = torch.randn(3)
-        with self._assert_fast_path_taken(fp_outer):
+        with self._assert_immutable_fast_path_taken(fp_outer):
             result = fp_outer(x)
         self.assertEqual(result, x * 2 + 1)
 
@@ -5976,7 +6011,7 @@ class TestCustomOpFastPath(TestCase):
             raise ValueError("intentional error")
 
         x = torch.randn(3)
-        with self._assert_fast_path_taken(fp_err):
+        with self._assert_immutable_fast_path_taken(fp_err):
             with self.assertRaisesRegex(ValueError, "intentional error"):
                 fp_err(x)
 
