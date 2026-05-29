@@ -3374,7 +3374,7 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
         torch._check(len(scale_factors) == spatial_dimensions, lambda: "")
         output_size = []
         for i, s in enumerate(scale_factors):
-            if int(s) == s:
+            if not isinstance(s, (torch.SymInt, torch.SymFloat)) and int(s) == s:
                 output_size.append(input_size[i + 2] * int(s))
             else:
                 output_size.append(sym_int(input_size[i + 2] * s))

@@ -2018,6 +2018,48 @@ graph():
         ):
             export(model, input1, dynamic_shapes=dynamic_shapes, strict=False)
 
+    def test_interpolate_symbolic_scale_factor(self):
+        for mode in ("bilinear", "bicubic", "lanczos"):
+            with self.subTest(mode=mode):
+
+                class M(torch.nn.Module):
+                    def forward(self, x):
+                        scale = 16 / x.shape[2]
+                        return F.interpolate(
+                            x,
+                            scale_factor=(scale, scale),
+                            mode=mode,
+                            antialias=True,
+                            align_corners=False,
+                        )
+
+                model = M()
+                ep = export(
+                    model,
+                    (torch.rand(2, 3, 16, 32),),
+                    dynamic_shapes=({0: Dim.DYNAMIC, 2: Dim.DYNAMIC, 3: Dim.DYNAMIC},),
+                    strict=False,
+                )
+                module = ep.module()
+
+                for shape in [
+                    (1, 3, 32, 20),
+                    (1, 3, 64, 20),
+                ]:
+                    x = torch.rand(*shape)
+                    torch.testing.assert_close(module(x), model(x))
+
+                # The current ATen upsample schemas accept scale factors as float[], so
+                # symbolic scale factors use output_size and recomputed-scale semantics.
+                # For rounded output sizes, cover the issue's dynamic shape behavior but
+                # do not assert scale_factor=False value semantics.
+                for shape, expected_shape in [
+                    ((1, 3, 30, 17), (1, 3, 16, 9)),
+                    ((1, 3, 32, 20), (1, 3, 16, 10)),
+                    ((1, 3, 64, 20), (1, 3, 16, 5)),
+                ]:
+                    self.assertEqual(module(torch.rand(*shape)).shape, expected_shape)
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
