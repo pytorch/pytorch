@@ -42,7 +42,7 @@ if TYPE_CHECKING:
         operation as TritonIROperation,
     )
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._guards import Source
@@ -203,10 +203,16 @@ kernel_side_table = KernelSideTable()
 
 
 def clone_preserve_strides_for_triton_kernel_wrapper(x: Tensor) -> Tensor:
-    # This helper is specific to Triton HOP functionalization. Unlike public
-    # tensor inputs, Inductor may realize a non-overlapping strided intermediate
-    # in compact storage, so copying the whole stride span from the source can
-    # read past the realized buffer.
+    # This helper is specific to Triton HOP functionalization. The user kernel
+    # still expects the cloned argument to have the original size/stride layout,
+    # but the source tensor may be an Inductor-realized intermediate whose
+    # backing allocation only contains the logical elements. For example,
+    # (base + 1)[:, :4096] can have size (64, 4096) and stride (8192, 1),
+    # requiring 520192 elements for that stride layout, while Inductor may
+    # realize the intermediate compactly in 64 * 4096 elements. The normal
+    # clone_preserve_strides path flattens and clones the source's whole implied
+    # storage span, which can read past that compact source buffer. Instead,
+    # allocate the destination span and copy only logical elements from x.
     if torch._debug_has_internal_overlap(x) == 1:
         # Preserve the legacy behavior for expanded/overlapping mutated args.
         # The logical-copy path below would reject writing into an overlapping
@@ -1732,7 +1738,7 @@ class TritonHOPifier:
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -1743,13 +1749,13 @@ class TritonHOPifier:
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         raise NotImplementedError("abstract method")
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         raise NotImplementedError("abstract method")
 
@@ -1942,7 +1948,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         if "grid" not in kwargs:
             self.raise_unsupported("Triton kernel requires to be called with a grid")
@@ -1966,7 +1972,7 @@ class TritonHOPifier:
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
@@ -2328,7 +2334,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def wrap_user_defined_obj(
         self,
         user_obj: Any,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
     ) -> Any:
@@ -2341,7 +2347,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         user_fn: Callable[..., Any],
         args: list,
         kwargs: dict,
-        tx: Optional["InstructionTranslator"],
+        tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
     ) -> Any:
         if not isinstance(args, list):
@@ -2353,7 +2359,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         return user_fn(*args, **kwargs)
 
     def maybe_unpack_configs(
-        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslator"]
+        self, configs: list["TritonConfig"], tx: Optional["InstructionTranslatorBase"]
     ) -> list["TritonConfig"]:
         if not isinstance(configs, list):
             raise AssertionError(f"configs must be a list, got {type(configs)}")
