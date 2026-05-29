@@ -156,6 +156,32 @@ xfails = [
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_nested_graph_breaks,  # noqa: F821
     # differing op_count
     NestedGraphBreaksMiscTests.test_nested_closure_nested_graph_breaks,  # noqa: F821
+    # debug_force_nested_calls tries to inline skipped functions
+    NestedGraphBreaksTupleTests.test_binop_add_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_binop_imul_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_eq_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_greater_than_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_greater_than_or_equal_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_less_than_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_less_than_or_equal_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_cmp_ne_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test___contains___nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_count_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test___getitem___nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_index_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test___iter___nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksTupleTests.test_list_mul_constant_tuple_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksFunctionTests.test_itertools_islice_basic_ops_nested_graph_breaks,  # noqa: F821
+    # debug_force_nested_calls changes kwargs handling
+    NestedGraphBreaksDefaultsTests.test_map_strict_nested_graph_breaks,  # noqa: F821
+    # bytecode codegen issues with nested graph breaks
+    NestedGraphBreaksDefaultsTests.test_frozenset_reconstruction2_nested_graph_breaks,  # noqa: F821
+    # correctness issues due to debug_force_nested_calls wrapping
+    NestedGraphBreaksDecoratorTests.test_fullgraph_eval_frame_override_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
 ]
 
 case = None
