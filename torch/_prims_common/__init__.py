@@ -2068,6 +2068,17 @@ def are_strides_like_channels_last_or_false(
 
 
 def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    """DDE-safe Python equivalent of ``Tensor.suggest_memory_format()``.
+
+    Returns ``torch.channels_last`` for 4D tensors with NHWC-pattern strides,
+    ``torch.channels_last_3d`` for 5D NDHWC, otherwise ``torch.contiguous_format``.
+    Uses ``are_strides_like_channels_last_or_false`` internally — when
+    contiguity can't be statically decided (e.g., unbacked symbolic strides),
+    falls back to ``contiguous_format`` instead of raising a data-dependent
+    error. Mirrors eager ``Tensor.suggest_memory_format()`` (with the default
+    ``channels_last_strides_exact_match=false``) for inputs eager would also
+    classify the same way.
+    """
     if x.layout != torch.strided:
         return torch.contiguous_format
 
