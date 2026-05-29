@@ -82,6 +82,12 @@ struct TORCH_API PyCompilerInterface {
       bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
+  virtual at::Tensor call_accumulate(
+      PyObject* py_compiler,
+      const at::Tensor& old_var,
+      const at::Tensor& new_var) const {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
