@@ -826,8 +826,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
   // Something is wrong if all variables contained in this bucket have
   // already been marked as ready.
   // We don't expect the same variable to be marked ready twice.
-  bool marked_twice =
-      perIterationReadyParams_.find(index) != perIterationReadyParams_.end();
+  bool marked_twice = perIterationReadyParams_.contains(index);
 
   if (marked_twice) {
     // Report index of param that has been marked twice. In debug mode, also
@@ -1003,8 +1002,7 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
     const Bucket& bucket) const {
   // Check if we have cached mapping previously.
   if (has_rebuilt_bucket_ &&
-      cached_variables_for_bucket_.find(bucket_index) !=
-          cached_variables_for_bucket_.end()) {
+      cached_variables_for_bucket_.contains(bucket_index)) {
     return cached_variables_for_bucket_[bucket_index];
   }
   std::vector<at::Tensor> variables_for_bucket;
@@ -1505,7 +1503,7 @@ void Reducer::search_unused_parameters(
   for (const auto& it : gradAccToVariableMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
-    if (seen.count(it.first) == 0) {
+    if (!seen.contains(it.first)) {
       if (ddp_debug_level_ == c10d::DebugLevel::Detail) {
         const auto param_info = param_names_.find(it.second);
         TORCH_INTERNAL_ASSERT(
@@ -1611,8 +1609,7 @@ void Reducer::copy_bucket_to_grad(
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
   std::vector<std::string> unMarkedParamNames;
   for (const auto& it : param_names_) {
-    if (perIterationReadyParams_.find(it.first) ==
-        perIterationReadyParams_.end()) {
+    if (!perIterationReadyParams_.contains(it.first)) {
       unMarkedParamNames.push_back(it.second);
     }
   }
@@ -1623,8 +1620,7 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
   std::vector<size_t> unmarked_param_indices;
   const auto variable_count = params_.size();
   for (const auto variable_index : c10::irange(variable_count)) {
-    if (perIterationReadyParams_.find(variable_index) ==
-        perIterationReadyParams_.end()) {
+    if (!perIterationReadyParams_.contains(variable_index)) {
       unmarked_param_indices.push_back(variable_index);
     }
   }
@@ -2352,7 +2348,7 @@ compute_bucket_assignment_by_size(
     bucket.size += tensor.numel() * tensor.element_size();
 
     // Initialize bucket size limit iterator if necessary.
-    if (bucket_size_limit_iterators.count(key) == 0) {
+    if (!bucket_size_limit_iterators.contains(key)) {
       bucket_size_limit_iterators[key] = bucket_size_limits.begin();
     }
 

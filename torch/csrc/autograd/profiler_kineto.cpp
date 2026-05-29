@@ -801,15 +801,15 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
+      (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {
     LOG(WARNING)
         << "Toggling CPU activity with GPU activity on may result in traces with GPU events on arbitrary tracks";
   } else if (
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
-      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+      (activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       activities.contains(torch::autograd::profiler::ActivityType::XPU)) &&
+      !activities.contains(torch::autograd::profiler::ActivityType::CPU)) {
     LOG(WARNING)
         << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
@@ -1361,6 +1361,7 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
 
+#ifdef USE_KINETO
 const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
     traceActivities() {
   if (trace_) {
@@ -1368,6 +1369,7 @@ const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
   }
   return nullptr;
 }
+#endif
 
 } // namespace autograd::profiler
 

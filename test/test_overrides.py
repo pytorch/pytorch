@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch._dynamo.utils import clone_input
@@ -1692,6 +1693,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertTrue(called)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/162586")
     def test_getitem_call(self):
         # This failed because the parser thinks the function is called to()
         # but it's actually called _parse_to()

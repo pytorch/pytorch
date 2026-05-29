@@ -37,7 +37,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, NoReturn, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -88,6 +88,7 @@ from ..utils import (
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
+    is_wrapper_or_member_descriptor,
     istype,
     list_methods,
     namedtuple_fields,
@@ -96,10 +97,12 @@ from ..utils import (
     raise_args_mismatch,
     set_methods,
     tensortype_to_dtype,
+    tracked_repr,
     tuple_methods,
     unpatched_nn_module_getattr,
 )
 from .base import (
+    AsPythonConstantNotImplementedError,
     AttrMutationKind,
     MutationType,
     NO_SUCH_SUBOBJ,
@@ -123,29 +126,41 @@ except ImportError:
     PyTreeSpec = type(None)  # type: ignore[misc, assignment]
 
 
-_SAFE_C_TP_HASH_FUNCS: OrderedSet[object] | None = None
+_SAFE_C_SLOTS: OrderedSet[object] | None = None
 
 
-def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
-    """C tp_hash slot wrappers known to be safe to call at trace time."""
-    global _SAFE_C_TP_HASH_FUNCS
-    if _SAFE_C_TP_HASH_FUNCS is None:
+def _safe_c_slots() -> OrderedSet[object]:
+    """C slot wrappers known to be safe to call at trace time.
+
+    Covers tp_hash and tp_richcompare slots for C extension types.
+    Used by UDOV's hash_impl and richcompare_impl MRO walks.
+    """
+    global _SAFE_C_SLOTS
+    if _SAFE_C_SLOTS is None:
         import datetime
         import decimal
         import re
 
-        _SAFE_C_TP_HASH_FUNCS = OrderedSet(
-            [
-                datetime.datetime.__hash__,
-                datetime.date.__hash__,
-                datetime.time.__hash__,
-                datetime.timedelta.__hash__,
-                datetime.timezone.__hash__,
-                decimal.Decimal.__hash__,
-                re.Pattern.__hash__,
-            ]
-        )
-    return _SAFE_C_TP_HASH_FUNCS
+        _SAFE_C_SLOTS = OrderedSet()
+        for tp in (
+            datetime.datetime,
+            datetime.date,
+            datetime.time,
+            datetime.timedelta,
+            datetime.timezone,
+            decimal.Decimal,
+            re.Pattern,
+        ):
+            _SAFE_C_SLOTS.add(tp.__hash__)
+            for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
+                if hasattr(tp, dunder):
+                    _SAFE_C_SLOTS.add(getattr(tp, dunder))
+    return _SAFE_C_SLOTS
+
+
+def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
+    """Backward compat: returns the unified set (hash funcs are a subset)."""
+    return _safe_c_slots()
 
 
 if TYPE_CHECKING:
@@ -248,6 +263,22 @@ def is_hashable(obj: object) -> bool:
         return False
 
 
+_SENTINEL = object()
+
+
+def _get_underlying_value(vt: "VariableTracker") -> object:
+    """Extract the underlying Python value from a VT for C-level comparison.
+
+    Returns _SENTINEL if the value cannot be extracted.
+    """
+    if isinstance(vt, UserDefinedVariable) and hasattr(vt, "value"):
+        return vt.value
+    try:
+        return vt.as_python_constant()
+    except Exception:
+        return _SENTINEL
+
+
 class UserDefinedVariable(VariableTracker):
     value: object
 
@@ -286,6 +317,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             except NotImplementedError:
                 pass
         return hash(self.value), True
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if not hasattr(other, "value"):
+            return ConstantVariable.create(NotImplemented)
+        if op in ("__eq__", "__ne__"):
+            try:
+                result = (
+                    (self.value == other.value)
+                    if op == "__eq__"
+                    else (self.value != other.value)
+                )
+                return ConstantVariable.create(result)
+            except Exception:
+                return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(NotImplemented)
 
     def as_python_constant(self) -> type[object]:
         return self.value
@@ -445,6 +495,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if hasattr(metaclass, "__bool__") and metaclass is not type:
             return self.call_method(tx, "__bool__", [], {})
         return ConstantVariable.create(True)
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L2379-L2408
+        metaclass = type(self.value)
+        if metaclass is type or type(self.value).__repr__ is type.__repr__:
+            return VariableTracker.build(tx, repr(self.value))
+
+        type_attr = self.lookup_metaclass_attr("__repr__")
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+        return self.call_method(tx, "__repr__", [], {})
 
     def nb_or_impl(
         self,
@@ -838,10 +899,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
             f"bad operand type for abs(): '{self.python_type_name()}'",
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # Class-level __setitem__ / __delitem__: looked up on the metaclass.
+        # `cls[k] = v` invokes type(cls).__setitem__(cls, k, v); `del cls[k]`
+        # invokes __delitem__. value=None signals delete (CPython NULL).
+        is_delete = value is None
+        attr = "__delitem__" if is_delete else "__setitem__"
+        m = self._maybe_get_baseclass_method(attr)
+        if isinstance(m, types.FunctionType):
+            source = self.source and AttrSource(self.source, attr)
+            args = [key] if is_delete else [key, value]
+            variables.UserMethodVariable(m, self, source_fn=source).call_function(
+                tx, args, {}
+            )
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
@@ -942,10 +1026,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
-        elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
-            return VariableTracker.build(tx, self.value == args[0].value)
-        elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
-            return VariableTracker.build(tx, self.value != args[0].value)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
@@ -1013,7 +1093,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
@@ -1314,11 +1394,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            items = [
-                item.call_method(tx, "__index__", [], {}) if item.is_tensor() else item
-                for item in tup.items  # type: ignore[missing-attribute]
-            ]
-            return SizeVariable(items)
+            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
@@ -1516,7 +1592,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
@@ -1544,7 +1620,7 @@ class RemovableHandleClass:
 def call_random_fn(
     tx: "InstructionTranslator",
     fn: Callable[..., Any],
-    args: Sequence[VariableTracker],
+    args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     from .builder import VariableBuilder
@@ -1590,7 +1666,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value_type: type | None = None,
         cls_source: TypeSource | None = None,
         base_cls_vt: VariableTracker | None = None,
-        init_args: Sequence[VariableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1764,6 +1840,68 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 f"__bool__ should return bool, returned {result.python_type().__name__}",
             )
         return result
+
+    def repr_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
+        type_attr = self.lookup_class_mro_attr("__repr__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            return super().repr_impl(tx)
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__repr__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.repr_impl(tx)
+
+        if type(self.value).__repr__ is object.__repr__:
+            return VariableTracker.build(tx, repr(self.value))
+
+        if (
+            is_wrapper_or_member_descriptor(type_attr)
+            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            or is_cython_function(type_attr)
+        ):
+            try:
+                inspect.getattr_static(type(type_attr), "__get__")(
+                    type_attr, self.value, type(self.value)
+                )
+            except (AttributeError, TypeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            else:
+                unimplemented(
+                    gb_type="untraceable user-defined __repr__",
+                    context=f"Could not trace __repr__ override for {type(self.value).__name__}",
+                    explanation="Dynamo could not safely trace this user-defined __repr__ override.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                )
+
+        source = self.source and self.get_source_by_walking_mro(tx, "__repr__")
+        method_var = self.resolve_type_attr(tx, "__repr__", type_attr, source)
+        if not isinstance(method_var, variables.GetAttrVariable):
+            return method_var.call_function(tx, [], {})
+
+        try:
+            inspect.getattr_static(type(type_attr), "__get__")(
+                type_attr, self.value, type(self.value)
+            )
+        except (AttributeError, TypeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        else:
+            unimplemented(
+                gb_type="untraceable user-defined __repr__",
+                context=f"Could not trace __repr__ override for {type(self.value).__name__}",
+                explanation="Dynamo could not safely trace this user-defined __repr__ override.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
 
     def nb_index_impl(
         self,
@@ -2032,6 +2170,33 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_vt is not None:
             return self._base_vt.sq_inplace_repeat_impl(tx, count)
         return super().sq_inplace_repeat_impl(tx, count)
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c
+        # value=None signals delete (CPython NULL sentinel).
+        is_delete = value is None
+        attr = "__delitem__" if is_delete else "__setitem__"
+        method, source_fn = self._lookup_slot_type_attr(tx, attr)
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        if isinstance(method, types.FunctionType):
+            args = [key] if is_delete else [key, value]
+            variables.UserMethodVariable(
+                method, self, source_fn=source_fn, source=self.source
+            ).call_function(tx, args, {})
+            return variables.ConstantVariable.create(None)
+        return super().mp_ass_subscript_impl(tx, key, value)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
 
     def _vectorcall_maybe(
         self,
@@ -2356,15 +2521,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args[0], variables.DeletedVariable()
                 )
 
-            if method is object.__eq__ and len(args) == 1 and not kwargs:
-                other = args[0]
-                if not isinstance(other, UserDefinedObjectVariable):
-                    return VariableTracker.build(tx, NotImplemented)
-
-                # TODO(anijain2305) - Identity checking should already be a part
-                # of the cmp_eq  polyfill function.
-                return VariableTracker.build(tx, self.value is other.value)
-
             if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
                 self.value, types.GeneratorType
             ):
@@ -2394,11 +2550,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
-            # Delegate to _base_vt for non-overridden base-class methods
+            # Delegate to _base_vt for non-overridden base-class methods.
+            # Skip comparison ops: they go through richcompare_impl on the
+            # UserDefined*Variable subclass, which handles _base_vt
+            # unwrapping and avoids tracing tensor elements via list_cmp.
+            _CMP_OPS = {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
             if (
                 self._base_vt is not None
                 and self._base_methods is not None
                 and method in self._base_methods
+                and name not in _CMP_OPS
             ):
                 return self._base_vt.call_method(tx, name, args, kwargs)
 
@@ -2624,6 +2785,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             setter = inspect.getattr_static(type(descriptor), "__set__", None)
             deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
+            # collections._tuplegetter (namedtuple field accessor) is a C-level
+            # data descriptor whose __set__/__delete__ unconditionally raise
+            # AttributeError. Short-circuit so we don't need to model it.
+            _tuplegetter = getattr(collections, "_tuplegetter", None)
+            if _tuplegetter is not None and type(descriptor) is _tuplegetter:
+                raise_readonly_attr()
             desc_var = VariableTracker.build(tx, descriptor, desc_source)
             if isinstance(value, variables.DeletedVariable):
                 if isinstance(deleter, types.FunctionType):
@@ -2742,7 +2909,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
@@ -3463,8 +3630,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 explanation=f"{cls.__name__} defines a C __hash__ that "
                 f"Dynamo cannot trace into.",
                 hints=[
-                    f"Use torch._dynamo.allow_c_hash({cls.__name__}) to "
-                    f"register it as safe if its __hash__ is pure and "
+                    f"Use torch._dynamo.allow_c_slot({cls.__name__}) to "
+                    f"register it as safe if its slots are pure and "
                     f"deterministic.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -3476,6 +3643,88 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # object.__hash__ (identity) and builtin-inherited C hashes
         # (e.g. IntEnum inheriting int.__hash__).
         return hash(self.value), False
+
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        """MRO walk for tp_richcompare, analogous to slot_tp_richcompare.
+
+        https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
+        """
+        from .constant import ConstantVariable
+        from .object_protocol import object_richcompare
+
+        obj_type = type(self.value)
+
+        for cls in obj_type.__mro__:
+            if op not in cls.__dict__:
+                continue
+
+            if cls is object:
+                break
+
+            method = cls.__dict__[op]
+
+            if isinstance(method, types.FunctionType):
+                resolved = self.resolve_type_attr(tx, op, method, source=None)
+                if resolved is not None:
+                    # Disable nested graph breaks so that if the user's
+                    # comparison method graph-breaks, it propagates to
+                    # COMPARE_OP (which runs eagerly) instead of splitting
+                    # mid-method.  Once PR #179844 lands (which defaults
+                    # allow_nested_graph_breaks=False on
+                    # inline_user_function_return), this override becomes
+                    # unnecessary.
+                    from unittest.mock import patch
+
+                    with patch.object(
+                        resolved, "should_allow_nested_graph_breaks", lambda: False
+                    ):
+                        return resolved.call_function(tx, [other], {})
+                break
+
+            # C comparison method. If _base_vt exists, it already implements
+            # this type's C-level comparison (e.g. ConstDictVariable for dict,
+            # SetVariable for set). Delegate to it instead of constant-folding
+            # or graph-breaking.
+            if self._base_vt is not None:
+                break
+
+            in_allowlist = False
+            try:
+                in_allowlist = method in _safe_c_slots()
+            except TypeError:
+                pass
+            if (
+                cls.__module__ == "builtins"
+                or in_allowlist
+                or is_pybind11_enum_member(self.value)
+            ):
+                other_val = _get_underlying_value(other)
+                if other_val is not _SENTINEL:
+                    try:
+                        result = method(self.value, other_val)
+                        return ConstantVariable.create(result)
+                    except Exception:
+                        pass
+                return ConstantVariable.create(NotImplemented)
+            unimplemented(
+                gb_type="Untraceable C tp_richcompare",
+                context=f"richcompare_impl {self} {op}",
+                explanation=f"{cls.__name__} defines a C comparison method "
+                f"that Dynamo cannot trace into.",
+                hints=[
+                    f"Use torch._dynamo.allow_c_slot({cls.__name__}) to "
+                    f"register it as safe if its comparison methods are pure "
+                    f"and deterministic.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        if self._base_vt is not None:
+            return self._base_vt.richcompare_impl(tx, other, op)
+
+        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         if (
@@ -3494,7 +3743,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """Emulate tree_map behavior for user-defined objects.
@@ -3591,7 +3840,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
@@ -3801,6 +4050,12 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def fn(self) -> Callable[..., object]:
         return self.value_type
 
+    @property
+    def exc_vt(self) -> "variables.ExceptionVariable":
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None for exception repr")
+        return cast(variables.ExceptionVariable, self._base_vt)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3858,7 +4113,13 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self._base_vt.python_stack  # type: ignore[missing-attribute]
 
     def debug_repr(self) -> str:
-        return self._base_vt.debug_repr()  # type: ignore[missing-attribute]
+        return self.exc_vt.debug_repr()
+
+    def repr_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
+        if type(self.value).__repr__ is not BaseException.__repr__:
+            return super().repr_impl(tx)
+        return self.exc_vt.repr_impl(tx)
 
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
@@ -4100,6 +4361,59 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 return self.call_method(tx, "__missing__", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
+    def debug_repr(self) -> str:
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None for dict repr")
+        base_vt = cast(ConstDictVariable, self._base_vt)
+        if type(self.value).__repr__ is collections.Counter.__repr__:
+            items = list(base_vt.items.items())
+            try:
+                items = sorted(
+                    items,
+                    key=lambda item: item[1].as_python_constant(),
+                    reverse=True,
+                )
+            except (NotImplementedError, TypeError):
+                pass
+            if not items:
+                return f"{type(self.value).__name__}()"
+            contents = ", ".join(
+                f"{key.vt.debug_repr()}: {value.debug_repr()}" for key, value in items
+            )
+            return f"{type(self.value).__name__}({{{contents}}})"
+        return base_vt.debug_repr()
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L748-L757
+        method = self._maybe_get_baseclass_method("__repr__")
+        if type(self.value).__repr__ is collections.Counter.__repr__:
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None for Counter repr")
+            base_vt = cast(ConstDictVariable, self._base_vt)
+            items = list(base_vt.items.items())
+            try:
+                items = sorted(
+                    items,
+                    key=lambda item: item[1].as_python_constant(),
+                    reverse=True,
+                )
+            except (NotImplementedError, TypeError):
+                pass
+            if not items:
+                return VariableTracker.build(tx, f"{type(self.value).__name__}()")
+            contents = ", ".join(
+                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
+                for key, value in items
+            )
+            return VariableTracker.build(
+                tx, f"{type(self.value).__name__}({{{contents}}})"
+            )
+        if method in self._base_methods:
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None for dict repr")
+            return self._base_vt.repr_impl(tx)
+        return super().repr_impl(tx)
+
 
 # TODO: move to dicts.py alongside ConstDictVariable and DefaultDictVariable.
 # Currently blocked by circular imports (dicts.py ↔ user_defined.py).
@@ -4145,6 +4459,44 @@ class OrderedDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None in as_python_constant")
         return collections.OrderedDict(self._base_vt.as_python_constant())
 
+    @staticmethod
+    def _ordered_dict_repr(items: Sequence[tuple[str, str]]) -> str:
+        if not items:
+            return "OrderedDict()"
+        if sys.version_info >= (3, 12):
+            return (
+                "OrderedDict({"
+                + ", ".join(f"{key}: {value}" for key, value in items)
+                + "})"
+            )
+        return (
+            "OrderedDict(["
+            + ", ".join(f"({key}, {value})" for key, value in items)
+            + "])"
+        )
+
+    def debug_repr(self) -> str:
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None for OrderedDict repr")
+        base_vt = cast(ConstDictVariable, self._base_vt)
+        items = [
+            (key.vt.debug_repr(), value.debug_repr())
+            for key, value in base_vt.items.items()
+        ]
+        return self._ordered_dict_repr(items)
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
+        # uses dict-style formatting.
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None for OrderedDict repr")
+        base_vt = cast(ConstDictVariable, self._base_vt)
+        items = [
+            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
+            for key, value in base_vt.items.items()
+        ]
+        return VariableTracker.build(tx, self._ordered_dict_repr(items))
+
     def nb_or_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
     ) -> VariableTracker:
@@ -4168,6 +4520,23 @@ class OrderedDictVariable(UserDefinedDictVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L323-L325
         self.call_method(tx, "update", [other], {})
         return self
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # value=None signals __delitem__ (CPython NULL sentinel).
+        attr = "__delitem__" if value is None else "__setitem__"
+        method = self._maybe_get_baseclass_method(attr)
+        if method in self._base_methods:
+            if self._base_vt is None:
+                raise AssertionError(
+                    "_base_vt must not be None in mp_ass_subscript_impl"
+                )
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        return super().mp_ass_subscript_impl(tx, key, value)
 
     def call_method(
         self,
@@ -4266,14 +4635,9 @@ class DefaultDictVariable(UserDefinedDictVariable):
         raises TypeError if not.  We mirror this by checking the
         underlying Python value when possible.
         """
-        if isinstance(arg, variables.ConstantVariable):
-            return arg.value is None
-        # Check the real Python value for callable()
-        try:
-            val = arg.as_python_constant()
+        val = arg.get_real_python_backed_value()
+        if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        except Exception:
-            pass
         # Callables (functions, builtins, classes) are supported
         return isinstance(
             arg,
@@ -4287,19 +4651,20 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def is_python_constant(self) -> bool:
         if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in is_python_constant")
-        # An empty defaultdict with a non-constant factory can't be
-        # constant-folded (we can't serialize the factory).
-        if not self.default_factory.is_python_constant() and not self._base_vt.items:  # type: ignore[union-attr]
+            raise AssertionError("_base_vt must not be None for defaultdict const")
+        if not self.default_factory.is_python_constant():
             return False
         return self._base_vt.is_python_constant()
 
     def as_python_constant(self) -> Any:
         if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in as_python_constant")
-        factory = None
-        if self.default_factory.is_python_constant():
-            factory = self.default_factory.as_python_constant()
+            raise AssertionError("_base_vt must not be None for defaultdict const")
+        if not self.default_factory.is_python_constant():
+            raise AsPythonConstantNotImplementedError(
+                self,
+                "defaultdict default_factory is not a Python constant",
+            )
+        factory = self.default_factory.as_python_constant()
         return collections.defaultdict(factory, self._base_vt.as_python_constant())
 
     def debug_repr(self) -> str:
@@ -4310,6 +4675,16 @@ class DefaultDictVariable(UserDefinedDictVariable):
         return (
             f"defaultdict({self.default_factory.debug_repr()}, "
             f"{self._base_vt.debug_repr()})"
+        )
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None for defaultdict repr")
+        return VariableTracker.build(
+            tx,
+            f"defaultdict({tracked_repr(tx, self.default_factory)}, "
+            f"{tracked_repr(tx, self._base_vt)})",
         )
 
     def var_getattr(
@@ -4475,12 +4850,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 )
                 return ConstantVariable.create(None)
             return super().call_method(tx, name, args, kwargs)
-        elif name == "__eq__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
-                tx, [self, args[0]], {}
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -4527,6 +4896,15 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if self._base_vt is None:
+            raise AssertionError("expected _base_vt to be set")
+        if isinstance(other, UserDefinedSetVariable) and other._base_vt is not None:
+            other = other._base_vt
+        return self._base_vt.richcompare_impl(tx, other, op)
+
     def as_python_constant(self) -> object:
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in as_python_constant")
@@ -4547,9 +4925,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def is_python_equal(self, other: object) -> bool:
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in is_python_equal")
-        return isinstance(
-            other, UserDefinedSetVariable
-        ) and self._base_vt.is_python_equal(other._base_vt)
+        if isinstance(other, UserDefinedSetVariable):
+            other = other._base_vt
+        return self.as_python_constant() == other.as_python_constant()  # type: ignore[union-attr]
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
@@ -4657,22 +5035,22 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+    def richcompare_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker, op: str
     ) -> VariableTracker:
-        if name == "__eq__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return VariableTracker.build(tx, self.is_python_equal(args[0]))
-        elif name == "__ne__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return VariableTracker.build(tx, not self.is_python_equal(args[0]))
-        return super().call_method(tx, name, args, kwargs)
+        if op in ("__eq__", "__ne__"):
+            result = self.is_python_equal(other)
+            if op == "__ne__":
+                result = not result
+            return VariableTracker.build(tx, result)
+        # Ordering: delegate to base TupleVariable, unwrapping other if needed.
+        if self._base_vt is None:
+            raise AssertionError("expected _base_vt to be set")
+        if isinstance(other, UserDefinedTupleVariable):
+            if other._base_vt is None:
+                raise AssertionError("expected other._base_vt to be set")
+            other = other._base_vt
+        return self._base_vt.richcompare_impl(tx, other, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from
@@ -4700,7 +5078,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         raise NotImplementedError
 
     def _validate_rest_for_tree_map(
-        self, rest: "collections.abc.Sequence[VariableTracker]"
+        self, rest: "list[VariableTracker]"
     ) -> list["UserDefinedTupleVariable"] | None:
         """Validate that rest args are compatible for tree_map fast-path."""
         others: list[UserDefinedTupleVariable] = []
@@ -4737,7 +5115,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not self._is_pytree_node():
@@ -4766,7 +5144,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslator",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
+        rest: "list[VariableTracker]",
         tree_map_kwargs: "dict[str, VariableTracker]",
         keypath: "tuple[Any, ...]",
     ) -> "VariableTracker":
@@ -4838,6 +5216,13 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         items = [x.as_proxy() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
 
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        fields = namedtuple_fields(self.tuple_cls)
+        items = ", ".join(
+            f"{name}={tracked_repr(tx, item)}" for name, item in zip(fields, self.items)
+        )
+        return VariableTracker.build(tx, f"{self.tuple_cls.__name__}({items})")
+
 
 class StructSequenceVariable(UserDefinedTupleVariable):
     """Represents C-implemented PyStructSequence types (torch.return_types.*).
@@ -4871,6 +5256,23 @@ class StructSequenceVariable(UserDefinedTupleVariable):
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
         return self.tuple_cls(items)
+
+    def debug_repr(self) -> str:
+        fields = namedtuple_fields(self.tuple_cls)
+        items = ", ".join(
+            f"{name}={item.debug_repr()}" for name, item in zip(fields, self.items)
+        )
+        return f"{self.tuple_cls.__module__}.{self.tuple_cls.__qualname__}({items})"
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        fields = namedtuple_fields(self.tuple_cls)
+        items = ", ".join(
+            f"{name}={tracked_repr(tx, item)}" for name, item in zip(fields, self.items)
+        )
+        return VariableTracker.build(
+            tx,
+            f"{self.tuple_cls.__module__}.{self.tuple_cls.__qualname__}({items})",
+        )
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
