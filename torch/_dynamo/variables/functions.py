@@ -1263,7 +1263,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             first_inst = 0
         else:
             first_inst = 1
-        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == first_inst
+        return (
+            self.inline_tracer is None
+            or self.inline_tracer.instruction_pointer == first_inst
+        )
 
     def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)

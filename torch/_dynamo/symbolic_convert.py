@@ -5224,8 +5224,9 @@ class InstructionTranslatorBase(
             CO_ITERABLE_COROUTINE,
         )
 
-        # Probably we shouldn't actually push None until the frame actually starts executing, but some tests (and
-        # possibly user code) depends on it.  Generators are handled properly in 3.11+, so we can skip them
+        # This isn't really the right place to push None.  But since we treat RETURN_GENERATOR as a no-op for
+        # non-generator frames, there needs to be something on the stack since the first instruction will be POP_TOP,
+        # which would error out with an empty stack
         push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
         if sys.version_info < (3, 11):
             push_types |= CO_GENERATOR
