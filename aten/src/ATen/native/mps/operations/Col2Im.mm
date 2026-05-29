@@ -90,7 +90,7 @@ static void col2im_out_mps_template(const Tensor& input,
           computeEncoder,
           col_tensor,
           output,
-          static_cast<uint64_t>(input_batch_stride),
+          input_batch_stride,
           n_output_plane,
           std::array<uint32_t, 2>{static_cast<uint32_t>(output_height), static_cast<uint32_t>(output_width)}, // im_hw
           std::array<uint32_t, 2>{static_cast<uint32_t>(kernel_height),
@@ -101,7 +101,7 @@ static void col2im_out_mps_template(const Tensor& input,
           std::array<uint32_t, 2>{static_cast<uint32_t>(dilation_height),
                                   static_cast<uint32_t>(dilation_width)}, // dilation_hw
           std::array<uint32_t, 2>{static_cast<uint32_t>(height_col), static_cast<uint32_t>(width_col)}, // col_hw
-          static_cast<uint64_t>(output_batch_stride),
+          output_batch_stride,
           std::array<uint64_t, 2>{static_cast<uint64_t>(input_channel_stride),
                                   static_cast<uint64_t>(input_spatial_stride)}); // col_inner_strides
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
