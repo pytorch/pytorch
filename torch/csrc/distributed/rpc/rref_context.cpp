@@ -275,7 +275,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
     std::vector<RRefId> unforkedOwners;
     for (const auto& it : owners_) {
       auto rrefId = it.first;
-      if (!forks_.contains(rrefId)) {
+      if (forks_.find(rrefId) == forks_.end()) {
         // Successful fork of owner was never processed.
         unforkedOwners.push_back(rrefId);
       }
@@ -747,7 +747,7 @@ void RRefContext::addForkOfOwnerIfNotPresent(
   // the child may have been added by a previous send attempt, and this check
   // (as opposed to an assertion here) ensures that messages that trigger this
   // function are idempotent.
-  if (!rrefForks.contains(forkId)) {
+  if (rrefForks.find(forkId) == rrefForks.end()) {
     rrefForks.insert(forkId);
   } else {
     LOG(INFO) << "Ignoring duplicate request to add Fork of OwnerRRef with "
