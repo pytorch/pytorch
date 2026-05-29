@@ -6343,7 +6343,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_acc_type(query.dtype, torch.device("cpu")),
         device=query.device,
     ).transpose(1, 2)
     return (
