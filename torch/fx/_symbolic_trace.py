@@ -741,7 +741,7 @@ class Tracer(TracerBase):
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
             self.graph._codegen = _PyTreeCodeGen(  # type: ignore[has-type]
-                _PyTreeInfo(orig_args[:total_args], in_spec, None)
+                _PyTreeInfo(orig_args[:total_args], in_spec, None, False)
             )
 
             # TODO: annotate return type. inspect.get_annotations(flatten_fn)

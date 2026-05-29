@@ -372,14 +372,15 @@ def _get_codegen(
     """
     Create the codegen for the graph module based on the in/out specs
     """
-    if forward_arg_names:
-        names = forward_arg_names
-    elif (
+    is_args_kwargs = (
         in_spec.type is tuple
         and in_spec.num_children == 2
         and in_spec.child(0).type is tuple
         and in_spec.child(1).type is dict
-    ):
+    )
+    if forward_arg_names:
+        names = forward_arg_names
+    elif is_args_kwargs:
         # if in_spec contains the args (tuple) and kwargs (dict)
         names = [f"arg_{i}" for i in range(in_spec.child(0).num_children)]
         # add kwarg names
@@ -392,6 +393,7 @@ def _get_codegen(
             names,
             in_spec,
             out_spec,
+            is_args_kwargs,
         )
     )
 
