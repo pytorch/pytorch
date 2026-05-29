@@ -404,23 +404,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 )
             )
 
-    # Foreach mm: after overlap scheduling, unwrap control_deps(mm)
-    # that don't depend on collectives, then batch the unwrapped mm
-    # ops into _foreach_mm. Enables cascading pointwise fusion.
-    if config.aten_distributed_optimizations.foreach_mm:
-        from torch._inductor.fx_passes.foreach_mm_post_sched import (
-            foreach_mm_post_scheduling_pass,
-        )
-        from torch._inductor.fx_passes.horizontal_fusion import foreach_mm_pass
-
-        GraphTransformObserver(gm, "foreach_mm_unwrap").apply_graph_pass(
-            lambda graph: foreach_mm_post_scheduling_pass(graph.owning_module)  # type: ignore[arg-type]
-        )
-
-        GraphTransformObserver(gm, "foreach_mm_batch").apply_graph_pass(
-            lambda graph: foreach_mm_pass(graph.owning_module)  # type: ignore[arg-type]
-        )
-
     if config.aten_distributed_optimizations.enable_low_contention_collectives:
         from torch._inductor.fx_passes.low_contention_collectives import (
             replace_collectives_with_low_contention,
