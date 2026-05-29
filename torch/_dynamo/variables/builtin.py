@@ -2845,6 +2845,13 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_remainder", "nb_remainder", "%=")
 
+    def call_divmod(
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        # PyNumber_Divmod dispatches through the nb_divmod slot with no
+        # in-place form. https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1056
+        return binary_op(tx, a, b, "nb_divmod", "divmod()")
+
     def call_not_(
         self, tx: "InstructionTranslator", a: VariableTracker
     ) -> VariableTracker | None:
