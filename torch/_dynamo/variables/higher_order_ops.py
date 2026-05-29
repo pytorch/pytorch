@@ -1225,6 +1225,7 @@ def validate_args_and_maybe_create_graph_inputs(
             args.append(new_arg)
         return args
 
+
 # N-branch generalization of former _merge_graph_inputs. Used by torch.cond (2 branches)
 # and torch.switch (N branches): both must produce subgraphs with a unified
 # placeholder signature so the higher order op can pass a single operand list.
@@ -1319,9 +1320,7 @@ def _merge_graph_inputs(
         # old placeholder to replace when emitting the shared block.
         canonical_to_branch_outer = {c: o for o, c in outer_to_canonical.items()}
 
-        def _insert_or_replace_phs(
-            new_args: Sequence[Proxy], name_suffix: str
-        ) -> None:
+        def _insert_or_replace_phs(new_args: Sequence[Proxy], name_suffix: str) -> None:
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
                 new_ph.meta = arg.node.meta
