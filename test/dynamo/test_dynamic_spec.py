@@ -1495,35 +1495,25 @@ class TestSeqSpec(TestCase):
         super().setUp()
         _reset_uid_counter()
 
-    def test_construction_basic(self):
-        B = ShapeVar("b")
-        sp = SeqSpec([TensorSpec([B, None]), TensorSpec([B, None])])
-        self.assertEqual(len(sp), 2)
-        self.assertIn(0, sp)
-        self.assertIn(1, sp)
-        self.assertNotIn(2, sp)
-        self.assertNotIn("x", sp)
-        self.assertIsInstance(sp[0], TensorSpec)
-
     def test_accepts_tuple(self):
         B = ShapeVar("b")
-        sp = SeqSpec((TensorSpec([B, None]), TensorSpec([B, None])))
+        sp = SeqSpec((TensorSpec([B, 4]), TensorSpec([B, 8])))
         self.assertEqual(len(sp), 2)
 
     def test_empty(self):
         sp = SeqSpec([])
         self.assertEqual(len(sp), 0)
-        self.assertNotIn(0, sp)
+        self.assertEqual(sp._entries, [])
 
     def test_iter(self):
         B = ShapeVar("b")
-        t0 = TensorSpec([B, None])
-        t1 = TensorSpec([B, None])
+        t0 = TensorSpec([B, 4])
+        t1 = TensorSpec([B, 8])
         sp = SeqSpec([t0, t1])
-        self.assertEqual(list(sp), [t0, t1])
+        self.assertEqual(sp._entries, [t0, t1])
 
     def test_repr(self):
-        sp = SeqSpec([TensorSpec([ShapeVar("a"), None])])
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), 4])])
         self.assertEqual(
             repr(sp),
             """\
@@ -1531,11 +1521,11 @@ seq_spec:
   [0]:
     Tensor:
       0: ShapeVar(a#0, min=0)
-      1: None""",
+      1: 4""",
         )
 
     def test_to_jsonable(self):
-        sp = SeqSpec([TensorSpec([ShapeVar("a"), None])])
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), 4])])
         j = sp.to_jsonable()
         self.assertEqual(j["type"], "SeqSpec")
         self.assertEqual(len(j["entries"]), 1)
@@ -1547,20 +1537,14 @@ seq_spec:
         B = ShapeVar("b")
         cnts = torch._dynamo.testing.CompileCounter()
 
-        def fn(xs):
+        def fn(xs: list[torch.Tensor]) -> torch.Tensor:
             return xs[0].sum() + xs[1].sum()
 
         compiled = torch.compile(
             fn,
             backend=cnts,
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params={
-                    "xs": SeqSpec(
-                        [TensorSpec([B, 3]), TensorSpec([B, 5])]
-                    )
-                }
-            ),
+            shapes_spec={"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 5])])},
         )
         compiled([torch.ones(4, 3), torch.ones(4, 5)])
         compiled([torch.ones(7, 3), torch.ones(7, 5)])  # same dim 0 dyn
@@ -1570,16 +1554,14 @@ seq_spec:
         """Indices beyond the SeqSpec length are unspecified == static."""
         B = ShapeVar("b")
 
-        def fn(xs):
+        def fn(xs: list[torch.Tensor]) -> torch.Tensor:
             return xs[0].sum() + xs[1].sum()
 
         compiled = torch.compile(
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params={"xs": SeqSpec([TensorSpec([B, None])])}
-            ),
+            shapes_spec={"xs": SeqSpec([TensorSpec([B, 3])])},
         )
         out = compiled([torch.ones(4, 3), torch.ones(4, 3)])
         self.assertTrue(torch.is_tensor(out))
@@ -1843,10 +1825,13 @@ class TestWalkSpecRaises(TestCase):
         )
 
         root = ObjectSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-        with self.assertRaisesRegex(
-            RuntimeError, r"ObjectSpec.*expects an attribute access"
-        ):
+        with self.assertRaises(RuntimeError) as ctx:
             _walk_spec(root, [_SubscriptToken("x")])
+        self.assertEqual(
+            str(ctx.exception),
+            "shapes_spec walk: ObjectSpec at \"['x']\" expects an attribute "
+            "access (.name), got subscript (['x'])",
+        )
         # sanity: the matching ``.x`` (AttrToken) form still resolves.
         ts = _walk_spec(root, [_AttrToken("x")])
         self.assertIsInstance(ts, TensorSpec)
@@ -1860,10 +1845,31 @@ class TestWalkSpecRaises(TestCase):
         )
 
         root = DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-        with self.assertRaisesRegex(RuntimeError, r"DictSpec.*expects.*subscript"):
+        with self.assertRaises(RuntimeError) as ctx:
             _walk_spec(root, [_AttrToken("x")])
+        self.assertEqual(
+            str(ctx.exception),
+            "shapes_spec walk: DictSpec at '.x' expects a subscript "
+            "(['key']), got attribute access (.x)",
+        )
         # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
         ts = _walk_spec(root, [_SubscriptToken("x")])
+        self.assertIsInstance(ts, TensorSpec)
+
+    def test_walk_seq_spec_with_non_int_subscript_raises(self):
+        """``SeqSpec`` paired with a non-int subscript token must raise."""
+        from torch._dynamo.variables.builder import _SubscriptToken, _walk_spec
+
+        root = SeqSpec([TensorSpec([ShapeVar("h"), STATIC])])
+        with self.assertRaises(RuntimeError) as ctx:
+            _walk_spec(root, [_SubscriptToken("x")])
+        self.assertEqual(
+            str(ctx.exception),
+            "shapes_spec walk: SeqSpec at \"['x']\" expects an int subscript "
+            "([i]), got subscript (['x'])",
+        )
+        # sanity: an int subscript still resolves.
+        ts = _walk_spec(root, [_SubscriptToken(0)])
         self.assertIsInstance(ts, TensorSpec)
 
     def test_walk_leaf_with_remaining_token_raises(self):
@@ -1871,10 +1877,14 @@ class TestWalkSpecRaises(TestCase):
         from torch._dynamo.variables.builder import _AttrToken, _walk_spec
 
         root = TensorSpec([ShapeVar("h"), STATIC])
-        with self.assertRaisesRegex(
-            RuntimeError, r"leaf spec.*cannot consume further token"
-        ):
+        with self.assertRaises(RuntimeError) as ctx:
             _walk_spec(root, [_AttrToken("something")])
+        self.assertEqual(
+            str(ctx.exception),
+            "shapes_spec walk: reached leaf spec (TensorSpec) at "
+            "'.something', but the input is not a leaf — remaining access "
+            "attribute access (.something) cannot be consumed by a leaf spec",
+        )
 
 
 if __name__ == "__main__":

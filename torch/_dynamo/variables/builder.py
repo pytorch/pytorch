@@ -392,6 +392,47 @@ _AccessToken = _LocalToken | _AttrToken | _SubscriptToken
 _AccessPath = list[_AccessToken]
 
 
+def _format_access_path(tokens: _AccessPath) -> str:
+    """Format an access path as a Python source-like string for error messages.
+
+    Examples:
+        [_LocalToken("xs")]                              -> "xs"
+        [_LocalToken("cfg"), _SubscriptToken("x")]       -> "cfg['x']"
+        [_LocalToken("m"), _AttrToken("weight")]         -> "m.weight"
+        [_SubscriptToken(0)]                             -> "[0]"
+    """
+    parts: list[str] = []
+    for tok in tokens:
+        match tok:
+            case _LocalToken(name=name):
+                parts.append(name)
+            case _AttrToken(name=name):
+                parts.append(f".{name}")
+            case _SubscriptToken(key=key):
+                parts.append(f"[{key!r}]")
+    return "".join(parts) if parts else "<empty path>"
+
+
+def _format_token(token: _AccessToken) -> str:
+    """Format a single access token as a Python source-like fragment.
+
+    Examples:
+        _AttrToken("weight")    -> "attribute access (.weight)"
+        _SubscriptToken("x")    -> "subscript (['x'])"
+        _SubscriptToken(0)      -> "subscript ([0])"
+        _LocalToken("xs")       -> "local (xs)"
+    """
+    match token:
+        case _LocalToken(name=name):
+            return f"local ({name})"
+        case _AttrToken(name=name):
+            return f"attribute access (.{name})"
+        case _SubscriptToken(key=key):
+            return f"subscript ([{key!r}])"
+        case _:
+            return repr(token)
+
+
 def _source_to_access_path(source: Source) -> _AccessPath | None:
     """Translate a dynamo ``Source`` chain into a flat ``_AccessPath``.
 
@@ -466,18 +507,17 @@ def _walk_spec(
             case ObjectSpec():
                 if not isinstance(token, _AttrToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: ObjectSpec at path {remaining_tokens!r} expects "
-                        f"an attribute access (_AttrToken), got "
-                        f"{type(token).__name__}"
+                        f"shapes_spec walk: ObjectSpec at {_format_access_path(remaining_tokens)!r} "
+                        f"expects an attribute access (.name), got "
+                        f"{_format_token(token)}"
                     )
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
                 if not isinstance(token, _SubscriptToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: DictSpec at path {remaining_tokens!r} expects "
-                        f"a str/int subscript (_SubscriptToken), got "
-                        f"{type(token).__name__}"
-                        f"({getattr(token, 'key', None)!r})"
+                        f"shapes_spec walk: DictSpec at {_format_access_path(remaining_tokens)!r} "
+                        f"expects a subscript (['key']), got "
+                        f"{_format_token(token)}"
                     )
                 current_spec = current_spec._entries.get(token.key)
             case SeqSpec():
@@ -485,29 +525,30 @@ def _walk_spec(
                     token.key, int
                 ):
                     raise RuntimeError(
-                        f"shapes_spec walk: SeqSpec at path {remaining_tokens!r} expects "
-                        f"an int subscript (_SubscriptToken), got "
-                        f"{type(token).__name__}"
-                        f"({getattr(token, 'key', None)!r})"
+                        f"shapes_spec walk: SeqSpec at {_format_access_path(remaining_tokens)!r} "
+                        f"expects an int subscript ([i]), got "
+                        f"{_format_token(token)}"
                     )
                 # Out-of-range index: unspecified -> treat as static (None),
-                # matching DictSpec's behavior for missing keys.
-                if token.key in current_spec:
-                    current_spec = current_spec[token.key]
+                if 0 <= token.key < len(current_spec):
+                    current_spec = current_spec._entries[token.key]
                 else:
                     current_spec = None
             case _:
                 # leaf spec (TensorSpec / IntVar / int / None) but path still
-                # has tokens → the user spec is too shallow for the access.
+                # has tokens → the user spec is too shallow: it claims a leaf,
+                # but the runtime value is a container being further accessed.
                 raise RuntimeError(
-                    f"shapes_spec walk: leaf spec ({type(current_spec).__name__}) "
-                    f"at path {remaining_tokens!r} cannot consume further token {token!r}; "
-                    f"the spec is too shallow for this access"
+                    f"shapes_spec walk: reached leaf spec "
+                    f"({type(current_spec).__name__}) at "
+                    f"{_format_access_path(remaining_tokens)!r}, but the input "
+                    f"is not a leaf — remaining access {_format_token(token)} "
+                    f"cannot be consumed by a leaf spec"
                 )
     if not isinstance(current_spec, LeafSpec):
         raise RuntimeError(
             f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
-            f"for access path {remaining_tokens!r}; expected a leaf spec"
+            f"for access path {_format_access_path(remaining_tokens)!r}; expected a leaf spec"
         )
     return current_spec
 

@@ -434,7 +434,9 @@ class DictSpec:
 class SeqSpec:
     """Spec for a Python ``list``- or ``tuple``-typed value.
 
-    Fixed-length, per-position.
+    Per-position. The spec list may be shorter than the runtime sequence;
+    any positions beyond ``len(self)`` are treated as fully static (i.e.
+    equivalent to an unspecified slot).
 
     Constructor::
 
@@ -442,24 +444,15 @@ class SeqSpec:
 
     Example::
 
-        SeqSpec([TensorSpec([ShapeVar("h"), 10]), None])
+        SeqSpec([TensorSpec([ShapeVar("h"), 10]), 1])
         SeqSpec((TensorSpec([ShapeVar("a")]), TensorSpec([ShapeVar("b")])))
     """
 
     def __init__(self, entries: Sequence[IntermediateSpec]) -> None:
         self._entries: list[IntermediateSpec] = list(entries)
 
-    def __contains__(self, index: object) -> bool:
-        return isinstance(index, int) and 0 <= index < len(self._entries)
-
-    def __iter__(self) -> Iterator[IntermediateSpec]:
-        return iter(self._entries)
-
     def __len__(self) -> int:
         return len(self._entries)
-
-    def __getitem__(self, index: int) -> IntermediateSpec:
-        return self._entries[index]
 
     def __repr__(self) -> str:
         lines = ["seq_spec:"]
