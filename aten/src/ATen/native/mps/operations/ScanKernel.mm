@@ -96,14 +96,14 @@ static bool use_contig_multiblock_scan(const std::string& op_name,
   return axis_size >= kMinAxisSize && n_scans <= kMaxScans;
 }
 
-// scan_outer_dim has no axis split. Prefer the axis-splitting strided kernels:
-// float always; int only when scan_outer_dim would be occupancy-starved.
+// scan_outer_dim is single-pass but unsplit, so it needs enough (orow x
+// stride-block) groups to fill the GPU; only split to the multi-block kernels
+// when that parallelism is starved (else the 3-pass split just adds overhead).
 static bool use_strided_outer_scan(const std::string& op_name,
                                    ScalarType scalar_type,
                                    int64_t axis_size,
                                    int64_t n_orows,
-                                   int64_t n_inner,
-                                   bool float_accum) {
+                                   int64_t n_inner) {
   if (!is_custom_scan_case(op_name, scalar_type)) {
     return false;
   }
@@ -111,12 +111,9 @@ static bool use_strided_outer_scan(const std::string& op_name,
   if (axis_size < kMinSplitAxis) {
     return false;
   }
-  if (float_accum) {
-    return true;
-  }
-  const int64_t outer_groups = n_orows * ((n_inner + 31) / 32);
-  constexpr int64_t kIntStarvedGroups = 64;
-  return outer_groups <= kIntStarvedGroups;
+  const auto outer_groups = n_orows * ((n_inner + 31) / 32);
+  constexpr int64_t kStarvedGroups = 64;
+  return outer_groups <= kStarvedGroups;
 }
 
 // Tiny innermost axis with very many scans: pack many rows per threadgroup
@@ -135,11 +132,11 @@ static bool use_tiny_scan(const std::string& op_name,
 }
 
 static void scan_tiny_innermost_mps_impl(const Tensor& input, const Tensor& output, const std::string& op_name) {
-  const int64_t axis_size = input.size(-1);
-  const int64_t n_scans = input.numel() / axis_size;
+  const auto axis_size = input.size(-1);
+  const auto n_scans = input.numel() / axis_size;
   constexpr int64_t kTinyTile = 2048; // must match TILE in scan_tiny_innermost
-  const int64_t rows_per_tg = kTinyTile / axis_size;
-  const int64_t num_tg = (n_scans + rows_per_tg - 1) / rows_per_tg;
+  const auto rows_per_tg = kTinyTile / axis_size;
+  const auto num_tg = (n_scans + rows_per_tg - 1) / rows_per_tg;
   constexpr int64_t tg = 256;
 
   const auto type_str = scan_kernel_type_tag(input, output);
@@ -167,20 +164,20 @@ static void scan_tiny_innermost_mps_impl(const Tensor& input, const Tensor& outp
 // Three-pass parallel scan over a [n_scans, axis_size] contiguous tensor whose
 // scan runs along the last (contiguous) dimension. See ScanKernel.metal.
 static void scan_multiblock_mps_impl(const Tensor& input, const Tensor& output, const std::string& op_name) {
-  const int64_t axis_size = input.size(-1);
-  const int64_t n_scans = input.numel() / axis_size;
+  const auto axis_size = input.size(-1);
+  const auto n_scans = input.numel() / axis_size;
 
   const auto acc_st = scan_accum_scalar_type(output.scalar_type());
-  const int n_reads = scan_n_reads(acc_st);
+  const auto n_reads = scan_n_reads(acc_st);
   constexpr int64_t tg = 256;
-  const int64_t elems_per_iter = tg * n_reads;
+  const auto elems_per_iter = tg * n_reads;
   // Block count ~ sqrt(axis)/4 (empirical sweet spot over 65536..16M): enough
   // parallelism for long scans without over-subdividing short ones. Clamped below.
   const int64_t max_blocks_by_size = std::max<int64_t>(1, axis_size / elems_per_iter);
-  int64_t num_blocks = static_cast<int64_t>(std::sqrt(static_cast<double>(axis_size))) / 4;
+  auto num_blocks = static_cast<int64_t>(std::sqrt(static_cast<double>(axis_size))) / 4;
   num_blocks = std::max<int64_t>(num_blocks, 2);
   num_blocks = std::min<int64_t>(num_blocks, std::min<int64_t>(max_blocks_by_size, 4096));
-  int64_t block_size = (axis_size + num_blocks - 1) / num_blocks;
+  auto block_size = (axis_size + num_blocks - 1) / num_blocks;
   num_blocks = (axis_size + block_size - 1) / block_size;
 
   auto block_sums = at::empty({n_scans, num_blocks}, input.options().dtype(acc_st));
@@ -216,14 +213,14 @@ static void scan_multiblock_mps_impl(const Tensor& input, const Tensor& output, 
 // Single-pass decoupled look-back over a [n_scans, axis_size] contiguous tensor
 // (innermost scan), 1 read + 1 write. Float-accumulate dtypes only.
 static void scan_decoupled_mps_impl(const Tensor& input, const Tensor& output, const std::string& op_name) {
-  const int64_t axis_size = input.size(-1);
-  const int64_t n_scans = input.numel() / axis_size;
+  const auto axis_size = input.size(-1);
+  const auto n_scans = input.numel() / axis_size;
 
   constexpr int64_t tg = 256;
   constexpr int64_t n_reads = 16; // must match REGISTER_DECOUPLED_SCAN_OP's NREADS
   constexpr int64_t tile = tg * n_reads;
-  const int64_t num_tiles = (axis_size + tile - 1) / tile;
-  const int64_t total_tiles = n_scans * num_tiles;
+  const auto num_tiles = (axis_size + tile - 1) / tile;
+  const auto total_tiles = n_scans * num_tiles;
 
   // counter starts at 0; aggregate/inclusive slots start at sentinel kScanEmpty
   // (-1) so look-back spins until a producer publishes.
@@ -257,39 +254,100 @@ static void scan_decoupled_mps_impl(const Tensor& input, const Tensor& output, c
   });
 }
 
+// NREADS per VEC, keeping NREADS*VEC near the contig path's register footprint.
+// Must match the REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC (NREADS, VEC) pairs.
+static int64_t strided_decoupled_n_reads(int64_t vec) {
+  return vec <= 2 ? 8 : (vec <= 8 ? 4 : 2);
+}
+
+static bool strided_decoupled_supports_vec(int64_t vec) {
+  return vec == 2 || vec == 4 || vec == 8 || vec == 16;
+}
+
+// Single-pass decoupled look-back for a narrow-stride outer scan over
+// [n_orows, axis_size, VEC] contiguous: 1 dispatch, 1 read + 1 write, no global
+// reduce->carry barrier. Float-accumulate dtypes only; gated to macOS 15+.
+static void scan_strided_decoupled_mps_impl(const Tensor& input,
+                                            const Tensor& output,
+                                            int64_t wrapped_dim,
+                                            const std::string& op_name) {
+  const auto axis_size = input.size(wrapped_dim);
+  const auto vec = input.stride(wrapped_dim);
+  const auto n_orows = input.numel() / (axis_size * vec);
+
+  // Coarse tiles minimize the per-tile fence/look-back count (swept vs MPSGraph).
+  const int64_t tg = vec <= 2 ? 768 : 512;
+  const auto n_reads = strided_decoupled_n_reads(vec);
+  const auto tile = tg * n_reads;
+  const auto num_tiles = (axis_size + tile - 1) / tile;
+  const auto total_tiles = n_orows * num_tiles;
+
+  auto counter = at::zeros({1}, input.options().dtype(kInt));
+  auto status = at::zeros({total_tiles}, input.options().dtype(kInt));
+  auto aggregates = at::empty({total_tiles * vec}, input.options().dtype(kInt));
+  auto inclusive = at::empty({total_tiles * vec}, input.options().dtype(kInt));
+
+  const auto type_str = scalarToMetalTypeString(input);
+  const auto kernel_name = fmt::format("{}_strided_decoupled_{}_{}_{}", op_name, vec, n_reads, type_str);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = mpsStream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(kernel_name);
+      getMPSProfiler().beginProfileKernel(pso, op_name, {input, output});
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc,
+                  input,
+                  output,
+                  counter,
+                  status,
+                  aggregates,
+                  inclusive,
+                  static_cast<uint32_t>(axis_size),
+                  static_cast<uint32_t>(num_tiles));
+      [enc dispatchThreads:MTLSizeMake(tg * total_tiles, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+}
+
 // Multi-block scan for an outer (non-innermost) axis without transposing;
 // contiguous input/output, scan stride n_irows = input.stride(wrapped_dim).
 static void scan_strided_multiblock_mps_impl(const Tensor& input,
                                              const Tensor& output,
                                              int64_t wrapped_dim,
                                              const std::string& op_name) {
-  const int64_t axis_size = input.size(wrapped_dim);
-  const int64_t n_irows = input.stride(wrapped_dim);
-  const int64_t n_orows = input.numel() / (axis_size * n_irows);
-  const int64_t n_scans = n_orows * n_irows;
+  const auto axis_size = input.size(wrapped_dim);
+  const auto n_irows = input.stride(wrapped_dim);
+  const auto n_orows = input.numel() / (axis_size * n_irows);
+  const auto n_scans = n_orows * n_irows;
 
   const auto acc_st = scan_accum_scalar_type(output.scalar_type());
-  const int n_reads = scan_n_reads(acc_st);
+  const auto n_reads = scan_n_reads(acc_st);
   constexpr int64_t BM = 32;
-  // Fit the tile width to the scan stride so threadgroups aren't wasted on
-  // padding columns (registered widths: 8, 16, 32).
-  const int64_t BN = n_irows <= 8 ? 8 : (n_irows <= 16 ? 16 : 32);
-  const int64_t stride_blocks = (n_irows + BN - 1) / BN;
+  // Smallest registered tile width >= n_irows (no wasted padding columns). Int
+  // has {8,16,32}; float also {12,24} for a tighter fit on strides in (8,24].
+  const bool float_ext = output.scalar_type() == ScalarType::Float || at::isReducedFloatingType(output.scalar_type());
+  const int64_t BN = float_ext
+      ? (n_irows <= 8 ? 8 : (n_irows <= 12 ? 12 : (n_irows <= 16 ? 16 : (n_irows <= 24 ? 24 : 32))))
+      : (n_irows <= 8 ? 8 : (n_irows <= 16 ? 16 : 32));
+  const auto stride_blocks = (n_irows + BN - 1) / BN;
 
   constexpr int64_t target_tg = 4096;
-  // Floor the block size: tiny blocks make the 3-pass block_sums overhead
-  // dominate on a moderate axis (e.g. [8192,256] dim0 -> block_size == BM).
-  constexpr int64_t kMinBlock = 4 * BM; // 128
-  const int64_t outer_tg = n_orows * stride_blocks;
-  int64_t num_blocks = std::max<int64_t>((target_tg + outer_tg - 1) / outer_tg, 2);
+  // Floor block size so tiny blocks don't over-subdivide a moderate axis (the
+  // 3-pass overhead would dominate); long axes hit target_tg, not this floor.
+  constexpr int64_t kMinBlock = 512;
+  const auto outer_tg = n_orows * stride_blocks;
+  auto num_blocks = std::max<int64_t>((target_tg + outer_tg - 1) / outer_tg, 2);
   num_blocks = std::min<int64_t>(num_blocks, std::max<int64_t>(1, axis_size / kMinBlock));
-  int64_t block_size = ((axis_size + num_blocks - 1) / num_blocks + BM - 1) / BM * BM;
+  auto block_size = ((axis_size + num_blocks - 1) / num_blocks + BM - 1) / BM * BM;
   num_blocks = (axis_size + block_size - 1) / block_size;
 
   auto block_sums = at::empty({n_scans, num_blocks}, input.options().dtype(acc_st));
 
-  const int64_t tg = (BN / n_reads) * 32;
-  const int64_t total_groups = n_orows * stride_blocks * num_blocks;
+  const auto tg = (BN / n_reads) * 32;
+  const auto total_groups = n_orows * stride_blocks * num_blocks;
   int64_t grid_y = total_groups, grid_z = 1;
   constexpr int64_t kMaxDim = 0x7fffffff;
   while (grid_y > kMaxDim) {
@@ -334,105 +392,6 @@ static void scan_strided_multiblock_mps_impl(const Tensor& input,
   });
 }
 
-// Per-column general-stride decoupled look-back: one simdgroup per column-tile,
-// constant N_READS regs, handles any inner stride. See ScanKernel.metal.
-static void scan_strided_col_mps_impl(const Tensor& input,
-                                      const Tensor& output,
-                                      int64_t wrapped_dim,
-                                      const std::string& op_name) {
-  const int64_t axis_size = input.size(wrapped_dim);
-  const int64_t n_irows = input.stride(wrapped_dim);
-  const int64_t n_orows = input.numel() / (axis_size * n_irows);
-
-  constexpr int64_t n_reads = 16; // must match REGISTER_STRIDED_COL_SCAN_OP's NREADS
-  constexpr int64_t tile_rows = n_reads * 32;
-  const int64_t num_tiles = (axis_size + tile_rows - 1) / tile_rows;
-  const int64_t n_cols_total = n_orows * n_irows;
-  const int64_t total_tiles = n_cols_total * num_tiles;
-
-  constexpr int64_t simdgroups_per_tg = 8;
-  const int64_t tg = simdgroups_per_tg * 32;
-  const int64_t num_tg = (total_tiles + simdgroups_per_tg - 1) / simdgroups_per_tg;
-
-  auto counter = at::zeros({1}, input.options().dtype(kInt));
-  auto aggregates = at::empty({total_tiles}, input.options().dtype(kInt));
-  auto inclusive = at::empty({total_tiles}, input.options().dtype(kInt));
-  aggregates.fill_(-1); // 0xFFFFFFFF == kScanEmpty
-  inclusive.fill_(-1);
-
-  const auto type_str = scalarToMetalTypeString(input);
-  const auto kernel_name = fmt::format("{}_strided_col_decoupled_{}", op_name, type_str);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> enc = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(pso, op_name, {input, output});
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc,
-                  input,
-                  output,
-                  counter,
-                  aggregates,
-                  inclusive,
-                  static_cast<uint32_t>(axis_size),
-                  static_cast<uint32_t>(n_irows),
-                  static_cast<uint32_t>(n_cols_total),
-                  static_cast<uint32_t>(total_tiles));
-      [enc dispatchThreads:MTLSizeMake(tg * num_tg, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
-    }
-  });
-}
-
-// Vectorized decoupled look-back: [axis, n_irows] as a contiguous scan over
-// n_irows-vectors, coalesced + register-held. See ScanKernel.metal.
-static void scan_vec_decoupled_mps_impl(const Tensor& input,
-                                        const Tensor& output,
-                                        int64_t wrapped_dim,
-                                        const std::string& op_name) {
-  const int64_t axis_size = input.size(wrapped_dim);
-  const int64_t n_irows = input.stride(wrapped_dim);
-  const int64_t n_orows = input.numel() / (axis_size * n_irows);
-
-  // VEC == n_irows is compile-time; N_READS*n_irows ~ 32 registers per thread.
-  const int64_t n_reads = std::max<int64_t>(1, 32 / n_irows);
-  constexpr int64_t tg = 256;
-  const int64_t tile = tg * n_reads; // super-elements per tile
-  const int64_t num_tiles = (axis_size + tile - 1) / tile;
-  const int64_t total_tiles = n_orows * num_tiles;
-
-  auto counter = at::zeros({1}, input.options().dtype(kInt));
-  auto aggregates = at::empty({total_tiles * n_irows}, input.options().dtype(kInt));
-  auto inclusive = at::empty({total_tiles * n_irows}, input.options().dtype(kInt));
-  aggregates.fill_(-1); // 0xFFFFFFFF == kScanEmpty
-  inclusive.fill_(-1);
-
-  const auto type_str = scalarToMetalTypeString(input);
-  const auto kernel_name = fmt::format("{}_vec_decoupled_{}_{}", op_name, n_irows, type_str);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> enc = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(pso, op_name, {input, output});
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc,
-                  input,
-                  output,
-                  counter,
-                  aggregates,
-                  inclusive,
-                  static_cast<uint32_t>(axis_size),
-                  static_cast<uint32_t>(num_tiles));
-      [enc dispatchThreads:MTLSizeMake(tg * total_tiles, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
-    }
-  });
-}
-
 // Int small-stride outer scan: 2-pass vectorized multi-block over
 // [n_orows, axis, VEC]. Reads exactly VEC components; the strided kernel's
 // min BN=8 tile would waste ~75% here.
@@ -440,22 +399,22 @@ static void scan_vec_multiblock_mps_impl(const Tensor& input,
                                          const Tensor& output,
                                          int64_t wrapped_dim,
                                          const std::string& op_name) {
-  const int64_t axis_size = input.size(wrapped_dim);
-  const int64_t vec = input.stride(wrapped_dim); // == n_irows == n_inner
-  const int64_t n_orows = input.numel() / (axis_size * vec);
+  const auto axis_size = input.size(wrapped_dim);
+  const auto vec = input.stride(wrapped_dim); // == n_irows == n_inner
+  const auto n_orows = input.numel() / (axis_size * vec);
 
   const auto acc_st = scan_accum_scalar_type(output.scalar_type());
-  const int n_reads = scan_n_reads(acc_st);
+  const auto n_reads = scan_n_reads(acc_st);
   // Small tg for occupancy, coarse blocks to amortize the 2-pass overhead
   // (empirical sweet spot).
   constexpr int64_t tg = 64;
   constexpr int64_t target_groups = 512;
-  const int64_t tile = tg * n_reads;
+  const auto tile = tg * n_reads;
   // Enough (orow x block) groups to fill the GPU; block_size a whole tile count.
-  int64_t num_blocks = std::max<int64_t>((target_groups + n_orows - 1) / n_orows, 2);
+  auto num_blocks = std::max<int64_t>((target_groups + n_orows - 1) / n_orows, 2);
   num_blocks = std::min<int64_t>(num_blocks, std::max<int64_t>(1, axis_size / tile));
   num_blocks = std::max<int64_t>(num_blocks, 1);
-  int64_t block_size = ((axis_size + num_blocks - 1) / num_blocks + tile - 1) / tile * tile;
+  auto block_size = ((axis_size + num_blocks - 1) / num_blocks + tile - 1) / tile * tile;
   num_blocks = (axis_size + block_size - 1) / block_size;
 
   auto block_sums = at::empty({n_orows * num_blocks * vec}, input.options().dtype(acc_st));
@@ -464,7 +423,7 @@ static void scan_vec_multiblock_mps_impl(const Tensor& input,
   const auto reduce_name = fmt::format("{}_vec_block_reduce_{}_{}", op_name, vec, type_str);
   const auto carry_name = fmt::format("{}_vec_block_carry_{}_{}", op_name, vec, type_str);
 
-  const int64_t total_groups = n_orows * num_blocks;
+  const auto total_groups = n_orows * num_blocks;
   int64_t grid_y = total_groups, grid_z = 1;
   constexpr int64_t kMaxDim = 0x7fffffff;
   while (grid_y > kMaxDim) {
@@ -497,15 +456,15 @@ static void scan_vec_multiblock_mps_impl(const Tensor& input,
 // Fused transpose-scan: non-contiguous `input` whose innermost scan axis is
 // physically outer. Storage is [axis_size, n_cols] contiguous (caller checked).
 static void scan_innermost_transposed_mps_impl(const Tensor& input, const Tensor& output, const std::string& op_name) {
-  const int64_t ndim = input.dim();
-  const int64_t axis_size = input.size(ndim - 1);
-  const int64_t n_cols = input.numel() / axis_size;
+  const auto ndim = input.dim();
+  const auto axis_size = input.size(ndim - 1);
+  const auto n_cols = input.numel() / axis_size;
   constexpr int64_t BN = 32;
-  const int64_t stride_blocks = (n_cols + BN - 1) / BN;
+  const auto stride_blocks = (n_cols + BN - 1) / BN;
 
   const auto acc_st = scan_accum_scalar_type(output.scalar_type());
-  const int n_reads = scan_n_reads(acc_st);
-  const int64_t tg = (BN / n_reads) * 32;
+  const auto n_reads = scan_n_reads(acc_st);
+  const auto tg = (BN / n_reads) * 32;
 
   int64_t grid_y = stride_blocks, grid_z = 1;
   constexpr int64_t kMaxDim = 0x7fffffff;
@@ -534,11 +493,11 @@ static void scan_innermost_transposed_mps_impl(const Tensor& input, const Tensor
 // Dense non-contiguous input whose innermost dim is physically outer (a
 // transpose): storage is contiguous when viewed axis-first.
 static bool is_transposed_innermost_scan(const Tensor& self, const Tensor& output, int64_t wrapped_dim) {
-  const int64_t ndim = self.dim();
+  const auto ndim = self.dim();
   if (ndim < 2 || wrapped_dim != ndim - 1 || self.is_contiguous() || !output.is_contiguous()) {
     return false;
   }
-  const int64_t n_cols = self.numel() / self.size(ndim - 1);
+  const auto n_cols = self.numel() / self.size(ndim - 1);
   constexpr int64_t kMinCols = 256; // enough column-blocks to fill the GPU
   if (n_cols < kMinCols) {
     return false;
@@ -556,10 +515,10 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
     return;
   }
 
-  const int64_t ndim = self.dim();
-  const int64_t wrapped_dim = maybe_wrap_dim(dim, ndim);
-  const int64_t axis_size = self.size(wrapped_dim);
-  const int64_t n_scans = self.numel() / axis_size;
+  const auto ndim = self.dim();
+  const auto wrapped_dim = maybe_wrap_dim(dim, ndim);
+  const auto axis_size = self.size(wrapped_dim);
+  const auto n_scans = self.numel() / axis_size;
   const bool is_innermost = (wrapped_dim == ndim - 1);
 
   // Run a scan that writes a contiguous result shaped like `proto`, delivering it
@@ -595,39 +554,49 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
   for (int64_t i = wrapped_dim + 1; i < ndim; i++) {
     n_inner *= self.size(i);
   }
-  const int64_t n_orows = n_scans / n_inner;
+  const auto n_orows = n_scans / n_inner;
 
   // Float uses the single-pass decoupled look-back; int can't (no int64 in a
   // 32-bit atomic sentinel) and stays on the 3-pass kernels.
   const bool float_accum = self.scalar_type() == ScalarType::Float || self.scalar_type() == ScalarType::Half ||
       self.scalar_type() == ScalarType::BFloat16;
 
+  // Float scans on macOS 15+ use the fenced decoupled look-back; macOS 14 (no
+  // device fence) and deterministic mode (timing-dependent carry fold) use the
+  // deterministic multi-block kernels instead.
+  const bool use_lookback = float_accum && is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
+      !globalContext().deterministicAlgorithms();
+
   if (n_inner == 1) {
     // Contiguous scan over the (effectively) innermost dim.
     if (use_contig_multiblock_scan(op_name, self.scalar_type(), axis_size, n_scans)) {
       Tensor input_tensor = self.contiguous();
-      auto run = float_accum ? scan_decoupled_mps_impl : scan_multiblock_mps_impl;
+      auto run = use_lookback ? scan_decoupled_mps_impl : scan_multiblock_mps_impl;
       auto in2 = is_innermost ? input_tensor : input_tensor.reshape({n_scans, axis_size});
       emit_scan(in2, [&](const Tensor& dst) { run(in2, dst, op_name); });
       return;
     }
-  } else if (use_strided_outer_scan(op_name, self.scalar_type(), axis_size, n_orows, n_inner, float_accum)) {
-    // Outer scan with a real inner stride; the strided kernels split the axis.
+  } else if (use_strided_outer_scan(op_name, self.scalar_type(), axis_size, n_orows, n_inner)) {
     Tensor input_tensor = self.contiguous();
-    const int64_t n_irows = input_tensor.stride(wrapped_dim);
-    if (float_accum && n_irows == 2) {
-      // Vectorized look-back at n_irows==2, per-column kernel for wider strides.
+    const auto n_irows = input_tensor.stride(wrapped_dim);
+    // Narrow float strides {2,4,8,16}: single-pass look-back (1 dispatch, no
+    // reduce->carry barrier) beats the multi-block on these latency-bound shapes.
+    if (use_lookback && strided_decoupled_supports_vec(n_irows)) {
       emit_scan(input_tensor,
-                [&](const Tensor& dst) { scan_vec_decoupled_mps_impl(input_tensor, dst, wrapped_dim, op_name); });
-    } else if (float_accum && n_irows >= 3) {
-      emit_scan(input_tensor,
-                [&](const Tensor& dst) { scan_strided_col_mps_impl(input_tensor, dst, wrapped_dim, op_name); });
-    } else if (!float_accum && ((n_irows >= 2 && n_irows <= 4) || n_irows == 8)) {
-      // Int small stride: 2-pass vec multi-block beats the strided kernel's
-      // BN-tile waste (n_irows<8) and its 3-pass overhead.
+                [&](const Tensor& dst) { scan_strided_decoupled_mps_impl(input_tensor, dst, wrapped_dim, op_name); });
+      return;
+    }
+    // Small strides read exactly VEC (vec multi-block); wider strides use the
+    // 3-pass strided multi-block. Float covers {2..8}; int/long {2,3,4,8}.
+    const bool use_vec =
+        float_accum ? (n_irows >= 2 && n_irows <= 8) : ((n_irows >= 2 && n_irows <= 4) || n_irows == 8);
+    if (use_vec) {
+      // Small stride: 2-pass vectorized multi-block reads exactly VEC
+      // components, avoiding the strided kernel's min BN=8 tile waste.
       emit_scan(input_tensor,
                 [&](const Tensor& dst) { scan_vec_multiblock_mps_impl(input_tensor, dst, wrapped_dim, op_name); });
     } else {
+      // Wide stride: the 3-pass strided multi-block kernel handles any stride.
       emit_scan(input_tensor,
                 [&](const Tensor& dst) { scan_strided_multiblock_mps_impl(input_tensor, dst, wrapped_dim, op_name); });
     }
@@ -654,7 +623,7 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
       // Build kernel name based on scan dimension position
       const auto type_str = scan_kernel_type_tag(input_tensor, output_tensor);
       const auto kernel_name = fmt::format("{}_{}_{}", op_name, is_innermost ? "innermost" : "outer", type_str);
-      const int n_reads = scan_n_reads(scan_accum_scalar_type(output_tensor.scalar_type()));
+      const auto n_reads = scan_n_reads(scan_accum_scalar_type(output_tensor.scalar_type()));
 
       id<MTLComputePipelineState> scanPSO = lib.getPipelineStateForFunc(kernel_name);
 

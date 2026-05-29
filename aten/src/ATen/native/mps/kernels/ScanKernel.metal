@@ -63,32 +63,6 @@ inline bool simd_shuffle(bool data, uint16_t lane) {
   return simd_shuffle(static_cast<uint32_t>(data), lane);
 }
 
-#define DEFINE_SIMD_SCAN()                                               \
-  template <typename U, metal::enable_if_t<sizeof(U) < 8, bool> = true>  \
-  U simd_scan(U val) {                                                   \
-    return simd_scan_impl(val);                                          \
-  }                                                                      \
-                                                                         \
-  template <typename U, metal::enable_if_t<sizeof(U) == 8, bool> = true> \
-  U simd_scan(U val) {                                                   \
-    for (int i = 1; i <= 16; i *= 2) {                                   \
-      val = operator()(val, simd_shuffle_and_fill_up(val, init, i));     \
-    }                                                                    \
-    return val;                                                          \
-  }
-
-#define DEFINE_SIMD_EXCLUSIVE_SCAN()                                     \
-  template <typename U, metal::enable_if_t<sizeof(U) < 8, bool> = true>  \
-  U simd_exclusive_scan(U val) {                                         \
-    return simd_exclusive_scan_impl(val);                                \
-  }                                                                      \
-                                                                         \
-  template <typename U, metal::enable_if_t<sizeof(U) == 8, bool> = true> \
-  U simd_exclusive_scan(U val) {                                         \
-    val = simd_scan(val);                                                \
-    return simd_shuffle_and_fill_up(val, init, 1);                       \
-  }
-
 // Inclusive (and derived exclusive) SIMD scan for scalar acc_t ops, expressed
 // through the op's operator(). Shared by LogCumSumExp/CumProd/CumSum.
 #define DEFINE_SIMD_SCAN()                                \
@@ -135,11 +109,6 @@ struct CumProdOp {
     return c10::metal::mul(a, b);
   }
 
-  // Componentwise op on 4 packed components (for the float4-batched vec scan).
-  float4 combine4(float4 a, float4 b) {
-    return a * b;
-  }
-
   DEFINE_SIMD_SCAN()
 };
 
@@ -148,11 +117,6 @@ struct CumSumOp {
   static constexpr constant acc_t init = cum_op_init<acc_t>(0);
 
   acc_t operator()(acc_t a, acc_t b) {
-    return a + b;
-  }
-
-  // Componentwise op on 4 packed components (for the float4-batched vec scan).
-  float4 combine4(float4 a, float4 b) {
     return a + b;
   }
 
@@ -173,15 +137,6 @@ inline ValueIndexPair<T, acc_t> make_pair(acc_t v, int64_t i) {
   result.value = v;
   result.index = i;
   return result;
-}
-
-// Helper function for shuffling pairs in SIMD operations
-template <typename T, typename acc_t = accum_t<T>>
-inline ValueIndexPair<T, acc_t> simd_shuffle_pair(
-    ValueIndexPair<T, acc_t> data,
-    uint16_t lane) {
-  return make_pair<T, acc_t>(
-      simd_shuffle(data.value, lane), simd_shuffle(data.index, lane));
 }
 
 template <typename T, typename acc_t = accum_t<T>>
@@ -234,13 +189,6 @@ struct CumMinOp {
   }
 
  private:
-  pair_t simd_shuffle_pair(pair_t data, uint16_t delta) {
-    pair_t init_val = get_init();
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, init_val.value, delta),
-        simd_shuffle_and_fill_up(data.index, init_val.index, delta));
-  }
-
   pair_t simd_shuffle_and_fill_up_pair(
       pair_t data,
       pair_t filling,
@@ -301,13 +249,6 @@ struct CumMaxOp {
   }
 
  private:
-  pair_t simd_shuffle_pair(pair_t data, uint16_t delta) {
-    pair_t init_val = get_init();
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, init_val.value, delta),
-        simd_shuffle_and_fill_up(data.index, init_val.index, delta));
-  }
-
   pair_t simd_shuffle_and_fill_up_pair(
       pair_t data,
       pair_t filling,
@@ -621,10 +562,8 @@ kernel void scan_outer_dim(
   }
 }
 
-// Fused transpose-scan: storage [axis_size, n_cols] contiguous, scanned along
-// axis, written to contiguous output [n_cols, axis_size]. Both the strided read
-// and the transposed write coalesce (scanned values sit in registers by
-// axis-lane), avoiding a full .contiguous() transpose copy.
+// Fused transpose-scan: read storage [axis_size, n_cols] strided, scan along
+// axis, write contiguous [n_cols, axis_size]; both accesses coalesce, no copy.
 template <
     typename T,
     typename Op,
@@ -1013,6 +952,16 @@ inline uint scan_encode(float value) {
                             : bits; // canonical NaN, never the sentinel
 }
 
+// Orders the look-back's cross-threadgroup carry handoff (producer release
+// before publish, consumer acquire after observe); relaxed atomics alone don't.
+// seq_cst fences exist only on Metal 3.2+, so on macOS 14 this is a no-op and
+// the caller routes to the multi-block kernels instead.
+inline void scan_lookback_fence() {
+#if defined(__HAVE_ATOMIC_FENCE__)
+  atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst);
+#endif
+}
+
 // Walk predecessor slots back from `look` (stepping by `stride`, stopping after
 // `first`), folding each into the carry; a resolved inclusive prefix short-
 // circuits. Returns the exclusive prefix for the current tile.
@@ -1028,10 +977,12 @@ inline acc_t scan_lookback(
   while (true) {
     uint iw = atomic_load_explicit(&inclusive[look], memory_order_relaxed);
     if (iw != kScanEmpty) {
+      scan_lookback_fence(); // acquire the producer's writes before using them
       return op(as_type<acc_t>(iw), carry);
     }
     uint aw = atomic_load_explicit(&aggregates[look], memory_order_relaxed);
     if (aw != kScanEmpty) {
+      scan_lookback_fence(); // acquire
       carry = op(as_type<acc_t>(aw), carry);
       if (look == first) {
         return carry;
@@ -1117,13 +1068,16 @@ kernel void scan_contig_decoupled(
     acc_t carry = Op::init;
     if (tile_in_row == 0) {
       // Tile 0's aggregate is already its inclusive prefix.
+      scan_lookback_fence(); // release before publishing the slot
       atomic_store_explicit(
           &inclusive[tile_id], scan_encode(block_total), memory_order_relaxed);
     } else {
+      scan_lookback_fence(); // release
       atomic_store_explicit(
           &aggregates[tile_id], scan_encode(block_total), memory_order_relaxed);
       carry = scan_lookback<Op, acc_t>(
           aggregates, inclusive, tile_id - 1, tile_id - tile_in_row, 1);
+      scan_lookback_fence(); // release
       atomic_store_explicit(
           &inclusive[tile_id],
           scan_encode(op(carry, block_total)),
@@ -1142,184 +1096,6 @@ kernel void scan_contig_decoupled(
     write_unsafe<T, N_READS>(values, out + base + offset);
   } else {
     write_safe<T, N_READS>(values, out + base + offset, offset, len);
-  }
-}
-
-// Outer strided scan as a contiguous decoupled-lookback over n_irows-vectors
-// (componentwise, compile-time VEC); register-held and coalesced.
-template <
-    typename T,
-    typename Op,
-    int N_READS,
-    int VEC,
-    typename acc_t = accum_t<T>>
-kernel void scan_vec_decoupled(
-    const device T* in [[buffer(0)]],
-    device T* out [[buffer(1)]],
-    device atomic_uint* tile_counter [[buffer(2)]],
-    device atomic_uint* aggregates [[buffer(3)]],
-    device atomic_uint* inclusive [[buffer(4)]],
-    const constant uint& axis_size [[buffer(5)]],
-    const constant uint& num_tiles [[buffer(6)]],
-    uint lid [[thread_position_in_threadgroup]],
-    uint lsize [[threads_per_threadgroup]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  // VEC is compile-time so the per-component loops unroll and `vals` stays in
-  // registers (a runtime bound would spill to thread-local memory).
-  Op op;
-  threadgroup uint tg_tile_id;
-  threadgroup acc_t simdgroup_sums[simd_size * VEC];
-  threadgroup acc_t tg_total[VEC];
-  threadgroup acc_t tg_carry[VEC];
-
-  if (lid == 0) {
-    tg_tile_id =
-        atomic_fetch_add_explicit(tile_counter, 1u, memory_order_relaxed);
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  const uint tile_id = tg_tile_id;
-  const uint tile_in_row = tile_id % num_tiles;
-  const uint row = tile_id / num_tiles; // outer-row (n_orows > 1)
-
-  const uint tile = lsize * N_READS; // super-elements per tile
-  const uint block_start = tile_in_row * tile;
-  const uint len = min(tile, axis_size - block_start);
-  const size_t base = (size_t(row) * axis_size + block_start) * VEC;
-  const uint soff =
-      lid * N_READS; // this thread's first super-element in the tile
-
-  // Local inclusive scan of the tile, per component, kept in registers.
-  acc_t vals[N_READS * VEC];
-  for (int i = 0; i < N_READS; i++) {
-    const uint s = soff + i;
-    for (int c = 0; c < VEC; c++) {
-      vals[i * VEC + c] = (s < len)
-          ? static_cast<acc_t>(in[base + size_t(s) * VEC + c])
-          : Op::init;
-    }
-  }
-  for (int i = 1; i < N_READS; i++) {
-    for (int c = 0; c < VEC; c++) {
-      vals[i * VEC + c] = op(vals[i * VEC + c], vals[(i - 1) * VEC + c]);
-    }
-  }
-  // The cross-lane (SIMD) scans are batched 4 components at a time as float4,
-  // so the shuffle count is ~VEC/4 instead of VEC - the dominant cost for wider
-  // VEC.
-  const uint simd_groups = lsize / simd_size;
-  constexpr int NV4 = (VEC + 3) / 4;
-  const float4 id4 = float4(Op::init);
-  acc_t prev_thread[VEC];
-  for (int g = 0; g < NV4; g++) {
-    float4 tt = id4;
-    for (int j = 0; j < 4; j++) {
-      if (4 * g + j < VEC) {
-        tt[j] = vals[(N_READS - 1) * VEC + 4 * g + j];
-      }
-    }
-    float4 v = tt;
-    for (uint d = 1; d < simd_size; d *= 2) {
-      v = op.combine4(v, simd_shuffle_and_fill_up(v, id4, ushort(d)));
-    }
-    const float4 prev =
-        simd_shuffle_and_fill_up(v, id4, 1); // exclusive prefix per lane
-    for (int j = 0; j < 4; j++) {
-      if (4 * g + j < VEC) {
-        prev_thread[4 * g + j] = prev[j];
-      }
-    }
-    if (simd_lane_id == simd_size - 1) {
-      for (int j = 0; j < 4; j++) {
-        if (4 * g + j < VEC) {
-          simdgroup_sums[simd_group_id * VEC + 4 * g + j] =
-              v[j]; // simdgroup total
-        }
-      }
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (simd_group_id == 0) {
-    for (int g = 0; g < NV4; g++) {
-      float4 sv = id4;
-      for (int j = 0; j < 4; j++) {
-        if (4 * g + j < VEC && simd_lane_id < simd_groups) {
-          sv[j] = simdgroup_sums[simd_lane_id * VEC + 4 * g + j];
-        }
-      }
-      float4 v = sv;
-      for (uint d = 1; d < simd_size; d *= 2) {
-        v = op.combine4(v, simd_shuffle_and_fill_up(v, id4, ushort(d)));
-      }
-      const float4 ex = simd_shuffle_and_fill_up(v, id4, 1);
-      for (int j = 0; j < 4; j++) {
-        if (4 * g + j < VEC) {
-          simdgroup_sums[simd_lane_id * VEC + 4 * g + j] = ex[j];
-        }
-      }
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  for (int i = 0; i < N_READS; i++) {
-    for (int c = 0; c < VEC; c++) {
-      vals[i * VEC + c] =
-          op(op(vals[i * VEC + c], simdgroup_sums[simd_group_id * VEC + c]),
-             prev_thread[c]);
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (simd_group_id == simd_groups - 1 && simd_lane_id == simd_size - 1) {
-    for (int c = 0; c < VEC; c++) {
-      tg_total[c] = vals[(N_READS - 1) * VEC + c];
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // Per-component decoupled look-back (single thread): publish all aggregates,
-  // resolve all carries, then publish all inclusive prefixes.
-  if (lid == 0) {
-    if (tile_in_row == 0) {
-      for (int c = 0; c < VEC; c++) {
-        atomic_store_explicit(
-            &inclusive[tile_id * VEC + c],
-            scan_encode(tg_total[c]),
-            memory_order_relaxed);
-        tg_carry[c] = Op::init;
-      }
-    } else {
-      for (int c = 0; c < VEC; c++) {
-        atomic_store_explicit(
-            &aggregates[tile_id * VEC + c],
-            scan_encode(tg_total[c]),
-            memory_order_relaxed);
-      }
-      const uint first = (tile_id - tile_in_row) * VEC;
-      for (int c = 0; c < VEC; c++) {
-        tg_carry[c] = scan_lookback<Op, acc_t>(
-            aggregates,
-            inclusive,
-            (tile_id - 1) * VEC + c,
-            first + uint(c),
-            VEC);
-      }
-      for (int c = 0; c < VEC; c++) {
-        atomic_store_explicit(
-            &inclusive[tile_id * VEC + c],
-            scan_encode(op(tg_carry[c], tg_total[c])),
-            memory_order_relaxed);
-      }
-    }
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  for (int i = 0; i < N_READS; i++) {
-    const uint s = soff + i;
-    if (s < len) {
-      for (int c = 0; c < VEC; c++) {
-        out[base + size_t(s) * VEC + c] =
-            static_cast<T>(op(tg_carry[c], vals[i * VEC + c]));
-      }
-    }
   }
 }
 
@@ -1387,10 +1163,155 @@ inline void scan_vec_tile_inclusive(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 }
 
-// Int small-stride outer scan over [n_orows, axis, VEC], componentwise. Int has
-// no decoupled look-back (no 64-bit atomic on metal3.1), so 2-pass:
-// block_reduce sums each (orow, block); block_carry re-scans seeded with
-// preceding blocks. Compile-time VEC stays in registers with coalesced reads.
+// VEC-wide decoupled look-back. A tile's VEC columns publish behind one
+// `status` word (0 empty, 1 aggregate, 2 inclusive ready), so the carry handoff
+// needs one device fence per step regardless of column count. Walks
+// predecessors of `look` down to `first`, folding into carry[0..VEC); an
+// inclusive prefix short-circuits.
+template <typename Op, typename acc_t, int VEC>
+inline void scan_lookback_vec(
+    device atomic_uint* status,
+    device atomic_uint* aggregates,
+    device atomic_uint* inclusive,
+    uint look,
+    uint first,
+    thread acc_t* carry) {
+  Op op;
+  while (true) {
+    uint st;
+    do {
+      st = atomic_load_explicit(&status[look], memory_order_relaxed);
+    } while (st == 0u);
+    scan_lookback_fence(); // acquire the producer's value writes
+    device atomic_uint* slot = (st == 2u) ? inclusive : aggregates;
+    for (int c = 0; c < VEC; c++) {
+      uint w =
+          atomic_load_explicit(&slot[look * VEC + c], memory_order_relaxed);
+      carry[c] = op(as_type<acc_t>(w), carry[c]);
+    }
+    if (st == 2u || look == first) {
+      return;
+    }
+    look -= 1;
+  }
+}
+
+// Single-pass decoupled look-back for an outer scan with inner stride VEC, over
+// [n_orows, axis_size, VEC] contiguous, one threadgroup per (orow, axis-tile).
+// 1 read + 1 write, no global reduce/carry barrier. Float-accumulate only.
+template <
+    typename T,
+    typename Op,
+    int N_READS,
+    int VEC,
+    typename acc_t = accum_t<T>>
+kernel void scan_strided_decoupled(
+    const device T* in [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    device atomic_uint* tile_counter [[buffer(2)]],
+    device atomic_uint* status [[buffer(3)]],
+    device atomic_uint* aggregates [[buffer(4)]],
+    device atomic_uint* inclusive [[buffer(5)]],
+    const constant uint& axis_size [[buffer(6)]],
+    const constant uint& num_tiles [[buffer(7)]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  Op op;
+  threadgroup uint tg_tile_id;
+  threadgroup acc_t simdgroup_sums[simd_size * VEC];
+  threadgroup acc_t tg_total[VEC];
+  threadgroup acc_t tg_carry[VEC];
+
+  if (lid == 0) {
+    tg_tile_id =
+        atomic_fetch_add_explicit(tile_counter, 1u, memory_order_relaxed);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint tile_id = tg_tile_id;
+  const uint tile_in_row = tile_id % num_tiles;
+  const uint row = tile_id / num_tiles;
+
+  const uint tile = lsize * N_READS;
+  const uint block_start = tile_in_row * tile;
+  const uint len = min(tile, axis_size - block_start);
+  const size_t base = (size_t(row) * axis_size + block_start) * VEC;
+
+  acc_t vals[N_READS * VEC];
+  scan_vec_tile_inclusive<Op, N_READS, VEC, acc_t, T>(
+      in,
+      base,
+      len,
+      lid * N_READS,
+      lsize,
+      simd_lane_id,
+      simd_group_id,
+      simdgroup_sums,
+      tg_total,
+      vals);
+
+  if (lid == 0) {
+    acc_t carry[VEC];
+    for (int c = 0; c < VEC; c++) {
+      carry[c] = Op::init;
+    }
+    if (tile_in_row == 0) {
+      for (int c = 0; c < VEC; c++) {
+        atomic_store_explicit(
+            &inclusive[tile_id * VEC + c],
+            scan_encode(tg_total[c]),
+            memory_order_relaxed);
+      }
+      scan_lookback_fence(); // release values before publishing the flag
+      atomic_store_explicit(&status[tile_id], 2u, memory_order_relaxed);
+    } else {
+      for (int c = 0; c < VEC; c++) {
+        atomic_store_explicit(
+            &aggregates[tile_id * VEC + c],
+            scan_encode(tg_total[c]),
+            memory_order_relaxed);
+      }
+      scan_lookback_fence(); // release
+      atomic_store_explicit(&status[tile_id], 1u, memory_order_relaxed);
+      scan_lookback_vec<Op, acc_t, VEC>(
+          status,
+          aggregates,
+          inclusive,
+          tile_id - 1,
+          tile_id - tile_in_row,
+          carry);
+      for (int c = 0; c < VEC; c++) {
+        atomic_store_explicit(
+            &inclusive[tile_id * VEC + c],
+            scan_encode(op(carry[c], tg_total[c])),
+            memory_order_relaxed);
+      }
+      scan_lookback_fence(); // release
+      atomic_store_explicit(&status[tile_id], 2u, memory_order_relaxed);
+    }
+    for (int c = 0; c < VEC; c++) {
+      tg_carry[c] = carry[c];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint soff = lid * N_READS;
+  for (int i = 0; i < N_READS; i++) {
+    const uint s = soff + i;
+    if (s < len) {
+      for (int c = 0; c < VEC; c++) {
+        out[base + size_t(s) * VEC + c] =
+            static_cast<T>(op(tg_carry[c], vals[i * VEC + c]));
+      }
+    }
+  }
+}
+
+// Int small-stride outer scan over [n_orows, axis, VEC], componentwise: int has
+// no decoupled look-back (no 64-bit atomic on metal3.1), so a 2-pass
+// multi-block (block_reduce sums each block; block_carry re-scans seeded with
+// prior blocks).
 template <
     typename T,
     typename Op,
@@ -1549,101 +1470,6 @@ kernel void scan_vec_block_carry(
       prefix[c] = op(prefix[c], tg_total[c]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-}
-
-// Per-column decoupled look-back for any inner stride: one simdgroup per
-// column-tile, constant N_READS regs; block-claimed adjacent columns coalesce.
-template <typename T, typename Op, int N_READS, typename acc_t = accum_t<T>>
-kernel void scan_strided_col_decoupled(
-    const device T* in [[buffer(0)]],
-    device T* out [[buffer(1)]],
-    device atomic_uint* tile_counter [[buffer(2)]],
-    device atomic_uint* aggregates [[buffer(3)]],
-    device atomic_uint* inclusive [[buffer(4)]],
-    const constant uint& axis_size [[buffer(5)]],
-    const constant uint& n_irows [[buffer(6)]],
-    const constant uint& n_cols_total [[buffer(7)]],
-    const constant uint& total_tiles [[buffer(8)]],
-    uint lid [[thread_position_in_threadgroup]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  Op op;
-  constexpr uint TILE_ROWS = N_READS * simd_size; // axis positions per tile
-  constexpr uint SIMDS_PER_TG = 8; // must match host dispatch
-
-  // Claim SIMDS_PER_TG consecutive tile ids per threadgroup so its simdgroups
-  // process adjacent columns, coalescing their otherwise-strided reads.
-  threadgroup uint tg_base;
-  if (lid == 0) {
-    tg_base = atomic_fetch_add_explicit(
-        tile_counter, SIMDS_PER_TG, memory_order_relaxed);
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  const uint tile_id = tg_base + simd_group_id;
-  if (tile_id >= total_tiles) {
-    return; // surplus simdgroup; no predecessor ever waits on an out-of-range
-            // id
-  }
-
-  const uint axis_block = tile_id / n_cols_total;
-  const uint col_global =
-      tile_id % n_cols_total; // (orow, col) flattened, col fast
-  const uint orow = col_global / n_irows;
-  const uint col = col_global % n_irows;
-  const uint row_start = axis_block * TILE_ROWS;
-  const size_t col_base = (size_t(orow) * axis_size) * n_irows + col;
-
-  // Coalesced (across the axis-tile's columns) strided load: lane L, slot r
-  // owns axis position row_start + r*32 + L of this column.
-  acc_t vals[N_READS];
-  for (int r = 0; r < N_READS; r++) {
-    const uint p = row_start + uint(r) * simd_size + simd_lane_id;
-    vals[r] = (p < axis_size)
-        ? static_cast<acc_t>(in[col_base + size_t(p) * n_irows])
-        : Op::init;
-  }
-
-  // Local inclusive scan of the tile (axis order = r major, lane minor): scan
-  // each group of 32 across lanes, then carry the running total across groups.
-  acc_t carry = Op::init;
-  for (int r = 0; r < N_READS; r++) {
-    acc_t x = op(carry, op.simd_scan(vals[r]));
-    vals[r] = x;
-    carry = simd_shuffle(
-        x, simd_size - 1); // group total -> running carry (all lanes)
-  }
-  const acc_t tile_total = carry;
-
-  // Per-column publish + look-back for the exclusive prefix (lane 0 owns it).
-  acc_t ep = Op::init;
-  if (simd_lane_id == 0) {
-    if (axis_block == 0) {
-      atomic_store_explicit(
-          &inclusive[tile_id], scan_encode(tile_total), memory_order_relaxed);
-    } else {
-      atomic_store_explicit(
-          &aggregates[tile_id], scan_encode(tile_total), memory_order_relaxed);
-      ep = scan_lookback<Op, acc_t>(
-          aggregates,
-          inclusive,
-          tile_id - n_cols_total,
-          col_global,
-          n_cols_total);
-      atomic_store_explicit(
-          &inclusive[tile_id],
-          scan_encode(op(ep, tile_total)),
-          memory_order_relaxed);
-    }
-  }
-  ep = simd_shuffle(ep, 0); // broadcast exclusive prefix to all lanes
-
-  // Seed with the exclusive prefix and store (strided).
-  for (int r = 0; r < N_READS; r++) {
-    const uint p = row_start + uint(r) * simd_size + simd_lane_id;
-    if (p < axis_size) {
-      out[col_base + size_t(p) * n_irows] = static_cast<T>(op(ep, vals[r]));
-    }
   }
 }
 
@@ -2023,39 +1849,23 @@ kernel void scan_tiny_innermost(
       uint simd_lane_id [[thread_index_in_simdgroup]],                         \
       uint simd_group_id [[simdgroup_index_in_threadgroup]])
 
-// Per-column general-stride decoupled look-back (any n_irows, runtime). One
-// instantiation per (op, dtype): n_irows is a runtime argument, not a template.
-#define REGISTER_STRIDED_COL_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS)         \
-  template                                                                     \
-      [[host_name(#OP_NAME "_strided_col_decoupled_" #DTYPE)]] [[kernel]] void \
-      scan_strided_col_decoupled<DTYPE, OP_CLASS<DTYPE>, NREADS>(              \
-          const device DTYPE* in [[buffer(0)]],                                \
-          device DTYPE* out [[buffer(1)]],                                     \
-          device atomic_uint* tile_counter [[buffer(2)]],                      \
-          device atomic_uint* aggregates [[buffer(3)]],                        \
-          device atomic_uint* inclusive [[buffer(4)]],                         \
-          const constant uint& axis_size [[buffer(5)]],                        \
-          const constant uint& n_irows [[buffer(6)]],                          \
-          const constant uint& n_cols_total [[buffer(7)]],                     \
-          const constant uint& total_tiles [[buffer(8)]],                      \
-          uint lid [[thread_position_in_threadgroup]],                         \
-          uint simd_lane_id [[thread_index_in_simdgroup]],                     \
-          uint simd_group_id [[simdgroup_index_in_threadgroup]])
-
-#define REGISTER_VEC_DECOUPLED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, VEC) \
-  template [[host_name(#OP_NAME "_vec_decoupled_" #VEC                        \
-                                "_" #DTYPE)]] [[kernel]] void                 \
-  scan_vec_decoupled<DTYPE, OP_CLASS<DTYPE>, NREADS, VEC>(                    \
-      const device DTYPE* in [[buffer(0)]],                                   \
-      device DTYPE* out [[buffer(1)]],                                        \
-      device atomic_uint* tile_counter [[buffer(2)]],                         \
-      device atomic_uint* aggregates [[buffer(3)]],                           \
-      device atomic_uint* inclusive [[buffer(4)]],                            \
-      const constant uint& axis_size [[buffer(5)]],                           \
-      const constant uint& num_tiles [[buffer(6)]],                           \
-      uint lid [[thread_position_in_threadgroup]],                            \
-      uint lsize [[threads_per_threadgroup]],                                 \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                        \
+// Single-pass strided decoupled look-back, one (NREADS, VEC) per registration.
+#define REGISTER_STRIDED_DECOUPLED_SCAN_OP(                            \
+    OP_NAME, OP_CLASS, DTYPE, NREADS, VEC)                             \
+  template [[host_name(#OP_NAME "_strided_decoupled_" #VEC "_" #NREADS \
+                                "_" #DTYPE)]] [[kernel]] void          \
+  scan_strided_decoupled<DTYPE, OP_CLASS<DTYPE>, NREADS, VEC>(         \
+      const device DTYPE* in [[buffer(0)]],                            \
+      device DTYPE* out [[buffer(1)]],                                 \
+      device atomic_uint* tile_counter [[buffer(2)]],                  \
+      device atomic_uint* status [[buffer(3)]],                        \
+      device atomic_uint* aggregates [[buffer(4)]],                    \
+      device atomic_uint* inclusive [[buffer(5)]],                     \
+      const constant uint& axis_size [[buffer(6)]],                    \
+      const constant uint& num_tiles [[buffer(7)]],                    \
+      uint lid [[thread_position_in_threadgroup]],                     \
+      uint lsize [[threads_per_threadgroup]],                          \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                 \
       uint simd_group_id [[simdgroup_index_in_threadgroup]])
 
 // Integer small-stride (VEC in {2,3,4}) two-pass vectorized multi-block scan.
@@ -2413,21 +2223,19 @@ REGISTER_DECOUPLED_SCAN_OP(cumprod, CumProdOp, float, 16);
 REGISTER_DECOUPLED_SCAN_OP(cumprod, CumProdOp, half, 16);
 REGISTER_DECOUPLED_SCAN_OP(cumprod, CumProdOp, bfloat, 16);
 
-// Only n_irows==2 routes to the vectorized kernel (n_irows>=3 uses the
-// per-column kernel), so only VEC=2 is instantiated.
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumsum, CumSumOp, float, 16, 2);
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumsum, CumSumOp, half, 16, 2);
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumsum, CumSumOp, bfloat, 16, 2);
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumprod, CumProdOp, float, 16, 2);
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumprod, CumProdOp, half, 16, 2);
-REGISTER_VEC_DECOUPLED_SCAN_OP(cumprod, CumProdOp, bfloat, 16, 2);
-
-REGISTER_STRIDED_COL_SCAN_OP(cumsum, CumSumOp, float, 16);
-REGISTER_STRIDED_COL_SCAN_OP(cumsum, CumSumOp, half, 16);
-REGISTER_STRIDED_COL_SCAN_OP(cumsum, CumSumOp, bfloat, 16);
-REGISTER_STRIDED_COL_SCAN_OP(cumprod, CumProdOp, float, 16);
-REGISTER_STRIDED_COL_SCAN_OP(cumprod, CumProdOp, half, 16);
-REGISTER_STRIDED_COL_SCAN_OP(cumprod, CumProdOp, bfloat, 16);
+// Narrow-stride outer-scan look-back, inner stride VEC in {2,4,8,16}. NREADS x
+// VEC ~ the contig path's register footprint; host VEC->NREADS map must match.
+#define REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(OP_NAME, OP_CLASS, DTYPE) \
+  REGISTER_STRIDED_DECOUPLED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, 8, 2);        \
+  REGISTER_STRIDED_DECOUPLED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, 4, 4);        \
+  REGISTER_STRIDED_DECOUPLED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, 4, 8);        \
+  REGISTER_STRIDED_DECOUPLED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, 2, 16)
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumsum, CumSumOp, float);
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumsum, CumSumOp, half);
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumsum, CumSumOp, bfloat);
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumprod, CumProdOp, float);
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumprod, CumProdOp, half);
+REGISTER_STRIDED_DECOUPLED_SCAN_OP_ALL_VEC(cumprod, CumProdOp, bfloat);
 
 // Strided multi-block variants, one tile width (BN) per registration. The host
 // picks the smallest BN >= n_irows (capped at 32) for good tile utilization.
@@ -2443,10 +2251,43 @@ REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, bfloat, 4);
 REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, int, 4);
 REGISTER_STRIDED_SCAN_OP_ALL_BN(cumprod, CumProdOp, long, 2);
 
-// Integer small-stride (VEC in {2,3,4}) vectorized multi-block scan. Only int
-// (no float decoupled limitation here); float small strides use vec_decoupled.
+// Small-stride (VEC in {2,3,4,8}) vectorized multi-block scan: deterministic,
+// reads exactly VEC, avoiding the strided kernel's min BN=8 tile waste.
 REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumsum, CumSumOp, long, 2);
 REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumprod, CumProdOp, long, 2);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumsum, CumSumOp, float, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumsum, CumSumOp, half, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumsum, CumSumOp, bfloat, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumprod, CumProdOp, float, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumprod, CumProdOp, half, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_ALL_VEC(cumprod, CumProdOp, bfloat, 4);
+
+// Odd narrow vec widths {5,6,7}, float only: read exactly VEC instead of idling
+// 8-n_irows lanes in a BN=8 strided tile. Int/long stay on the strided kernel.
+#define REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(                         \
+    OP_NAME, OP_CLASS, DTYPE, NREADS)                                   \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 5); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 6); \
+  REGISTER_VEC_MULTIBLOCK_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 7)
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumsum, CumSumOp, float, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumsum, CumSumOp, half, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumsum, CumSumOp, bfloat, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumprod, CumProdOp, float, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumprod, CumProdOp, half, 4);
+REGISTER_VEC_MULTIBLOCK_SCAN_OP_NARROW(cumprod, CumProdOp, bfloat, 4);
+
+// Tight strided tile widths {12,24}, float-accumulate dtypes only: fits n_irows
+// in (8,12] and (16,24] without the loose BN=16/32 lane waste (n_irows=12 ->
+// BN=16 idles 4 of 16 lanes, regressing bf16). Int/long use the {8,16,32} set.
+#define REGISTER_STRIDED_SCAN_OP_TIGHT(OP_NAME, OP_CLASS, DTYPE, NREADS) \
+  REGISTER_STRIDED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 12);        \
+  REGISTER_STRIDED_SCAN_OP(OP_NAME, OP_CLASS, DTYPE, NREADS, 24)
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumsum, CumSumOp, float, 4);
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumsum, CumSumOp, half, 4);
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumsum, CumSumOp, bfloat, 4);
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumprod, CumProdOp, float, 4);
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumprod, CumProdOp, half, 4);
+REGISTER_STRIDED_SCAN_OP_TIGHT(cumprod, CumProdOp, bfloat, 4);
 
 // Tiny-innermost-axis variants (many short scans).
 REGISTER_TINY_SCAN_OP(cumsum, CumSumOp, float);
