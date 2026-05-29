@@ -17,6 +17,7 @@ QUACK_GEMM_OPS = (
     torch.ops.aten._grouped_mm.default,
 )
 SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
+QUACK_TENSORSSA_FRAGMENT_N = 32
 
 
 def unwrap_output(node: torch.fx.Node) -> Any:
@@ -46,6 +47,7 @@ def find_single_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
 
 @dataclass(frozen=True)
 class QuackLocalReduceInfo:
+    """Plan for an epilogue-local reduction lowered inside QUACK TensorSSA."""
     view_node: torch.fx.Node
     reduce_op_node: torch.fx.Node
     source_node: torch.fx.Node
@@ -106,6 +108,7 @@ class QuackMainOutputTransformInfo:
 
 @dataclass(frozen=True)
 class QuackOutputPlan:
+    """Classified HOP body outputs and the FX nodes consumed by QUACK lowering."""
     output_value: Any
     skip_nodes: frozenset[torch.fx.Node]
     local_reduce: QuackLocalReduceInfo | None
@@ -162,6 +165,16 @@ def normalize_shape(shape: Any) -> Any:
     return shape
 
 
+def method_clamp_bounds(node: torch.fx.Node) -> tuple[Any, Any]:
+    min_value = node.kwargs["min"] if "min" in node.kwargs else None
+    max_value = node.kwargs["max"] if "max" in node.kwargs else None
+    if "min" not in node.kwargs and len(node.args) > 1:
+        min_value = node.args[1]
+    if "max" not in node.kwargs and len(node.args) > 2:
+        max_value = node.args[2]
+    return min_value, max_value
+
+
 def match_view_or_reshape(node: Any) -> QuackViewMatch | None:
     if not isinstance(node, torch.fx.Node):
         return None
@@ -208,10 +221,11 @@ def match_sum(node: Any, *, allow_method_sum: bool) -> QuackSumMatch | None:
             node=node, view_node=view_node, dims=dims, keepdim=keepdim, dtype=dtype
         )
     if allow_method_sum and node.op == "call_method" and node.target == "sum":
-        if len(node.args) < 2:
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        if dim is None:
             return None
         view_node = node.args[0]
-        dims = normalize_reduce_dims(node.args[1])
+        dims = normalize_reduce_dims(dim)
         keepdim = (
             node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
         )
@@ -253,12 +267,13 @@ def match_tensorssa_reduce(node: Any) -> QuackTensorSSAReduceMatch | None:
             kind="amax",
         )
     if node.op == "call_method" and node.target == "amax":
-        if len(node.args) < 2:
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        if dim is None:
             return None
         return QuackTensorSSAReduceMatch(
             node=node,
             input_node=node.args[0],
-            dims=normalize_reduce_dims(node.args[1]),
+            dims=normalize_reduce_dims(dim),
             keepdim=node.kwargs.get("keepdim", False),
             dtype=None,
             kind="amax",
@@ -1087,7 +1102,7 @@ def is_n_group_shape(shape: Any) -> bool:
 
 
 def is_same_fragment_n_group_shape(shape: Any) -> bool:
-    return is_n_group_shape(shape) and 32 % shape[-1] == 0
+    return is_n_group_shape(shape) and QUACK_TENSORSSA_FRAGMENT_N % shape[-1] == 0
 
 
 def is_concat_half_n_shape(shape: Any) -> bool:
@@ -1115,7 +1130,7 @@ def is_nonnegative_expr(node: Any) -> bool:
         min_value = node.kwargs.get("min", node.args[1] if len(node.args) > 1 else None)
         return isinstance(min_value, (int, float)) and min_value >= 0
     if node.op == "call_method" and node.target == "clamp":
-        min_value = node.kwargs.get("min", None)
+        min_value, _ = method_clamp_bounds(node)
         return isinstance(min_value, (int, float)) and min_value >= 0
     return False
 

@@ -25,8 +25,8 @@ class HintsWrapper(HigherOrderOperator):
             body_fn (Callable): A callable function that is within the scope
              that is being traced.
 
-            args (Tuple of torch.Tensor/int/float/bool): A tuple of inputs to
-             body_fn.
+            args (Tuple of torch.Tensor/SymInt/SymFloat/SymBool/int/float/bool):
+             A tuple of inputs to body_fn.
 
             kwargs (dict): Keyword argument to the body_fn.
 

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import inspect
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +19,8 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 @dataclass(frozen=True)
 class GemmEpilogueOpInfo:
+    """Cross-backend GEMM metadata used to rebuild fused epilogue calls."""
+
     quack_name: str
     mat1_index: int
     mat2_index: int
@@ -47,7 +48,7 @@ _GEMM_EPILOGUE_OP_ALIASES = {
     torch.baddbmm: torch.ops.aten.baddbmm.default,
     torch._grouped_mm: torch.ops.aten._grouped_mm.default,
 }
-_SUPPORTED_BACKENDS = {"TRITON", "CUTEDSL", "QUACK"}
+_SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
 _SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
 
 
@@ -165,6 +166,7 @@ def _(x: torch.Tensor) -> torch.Tensor:
 
 
 def _quack_f32_to_floatx_unpacked(x: torch.Tensor, ebits: int, mbits: int) -> torch.Tensor:
+    """Convert fp32 values to unsigned floatx payloads with round-to-nearest-even."""
     if x.dtype is not torch.float32:
         x = x.float()
     exp_bias = (1 << (ebits - 1)) - 1
@@ -243,41 +245,6 @@ def _as_list(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
 
 def _enum_values(value: Any | list[Any] | tuple[Any, ...] | None) -> list[Any]:
     return [item.value if hasattr(item, "value") else item for item in _as_list(value)]
-
-
-def _unwrap_output(node: torch.fx.Node) -> Any:
-    value = node.args[0]
-    if isinstance(value, (tuple, list)) and len(value) == 1:
-        return value[0]
-    return value
-
-
-def is_mm_relu_body(graph_module: torch.fx.GraphModule) -> bool:
-    nodes = list(graph_module.graph.nodes)
-    placeholders = [node for node in nodes if node.op == "placeholder"]
-    outputs = [node for node in nodes if node.op == "output"]
-    mm_nodes = [
-        node
-        for node in nodes
-        if node.op == "call_function" and node.target == torch.ops.aten.mm.default
-    ]
-    if len(placeholders) != 2 or len(outputs) != 1 or len(mm_nodes) != 1:
-        return False
-
-    mm_node = mm_nodes[0]
-    relu_nodes = [
-        user
-        for user in mm_node.users
-        if (
-            (user.op == "call_method" and user.target == "relu")
-            or (
-                user.op == "call_function"
-                and user.target in (torch.ops.aten.relu.default, torch.relu)
-            )
-        )
-        and user.args[0] is mm_node
-    ]
-    return len(relu_nodes) == 1 and _unwrap_output(outputs[0]) is relu_nodes[0]
 
 
 class GemmEpilogueFusion(HigherOrderOperator):
@@ -370,6 +337,12 @@ def gemm_epilogue_fusion(
     gemm_kwargs: dict[str, Any] | None = None,
     kernel_options: dict[str, Any] | None = None,
 ):
+    """Fuse an epilogue body into a supported GEMM call.
+
+    ``gemm_args`` carries tensor and scalar operands, while ``gemm_kwargs`` may
+    contain only non-tensor kwargs such as ``alpha``/``beta``. Autograd through
+    the fused higher-order op is intentionally not implemented.
+    """
     if gemm_kwargs is None:
         gemm_kwargs = {}
     if kernel_options is None:

@@ -27,10 +27,12 @@ from torch._higher_order_ops.gemm_epilogue_quack import (
     match_mul_scalar,
     match_negated_node,
     match_tensorssa_reduce,
+    method_clamp_bounds,
     match_view_or_reshape,
     normalize_shape,
     fx_equivalent,
     grouped_n_fragment_shape,
+    QUACK_TENSORSSA_FRAGMENT_N,
     QUACK_TENSORSSA_REDUCTIONS,
     unwrap_output,
 )
@@ -298,7 +300,10 @@ def lower_view_or_reshape_node(
                 )
             group_size = group_shape[-1]
         return emit_tensorssa_reshape(
-            kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
+            kernel,
+            source,
+            f"((1, {group_size}, "
+            f"{QUACK_TENSORSSA_FRAGMENT_N // group_size}), 1, 1)",
         )
     mm_meta = mm_node.meta.get("val")
     if (
@@ -713,11 +718,15 @@ def compile_pointwise_nodes(
                     if is_same_fragment_n_group_shape(
                         group_shape
                     ) or is_concat_half_n_shape(shape):
-                        group_size = 2 if is_concat_half_n_shape(shape) else group_shape[-1]
+                        group_size = (
+                            2 if is_concat_half_n_shape(shape) else group_shape[-1]
+                        )
                         base_info = grouped_tensors.get(view_match.base)
                         grouped_tensors[node] = QuackGroupedTensorSSAInfo(
                             group_size=group_size,
-                            groups_per_fragment=32 // group_size,
+                            groups_per_fragment=(
+                                QUACK_TENSORSSA_FRAGMENT_N // group_size
+                            ),
                             nonnegative=(
                                 base_info.nonnegative
                                 if base_info is not None
@@ -730,11 +739,16 @@ def compile_pointwise_nodes(
                     _split_node, group_size, _concat_layout = split
                     source = cute_arg(mm_node, env)
                     env[node] = emit_tensorssa_reshape(
-                        kernel, source, f"((1, {group_size}, {32 // group_size}), 1, 1)"
+                        kernel,
+                        source,
+                        f"((1, {group_size}, "
+                        f"{QUACK_TENSORSSA_FRAGMENT_N // group_size}), 1, 1)",
                     )
                     grouped_tensors[node] = QuackGroupedTensorSSAInfo(
                         group_size=group_size,
-                        groups_per_fragment=32 // group_size,
+                        groups_per_fragment=(
+                            QUACK_TENSORSSA_FRAGMENT_N // group_size
+                        ),
                         nonnegative=is_nonnegative_expr(mm_node),
                     )
                     continue
@@ -766,11 +780,12 @@ def compile_pointwise_nodes(
                             propagate_grouped_tensorssa_info(node, grouped_tensors)
                         continue
                     if node.target == "clamp":
+                        min_value, max_value = method_clamp_bounds(node)
                         result = arg
-                        if node.kwargs.get("min") is not None:
-                            result = ops.maximum(result, node.kwargs["min"]).value
-                        if node.kwargs.get("max") is not None:
-                            result = ops.minimum(result, node.kwargs["max"]).value
+                        if min_value is not None:
+                            result = ops.maximum(result, min_value).value
+                        if max_value is not None:
+                            result = ops.minimum(result, max_value).value
                         env[node] = result
                         propagate_grouped_tensorssa_info(node, grouped_tensors)
                         continue

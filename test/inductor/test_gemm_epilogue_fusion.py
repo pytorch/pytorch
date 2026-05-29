@@ -153,6 +153,18 @@ class GemmEpilogueFusionTests(TestCase):
 
         torch.testing.assert_close(actual, (a @ b).relu())
 
+    def test_rejects_unsupported_cutedsl_backend(self):
+        a = torch.randn(2, 3)
+        b = torch.randn(3, 4)
+
+        with self.assertRaisesRegex(RuntimeError, "unsupported GEMM epilogue backend"):
+            gemm_epilogue_fusion(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "CUTEDSL"},
+            )
+
     def test_tuple_epilogue_eager_matches_reference(self):
         M = 2
         a = torch.randn(M, 3)
@@ -1477,6 +1489,26 @@ class GemmEpilogueFusionTests(TestCase):
         ).check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_positional_clamp_matches_reference(self):
+        def fn(a, b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten.mm.default,
+                (a, b),
+                lambda acc: acc.clamp(-0.5, 0.5),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("@cute.jit").check("-0.5").check("0.5").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_local_reduce_feeds_main_groups(self):
         M = 32
         N = 64
@@ -1487,7 +1519,7 @@ class GemmEpilogueFusionTests(TestCase):
                 def fn(a, b):
                     def epilogue(acc):
                         x = acc.float().view(M, -1, group)
-                        denom = x.sum(-1, keepdim=True)
+                        denom = x.sum(dim=-1, keepdim=True)
                         return (x * denom.reciprocal()).view(M, N)
 
                     return gemm_epilogue_fusion(
@@ -1523,7 +1555,7 @@ class GemmEpilogueFusionTests(TestCase):
                 def fn(a, b):
                     def epilogue(acc):
                         x = acc.float().view(M, -1, group)
-                        denom = x.abs().amax(-1, keepdim=True)
+                        denom = x.abs().amax(dim=-1, keepdim=True)
                         return (x * denom.reciprocal()).view(M, N)
 
                     return gemm_epilogue_fusion(

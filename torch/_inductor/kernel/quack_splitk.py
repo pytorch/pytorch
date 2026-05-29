@@ -21,12 +21,15 @@ class QuackSplitKTemplate(KernelTemplate):
         return None
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
-        return QuackSplitKTemplateCaller(
+        caller = QuackSplitKTemplateCaller(
             name=f"quack_split_k_{next(self.index_counter)}",
             input_nodes=kwargs.pop("input_nodes"),
             layout=kwargs.pop("layout"),
             k_split=kwargs.pop("k_split"),
         )
+        if kwargs:
+            raise RuntimeError(f"Unexpected QuACK split-K template kwargs: {kwargs}")
+        return caller
 
 
 class QuackSplitKTemplateCaller(ChoiceCaller):

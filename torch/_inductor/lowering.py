@@ -8390,6 +8390,7 @@ def process_subgraph_nodes_replacing_gemm(
     gemm_replacement: Any = None,
 ):
     output = _MISSING
+    replacements = 0
 
     for i, node in enumerate(graph_module.graph.nodes):
         if node.op == "placeholder":
@@ -8406,6 +8407,7 @@ def process_subgraph_nodes_replacing_gemm(
                 and node.op == "call_function"
                 and node.target == gemm_op
             ):
+                replacements += 1
                 V.graph.env[node] = gemm_replacement
                 continue
             # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
@@ -8418,6 +8420,8 @@ def process_subgraph_nodes_replacing_gemm(
 
     if output is _MISSING:
         raise RuntimeError("No output node found in graph")
+    if gemm_op is not None and replacements != 1:
+        raise RuntimeError("GEMM epilogue body must contain exactly one replaced GEMM")
 
     return output
 
@@ -8434,11 +8438,15 @@ def _meta_value_from_fx_output(value: Any) -> Any:
 
 def _cast_output_to_fx_meta_dtype(output: Any, meta_value: Any) -> Any:
     if isinstance(output, tuple) and isinstance(meta_value, tuple):
+        if len(output) != len(meta_value):
+            raise RuntimeError("GEMM epilogue output structure changed during lowering")
         return tuple(
             _cast_output_to_fx_meta_dtype(item, meta_item)
             for item, meta_item in zip(output, meta_value)
         )
     if isinstance(output, list) and isinstance(meta_value, list):
+        if len(output) != len(meta_value):
+            raise RuntimeError("GEMM epilogue output structure changed during lowering")
         return [
             _cast_output_to_fx_meta_dtype(item, meta_item)
             for item, meta_item in zip(output, meta_value)
@@ -8675,14 +8683,9 @@ def _allocate_quack_local_reduce_out(local_reduce, size, mat1):
         *prefix, m, n = size
         if local_reduce.dim == 0:
             local_reduce_size = [*prefix, FloorDiv(m, group_size), n]
-            local_reduce_stride = [n * FloorDiv(m, group_size), n, 1]
         else:
             local_reduce_size = [*prefix, m, FloorDiv(n, group_size)]
-            local_reduce_stride = [
-                m * FloorDiv(n, group_size),
-                FloorDiv(n, group_size),
-                1,
-            ]
+        local_reduce_stride = ir.FlexibleLayout.contiguous_strides(local_reduce_size)
     return empty_strided(
         local_reduce_size,
         local_reduce_stride,
@@ -8825,7 +8828,13 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         if backend == "QUACK":
             from torch._inductor.kernel.quack_splitk import quack_split_k_template
 
-            k_splits = get_k_splits(m, n, k)
+            k_splits = [
+                k_split
+                for k_split in get_k_splits(m, n, k)
+                if V.graph.sizevars.statically_known_true(
+                    sympy.Eq(sympy.Mod(k, k_split), 0)
+                )
+            ]
             if not k_splits:
                 raise NotImplementedError(
                     "no valid split-K choices for QUACK GEMM epilogue"
