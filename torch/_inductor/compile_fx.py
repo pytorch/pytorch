@@ -675,9 +675,33 @@ def _restore_node_strides(
     return _copy_to_strides(gm, input_node, meta, size, stride, insert_before)
 
 
+def _refresh_graph_meta_from_placeholders(gm: GraphModule) -> None:
+    inputs = []
+    for node in gm.graph.nodes:
+        if node.op != "placeholder":
+            continue
+        if "val" in node.meta:
+            inputs.append(node.meta["val"])
+        elif "example_value" in node.meta:
+            inputs.append(node.meta["example_value"])
+        else:
+            return
+
+    fake_mode = detect_fake_mode(inputs)
+    if fake_mode is None:
+        return
+
+    with (
+        enable_python_dispatcher(),
+        mock.patch.object(fake_mode, "allow_non_fake_inputs", True),
+    ):
+        FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
+
+
 def _enforce_subgraph_output_strides(
     gm: GraphModule, output_specs: Sequence[_WhileLoopCarrySpec | None]
 ) -> None:
+    _refresh_graph_meta_from_placeholders(gm)
     output_node = gm.graph.find_nodes(op="output")[0]
     if isinstance(output_node.args[0], torch.fx.Node):
         output_args = list(output_node.args)
@@ -3422,7 +3446,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3440,8 +3463,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return

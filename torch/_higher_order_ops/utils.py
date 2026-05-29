@@ -182,7 +182,6 @@ def check_meta_consistency(
     lhs_name: str,
     rhs_name: str,
     include_contiguity: bool = True,
-    ignore_stride_on_size_one_dims: bool = False,
 ) -> None:
     def diff_meta_pairs(
         lhs_list: list[torch.Tensor | torch.SymInt | int],
@@ -202,7 +201,6 @@ def check_meta_consistency(
                             rhs, include_contiguity=include_contiguity
                         ),
                         check_grad=False,
-                        ignore_stride_on_size_one_dims=ignore_stride_on_size_one_dims,
                     )
                 )
             else:
@@ -995,27 +993,8 @@ def diff_tensor_meta(
     meta1: TensorMetadata,
     meta2: TensorMetadata,
     check_grad: bool = True,
-    ignore_stride_on_size_one_dims: bool = False,
 ) -> list[str]:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        GuardOnDataDependentSymNode,
-    )
-
-    def only_size_one_stride_diffs() -> bool:
-        for size, stride1, stride2 in zip(meta1.shape, meta1.stride, meta2.stride):
-            try:
-                stride_matches = stride1 == stride2
-                if isinstance(stride_matches, torch.SymBool):
-                    stride_matches = guard_or_false(stride_matches)
-                if stride_matches:
-                    continue
-
-                if not guard_or_false(size <= 1):
-                    return False
-            except GuardOnDataDependentSymNode:
-                return False
-        return True
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     pair_diffs = []
     for meta_name in TensorMetadata._fields:
@@ -1025,12 +1004,6 @@ def diff_tensor_meta(
         val2 = getattr(meta2, meta_name)
         try:
             if val1 != val2:
-                if (
-                    ignore_stride_on_size_one_dims
-                    and meta_name == "stride"
-                    and only_size_one_stride_diffs()
-                ):
-                    continue
                 pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
         except GuardOnDataDependentSymNode:
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")

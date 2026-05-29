@@ -817,6 +817,39 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_buffer_reuse_with_large_subgraph(self, device):
+        # Regression test: torch.cond subgraph with more buffers than main
+        # graph scheduler nodes caused segmented_tree OOB in memory planning.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(64, 64) for _ in range(10)]
+                )
+
+            def forward(self, p, x):
+                def true_fn(inp):
+                    h = inp
+                    for layer in self.layers:
+                        h = torch.relu(layer(h))
+                    return h.clone()
+
+                def false_fn(inp):
+                    return inp.new_zeros(inp.shape[0], 64)
+
+                return torch.cond(p, true_fn, false_fn, (x,))
+
+        model = Model().to(device)
+        inputs = (torch.randn(8, 64),)
+        self._run_test(
+            model=model,
+            inputs=inputs,
+            device=device,
+            dynamic=True,
+        )
+
 
 class WhileLoopModels:
     class Simple(torch.nn.Module):
@@ -1289,20 +1322,27 @@ class WhileLoopTests(TestCase):
         def body_fn(a, b):
             return torch.ones_like(a), torch.ones_like(b)
 
-        def f(A):
+        def f(A, use_empty_like_copy):
             Q, R = torch.linalg.qr(A)
             rhs = torch.ones(Q.shape[0], 1, device=A.device)
             a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
-            a = a.flatten().reshape(-1, 1)
+            if use_empty_like_copy:
+                a = torch.empty_like(a).copy_(a)
+            else:
+                a = a.flatten().reshape(-1, 1)
             out, _ = torch.while_loop(
                 cond_fn, body_fn, (a, torch.ones(3, device=A.device))
             )
             return out
 
         A = torch.rand(5, 5, device=GPU_TYPE)
-        out = torch.compile(f, fullgraph=True)(A)
-        self.assertEqual(out.shape, (5, 1))
-        self.assertEqual(out.stride(), (1, 1))
+        for use_empty_like_copy, expected_stride in (
+            (True, (1, 5)),
+            (False, (1, 1)),
+        ):
+            out = torch.compile(f, fullgraph=True)(A, use_empty_like_copy)
+            self.assertEqual(out.shape, (5, 1))
+            self.assertEqual(out.stride(), expected_stride)
 
     @requires_gpu
     @torch._inductor.config.patch(force_shape_pad=True)
@@ -2163,6 +2203,12 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
+        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
+        if autograd:
+            raise unittest.SkipTest(
+                "Fails due to issues with backward pass when compiled."
+            )
+
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)

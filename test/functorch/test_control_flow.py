@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
@@ -5546,6 +5547,23 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 torch.randn(2, 3),
             )
 
+    def test_while_loop_rejects_size_one_stride_change_observed_by_body(self):
+        def f(i, x):
+            def cond_fn(i, x):
+                return i < 10
+
+            def body_fn(i, x):
+                return i + x.stride(1), x.clone().flatten().reshape(-1, 1)
+
+            return torch.while_loop(cond_fn, body_fn, (i, x))
+
+        x = torch.randn(1, 5).t()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "stride",
+        ):
+            make_fx(f, tracing_mode="fake")(torch.tensor(0), x)
+
     def test_while_loop_preserve_format_like_op_with_size_one_stride(self):
         x = torch.randn(1, 5).t()
 
@@ -9878,6 +9896,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
     @requires_cuda
     @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
