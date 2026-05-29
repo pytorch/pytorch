@@ -3,7 +3,10 @@ name: Upload test stats
 on:
   workflow_run:
     workflows:
+      - inductor-rocm-mi210
+      - periodic-rocm-mi210
       - pull
+      - rocm-mi210
       - trunk
       - trunk-rocm-sandbox
       - periodic
