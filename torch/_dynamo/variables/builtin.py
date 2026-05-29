@@ -114,6 +114,7 @@ from .object_protocol import (
     generic_getiter,
     generic_inplace_multiply,
     generic_int,
+    generic_invert,
     generic_len,
     generic_multiply,
     generic_neg,
@@ -1719,6 +1720,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__abs__(-4) → abs(-4)
             return generic_abs(tx, args[0])
 
+        if name == "__invert__" and len(args) == 1 and not kwargs:
+            # type.__invert__(instance) → ~instance
+            # e.g., int.__invert__(4) → ~4
+            return generic_invert(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -2514,6 +2520,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker:
         return generic_neg(tx, a)
+
+    def call_invert(
+        self, tx: "InstructionTranslator", a: VariableTracker
+    ) -> VariableTracker:
+        return generic_invert(tx, a)
 
     def call_format(
         self,

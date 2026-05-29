@@ -1772,6 +1772,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_invert_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_invert slot.
+
+        Called when type_implements_nb_invert returns True for this type.
+        Subclasses override to provide the actual bitwise inversion.
+        """
+        unimplemented(
+            gb_type="nb_invert_impl not implemented",
+            context=f"{type(self).__name__} has nb_invert slot but no nb_invert_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_invert C slot but "
+            "the corresponding VariableTracker doesn't implement nb_invert_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,

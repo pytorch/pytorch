@@ -265,6 +265,12 @@ type_implements_nb_inplace_matrix_multiply = partial(
 )
 
 
+def type_implements_nb_invert(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_invert slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_INVERT)
+
+
 def type_implements_tp_iter(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
@@ -828,6 +834,28 @@ def vt_is_iterable(obj: VariableTracker) -> bool:
     """Check if the object supports iteration (i.e. has tp_iter or sequence protocol)."""
     T = maybe_get_python_type(obj)
     return type_implements_tp_iter(T) or pysequence_check(T)
+
+
+def generic_invert(
+    tx: "InstructionTranslator", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyNumber_Invert.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1394
+
+    Algorithm:
+    1. If type has nb_invert slot, call obj.nb_invert_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_invert(obj_type):
+        return obj.nb_invert_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for unary ~: '{obj.python_type_name()}'",
+    )
 
 
 def generic_getiter(
