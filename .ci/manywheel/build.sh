@@ -28,6 +28,26 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         cd "${PYTORCH_ROOT}"
         python3 "${SCRIPTPATH}/build_wheel.py"  "${RAW_WHEEL_DIR}"
         python3 "${SCRIPTPATH}/repair_wheel.py" "${RAW_WHEEL_DIR}" "${PYTORCH_FINAL_PACKAGE_DIR}"
+
+        # Build telemetry: collect diagnostics for upload as CI artifacts.
+        ANALYSIS_DIR="${PYTORCH_FINAL_PACKAGE_DIR}/build-analysis"
+        mkdir -p "${ANALYSIS_DIR}"
+
+        env | sort > "${ANALYSIS_DIR}/env.txt"
+        nproc > "${ANALYSIS_DIR}/nproc.txt"
+
+        if [[ -f "${PYTORCH_ROOT}/build/.ninja_log" ]]; then
+            cp "${PYTORCH_ROOT}/build/.ninja_log" "${ANALYSIS_DIR}/ninja_log.txt"
+        fi
+
+        if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats > "${ANALYSIS_DIR}/sccache-stats.txt" || true
+            sccache --show-stats --stats-format json > "${ANALYSIS_DIR}/sccache-stats.json" || true
+        fi
+
+        if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats > "${ANALYSIS_DIR}/ccache-stats.txt" || true
+        fi
         ;;
     cpu-s390x)
         bash "${SCRIPTPATH}/build_cpu.sh"
