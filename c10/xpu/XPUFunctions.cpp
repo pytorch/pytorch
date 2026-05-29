@@ -1,3 +1,4 @@
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -285,6 +286,29 @@ c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
 
 c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
+}
+
+// TODO: Currently only used by syncStreamsOnDevice. Once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms,
+// deprecate syncStreamsOnDevice and route callers to device_synchronize.
+void device_synchronize(c10::DeviceIndex device) {
+#if SYCL_COMPILER_VERSION >= 20260000
+  initDevicePoolCallOnce();
+  if (device == -1) {
+    device = c10::xpu::current_device();
+  }
+  check_device_index(device);
+  get_raw_device(device).ext_oneapi_wait_and_throw();
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+  }
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "device_synchronize is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.0 or newer.");
+#endif
 }
 
 } // namespace c10::xpu
