@@ -21,6 +21,7 @@ from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -434,8 +435,9 @@ def _resolve_fake_mode(
         for node in nodes:
             if "example_value" in node.meta:
                 maybe_tensor = node.meta["example_value"]
-                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
-                    return maybe_tensor.fake_mode
+                maybe_fake_mode = maybe_get_fake_mode(maybe_tensor)
+                if maybe_fake_mode is not None:
+                    return maybe_fake_mode
 
         return FakeTensorMode(shape_env=ShapeEnv())
     else:
