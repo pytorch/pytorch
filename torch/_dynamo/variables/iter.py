@@ -39,14 +39,14 @@ from .object_protocol import generic_iternext
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
 
 
 def is_iterator_exhausted(
-    tx: "InstructionTranslator", iterator: VariableTracker
+    tx: "InstructionTranslatorBase", iterator: VariableTracker
 ) -> bool:
     try:
         generic_iternext(tx, iterator)
@@ -77,7 +77,7 @@ class ItertoolsVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
@@ -259,7 +259,7 @@ class IteratorVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="Unimplemented next() call",
             context=f"next({self})",
@@ -268,13 +268,13 @@ class IteratorVariable(VariableTracker):
         )
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
 
@@ -288,7 +288,7 @@ class RepeatIteratorVariable(IteratorVariable):
         return itertools.repeat
 
     # Repeat needs no mutation, clone self
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4332-L4340
         # TODO(dynamo-team): Missing `times` argument handling
         return self.item
@@ -333,7 +333,7 @@ class CountIteratorVariable(IteratorVariable):
         self.step = step
         self.advance_count = advance_count
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4189-L4216
         if not self.is_mutable():
             raise AssertionError("CountIteratorVariable must be mutable for next()")
@@ -386,7 +386,7 @@ class ZipVariable(IteratorVariable):
     def python_type(self) -> type[zip]:  # type: ignore[type-arg]
         return zip
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2906-L2994
         if not self.is_mutable():
             raise AssertionError("ZipVariable must be mutable for next()")
@@ -473,7 +473,7 @@ class MapVariable(IteratorVariable):
     def python_type(self) -> type:
         return map
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
         if not self.is_mutable():
             raise AssertionError("MapVariable must be mutable for next()")
@@ -553,7 +553,7 @@ class FilterVariable(IteratorVariable):
     def python_type(self) -> type:
         return filter
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L573-L606
         # A do-while loop to find elements that make fn return true
         while True:
@@ -602,7 +602,7 @@ class DictViewIterator(IteratorVariable):
                 )
             self._iter = iter(items.items())  # type: ignore[bad-assignment]
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578
         # dictiter_iternextkey: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5125-L5144
         # dictiter_iternextvalue: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5248-L5267
