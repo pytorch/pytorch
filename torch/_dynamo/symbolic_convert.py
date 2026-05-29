@@ -6213,7 +6213,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
-    def RETURN_GENERATOR(self, inst: Instruction):
+    def RETURN_GENERATOR(self, inst: Instruction) -> None:
         self.symbolic_result = self.funcvar
         raise ReturnValueOp
 
