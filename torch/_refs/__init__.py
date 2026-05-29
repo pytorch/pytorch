@@ -3085,8 +3085,8 @@ def constant_pad_nd(
     result = c_input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        left = pad[pad_idx] if pad[pad_idx] >= 0 else 0
-        right = pad[pad_idx + 1] if pad[pad_idx + 1] >= 0 else 0
+        left = max(pad[pad_idx], 0)
+        right = max(pad[pad_idx + 1], 0)
         if left == 0 and right == 0:
             continue
         parts = []
@@ -3110,7 +3110,7 @@ def constant_pad_nd(
     if result is c_input:
         result = result.clone()
 
-    return result
+    return result.contiguous(memory_format=utils.suggest_memory_format(input))
 
 
 def contiguous(
